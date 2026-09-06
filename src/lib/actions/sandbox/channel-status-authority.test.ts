@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SandboxMessagingProfileAuthority } from "../../messaging";
+import type { ChannelManifest } from "../../messaging/manifest";
 import type { ChannelManifestRegistry } from "../../messaging/manifest/registry";
 import type { SandboxEntry } from "../../state/registry";
 import {
@@ -37,7 +38,7 @@ function packageProfile(
     ...fakeAgent("openclaw"),
     name: packageId,
     displayName: packageId,
-  }) as SandboxMessagingProfileAuthority["agent"];
+  });
   return Object.freeze({
     agent,
     packageAuthority: Object.freeze({
@@ -51,10 +52,28 @@ function packageProfile(
   });
 }
 
+function messagingChannels(...channelIds: string[]) {
+  return channelIds.map((channelId) => ({
+    channelId,
+    config: { renders: [] },
+    policy: [],
+    lifecycle: { hookIds: [] },
+  }));
+}
+
 function channelFromRegistry(registry: ChannelManifestRegistry, channelId: string) {
   const channel = registry.get(channelId);
   if (!channel) throw new Error(`test channel '${channelId}' is missing`);
   return channel;
+}
+
+function packageChannelFromRegistry(
+  registry: ChannelManifestRegistry,
+  channelId: string,
+  packageId: string,
+): ChannelManifest {
+  const service = channelFromRegistry(registry, channelId);
+  return { ...service, supportedAgents: [packageId], hooks: [] };
 }
 
 describe("channel status package authority", () => {
@@ -62,7 +81,8 @@ describe("channel status package authority", () => {
     const authority = packageProfile({
       kind: "channels",
       packageId: "openclaw",
-      channelIds: ["whatsapp"],
+      build: { configRoot: "~/.openclaw", packageManagers: ["node-package"] },
+      channels: messagingChannels("whatsapp"),
     });
     const loadAgent = vi.fn();
     const resolveMessagingProfileAuthority = vi.fn(() => authority);
@@ -141,7 +161,8 @@ describe("channel status package authority", () => {
     const authority = packageProfile({
       kind: "channels",
       packageId: "openclaw",
-      channelIds: ["telegram"],
+      build: { configRoot: "~/.openclaw", packageManagers: ["node-package"] },
+      channels: messagingChannels("telegram"),
     });
     const getAppliedPresets = vi.fn(() => ["whatsapp"]);
     const { deps } = makeDeps({
@@ -170,20 +191,23 @@ describe("channel status package authority", () => {
     expect(deps.execSandbox).not.toHaveBeenCalled();
   });
 
-  it("does not route a receipt-backed future package through built-in channel hooks", async () => {
+  it("routes a receipt-backed future package through its composed channel profile", async () => {
     const packageId = "future-harness";
     const authority = packageProfile({
       kind: "channels",
       packageId,
-      channelIds: ["telegram"],
+      build: { configRoot: "~/.future-harness", packageManagers: [] },
+      channels: messagingChannels("telegram"),
     });
+    let packageManifest: ChannelManifest | undefined;
     const { deps } = makeDeps({
       exec: () => ({ status: 0, stdout: "", stderr: "" }),
       sandbox: receiptBackedEntry([], packageId),
       resolveMessagingProfileAuthority: () => authority,
-      listMessagingChannelsForProfile: (_authority, registry) => [
-        channelFromRegistry(registry, "telegram"),
-      ],
+      listMessagingChannelsForProfile: (_authority, registry) => {
+        packageManifest = packageChannelFromRegistry(registry, "telegram", packageId);
+        return [packageManifest];
+      },
     });
 
     const result = await showSandboxChannelStatus("alpha", { deps, channel: "telegram" });
@@ -192,6 +216,10 @@ describe("channel status package authority", () => {
     expect(resolveChannelHookAgent("openclaw")).toBe("openclaw");
     expect(resolveChannelHookAgent("hermes")).toBe("hermes");
     expect(resolveChannelHookAgent(packageId)).toBeNull();
+    expect(packageManifest).toBeDefined();
+    expect(resolveChannelHookAgent(packageId, packageManifest ? [packageManifest] : [])).toBe(
+      packageId,
+    );
     expect(result).toMatchObject({
       sandbox: "alpha",
       channel: "telegram",

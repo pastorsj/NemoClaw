@@ -4,10 +4,9 @@
 import { Flags } from "@oclif/core";
 
 import { runNpmLinkOrShim } from "../../../lib/actions/dev/npm-link-or-shim";
-import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
+import { NemoClawInternalCommand } from "../../../lib/cli/internal-command";
 
-export default class InternalDevNpmLinkOrShimCommand extends NemoClawCommand {
-  static hidden = true;
+export default class InternalDevNpmLinkOrShimCommand extends NemoClawInternalCommand {
   static strict = true;
   static summary = "Internal: link the checkout CLI or create a dev shim";
   static description = "Run npm link, falling back to a user-local NemoClaw development shim.";

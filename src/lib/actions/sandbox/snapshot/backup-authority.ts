@@ -33,6 +33,7 @@ import {
 import { sanitizeReadinessText } from "../../../readiness/sanitize";
 import { readManagedSnapshotProfileAuthority } from "./managed-profile";
 import { captureSandboxRuntimeSnapshot } from "./provider-lifecycle";
+import { createLegacyOpenClawStateFileCapture } from "./legacy-capture";
 
 type SnapshotBackupAuthority = Pick<
   sandboxState.BackupOptions,
@@ -77,8 +78,6 @@ const PRIVILEGED_COPY_CAPTURE_TIMEOUT_MS = 30_000;
 const PRIVILEGED_COPY_CAPTURE_PROTOCOL_PREFIX = "nemoclaw-state-file-capture:";
 const PRIVILEGED_COPY_CAPTURE_PROTOCOL_MAX_BYTES = 128;
 const PRIVILEGED_COPY_CAPTURE_DIAGNOSTIC_MAX_BYTES = 1024;
-const LEGACY_OPENCLAW_CONFIG_DIRECTORY = "/sandbox/.openclaw";
-const LEGACY_OPENCLAW_CONFIG_NAME = "openclaw.json";
 const CONTROL_CHARACTER_RE = /[\x00-\x1f\x7f]/u;
 
 interface PrivilegedCopyStateFileAuthority {
@@ -362,19 +361,6 @@ function createReceiptBackedStateFileCapture(
   };
 }
 
-function createLegacyOpenClawStateFileCapture(
-  sandboxName: string,
-  agentDefinition: AgentDefinition,
-  capture: SnapshotBackupAuthorityDependencies["capturePrivilegedCopyStateFile"],
-): sandboxState.StateFileCapture | null {
-  if (agentDefinition.name !== "openclaw") return null;
-  const authority: PrivilegedCopyStateFileAuthority = {
-    directory: LEGACY_OPENCLAW_CONFIG_DIRECTORY,
-    spec: { path: LEGACY_OPENCLAW_CONFIG_NAME, strategy: "copy" },
-  };
-  return (request) => capture(sandboxName, request, authority);
-}
-
 function createStateFileCapture(
   sandboxName: string,
   authority: SnapshotBackupAgentAuthority,
@@ -539,6 +525,7 @@ function readAuthority(entry: SandboxEntry) {
     agentType: entry.agent ?? "",
     imageTag: entry.imageTag,
     fromDockerfile: entry.fromDockerfile,
+    ...(entry.harnessPackage ? { harnessPackage: entry.harnessPackage } : {}),
     workload: entry.workload,
   });
 }

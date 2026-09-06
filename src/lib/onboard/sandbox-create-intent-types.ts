@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SandboxHostMount } from "../state/registry/types";
+import type { HarnessSandboxTmpfsMountDeclaration } from "../agent-runtime/manifest-types";
 import type { MessagingChannelConfig } from "../messaging-channel-config";
 import type { DockerGpuRoutePlan } from "./docker-gpu-route";
 import type { InitialSandboxPolicy } from "./initial-policy";
@@ -58,6 +59,7 @@ export type SandboxCreateIntent = {
   readonly gpuCreateArgs: readonly string[];
   readonly resourceCreateArgs: readonly string[];
   readonly hostMounts?: readonly SandboxHostMount[];
+  readonly sandboxDriverMounts?: readonly HarnessSandboxTmpfsMountDeclaration[];
   readonly gpuRoutePlan: DockerGpuRoutePlan;
   readonly sandboxGpuLogMessage: string | null;
   readonly disabledChannelNames: readonly string[];
@@ -83,6 +85,7 @@ export type ResolveSandboxCreateIntentInput = {
   gpuCreateArgs: readonly string[];
   resourceCreateArgs?: readonly string[];
   hostMounts?: readonly SandboxHostMount[];
+  sandboxDriverMounts?: readonly HarnessSandboxTmpfsMountDeclaration[];
   gpuRoutePlan: DockerGpuRoutePlan;
   sandboxGpuLogMessage: string | null;
   extraPlaceholderKeys?: readonly string[];

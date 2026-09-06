@@ -59,6 +59,19 @@ export const openclawPackageTestMoves = createTestMoveRecords({
 });
 
 export const openclawNemoclawTestMoves = createTestMoveRecords({
+  "test/runtime/policy/policy-openclaw-npm-compatibility.test.ts":
+    "tests/integration/npm-policy.test.ts",
+  "test/state/snapshot-openclaw-managed-extensions.test.ts":
+    "tests/integration/state-extensions.test.ts",
+  "test/package-contract/banner-boundary.test.ts": "tests/integration/banner-boundary.test.ts",
+  "test/package-contract/credential-filter-boundary.test.ts":
+    "tests/integration/credential-filter.test.ts",
+  "test/package-contract/msteams-message-hints-preload.test.ts":
+    "tests/compat/compiled-msteams.test.ts",
+  "test/package-contract/ssrf-parity.test.ts": "tests/integration/ssrf-parity.test.ts",
+  "test/e2e-runtime/historical-openclaw-security-revision-container-e2e.test.ts":
+    "tests/integration/security-revision.test.ts",
+  "test/repository/openclaw-publication-contract.test.ts": "tests/integration/publication.test.ts",
   "src/lib/state/sandbox-recreated-openclaw-restore.test.ts":
     "tests/integration/recreated-state.test.ts",
   "test/agents/agents-manifest-policy-conformance.test.ts": "tests/config/agent-policy.test.ts",
@@ -248,6 +261,10 @@ export const openclawPackageSplitTests = openclawPackageTestSplits.map(
 // Package-owned assertions split from larger root suites. This lane supplies
 // the exact NemoClaw checkout that their fixtures and production paths read.
 export const openclawNemoclawTestSplits: readonly PackageTestMove[] = [
+  {
+    source: "test/inference/managed/managed-image-capability-union.test.ts",
+    destination: "tests/image/capability-union.test.ts",
+  },
   {
     source: "src/lib/state/openclaw-config-restore-input.test.ts",
     destination: "tests/integration/config-restore.test.ts",

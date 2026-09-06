@@ -43,6 +43,7 @@ const PUBLISHED_LOCKFILES = [
   "runtime/openclaw/npm-shrinkwrap.json",
   "runtime/wechat/npm-shrinkwrap.json",
 ] as const;
+const PUBLISHED_BUILD_CONFIGS = ["plugin/tsconfig.json", "plugin/tsconfig.shared.json"] as const;
 const ARCHIVE_SETUP_TIMEOUT_MS = 3 * 60_000;
 const PACK_REPORT_MAX_BUFFER = 64 * 1024 * 1024;
 
@@ -150,6 +151,10 @@ describe("published OpenClaw package", () => {
     expect(packedFiles.has(artifact), artifact).toBe(true);
   });
 
+  it.each(PUBLISHED_BUILD_CONFIGS)("ships Dockerfile-required build config %s", (artifact) => {
+    expect(packedFiles.has(artifact), artifact).toBe(true);
+  });
+
   it("ships the MCP adapter in the openclaw package", () => {
     expect(packedFiles.has("host/mcp-adapter.cts")).toBe(true);
   });
@@ -165,6 +170,19 @@ describe("published OpenClaw package", () => {
     const artifact = "runtime/generate-config.sh";
     expect((packedFiles.get(artifact)?.mode ?? 0) & 0o111).not.toBe(0);
     expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
+  });
+
+  it.each(["messaging/messaging-build.mts", "runtime/managed-gateway-control.py"])(
+    "ships package-owned image runtime %s as executable",
+    (artifact) => {
+      expect(packedFiles.has(artifact), artifact).toBe(true);
+      expect((packedFiles.get(artifact)?.mode ?? 0) & 0o111).not.toBe(0);
+      expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
+    },
+  );
+
+  it("ships the package-owned managed gateway profile", () => {
+    expect(packedFiles.has("runtime/managed-gateway-profile.py")).toBe(true);
   });
 
   it.each(["runtime/backup-workspace.sh", "compat/npm-remediation.mts"])(
@@ -190,13 +208,21 @@ describe("published OpenClaw package", () => {
         replaceExisting: boolean;
         teardownRollback: boolean;
         configDirectory: string | null;
-      }): { execution: { command: string } };
+      }): {
+        execution: {
+          command: { kind: "shell"; script: string; shellTrust: "package-authored-code" };
+        };
+      };
       buildMcpRemovalPlan(request: {
         entry: { server: string; url: string; headers: Record<string, string> };
         force: boolean;
         adaptiveTeardown: boolean;
         configDirectory: string | null;
-      }): { execution: { command: string } };
+      }): {
+        execution: {
+          command: { kind: "shell"; script: string; shellTrust: "package-authored-code" };
+        };
+      };
       buildInspectCommand(
         entry: { server: string; url: string; headers: Record<string, string> },
         failOnMismatch: boolean,
@@ -205,14 +231,14 @@ describe("published OpenClaw package", () => {
         entry: { server: string; url: string; headers: Record<string, string> };
         failOnMismatch: boolean;
         configDirectory: string | null;
-      }): string;
+      }): { kind: "shell"; script: string; shellTrust: "package-authored-code" };
       buildMcpRuntimePlan(request: { command: string[] }): {
         command: string[];
         environmentVariablesToRemove: string[];
       };
       describeMcpMutationCapability(request: { sandboxName: string }): {
         kind: string;
-        command: string;
+        command: { kind: "shell"; script: string; shellTrust: "package-authored-code" };
         success: { kind: string };
       };
       describeMcpTeardownCapability(request: { sandboxName: string }): { kind: string };
@@ -264,10 +290,18 @@ describe("published OpenClaw package", () => {
         failOnMismatch: true,
         configDirectory: "/sandbox/.custom-openclaw",
       }),
-    ).toContain("/sandbox/.custom-openclaw/workspace");
+    ).toMatchObject({
+      kind: "shell",
+      script: expect.stringContaining("/sandbox/.custom-openclaw/workspace"),
+      shellTrust: "package-authored-code",
+    });
     expect(mcp.describeMcpMutationCapability({ sandboxName: "sandbox" })).toMatchObject({
       kind: "command",
-      command: "command -v mcporter",
+      command: {
+        kind: "shell",
+        script: "command -v mcporter",
+        shellTrust: "package-authored-code",
+      },
       success: { kind: "exit-zero" },
     });
     expect(mcp.describeMcpTeardownCapability({ sandboxName: "sandbox" })).toEqual({
@@ -304,7 +338,15 @@ describe("published OpenClaw package", () => {
         teardownRollback: false,
         configDirectory: null,
       }),
-    ).toMatchObject({ execution: { command: expect.stringContaining("config") } });
+    ).toMatchObject({
+      execution: {
+        command: {
+          kind: "shell",
+          script: expect.stringContaining("config"),
+          shellTrust: "package-authored-code",
+        },
+      },
+    });
     expect(
       mcp.buildMcpRemovalPlan({
         entry: mcpEntry,
@@ -312,7 +354,15 @@ describe("published OpenClaw package", () => {
         adaptiveTeardown: false,
         configDirectory: null,
       }),
-    ).toMatchObject({ execution: { command: expect.stringContaining("example") } });
+    ).toMatchObject({
+      execution: {
+        command: {
+          kind: "shell",
+          script: expect.stringContaining("example"),
+          shellTrust: "package-authored-code",
+        },
+      },
+    });
     runtime.applyOpenClawAnthropicReplyBudget(openClawModel, Number.NaN);
     expect(runtime.DEFAULT_OPENCLAW_MAX_TOKENS).toBe(4096);
     expect(openClawModel.maxTokens).toBe(4096);
@@ -372,6 +422,7 @@ describe("published OpenClaw package", () => {
         /^plugin\/src\/.+\.test\.ts$/u.test(candidate) ||
         [
           "plugin/tsconfig.test.json",
+          "plugin/tsconfig.runner.json",
           "plugin/vitest.config.ts",
           "plugin/vitest.project.ts",
         ].includes(candidate),

@@ -22,11 +22,14 @@ export type PublicFabricLifecyclePhase =
   | "after-inference-switch"
   | "after-onboard"
   | "after-package-deactivation"
+  | "after-package-rollback"
   | "after-package-upgrade"
+  | "after-upgraded-receipt-onboard"
   | "after-rebuild"
   | "after-sandbox-restart"
   | "after-shields-down"
   | "after-shields-up"
+  | "upgraded-sandbox-after-package-rollback"
   | "before-gateway-restart";
 
 export type PublicFabricHarnessContract = FabricHarnessE2eContract;

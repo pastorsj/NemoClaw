@@ -4,7 +4,7 @@
 import type { SpawnSyncOptions, SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { spawnExitCode } from "./core/process-exit";
+import { spawnExitCode } from "./core/process-status";
 
 export function buildVersionedUninstallUrl(version: string): string {
   const stableVersion = String(version || "")

@@ -1,11 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { materializeHarnessPackageArtifact } from "@nvidia/nemoclaw-harness-contract/build-package";
+
+import { missingDockerfileCopySources } from "../../../scripts/lib/dockerfile-copy-sources.mts";
 import { makeAgent, withMockedDocker } from "../../../test/helpers/base-image-test-harness";
 import { testTimeout } from "../../../test/helpers/timeouts";
 import { tmpDir, writeCa } from "../onboard/__test-helpers__/corporate-ca-fixtures";
@@ -14,7 +18,19 @@ import {
   type SandboxBaseImageResolutionMetadata,
 } from "../sandbox-base-image";
 import { loadAgent } from "./defs";
-import { loadManifestRecord, readString } from "../agent-runtime/manifest-readers";
+import { loadValidatedHarnessManifest, readString } from "../agent-runtime/manifest-readers";
+import { installHarnessPackage } from "../agent-runtime/package/install";
+import { stageAgentComposedBuildContext } from "./base-image";
+
+function makeFixtureDirectoriesWritable(directory: string): void {
+  if (!fs.existsSync(directory)) return;
+  const metadata = fs.lstatSync(directory);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) return;
+  fs.chmodSync(directory, 0o700);
+  for (const entry of fs.readdirSync(directory)) {
+    makeFixtureDirectoriesWritable(path.join(directory, entry));
+  }
+}
 
 function makeResolutionMetadata(
   overrides: Partial<SandboxBaseImageResolutionMetadata> = {},
@@ -67,12 +83,20 @@ function declaresCorporateCaBuildArg(dockerfilePath: string): boolean {
 
 function readManifestExpectedVersion(agentName: string): string {
   const manifestPath = path.join(agentPackageDir(agentName), "manifest.yaml");
-  const expectedVersion = readString(loadManifestRecord(manifestPath), "expected_version");
+  const expectedVersion = readString(
+    loadValidatedHarnessManifest(manifestPath, agentName),
+    "expected_version",
+  );
   expect(
     expectedVersion,
     `agent '${agentName}' must declare expected_version in ${manifestPath}`,
   ).toBeTruthy();
   return expectedVersion ?? "";
+}
+
+function packageImageProbeMarker(agentName: string): string {
+  const probe = fs.readFileSync(path.join(agentPackageDir(agentName), "checks/image-probe.py"));
+  return `nemoclaw-image-probe-ok ${crypto.createHash("sha256").update(probe).digest("hex")}`;
 }
 
 // Read the agent names from the checked-in Dockerfiles so a base image that
@@ -90,7 +114,7 @@ expect(
   "expected at least one agent base image to declare the corporate CA build arg",
 ).not.toHaveLength(0);
 
-describe("agent base image provisioning", () => {
+describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () => {
   beforeEach(() => {
     vi.stubEnv("NEMOCLAW_CORPORATE_CA_ANCHOR_DIRS", "");
     vi.restoreAllMocks();
@@ -154,41 +178,325 @@ describe("agent base image provisioning", () => {
     }
   });
 
-  it("stages managed sandbox bytes from the selected package root", () => {
-    const packageRoot = fs.realpathSync(tmpDir());
-    const agentDir = packageRoot;
-    const dockerfilePath = path.join(agentDir, "Dockerfile");
-    fs.writeFileSync(dockerfilePath, "FROM scratch\nCOPY package-sentinel.txt /sandbox/\n");
-    fs.writeFileSync(path.join(packageRoot, "package-sentinel.txt"), "selected-package");
-    let buildContext: string | null = null;
-    try {
-      withMockedDocker(({ createAgentSandbox, resolveSandboxBaseImageMock, dockerBuildMock }) => {
-        const result = createAgentSandbox(
+  it(
+    "stages managed sandbox bytes from the selected package root",
+    () => {
+      const packageRoot = fs.realpathSync(tmpDir());
+      const agentDir = packageRoot;
+      const dockerfilePath = path.join(agentDir, "Dockerfile");
+      fs.writeFileSync(path.join(agentDir, "manifest.yaml"), "name: pi\n");
+      fs.writeFileSync(
+        dockerfilePath,
+        "FROM scratch\nCOPY packages/nemoclaw-pi/package-sentinel.txt /sandbox/\n",
+      );
+      fs.writeFileSync(path.join(packageRoot, "package-sentinel.txt"), "selected-package");
+      let buildContext: string | null = null;
+      try {
+        withMockedDocker(({ createAgentSandbox, resolveSandboxBaseImageMock, dockerBuildMock }) => {
+          const result = createAgentSandbox(
+            makeAgent({
+              name: "pi",
+              displayName: "Pi",
+              packageRoot,
+              agentDir,
+              manifestPath: path.join(agentDir, "manifest.yaml"),
+              dockerfilePath,
+              dockerfileBasePath: null,
+            }),
+          );
+          buildContext = result.buildCtx;
+          expect(
+            fs.readFileSync(
+              path.join(result.buildCtx, "packages", "nemoclaw-pi", "package-sentinel.txt"),
+              "utf8",
+            ),
+          ).toBe("selected-package");
+          expect(
+            fs
+              .readdirSync(path.join(result.buildCtx, "packages"))
+              .filter((entry) => entry.startsWith("nemoclaw-"))
+              .sort(),
+          ).toEqual(["nemoclaw-fabric", "nemoclaw-pi"]);
+          expect(resolveSandboxBaseImageMock).not.toHaveBeenCalled();
+          expect(dockerBuildMock).not.toHaveBeenCalled();
+        });
+      } finally {
+        fs.rmSync(buildContext ?? path.join(packageRoot, ".missing-build-context"), {
+          recursive: true,
+          force: true,
+        });
+        fs.rmSync(packageRoot, { recursive: true, force: true });
+      }
+    },
+    testTimeout(60_000),
+  );
+
+  it(
+    "stages a materialized unknown package without leaking sibling harnesses",
+    () => {
+      const root = fs.realpathSync(tmpDir());
+      const sourceRoot = path.join(root, "source");
+      const artifactRoot = path.join(root, "artifact");
+      fs.mkdirSync(sourceRoot);
+      const write = (relativePath: string, contents: string, mode = 0o644) => {
+        const target = path.join(sourceRoot, relativePath);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, contents, { mode });
+      };
+      const dockerfile = [
+        "FROM scratch",
+        "COPY packages/nemoclaw-context-probe/start.sh /usr/local/bin/nemoclaw-start",
+        "COPY packages/nemoclaw-fabric/src/ /opt/nemoclaw-fabric/src/",
+        "COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/",
+        "",
+      ].join("\n");
+      write(
+        "package.json",
+        `${JSON.stringify({
+          name: "@example/nemoclaw-context-probe",
+          version: "0.1.0",
+          files: [
+            "Dockerfile",
+            "Dockerfile.base",
+            "host/config-adapter.cts",
+            "host/messaging-adapter.cts",
+            "manifest.yaml",
+            "policy-additions.yaml",
+            "start.sh",
+          ],
+          nemoclaw: {
+            harnessManifest: "manifest.yaml",
+            minimumNemoClawVersion: "0.0.113",
+            maximumNemoClawVersionExclusive: "0.0.121",
+          },
+        })}\n`,
+      );
+      write("Dockerfile", dockerfile);
+      write("Dockerfile.base", dockerfile);
+      write(
+        "manifest.yaml",
+        [
+          "name: context-probe",
+          'display_name: "Context Probe"',
+          "runtime:",
+          "  kind: terminal",
+          "  prompt_transport: stdin",
+          "  headless_command: context-probe --prompt",
+          "config:",
+          "  dir: /sandbox/.context-probe",
+          "  config_file: config.json",
+          "  format: json",
+          "inference:",
+          "  config_update:",
+          "    support: unsupported",
+          "    reason: This fixture uses fixed inference configuration.",
+          "state_lifecycle:",
+          "  backup_quiescence:",
+          "    kind: not-required",
+          "  snapshot_restore: []",
+          "  rebuild:",
+          "    image_plugin_provenance: not-required",
+          "    scheduled_work:",
+          "      support: disabled",
+          "      reason: This fixture does not run scheduled work.",
+          "    post_restore:",
+          "      kind: not-required",
+          "mcp:",
+          "  support: disabled",
+          "messaging:",
+          "  support: disabled",
+          "",
+        ].join("\n"),
+      );
+      write("policy-additions.yaml", "network_policies: []\n");
+      write("start.sh", "#!/bin/sh\nexec sleep infinity\n", 0o755);
+      write("host/config-adapter.cts", '"use strict";\nmodule.exports = Object.freeze({});\n');
+      write("host/messaging-adapter.cts", '"use strict";\nmodule.exports = Object.freeze({});\n');
+
+      let sandboxContext: string | null = null;
+      let baseContext: string | null = null;
+      try {
+        materializeHarnessPackageArtifact(sourceRoot, artifactRoot);
+        const agent = makeAgent({
+          name: "context-probe",
+          displayName: "Context Probe",
+          packageRoot: artifactRoot,
+          agentDir: artifactRoot,
+          manifestPath: path.join(artifactRoot, "manifest.yaml"),
+          dockerfilePath: path.join(artifactRoot, "Dockerfile"),
+          dockerfileBasePath: path.join(artifactRoot, "Dockerfile.base"),
+        });
+        const stagedSandbox = stageAgentComposedBuildContext(
+          agent,
+          agent.dockerfilePath!,
+          "Dockerfile",
+        );
+        sandboxContext = stagedSandbox.buildCtx;
+        const stagedBase = stageAgentComposedBuildContext(
+          agent,
+          agent.dockerfileBasePath!,
+          "Dockerfile.base",
+        );
+        baseContext = stagedBase.buildCtx;
+        for (const staged of [stagedSandbox, stagedBase]) {
+          expect(missingDockerfileCopySources(staged.stagedDockerfile, staged.buildCtx)).toEqual(
+            [],
+          );
+          expect(
+            fs
+              .readdirSync(path.join(staged.buildCtx, "packages"))
+              .filter((entry) => entry.startsWith("nemoclaw-"))
+              .sort(),
+          ).toEqual(["nemoclaw-context-probe", "nemoclaw-fabric"]);
+          expect(fs.existsSync(path.join(staged.buildCtx, "packages", "nemoclaw-openclaw"))).toBe(
+            false,
+          );
+        }
+      } finally {
+        for (const temporaryPath of [sandboxContext, baseContext, root]) {
+          if (temporaryPath) {
+            if (path.basename(temporaryPath).startsWith("nemoclaw-build-")) {
+              fs.rmSync(temporaryPath, { recursive: true, force: true });
+            } else {
+              makeFixtureDirectoriesWritable(temporaryPath);
+              fs.rmSync(temporaryPath, { recursive: true, force: true });
+            }
+          }
+        }
+      }
+    },
+    testTimeout(60_000),
+  );
+
+  it(
+    "resolves every Dockerfile COPY source for each materialized harness package",
+    () => {
+      const root = fs.realpathSync(tmpDir());
+      const stagedContexts: string[] = [];
+      const packageIds = [
+        "openclaw",
+        "hermes",
+        "langchain-deepagents-code",
+        "pi",
+        "haystack-agent",
+        "deepseek-harness",
+      ] as const;
+      try {
+        for (const packageId of packageIds) {
+          const sourceRoot = path.resolve(
+            import.meta.dirname,
+            `../../../packages/nemoclaw-${packageId}`,
+          );
+          const artifactRoot = path.join(root, `artifact-${packageId}`);
+          materializeHarnessPackageArtifact(sourceRoot, artifactRoot);
+          const agent = makeAgent({
+            name: packageId,
+            displayName: packageId,
+            packageRoot: artifactRoot,
+            agentDir: artifactRoot,
+            manifestPath: path.join(artifactRoot, "manifest.yaml"),
+            dockerfilePath: path.join(artifactRoot, "Dockerfile"),
+            dockerfileBasePath: path.join(artifactRoot, "Dockerfile.base"),
+          });
+          for (const dockerfileName of ["Dockerfile", "Dockerfile.base"] as const) {
+            const staged = stageAgentComposedBuildContext(
+              agent,
+              path.join(artifactRoot, dockerfileName),
+              dockerfileName,
+            );
+            stagedContexts.push(staged.buildCtx);
+            expect(
+              missingDockerfileCopySources(staged.stagedDockerfile, staged.buildCtx),
+              `${packageId}/${dockerfileName}`,
+            ).toEqual([]);
+            const stagedHarnesses = fs
+              .readdirSync(path.join(staged.buildCtx, "packages"), { withFileTypes: true })
+              .filter((entry) => entry.isDirectory() && entry.name.startsWith("nemoclaw-"))
+              .map((entry) => entry.name)
+              .sort();
+            expect(stagedHarnesses).toEqual([`nemoclaw-${packageId}`, "nemoclaw-fabric"].sort());
+          }
+        }
+      } finally {
+        for (const buildCtx of stagedContexts) {
+          fs.rmSync(buildCtx, { recursive: true, force: true });
+        }
+        makeFixtureDirectoriesWritable(root);
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+    testTimeout(120_000),
+  );
+
+  it(
+    "stages exact receipt-selected package bytes and detects later digest drift",
+    () => {
+      const root = fs.realpathSync(tmpDir());
+      const artifactRoot = path.join(root, "artifact");
+      const storeRoot = path.join(root, "store");
+      fs.mkdirSync(storeRoot, { mode: 0o700 });
+      let buildContext: string | null = null;
+      try {
+        materializeHarnessPackageArtifact(agentPackageDir("pi"), artifactRoot);
+        const installed = installHarnessPackage(
+          {
+            packageRoot: artifactRoot,
+            sourceIdentity: {
+              kind: "bundled",
+              nemoclawBuildIdentity: {
+                nemoclawVersion: "0.0.113",
+                sourceRevision: "d".repeat(40),
+              },
+            },
+          },
+          { storeRoot },
+        );
+        const packageDirectory = path.dirname(installed.packageManifest.manifestPath);
+        expect(() =>
+          stageAgentComposedBuildContext(
+            makeAgent({
+              name: "different-harness",
+              displayName: "Different Harness",
+              packageRoot: installed.packageRoot,
+              agentDir: packageDirectory,
+              manifestPath: installed.packageManifest.manifestPath,
+              dockerfilePath: path.join(packageDirectory, "Dockerfile"),
+              dockerfileBasePath: null,
+            }),
+            path.join(packageDirectory, "Dockerfile"),
+            "Dockerfile",
+            { harnessPackage: installed.identity, harnessPackageStoreRoot: storeRoot },
+          ),
+        ).toThrow("does not match its package receipt");
+        const staged = stageAgentComposedBuildContext(
           makeAgent({
             name: "pi",
             displayName: "Pi",
-            packageRoot,
-            agentDir,
-            manifestPath: path.join(agentDir, "manifest.yaml"),
-            dockerfilePath,
+            packageRoot: installed.packageRoot,
+            agentDir: packageDirectory,
+            manifestPath: installed.packageManifest.manifestPath,
+            dockerfilePath: path.join(packageDirectory, "Dockerfile"),
             dockerfileBasePath: null,
           }),
+          path.join(packageDirectory, "Dockerfile"),
+          "Dockerfile",
+          { harnessPackage: installed.identity, harnessPackageStoreRoot: storeRoot },
         );
-        buildContext = result.buildCtx;
-        expect(fs.readFileSync(path.join(result.buildCtx, "package-sentinel.txt"), "utf8")).toBe(
-          "selected-package",
-        );
-        expect(resolveSandboxBaseImageMock).not.toHaveBeenCalled();
-        expect(dockerBuildMock).not.toHaveBeenCalled();
-      });
-    } finally {
-      fs.rmSync(buildContext ?? path.join(packageRoot, ".missing-build-context"), {
-        recursive: true,
-        force: true,
-      });
-      fs.rmSync(packageRoot, { recursive: true, force: true });
-    }
-  });
+        buildContext = staged.buildCtx;
+
+        expect(staged.verifyBuildCtx()).toBe(true);
+        const stagedStartScript = path.join(staged.buildCtx, "packages", "nemoclaw-pi", "start.sh");
+        fs.chmodSync(stagedStartScript, 0o744);
+        fs.appendFileSync(stagedStartScript, "\n# changed after staging\n");
+        expect(staged.verifyBuildCtx()).toBe(false);
+      } finally {
+        if (buildContext) fs.rmSync(buildContext, { recursive: true, force: true });
+        makeFixtureDirectoriesWritable(root);
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+    testTimeout(60_000),
+  );
 
   it("makes private installed package bytes readable to Docker image users", () => {
     const packageRoot = fs.realpathSync(tmpDir());
@@ -197,7 +505,12 @@ describe("agent base image provisioning", () => {
     fs.mkdirSync(scriptDir, { recursive: true });
     const dockerfilePath = path.join(agentDir, "Dockerfile");
     const scriptPath = path.join(scriptDir, "openclaw-npm-remediation.mts");
-    fs.writeFileSync(dockerfilePath, "FROM scratch\nCOPY scripts/ /scripts/\n", { mode: 0o600 });
+    fs.writeFileSync(path.join(agentDir, "manifest.yaml"), "name: pi\n");
+    fs.writeFileSync(
+      dockerfilePath,
+      "FROM scratch\nCOPY packages/nemoclaw-pi/scripts/ /scripts/\n",
+      { mode: 0o600 },
+    );
     fs.writeFileSync(scriptPath, "export const packageHelper = true;\n", { mode: 0o711 });
     fs.chmodSync(path.join(packageRoot, "scripts"), 0o711);
     fs.chmodSync(scriptDir, 0o711);
@@ -219,16 +532,17 @@ describe("agent base image provisioning", () => {
         );
         buildContext = result.buildCtx;
         expect((fs.statSync(result.buildCtx).mode & 0o777).toString(8)).toBe("700");
-        expect((fs.statSync(path.join(result.buildCtx, "scripts")).mode & 0o777).toString(8)).toBe(
-          "755",
-        );
+        const stagedPackageRoot = path.join(result.buildCtx, "packages", "nemoclaw-pi");
         expect(
-          (fs.statSync(path.join(result.buildCtx, "scripts", "lib")).mode & 0o777).toString(8),
+          (fs.statSync(path.join(stagedPackageRoot, "scripts")).mode & 0o777).toString(8),
+        ).toBe("755");
+        expect(
+          (fs.statSync(path.join(stagedPackageRoot, "scripts", "lib")).mode & 0o777).toString(8),
         ).toBe("755");
         expect(
           (
             fs.statSync(
-              path.join(result.buildCtx, "scripts", "lib", "openclaw-npm-remediation.mts"),
+              path.join(stagedPackageRoot, "scripts", "lib", "openclaw-npm-remediation.mts"),
             ).mode & 0o777
           ).toString(8),
         ).toBe("755");
@@ -294,7 +608,7 @@ describe("agent base image provisioning", () => {
     });
   });
 
-  it("initializes the lazy Hermes MCP runtime before accepting a published base", () => {
+  it("runs the package-bound Hermes image probe before accepting a published base", () => {
     const imageRef = "hermes-base:current";
 
     withMockedDocker(({ ensureAgentBaseImage, dockerCaptureMock, resolveSandboxBaseImageMock }) => {
@@ -306,9 +620,11 @@ describe("agent base image provisioning", () => {
       expect(options.validateImage?.(imageRef)).toBe(true);
       expect(dockerCaptureMock.mock.calls[0]?.[0]).toEqual(
         expect.arrayContaining([
-          "/opt/hermes/.venv/bin/python",
+          "--user",
+          "998:999",
+          "--entrypoint",
+          "/usr/local/lib/nemoclaw/checks/image-probe.py",
           imageRef,
-          expect.stringContaining("mcp_tool._ensure_mcp_sdk() or sys.exit(1)"),
         ]),
       );
     });
@@ -357,7 +673,7 @@ describe("agent base image provisioning", () => {
               rootDir: root,
               validateImage: expect.any(Function),
               validationDescription:
-                "the required MCP Streamable HTTP and ACP runtimes and the immutable security package inventory",
+                "the package-bound image probe and the immutable security package inventory",
             }),
           );
           expect(dockerImageInspectMock).not.toHaveBeenCalled();
@@ -402,8 +718,8 @@ describe("agent base image provisioning", () => {
         dockerCaptureMock.mockImplementation((args: string[]) =>
           args.includes("/usr/bin/ldd")
             ? "ldd (Debian GLIBC 2.41-12) 2.41"
-            : args.includes("/opt/hermes/.venv/bin/python")
-              ? "nemoclaw-hermes-mcp-runtime-ok"
+            : args.includes("/usr/local/lib/nemoclaw/checks/image-probe.py")
+              ? packageImageProbeMarker("hermes")
               : "nemoclaw-security-inventory-ok",
         );
         dockerImageInspectFormatMock.mockImplementation((format: string, imageRef: string) =>
@@ -472,8 +788,8 @@ describe("agent base image provisioning", () => {
         dockerCaptureMock.mockImplementation((args: string[]) =>
           args.includes("/usr/bin/ldd")
             ? "ldd (Debian GLIBC 2.41-12) 2.41"
-            : args.includes("/opt/hermes/.venv/bin/python")
-              ? "nemoclaw-hermes-mcp-runtime-ok"
+            : args.includes("/usr/local/lib/nemoclaw/checks/image-probe.py")
+              ? packageImageProbeMarker("hermes")
               : "nemoclaw-security-inventory-ok",
         );
         dockerImageInspectFormatMock.mockImplementation((format: string) =>
@@ -629,14 +945,105 @@ describe("agent base image provisioning", () => {
             path.join(agentPackageDir("langchain-deepagents-code"), "manifest.yaml"),
             path.join(agentPackageDir("langchain-deepagents-code"), "runtime/requirements.lock"),
             path.join(agentPackageDir("langchain-deepagents-code"), "fabric/requirements.lock"),
-            path.join(agentPackageDir("langchain-deepagents-code"), "checks/fabric-runtime.py"),
+            path.join(agentPackageDir("langchain-deepagents-code"), "checks/image-probe.py"),
           ],
           validateImage: expect.any(Function),
           validationDescription:
-            "deepagents-code==0.1.55, dos2unix, the package-qualified Fabric runtime, and the immutable security package inventory",
+            "the package-bound image probe and the immutable security package inventory",
         }),
       );
     });
+  });
+
+  it("uses a neutral base-image policy for an unknown package without a declaration", () => {
+    withMockedDocker(({ ensureAgentBaseImage, resolveSandboxBaseImageMock }) => {
+      ensureAgentBaseImage(
+        makeAgent({
+          name: "future-harness",
+          displayName: "Future Harness",
+          managedImage: {
+            repository: "registry.example/team/future-harness",
+            architectures: ["linux/amd64"],
+            runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+          },
+        }),
+      );
+
+      expect(resolveSandboxBaseImageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          buildArgs: undefined,
+          imageName: "registry.example/team/future-harness-base",
+          inputPaths: undefined,
+          pinnedRemoteRef: undefined,
+          requirePinnedRemoteRef: false,
+        }),
+      );
+      const options = resolveSandboxBaseImageMock.mock.calls[0]?.[0] as {
+        validateImage?: unknown;
+        validationDescription?: unknown;
+      };
+      expect(options.validateImage).toBeUndefined();
+      expect(options.validationDescription).toBeUndefined();
+    });
+  });
+
+  it("runs an unknown package's conventional image probe from typed manifest data", () => {
+    const packageRoot = fs.realpathSync(tmpDir());
+    const checks = path.join(packageRoot, "checks");
+    const manifestPath = path.join(packageRoot, "manifest.yaml");
+    const dockerfileBasePath = path.join(packageRoot, "Dockerfile.base");
+    const dockerfilePath = path.join(packageRoot, "Dockerfile");
+    fs.mkdirSync(checks);
+    fs.writeFileSync(manifestPath, "name: future-harness\n");
+    fs.writeFileSync(dockerfileBasePath, "FROM scratch\n");
+    fs.writeFileSync(dockerfilePath, "FROM scratch\n");
+    const probePath = path.join(checks, "image-probe.py");
+    fs.writeFileSync(probePath, "# future package image probe\n");
+    try {
+      withMockedDocker(
+        ({ ensureAgentBaseImage, dockerCaptureMock, resolveSandboxBaseImageMock }) => {
+          ensureAgentBaseImage(
+            makeAgent({
+              name: "future-harness",
+              displayName: "Future Harness",
+              packageRoot,
+              agentDir: packageRoot,
+              manifestPath,
+              dockerfileBasePath,
+              dockerfilePath,
+              managedImage: {
+                repository: "registry.example/team/future-harness",
+                architectures: ["linux/amd64"],
+                runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+                base_image: { package_probe: true },
+              },
+            }),
+          );
+          const options = resolveSandboxBaseImageMock.mock.calls[0]?.[0] as {
+            validateImage?: (imageRef: string) => boolean;
+          };
+          const digest = crypto
+            .createHash("sha256")
+            .update(fs.readFileSync(probePath))
+            .digest("hex");
+          dockerCaptureMock.mockReturnValueOnce(`nemoclaw-image-probe-ok ${digest}`);
+
+          expect(options.validateImage?.("future-base:current")).toBe(true);
+          expect(dockerCaptureMock).toHaveBeenLastCalledWith(
+            expect.arrayContaining([
+              "--user",
+              "1234:1235",
+              "--entrypoint",
+              "/usr/local/lib/nemoclaw/checks/image-probe.py",
+              "future-base:current",
+            ]),
+            { ignoreError: true, timeout: 20_000 },
+          );
+        },
+      );
+    } finally {
+      fs.rmSync(packageRoot, { recursive: true, force: true });
+    }
   });
 
   it.each(CORPORATE_CA_BASE_IMAGE_AGENTS)(
@@ -719,24 +1126,22 @@ describe("agent base image provisioning", () => {
     });
   });
 
-  it("fails closed when the Deep Agents Code manifest omits its base-image version", () => {
+  it("leaves package version checks to the package-bound image probe", () => {
     withMockedDocker(({ ensureAgentBaseImage, resolveSandboxBaseImageMock }) => {
-      expect(() =>
-        ensureAgentBaseImage(
-          makeAgent({
-            name: "langchain-deepagents-code",
-            displayName: "LangChain Deep Agents Code",
-            expectedVersion: null,
-            dockerfileBasePath: path.join(
-              agentPackageDir("langchain-deepagents-code"),
-              "Dockerfile.base",
-            ),
-          }),
-        ),
-      ).toThrow(
-        "Agent 'langchain-deepagents-code' (LangChain Deep Agents Code) manifest is missing expected_version required for base-image validation",
+      ensureAgentBaseImage(
+        makeAgent({
+          name: "langchain-deepagents-code",
+          displayName: "LangChain Deep Agents Code",
+          expectedVersion: null,
+          dockerfileBasePath: path.join(
+            agentPackageDir("langchain-deepagents-code"),
+            "Dockerfile.base",
+          ),
+        }),
       );
-      expect(resolveSandboxBaseImageMock).not.toHaveBeenCalled();
+      expect(resolveSandboxBaseImageMock).toHaveBeenCalledWith(
+        expect.objectContaining({ validateImage: expect.any(Function) }),
+      );
     });
   });
 
@@ -772,6 +1177,12 @@ describe("agent base image provisioning", () => {
         const expectedProvenanceKey = createSandboxBaseImageBuildProvenanceKey({
           imageName: "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base",
           dockerfilePath: path.join(agentPackageDir("hermes"), "Dockerfile.base"),
+          inputPaths: [
+            path.join(agentPackageDir("hermes"), "manifest.yaml"),
+            path.join(agentPackageDir("hermes"), "runtime/requirements.lock"),
+            path.join(agentPackageDir("hermes"), "fabric/requirements.lock"),
+            path.join(agentPackageDir("hermes"), "checks/image-probe.py"),
+          ],
           localTag: "unused-by-build-provenance",
           rootDir: root,
         });
@@ -798,16 +1209,17 @@ describe("agent base image provisioning", () => {
             }),
             validateImage: expect.any(Function),
             validationDescription:
-              "the required MCP Streamable HTTP and ACP runtimes and the immutable security package inventory",
+              "the package-bound image probe and the immutable security package inventory",
             trustedLocalOverride: { ref: result.imageTag, provenance },
           }),
         );
         expect(dockerImageInspectMock).not.toHaveBeenCalled();
         expect(dockerBuildMock).toHaveBeenCalledWith(
-          path.join(agentPackageDir("hermes"), "Dockerfile.base"),
+          expect.stringMatching(/nemoclaw-build-[^/]+\/Dockerfile\.base$/u),
           expect.stringMatching(/^nemoclaw-hermes-sandbox-base-local:build-\d+-[0-9a-f]{16}$/),
-          root,
+          expect.stringMatching(/nemoclaw-build-[^/]+$/u),
           {
+            buildArgs: undefined,
             ignoreError: true,
             labels: {
               "com.nvidia.nemoclaw.base-build-provenance": expect.stringMatching(

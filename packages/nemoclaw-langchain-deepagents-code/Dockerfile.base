@@ -343,7 +343,7 @@ RUN chmod 444 /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
 
 COPY packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock /tmp/deepagents-code-requirements.lock
 COPY packages/nemoclaw-langchain-deepagents-code/fabric/requirements.lock /tmp/nemoclaw-fabric-requirements.lock
-COPY --chmod=0555 packages/nemoclaw-langchain-deepagents-code/checks/fabric-runtime.py /usr/local/lib/nemoclaw/checks/fabric-runtime.py
+COPY --chmod=0555 packages/nemoclaw-langchain-deepagents-code/checks/image-probe.py /usr/local/lib/nemoclaw/checks/image-probe.py
 
 RUN python3 -m venv --copies "$VIRTUAL_ENV" \
     && "$VIRTUAL_ENV/bin/pip3" install --no-cache-dir --require-hashes \
@@ -364,7 +364,7 @@ RUN python3 -m venv --copies /opt/nemoclaw-fabric-venv \
     && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-cache-dir --require-hashes \
         -r /tmp/nemoclaw-fabric-requirements.lock \
     && /opt/nemoclaw-fabric-venv/bin/pip3 check \
-    && /usr/local/lib/nemoclaw/checks/fabric-runtime.py >/dev/null \
+    && /usr/local/lib/nemoclaw/checks/image-probe.py >/dev/null \
     && test -x /opt/nemoclaw-fabric-venv/bin/python3 \
     && test -x /opt/venv/bin/dcode \
     && rm -f /tmp/nemoclaw-fabric-requirements.lock

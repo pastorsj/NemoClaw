@@ -97,6 +97,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     const startupModulePath = path.join(startupDirectory, "auto-pair.py");
     const configGuardPath = path.join(localLib, "openclaw-config-guard.py");
     const managedGatewayControlPath = path.join(localLib, "managed-gateway-control.py");
+    const managedGatewayProfilePath = path.join(localLib, "managed-gateway-profile.py");
     const files = [
       path.join(localBin, "nemoclaw-start"),
       path.join(localBin, "nemoclaw-codex-acp"),
@@ -110,6 +111,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       startupModulePath,
       configGuardPath,
       managedGatewayControlPath,
+      managedGatewayProfilePath,
       path.join(localLib, "openclaw_device_approval_policy.py"),
       path.join(localLib, "clean_runtime_shell_env_shim.py"),
       path.join(localLib, "normalize_mutable_config_perms.py"),
@@ -206,6 +208,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       expect((fs.statSync(startupModulePath).mode & 0o777).toString(8)).toBe("444");
       expect((fs.statSync(configGuardPath).mode & 0o777).toString(8)).toBe("500");
       expect((fs.statSync(managedGatewayControlPath).mode & 0o777).toString(8)).toBe("500");
+      expect((fs.statSync(managedGatewayProfilePath).mode & 0o777).toString(8)).toBe("400");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

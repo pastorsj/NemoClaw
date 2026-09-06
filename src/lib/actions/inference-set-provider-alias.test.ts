@@ -194,14 +194,23 @@ describe("runInferenceSet package-owned mutability — facet 3 (#6321)", () => {
     sensitiveFiles: [] as string[],
   });
 
-  it("uses the receipt-backed package's immutable reason before any mutation", async () => {
+  it("uses the receipt-backed package's unsupported reason before any mutation", async () => {
     const reason =
       "This configuration is materialized by the sandbox image. Re-onboard to change it.";
     const deps = createDeps({
       config: { agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } } },
-      entry: { name: "dcode-sb", agent: "langchain-deepagents-code" },
+      entry: {
+        name: "dcode-sb",
+        agent: "langchain-deepagents-code",
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: "langchain-deepagents-code",
+          packageVersion: "1.0.0",
+          contentDigest: "d".repeat(64),
+        },
+      },
       target: configTarget("langchain-deepagents-code"),
-      configUpdateSupport: { kind: "immutable", reason },
+      configUpdateSupport: { kind: "unsupported", reason },
     });
 
     await expect(
@@ -233,12 +242,42 @@ describe("runInferenceSet package-owned mutability — facet 3 (#6321)", () => {
     expectNoInferenceMutation(deps.calls);
   });
 
-  it("fails closed when an unknown package is mutable but lacks an inference mapping", async () => {
+  it("applies a synthetic receipt-backed package without a core package dispatch", async () => {
+    const identity = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    };
     const deps = createDeps({
-      config: { agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } } },
-      entry: { name: "future-sb", agent: "future-harness" },
+      config: { runtime: { model: "old-model" } },
+      entry: {
+        name: "future-sb",
+        agent: "future-harness",
+        harnessPackage: identity,
+      },
       target: configTarget("future-harness"),
-      configUpdateSupport: { kind: "mutable" },
+      configUpdateSupport: { kind: "mutable", providerApiOverrides: [] },
+      preparePackageInferenceConfig: (_receivedIdentity, request) => ({
+        kind: "mutation",
+        config: {
+          runtime: {
+            model: request.route.model,
+            baseUrl: request.route.baseUrl,
+          },
+        },
+        changed: true,
+        postCommit: {
+          configSync: "required",
+          gatewayRestart: { kind: "not-required" },
+          sandboxReconcile: {
+            kind: "command",
+            trigger: "when-config-changes",
+            command: ["/usr/local/lib/future-harness/reconcile"],
+            timeoutSeconds: 45,
+          },
+        },
+      }),
     });
 
     await expect(
@@ -246,8 +285,192 @@ describe("runInferenceSet package-owned mutability — facet 3 (#6321)", () => {
         { provider: "nvidia-prod", model: "nvidia/model-a", sandboxName: "future-sb" },
         deps,
       ),
-    ).rejects.toThrow(/package adapter for 'future-harness'.*supported runtime inference mapping/u);
+    ).resolves.toMatchObject({
+      sandboxName: "future-sb",
+      primaryModelRef: "inference/nvidia/model-a",
+      configChanged: true,
+      inSandboxConfigSynced: true,
+    });
 
+    expect(deps.calls.preparePackageInferenceConfig).toHaveBeenCalledWith(
+      identity,
+      expect.objectContaining({
+        route: expect.objectContaining({
+          upstreamProvider: "nvidia-prod",
+          model: "nvidia/model-a",
+        }),
+      }),
+    );
+    expect(deps.calls.writeSandboxConfig).toHaveBeenCalledWith(
+      "future-sb",
+      configTarget("future-harness"),
+      {
+        runtime: {
+          model: "nvidia/model-a",
+          baseUrl: "https://inference.local/v1",
+        },
+      },
+    );
+    expect(deps.calls.recomputeSandboxConfigHash).not.toHaveBeenCalled();
+    expect(deps.calls.restartSandboxGateway).not.toHaveBeenCalled();
+    expect(deps.calls.settleOpenClawPairing).not.toHaveBeenCalled();
+    expect(deps.calls.reconcilePackageSandbox).toHaveBeenCalledWith("future-sb", identity, {
+      kind: "command",
+      trigger: "when-config-changes",
+      command: ["/usr/local/lib/future-harness/reconcile"],
+      timeoutSeconds: 45,
+    });
+  });
+
+  it("rejects a changed package receipt before invoking its inference adapter", async () => {
+    const identity = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    };
+    const selectedEntry = {
+      name: "future-sb",
+      agent: "future-harness",
+      harnessPackage: identity,
+    };
+    let reads = 0;
+    const deps = createDeps({
+      config: { runtime: { model: "old-model" } },
+      entry: selectedEntry,
+      getSandbox: () => {
+        reads += 1;
+        return reads < 4
+          ? selectedEntry
+          : {
+              ...selectedEntry,
+              harnessPackage: { ...identity, contentDigest: "b".repeat(64) },
+            };
+      },
+      target: configTarget("future-harness"),
+      configUpdateSupport: { kind: "mutable", providerApiOverrides: [] },
+    });
+
+    await expect(
+      runInferenceSet(
+        { provider: "nvidia-prod", model: "nvidia/model-a", sandboxName: "future-sb" },
+        deps,
+      ),
+    ).rejects.toThrow(/package receipt changed before inference configuration was prepared/u);
+
+    expect(deps.calls.preparePackageInferenceConfig).not.toHaveBeenCalled();
+    expectNoInferenceMutation(deps.calls);
+  });
+
+  it("rejects a package adapter that misreports whether its config changed", async () => {
+    const identity = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    };
+    const deps = createDeps({
+      config: { runtime: { model: "old-model" } },
+      entry: { name: "future-sb", agent: "future-harness", harnessPackage: identity },
+      target: configTarget("future-harness"),
+      configUpdateSupport: { kind: "mutable", providerApiOverrides: [] },
+      preparePackageInferenceConfig: (_receivedIdentity, request) => ({
+        kind: "mutation",
+        config: request.config,
+        changed: true,
+        postCommit: {
+          configSync: "required",
+          gatewayRestart: { kind: "not-required" },
+          sandboxReconcile: { kind: "not-required" },
+        },
+      }),
+    });
+
+    await expect(
+      runInferenceSet(
+        { provider: "nvidia-prod", model: "nvidia/model-a", sandboxName: "future-sb" },
+        deps,
+      ),
+    ).rejects.toThrow(/returned an inconsistent mutation/u);
+
+    expectNoInferenceMutation(deps.calls);
+  });
+
+  it("rejects a package API override that the provider route would silently replace", async () => {
+    const identity = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    };
+    const deps = createDeps({
+      config: { runtime: { model: "old-model" } },
+      entry: { name: "future-sb", agent: "future-harness", harnessPackage: identity },
+      target: configTarget("future-harness"),
+      configUpdateSupport: {
+        kind: "mutable",
+        providerApiOverrides: [{ provider: "nvidia-prod", api: "openai-responses" }],
+      },
+    });
+
+    await expect(
+      runInferenceSet(
+        { provider: "nvidia-prod", model: "nvidia/model-a", sandboxName: "future-sb" },
+        deps,
+      ),
+    ).rejects.toThrow(
+      /requires the managed openai-responses frontend.*routes that provider through openai-completions/u,
+    );
+
+    expect(deps.calls.preparePackageInferenceConfig).not.toHaveBeenCalled();
+    expect(deps.calls.ensureHttpsPinRuntimeAdapter).not.toHaveBeenCalled();
+    expectNoInferenceMutation(deps.calls);
+  });
+
+  it("rejects a package adapter plan before creating an HTTPS-pin route", async () => {
+    const identity = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    };
+    const deps = createDeps({
+      config: { runtime: { model: "old-model" } },
+      entry: { name: "future-sb", agent: "future-harness", harnessPackage: identity },
+      target: configTarget("future-harness"),
+      configUpdateSupport: {
+        kind: "mutable",
+        providerApiOverrides: [{ provider: "compatible-endpoint", api: "openai-completions" }],
+      },
+      preparePackageInferenceConfig: (_receivedIdentity, request) => ({
+        kind: "mutation",
+        config: request.config,
+        changed: true,
+        postCommit: {
+          configSync: "required",
+          gatewayRestart: { kind: "not-required" },
+          sandboxReconcile: { kind: "not-required" },
+        },
+      }),
+    });
+
+    await expect(
+      runInferenceSet(
+        {
+          provider: "compatible-endpoint",
+          model: "future-model",
+          sandboxName: "future-sb",
+          endpointUrl: "https://future.example.test/v1",
+          credentialEnv: "COMPATIBLE_API_KEY",
+          inferenceApi: "openai-completions",
+        },
+        deps,
+      ),
+    ).rejects.toThrow(/returned an inconsistent mutation/u);
+
+    expect(deps.calls.preparePackageInferenceConfig).toHaveBeenCalledOnce();
+    expect(deps.calls.ensureHttpsPinRuntimeAdapter).not.toHaveBeenCalled();
+    expect(deps.calls.rewriteConfigUrlsWithDnsPinning).not.toHaveBeenCalled();
     expectNoInferenceMutation(deps.calls);
   });
 });

@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import { loadAgent, type AgentDefinition } from "../agent/defs";
 import { resolvePackageBackedSandboxAgent } from "../onboard/package/package-authority";
-import { normalizeSandboxAgentName } from "../onboard/sandbox-agent";
+import { normalizeSandboxAgentName } from "../onboard/sandbox-agent/naming";
 import type { SandboxEntry } from "../state/registry";
 
 export interface SandboxCommandAgentDependencies {

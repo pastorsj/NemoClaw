@@ -4,11 +4,11 @@
 import { isDeepStrictEqual } from "node:util";
 import { listMessagingCredentialMetadata } from "../messaging/channels/metadata";
 import type { SandboxMessagingPlan } from "../messaging/manifest";
-import {
-  harnessPackageIdentitiesEqual,
-  type HarnessPackageIdentity,
-  type HarnessPackageMigration,
-} from "../agent-runtime/package/identity";
+import { harnessPackageIdentitiesEqual } from "../agent-runtime/package/identity-validation";
+import type {
+  HarnessPackageIdentity,
+  HarnessPackageMigration,
+} from "../agent-runtime/package/types";
 import { MESSAGING_CREDENTIAL_PROVIDER_TYPE } from "../messaging/provider-profile";
 import { getActiveChannelIdsFromPlan } from "../messaging/plan-validation";
 import { isDecisionSelected } from "../state/onboard-checkpoint-decision";

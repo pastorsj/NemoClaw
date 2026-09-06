@@ -30,3 +30,11 @@ export function resolveExperimentalOnboardProfile(
 export function isPortableExperimentalProfile(env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveExperimentalOnboardProfile(env) === PORTABLE_EXPERIMENTAL_PROFILE;
 }
+
+/** Product selection for the retired schema-4 OpenClaw Portable lifecycle. */
+export function isOpenClawPortableProduct(
+  agentName: string | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isPortableExperimentalProfile(env) && (agentName ?? "openclaw") === "openclaw";
+}

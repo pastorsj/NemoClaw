@@ -14,8 +14,8 @@ import {
   getOpenshellBinary,
   runOpenshell,
 } from "../../adapters/openshell/runtime";
-import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
 import type { AgentDefinition } from "../../agent/defs";
+import * as agentRuntime from "../../agent/runtime";
 import { CLI_NAME } from "../../cli/branding";
 import { prompt as askPrompt } from "../../credentials/store";
 import { formatFailedBackupItems } from "../../domain/backup-failure";
@@ -63,12 +63,6 @@ import * as registry from "../../state/registry";
 import { getSandboxEntryInference } from "../../state/registry-entry-view";
 import * as sandboxState from "../../state/sandbox";
 import {
-  DCODE_AGENT_NAME,
-  DCODE_BUSY_PROBE_SCRIPT,
-  DCODE_PROBE_STATE,
-  parseDcodeProbeState,
-} from "./dcode-activity-probe";
-import {
   removeSandboxRegistryEntryIfCurrentOutcome,
   requireSandboxDestructiveCleanupAuthority,
 } from "./destroy";
@@ -77,10 +71,13 @@ import {
   waitForRestoredSandboxGatewaySupervisor,
 } from "./restore-gateway-pairing";
 import {
-  buildSandboxExecMarkedCommand,
-  createSandboxExecMarker,
-  extractSandboxExecCommandStdoutFromStreams,
-} from "./sandbox-exec-output";
+  inspectReceiptBackedBackupQuiescence,
+  packageRequestsSnapshotRestoreAction,
+} from "./state-lifecycle";
+import {
+  inspectLegacyDcodeBackupQuiescence,
+  legacySandboxRequiresDcodeActivityProbe,
+} from "./snapshot/legacy-dcode";
 import {
   probeGatewayRunning,
   selectSandboxGatewayIfRegistered,
@@ -356,9 +353,11 @@ function allocateCloneDashboardPort(
 // mutation.
 function allocateCloneHermesApiPort(
   dstName: string,
-  srcEntry: { name?: string; agent?: string | null },
+  srcEntry: { name?: string; hermesApiPort?: number | null },
 ): number | null {
-  if (srcEntry.agent !== "hermes") return null;
+  // The durable port allocation, rather than a harness ID, is the authority
+  // that this source owns an independently forwarded API endpoint.
+  if (!isValidForwardPort(srcEntry.hermesApiPort)) return null;
   const forwards = captureOpenshell(["forward", "list"], { ignoreError: true });
   try {
     return findAvailableHermesApiPort(
@@ -385,7 +384,9 @@ function resolveCloneDashboardEnvArgs(
   }
 
   const source = srcEntry as SandboxEntry;
-  if (source.agent !== "hermes") return envArgs;
+  // These fields are retained compatibility state. Their presence, not a
+  // package identifier, determines whether clone startup must preserve them.
+  if (source.hermesDashboardEnabled === undefined) return envArgs;
   if (source.hermesDashboardEnabled !== true) {
     envArgs.push(`${HERMES_DASHBOARD_ENABLE_ENV}=0`);
     return envArgs;
@@ -521,6 +522,7 @@ async function autoCreateSandboxFromSource(
   dstHermesApiPort: number | null,
   sourceRegistryFingerprint: string,
   packageAuthority: SnapshotPackageAuthority,
+  sourceAgentDefinition: AgentDefinition,
   validateBeforeCreate: (routeReservation: SandboxEntry | null) => void,
   validateBeforeFinalRegistration: (expectedPending: SandboxEntry) => void,
 ): Promise<SandboxEntry> {
@@ -772,8 +774,10 @@ async function autoCreateSandboxFromSource(
     failUnregisteredSnapshotClone(dstName, sourceGatewayName);
   }
 
-  const sourceAgent = (srcEntry as SandboxEntry).agent || "openclaw";
-  if (sourceAgent === "openclaw" && !waitForRestoredSandboxGatewaySupervisor(dstName)) {
+  if (
+    sourceAgentDefinition.runtime?.kind !== "terminal" &&
+    !waitForRestoredSandboxGatewaySupervisor(dstName)
+  ) {
     validateBeforeFinalRegistration(pendingRegistration);
     failPendingSnapshotClone(dstName, pendingRegistration);
   }
@@ -1098,8 +1102,9 @@ function reconcilePendingSnapshotClone(
       `Pending clone '${targetSandbox}' has the expected identity but is not Ready yet. Retry after it becomes Ready.`,
     );
   }
+  const pendingAgentDefinition = resolveSnapshotSourceAgent(sourceEntry, packageAuthority);
   if (
-    (pending.agent || "openclaw") === "openclaw" &&
+    pendingAgentDefinition.runtime?.kind !== "terminal" &&
     !waitForRestoredSandboxGatewaySupervisor(targetSandbox)
   ) {
     deleteSandboxForRestore(
@@ -1138,66 +1143,31 @@ function reconcilePendingSnapshotClone(
   return { status: "finalized", entry: finalized };
 }
 
-function shouldCheckDcodeActivity(sandboxName: string): boolean {
+function isSnapshotCreationAllowedByStateLifecycle(sandboxName: string): boolean {
   const entry = registry.getSandbox(sandboxName);
-  // Preserve the existing snapshot path for registered non-dcode sandboxes while
-  // still probing missing-registry entries, where stale metadata is part of the risk.
-  return !entry || entry.agent === DCODE_AGENT_NAME;
-}
-
-function isSnapshotCreationAllowedByDcodeActivity(sandboxName: string): boolean {
-  // Invalid state: backing up .deepagents while dcode is actively mutating it can
-  // produce a snapshot that later restores inconsistent agent state. The source
-  // boundary available today is the live sandbox process table plus runtime
-  // markers, because the managed dcode wrapper does not yet expose an atomic
-  // quiescence lock that backupSandboxState can consume. Keep this guard
-  // fail-closed for missing/unknown probe sentinels, OpenShell exec failures,
-  // timeouts, and any detected-but-unverifiable runtime. Remove this workaround
-  // when dcode exposes a wrapper-owned idle/active lock or equivalent snapshot
-  // quiescence signal and the backup path checks that source directly.
-  const execMarker = createSandboxExecMarker();
-  const probe = captureOpenshell(
-    [
-      "sandbox",
-      "exec",
-      "--name",
-      sandboxName,
-      "--",
-      "sh",
-      "-c",
-      buildSandboxExecMarkedCommand(DCODE_BUSY_PROBE_SCRIPT, execMarker),
-    ],
-    {
-      ignoreError: true,
-      includeStreams: true,
-      timeout: OPENSHELL_PROBE_TIMEOUT_MS,
-    },
-  );
-  const probeCompleted = probe.status === 0 && !probe.error && !probe.signal;
-  const commandStdout = probeCompleted
-    ? extractSandboxExecCommandStdoutFromStreams(
-        { stdout: probe.stdout, stderr: probe.stderr },
-        execMarker,
-      )
-    : null;
-  const probeState = commandStdout === null ? null : parseDcodeProbeState(commandStdout);
-  if (
-    probeState === DCODE_PROBE_STATE.idleDcodeRuntime ||
-    probeState === DCODE_PROBE_STATE.noDcodeRuntime
-  ) {
-    return true;
-  }
-  if (probeState === DCODE_PROBE_STATE.active) {
+  if (entry?.harnessPackage) {
+    let agent: AgentDefinition | null = null;
+    try {
+      agent = agentRuntime.getSessionAgent(sandboxName);
+    } catch {
+      // The generic result below reports unavailable package authority.
+    }
+    const result = inspectReceiptBackedBackupQuiescence(sandboxName, entry, agent);
+    if (result.kind === "ready") return true;
+    if (result.kind === "busy") {
+      console.error(
+        "  Sandbox state is actively changing. Please retry after the package runtime becomes idle.",
+      );
+      return false;
+    }
     console.error(
-      "  Sandbox is actively running a dcode task. Please retry after the task completes.",
+      `  Cannot verify that sandbox '${sandboxName}' state is safe to capture. Refusing to create snapshot.`,
     );
     return false;
   }
-
-  console.error(
-    `  Cannot verify whether sandbox '${sandboxName}' is actively running a dcode task. Refusing to create snapshot.`,
-  );
-  return false;
+  return !legacySandboxRequiresDcodeActivityProbe(sandboxName)
+    ? true
+    : inspectLegacyDcodeBackupQuiescence(sandboxName);
 }
 
 function removeIncompleteSnapshot(sandboxName: string, backupPath: string): void {
@@ -1224,10 +1194,7 @@ function runSnapshotCreate(
     snapshotExit(1);
   }
   return withMcpLifecycleLockSync(sandboxName, () => {
-    if (
-      shouldCheckDcodeActivity(sandboxName) &&
-      !isSnapshotCreationAllowedByDcodeActivity(sandboxName)
-    ) {
+    if (!isSnapshotCreationAllowedByStateLifecycle(sandboxName)) {
       snapshotExit(1);
     }
     const label = request.name ? ` (--name ${request.name})` : "";
@@ -1269,18 +1236,27 @@ function runSnapshotCreate(
   });
 }
 
-function requireRestoredOpenClawConfigPerms(
+function requireRestoredMutableConfigPerms(
   targetSandbox: string,
+  agentDefinition: AgentDefinition,
   result: ReturnType<typeof sandboxState.restoreSandboxState>,
   validateBeforeMutation: () => void,
 ): void {
-  if (!result.restoredFiles.includes("openclaw.json")) return;
+  if (
+    !packageRequestsSnapshotRestoreAction(
+      agentDefinition.stateLifecycle,
+      "repair-mutable-config",
+    ) ||
+    !result.restoredFiles.includes(agentDefinition.configPaths.configFile)
+  ) {
+    return;
+  }
   validateBeforeMutation();
   let failure: string;
   try {
     const permRepair = repairMutableConfigPerms(targetSandbox);
     if (permRepair.applied && permRepair.verified) {
-      console.log(`  ${G}✓${R} OpenClaw config permissions restored`);
+      console.log(`  ${G}✓${R} Mutable config permissions restored`);
       return;
     }
     failure = permRepair.applied
@@ -1290,7 +1266,7 @@ function requireRestoredOpenClawConfigPerms(
     failure = err instanceof Error ? err.message : String(err);
   }
   throw new SnapshotCommandError([
-    `State restored into '${targetSandbox}', but OpenClaw config permissions could not be verified.`,
+    `State restored into '${targetSandbox}', but mutable config permissions could not be verified.`,
     `Run \`${CLI_NAME} ${targetSandbox} doctor --fix\`, then rerun \`${CLI_NAME} ${targetSandbox} doctor\` before running an agent.`,
     `Details: ${failure}`,
   ]);
@@ -1303,6 +1279,7 @@ function readCurrentManagedSnapshotProfileAuthority(entry: SandboxEntry | null) 
         agentType: entry.agent ?? "",
         imageTag: entry.imageTag,
         fromDockerfile: entry.fromDockerfile,
+        ...(entry.harnessPackage ? { harnessPackage: entry.harnessPackage } : {}),
         workload: entry.workload,
       })
     : null;
@@ -1348,7 +1325,6 @@ async function runSnapshotRestoreUnlocked(
     "  Failed to query live sandbox state from OpenShell.",
   );
   const isCrossSandboxRestore = targetSandbox !== sandboxName;
-  let crossSandboxRestoreAgent: string | null = null;
   const targetEntry = isCrossSandboxRestore ? registry.getSandbox(targetSandbox) : null;
   let targetExists = sourceLiveNames.has(targetSandbox) || Boolean(targetEntry);
   const hasPendingCreatedClone =
@@ -1443,6 +1419,7 @@ async function runSnapshotRestoreUnlocked(
   const snapshotProfileSource = {
     sandboxName,
     agentType: resolvedSnapshot.agentType,
+    ...(resolvedSnapshot.harnessPackage ? { harnessPackage: resolvedSnapshot.harnessPackage } : {}),
     workload: resolvedSnapshot.workload,
   };
   let hasManagedProfileAuthority = false;
@@ -1652,7 +1629,6 @@ async function runSnapshotRestoreUnlocked(
         }
         const lockedSourceEntrySnapshot = structuredClone(lockedSourceEntry);
         expectedRestoreSourceEntry = lockedSourceEntrySnapshot;
-        crossSandboxRestoreAgent = lockedSourceEntry.agent || "openclaw";
         if (getSandboxEntryInference(lockedSourceEntry).kind !== "configured") {
           console.error(
             `  Cannot auto-create '${targetSandbox}': source '${sandboxName}' has no complete durable inference route.`,
@@ -1909,6 +1885,7 @@ async function runSnapshotRestoreUnlocked(
             dstHermesApiPort,
             fingerprintSandboxRecreateValue(lockedSourceEntrySnapshot),
             lockedSourceAuthority.packageAuthority,
+            lockedSourceAuthority.agentDefinition,
             validateBeforeCloneCreate,
             validateBeforeCloneFinalRegistration,
           );
@@ -2227,8 +2204,9 @@ async function runSnapshotRestoreUnlocked(
             snapshotExit(1);
           }
         }
-        requireRestoredOpenClawConfigPerms(
+        requireRestoredMutableConfigPerms(
           targetSandbox,
+          snapshotSourceAuthority.agentDefinition,
           result,
           validateRestoreTargetRemoteMutationAuthority,
         );
@@ -2259,7 +2237,7 @@ async function runSnapshotRestoreUnlocked(
         snapshotExit(1);
       }
     });
-    if (isCrossSandboxRestore && crossSandboxRestoreAgent === "openclaw") {
+    if (isCrossSandboxRestore && snapshotSourceAuthority.agentDefinition.hasDevicePairing) {
       validateRestoreTargetRemoteMutationAuthority();
       try {
         await establishRestoredSandboxGatewayPairing(targetSandbox);

@@ -10,7 +10,7 @@ import {
   dockerImageInspectFormat,
   dockerPull,
 } from "./adapters/docker";
-import { ROOT, redact } from "./runner";
+import { ROOT, redact, redactFull } from "./runner";
 import { imageMeetsMinimumGlibc } from "./sandbox-base-image/image-compatibility";
 import { withLocalBuildHeartbeat } from "./sandbox-base-image/local-build-heartbeat";
 import {
@@ -37,7 +37,6 @@ import {
   SANDBOX_BASE_TAG,
   type SandboxBaseImageResolution,
 } from "./sandbox-base-image/types";
-import { redactFull } from "./security/redact";
 import { addTraceEvent } from "./trace";
 
 export * from "./sandbox-base-image/image-compatibility";

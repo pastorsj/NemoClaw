@@ -88,14 +88,16 @@ beforeEach(() => {
   vi.spyOn(policies, "listPresets").mockReturnValue(POLICY_PRESETS);
   vi.spyOn(policies, "listCustomPresets").mockReturnValue([]);
   vi.spyOn(policies, "getAppliedPresets").mockReturnValue(["pypi"]);
-  loadPresetForSandboxMock = vi.spyOn(policies, "loadPresetForSandbox").mockImplementation(
-    (_sandboxName: unknown, name: unknown) =>
-      `network_policies:\n  ${String(name)}:\n    host: ${String(name)}.example.com\n`,
-  );
+  loadPresetForSandboxMock = vi
+    .spyOn(policies, "loadPresetForSandbox")
+    .mockImplementation(
+      (_sandboxName: unknown, name: unknown) =>
+        `network_policies:\n  ${String(name)}:\n    host: ${String(name)}.example.com\n`,
+    );
   applyPresetMock = vi.spyOn(policies, "applyPreset").mockReturnValue(true);
   gatewayStateMock = vi.spyOn(policies, "getPresetContentGatewayState").mockReturnValue("drift");
   npmCompatibilityStateMock = vi
-    .spyOn(policies, "getOpenClawNpmCompatibilityState")
+    .spyOn(policies, "getNpmCompatibilityState")
     .mockReturnValue("match");
   vi.spyOn(policies, "getPresetEndpoints").mockReturnValue(["pypi.example.com"]);
   vi.spyOn(policies, "getPresetValidationWarning").mockReturnValue(null);
@@ -182,9 +184,8 @@ describe("addSandboxPolicy drift-aware named re-add", () => {
         appliedPolicy = loadMessagingChannelPolicyPreset(String(presetName), {
           agent: "openclaw",
           sandboxName: "alpha",
-          messagingConfig: (
-            options as { messagingConfig?: Readonly<Record<string, string>> }
-          ).messagingConfig,
+          messagingConfig: (options as { messagingConfig?: Readonly<Record<string, string>> })
+            .messagingConfig,
         });
         return appliedPolicy !== null;
       },
@@ -236,7 +237,7 @@ describe("addSandboxPolicy drift-aware named re-add", () => {
       "network_policies:\n  npm_yarn:\n    name: npm_yarn\n",
     );
     const disclosureSpy = vi
-      .spyOn(policies, "logOpenClawNpmCompatibilityDisclosure")
+      .spyOn(policies, "logNpmCompatibilityDisclosure")
       .mockImplementation(() => undefined);
     gatewayStateMock.mockReturnValue("match");
     npmCompatibilityStateMock.mockReturnValue("repair");

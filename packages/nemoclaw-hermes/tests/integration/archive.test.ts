@@ -144,6 +144,11 @@ describe("published Hermes package", () => {
     expect(packedFiles.has(artifact)).toBe(true);
   });
 
+  it("ships the agent-browser production dependency lock", () => {
+    expect(packedFiles.has("agent-browser-runtime/npm-shrinkwrap.json")).toBe(true);
+    expect(packedFiles.has("agent-browser-runtime/package-lock.json")).toBe(false);
+  });
+
   it("ships the MCP adapter in the hermes package", () => {
     expect(packedFiles.has("host/mcp-adapter.cts")).toBe(true);
   });
@@ -152,6 +157,19 @@ describe("published Hermes package", () => {
     const artifact = "runtime/generate-config.sh";
     expect((packedFiles.get(artifact)?.mode ?? 0) & 0o111).not.toBe(0);
     expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
+  });
+
+  it.each(["messaging/messaging-build.mts", "runtime/managed-gateway-control.py"])(
+    "ships package-owned image runtime %s as executable",
+    (artifact) => {
+      expect(packedFiles.has(artifact), artifact).toBe(true);
+      expect((packedFiles.get(artifact)?.mode ?? 0) & 0o111).not.toBe(0);
+      expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
+    },
+  );
+
+  it("ships the package-owned managed gateway profile", () => {
+    expect(packedFiles.has("runtime/managed-gateway-profile.py")).toBe(true);
   });
 
   it("loads package-owned runtime modules from a normal node_modules installation", () => {
@@ -173,13 +191,13 @@ describe("published Hermes package", () => {
         replaceExisting: boolean;
         teardownRollback: boolean;
         configDirectory: string | null;
-      }): { execution: { command: string[] } };
+      }): { execution: { command: { kind: "argv"; argv: string[] } } };
       buildMcpRemovalPlan(request: {
         entry: { server: string; url: string; headers: Record<string, string> };
         force: boolean;
         adaptiveTeardown: boolean;
         configDirectory: string | null;
-      }): { execution: { command: string[] } };
+      }): { execution: { command: { kind: "argv"; argv: string[] } } };
       buildInspectCommand(payload: string): string[];
       buildStatusCommand(entry: {
         server: string;
@@ -190,14 +208,14 @@ describe("published Hermes package", () => {
         entry: { server: string; url: string; headers: Record<string, string> };
         failOnMismatch: boolean;
         configDirectory: string | null;
-      }): string;
+      }): { kind: "shell"; script: string; shellTrust: "package-authored-code" };
       buildMcpRuntimePlan(request: { command: string[] }): {
         command: string[];
         environmentVariablesToRemove: string[];
       };
       describeMcpMutationCapability(request: { sandboxName: string }): {
         kind: string;
-        command: string[];
+        command: { kind: "argv"; argv: string[] };
         success: { kind: string };
         retry: {
           outputExact: string;
@@ -207,7 +225,7 @@ describe("published Hermes package", () => {
       };
       describeMcpTeardownCapability(request: { sandboxName: string }): {
         kind: string;
-        command: string[];
+        command: { kind: "argv"; argv: string[] };
         success: { kind: string };
       };
       describeMcpRuntimeIntentVerification(request: {
@@ -215,7 +233,7 @@ describe("published Hermes package", () => {
         managedServerNames: string[];
       }): {
         kind: string;
-        command: string[];
+        command: { kind: "argv"; argv: string[] };
         success: { kind: string };
         retry: { outputExact: string; initialAttempts: number; intervalMilliseconds: number };
       };
@@ -260,11 +278,18 @@ describe("published Hermes package", () => {
         failOnMismatch: false,
         configDirectory: null,
       }),
-    ).toContain("example");
+    ).toMatchObject({
+      kind: "shell",
+      script: expect.stringContaining("example"),
+      shellTrust: "package-authored-code",
+    });
     const mutationCapability = mcp.describeMcpMutationCapability({ sandboxName: "sandbox" });
     expect(mutationCapability).toMatchObject({
       kind: "command",
-      command: ["/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py", "probe"],
+      command: {
+        kind: "argv",
+        argv: ["/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py", "probe"],
+      },
       success: { kind: "last-json-line-ok" },
       retry: {
         outputExact: "Hermes gateway is not running for managed MCP reload",
@@ -284,12 +309,15 @@ describe("published Hermes package", () => {
       }),
     ).toMatchObject({
       kind: "command",
-      command: [
-        "/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
-        "inspect",
-        "--payload",
-        expect.stringContaining('"absent":["removed"]'),
-      ],
+      command: {
+        kind: "argv",
+        argv: [
+          "/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
+          "inspect",
+          "--payload",
+          expect.stringContaining('"absent":["removed"]'),
+        ],
+      },
       success: { kind: "last-json-line-ok" },
       retry: {
         outputExact: "refusing raced Hermes MCP integrity snapshot",
@@ -315,7 +343,9 @@ describe("published Hermes package", () => {
         teardownRollback: false,
         configDirectory: null,
       }),
-    ).toMatchObject({ execution: { command: expect.arrayContaining(["add", "--payload"]) } });
+    ).toMatchObject({
+      execution: { command: { kind: "argv", argv: expect.arrayContaining(["add", "--payload"]) } },
+    });
     expect(
       mcp.buildMcpRemovalPlan({
         entry: mcpEntry,
@@ -323,7 +353,11 @@ describe("published Hermes package", () => {
         adaptiveTeardown: false,
         configDirectory: null,
       }),
-    ).toMatchObject({ execution: { command: expect.arrayContaining(["remove", "--payload"]) } });
+    ).toMatchObject({
+      execution: {
+        command: { kind: "argv", argv: expect.arrayContaining(["remove", "--payload"]) },
+      },
+    });
   });
 
   it("omits hermes package authoring files from archives", () => {

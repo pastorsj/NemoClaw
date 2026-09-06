@@ -23,6 +23,24 @@ const PRIVATE_TOOL_NAMES = ["node", "npm", "npx", "corepack", "git", "tar"] as c
 const REQUIRED_PRIVATE_TOOL_NAMES = new Set(["node", "npm", "git", "tar"]);
 const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 const MANIFEST_MAX_BYTES = 256 * 1024;
+const MAX_BUILD_PROJECTS = 8;
+const MAX_BUILD_PROJECT_PATH_BYTES = 128;
+const BUILD_PROJECT_PATH = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/u;
+const FORBIDDEN_BUILD_PROJECT_DIRECTORY_NAMES = new Set([
+  ".cache",
+  ".e2e",
+  ".git",
+  ".github",
+  ".turbo",
+  "__pycache__",
+  "__tests__",
+  "cache",
+  "coverage",
+  "node_modules",
+  "test",
+  "tests",
+]);
+const PUBLISHED_CONTRACT_RANGE = /^\^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 const NON_SECRET_BASE_IMAGE =
   "ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const HARNESS_CONTRACT_ROOT = path.resolve(import.meta.dirname, "..", "..", "harness-contract");
@@ -58,6 +76,8 @@ export interface PackageCheckoutOptions {
   readonly mode: PackageCheckoutMode;
   readonly packageId: string;
   readonly candidatePackageDir: string;
+  /** Acknowledge that this rehearsal executes trusted candidate code on the host. */
+  readonly allowPackageCode?: boolean;
   readonly coreCheckoutDir?: string;
   readonly coreCommit?: string;
   readonly temporaryParentDir?: string;
@@ -87,7 +107,9 @@ interface CredentialFreeEnvironmentOptions {
 
 interface CandidatePackageMetadata {
   readonly hasFabricTestScript: boolean;
+  readonly hasNemoclawTestScript: boolean;
   readonly usesHarnessContract: boolean;
+  readonly buildProjectRoots: readonly string[];
 }
 
 /** Restore write access only within the generated agent runtime artifact tree. */
@@ -218,6 +240,57 @@ function assertCandidatePackageMetadata(
   ) {
     throw new Error(`Candidate package must declare nemoclaw.harnessManifest: ${packageJsonPath}`);
   }
+  const nemoclawMetadata = nemoclaw as Record<string, unknown>;
+  if (Object.hasOwn(nemoclawMetadata, "authoringProjects")) {
+    throw new Error(
+      `Candidate package nemoclaw.authoringProjects was renamed to nemoclaw.buildProjects: ${packageJsonPath}`,
+    );
+  }
+  const buildProjects = nemoclawMetadata.buildProjects;
+  if (
+    buildProjects !== undefined &&
+    (!Array.isArray(buildProjects) ||
+      buildProjects.length === 0 ||
+      buildProjects.length > MAX_BUILD_PROJECTS)
+  ) {
+    throw new Error(
+      `Candidate package nemoclaw.buildProjects must contain between 1 and ${String(MAX_BUILD_PROJECTS)} paths: ${packageJsonPath}`,
+    );
+  }
+  const buildProjectRoots = (buildProjects ?? []).map((projectPath) => {
+    if (
+      typeof projectPath !== "string" ||
+      Buffer.byteLength(projectPath, "utf8") > MAX_BUILD_PROJECT_PATH_BYTES ||
+      !BUILD_PROJECT_PATH.test(projectPath)
+    ) {
+      throw new Error(`Candidate package build project path is invalid: ${packageJsonPath}`);
+    }
+    if (
+      projectPath
+        .toLowerCase()
+        .split("/")
+        .some((segment) => FORBIDDEN_BUILD_PROJECT_DIRECTORY_NAMES.has(segment))
+    ) {
+      throw new Error(
+        `Candidate package build project must not identify a test, cache, or dependency directory: ${packageJsonPath}`,
+      );
+    }
+    const projectRoot = path.resolve(candidatePackageDir, ...projectPath.split("/"));
+    if (
+      !isPathInsideRoot(projectRoot, candidatePackageDir) ||
+      projectRoot === candidatePackageDir
+    ) {
+      throw new Error(
+        `Candidate package build project escapes the package root: ${packageJsonPath}`,
+      );
+    }
+    assertRegularDirectory(projectRoot, "Candidate build project");
+    assertNpmInstallLock(projectRoot, "Candidate build project lock");
+    return projectPath;
+  });
+  if (new Set(buildProjectRoots).size !== buildProjectRoots.length) {
+    throw new Error(`Candidate package build projects must be unique: ${packageJsonPath}`);
+  }
   assertNpmInstallLock(candidatePackageDir, "Candidate package lock");
   const manifestPath = path.join(candidatePackageDir, "manifest.yaml");
   const manifest = readBoundedRegularFile(
@@ -237,9 +310,13 @@ function assertCandidatePackageMetadata(
     !Array.isArray(devDependencies)
       ? (devDependencies as Record<string, unknown>)["@nvidia/nemoclaw-harness-contract"]
       : undefined;
-  if (harnessContractDependency !== undefined && harnessContractDependency !== "^0.1.0") {
+  if (
+    harnessContractDependency !== undefined &&
+    (typeof harnessContractDependency !== "string" ||
+      !PUBLISHED_CONTRACT_RANGE.test(harnessContractDependency))
+  ) {
     throw new Error(
-      "Candidate package must use the published @nvidia/nemoclaw-harness-contract range",
+      "Candidate package must use a published @nvidia/nemoclaw-harness-contract caret range",
     );
   }
   return {
@@ -248,7 +325,13 @@ function assertCandidatePackageMetadata(
       typeof scripts === "object" &&
       !Array.isArray(scripts) &&
       typeof (scripts as Record<string, unknown>)["test:fabric"] === "string",
+    hasNemoclawTestScript:
+      scripts !== null &&
+      typeof scripts === "object" &&
+      !Array.isArray(scripts) &&
+      typeof (scripts as Record<string, unknown>)["test:nemoclaw"] === "string",
     usesHarnessContract: harnessContractDependency !== undefined,
+    buildProjectRoots,
   };
 }
 
@@ -480,27 +563,80 @@ function npmCommand(
   return { executable: "npm", args, cwd, env, output: "inherit", purpose };
 }
 
-function installPackageDevelopmentDependencies(
-  packageId: string,
-  packageRoot: string,
+function packHarnessContract(
+  contractRoot: string,
+  rehearsalRoot: string,
   env: NodeJS.ProcessEnv,
   runCommand: CheckoutCommandRunner,
+): string {
+  assertRegularDirectory(contractRoot, "Harness contract package");
+  const outputDirectory = path.join(rehearsalRoot, "shared-inputs");
+  fs.mkdirSync(outputDirectory, { mode: 0o700 });
+  const { stdout } = runCommand({
+    executable: "npm",
+    args: ["pack", "--json", "--pack-destination", outputDirectory],
+    cwd: contractRoot,
+    env,
+    output: "capture",
+    purpose: "pack public harness contract",
+  });
+  let filename: unknown;
+  try {
+    const report = JSON.parse(stdout) as unknown;
+    filename = Array.isArray(report)
+      ? (report[0] as { filename?: unknown } | undefined)?.filename
+      : null;
+  } catch {
+    throw new Error("Packed harness contract report is invalid");
+  }
+  if (
+    typeof filename !== "string" ||
+    filename.length === 0 ||
+    filename !== path.basename(filename) ||
+    !filename.endsWith(".tgz")
+  ) {
+    throw new Error("Packed harness contract report has no safe archive name");
+  }
+  return path.join(outputDirectory, filename);
+}
+
+function installPackageDevelopmentDependencies(
+  packageRoot: string,
+  buildProjectRoots: readonly string[],
+  env: NodeJS.ProcessEnv,
+  runCommand: CheckoutCommandRunner,
+  harnessContractArchive?: string,
 ): void {
   runDependencyInstall(
     runCommand,
-    npmCommand(packageRoot, env, "install candidate package dependencies", [
-      "ci",
-      "--ignore-scripts",
-    ]),
+    npmCommand(
+      packageRoot,
+      env,
+      "install candidate package dependencies",
+      harnessContractArchive
+        ? [
+            "install",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+            "--no-save",
+            harnessContractArchive,
+          ]
+        : ["ci", "--ignore-scripts"],
+    ),
   );
-  if (packageId !== "openclaw") return;
-
-  const pluginRoot = path.join(packageRoot, "plugin");
-  assertNpmInstallLock(pluginRoot, "OpenClaw plugin package lock");
-  runDependencyInstall(
-    runCommand,
-    npmCommand(pluginRoot, env, "install OpenClaw plugin dependencies", ["ci", "--ignore-scripts"]),
-  );
+  for (const projectPath of buildProjectRoots) {
+    const projectRoot = path.resolve(packageRoot, ...projectPath.split("/"));
+    assertRegularDirectory(projectRoot, "Candidate build project");
+    assertNpmInstallLock(projectRoot, "Candidate build project lock");
+    runDependencyInstall(
+      runCommand,
+      npmCommand(projectRoot, env, `install candidate build project dependencies: ${projectPath}`, [
+        "ci",
+        "--ignore-scripts",
+      ]),
+    );
+  }
 }
 
 function assertExactCoreRevision(
@@ -625,15 +761,21 @@ function runPackageOnlyRehearsal(
   runCommand: CheckoutCommandRunner,
   hasFabricTestScript: boolean,
   usesHarnessContract: boolean,
+  buildProjectRoots: readonly string[],
 ): PackageCheckoutResult {
   const workspaceRoot = path.join(rehearsalRoot, "workspace");
   const packageRoot = path.join(workspaceRoot, "packages", `nemoclaw-${packageId}`);
-  if (usesHarnessContract) {
-    assertRegularDirectory(HARNESS_CONTRACT_ROOT, "Harness contract package");
-    copyCandidatePackage(HARNESS_CONTRACT_ROOT, path.join(workspaceRoot, "harness-contract"));
-  }
+  const harnessContractArchive = usesHarnessContract
+    ? packHarnessContract(HARNESS_CONTRACT_ROOT, rehearsalRoot, env, runCommand)
+    : undefined;
   copyCandidatePackage(candidatePackageDir, packageRoot);
-  installPackageDevelopmentDependencies(packageId, packageRoot, env, runCommand);
+  installPackageDevelopmentDependencies(
+    packageRoot,
+    buildProjectRoots,
+    env,
+    runCommand,
+    harnessContractArchive,
+  );
   runCommand(
     npmCommand(packageRoot, env, "run candidate package-only tests", ["run", "test:package"]),
   );
@@ -673,29 +815,68 @@ function runComposedRehearsal(
     throw new Error("Exact NemoClaw revision does not contain a root package lock");
   }
 
-  const packageRoot = path.join(coreRoot, "packages", `nemoclaw-${options.packageId}`);
-  fs.rmSync(packageRoot, { recursive: true, force: true });
-  fs.mkdirSync(path.dirname(packageRoot), { recursive: true });
-  copyCandidatePackage(path.resolve(options.candidatePackageDir), packageRoot);
-
   runDependencyInstall(
     runCommand,
     npmCommand(coreRoot, env, "install NemoClaw dependencies", ["ci", "--ignore-scripts"]),
   );
-  installPackageDevelopmentDependencies(options.packageId, packageRoot, env, runCommand);
 
-  const pluginRoot = path.join(packageRoot, "plugin");
+  // Keep the candidate outside the exact NemoClaw archive. This proves the same
+  // public artifact boundary that an independently maintained package uses.
+  const packageRoot = path.join(rehearsalRoot, "candidate-package");
+  copyCandidatePackage(path.resolve(options.candidatePackageDir), packageRoot);
+  const packageMetadata = assertCandidatePackageMetadata(packageRoot, options.packageId);
+  const harnessContractArchive = packageMetadata.usesHarnessContract
+    ? packHarnessContract(path.join(coreRoot, "harness-contract"), rehearsalRoot, env, runCommand)
+    : undefined;
+  installPackageDevelopmentDependencies(
+    packageRoot,
+    packageMetadata.buildProjectRoots,
+    env,
+    runCommand,
+    harnessContractArchive,
+  );
   runCommand(npmCommand(coreRoot, env, "build NemoClaw CLI", ["run", "build:cli"]));
-  if (options.packageId === "openclaw") {
-    runCommand(npmCommand(pluginRoot, env, "build OpenClaw plugin", ["run", "build"]));
-  }
+  runCommand(
+    npmCommand(packageRoot, env, "build candidate package artifact", ["run", "build:package"]),
+  );
+  const packageArtifact = path.join(packageRoot, "dist", `nemoclaw-${options.packageId}`);
+  assertRegularDirectory(packageArtifact, "Candidate package artifact");
 
-  runCommand(npmCommand(packageRoot, env, "run complete candidate tests", ["test"]));
+  if (packageMetadata.hasNemoclawTestScript) {
+    // Compose a second source copy into the conventional package location only
+    // for integration tests. The installed artifact above still comes from the
+    // independent candidate checkout, so tests cannot change its provenance.
+    const integrationPackageRoot = path.join(coreRoot, "packages", `nemoclaw-${options.packageId}`);
+    makeManagedOutputWritable(path.join(integrationPackageRoot, "dist"));
+    fs.rmSync(integrationPackageRoot, { force: true, recursive: true });
+    copyCandidatePackage(path.resolve(options.candidatePackageDir), integrationPackageRoot);
+    installPackageDevelopmentDependencies(
+      integrationPackageRoot,
+      packageMetadata.buildProjectRoots,
+      env,
+      runCommand,
+      harnessContractArchive,
+    );
+    runCommand(
+      npmCommand(integrationPackageRoot, env, "run candidate NemoClaw integration tests", [
+        "run",
+        "test:nemoclaw",
+      ]),
+    );
+  }
 
   const cliPath = path.join(coreRoot, "bin", "nemoclaw.js");
   runCommand({
     executable: process.execPath,
-    args: [cliPath, "harness", "install", options.packageId],
+    args: [
+      cliPath,
+      "harness",
+      "install",
+      options.packageId,
+      "--from",
+      packageArtifact,
+      "--yes-i-trust-local-package",
+    ],
     cwd: coreRoot,
     env,
     output: "inherit",
@@ -746,6 +927,11 @@ export function runPackageCheckoutRehearsal(
       "Composed mode requires an explicit NemoClaw checkout and exact 40-character commit SHA",
     );
   }
+  if (options.allowPackageCode !== true) {
+    throw new Error(
+      "Package checkout rehearsal executes trusted candidate package code on this host and is not an untrusted-package sandbox. Pass allowPackageCode: true through the API or --allow-package-code through the CLI only for a trusted candidate.",
+    );
+  }
 
   const candidatePackageDir = path.resolve(options.candidatePackageDir);
   const candidateMetadata = assertCandidatePackageMetadata(candidatePackageDir, options.packageId);
@@ -789,11 +975,13 @@ export function runPackageCheckoutRehearsal(
         runCommand,
         candidateMetadata.hasFabricTestScript,
         candidateMetadata.usesHarnessContract,
+        candidateMetadata.buildProjectRoots,
       );
     }
     return runComposedRehearsal(options, rehearsalRoot, env, runCommand);
   } finally {
     prepareCheckoutRootRemoval(rehearsalRoot);
+    makeManagedOutputWritable(path.join(rehearsalRoot, "candidate-package", "dist"));
     fs.rmSync(rehearsalRoot, { recursive: true, force: true });
   }
 }
@@ -801,12 +989,14 @@ export function runPackageCheckoutRehearsal(
 function usage(): string {
   return [
     "Usage:",
-    "  scripts/packages/checkout.mts package-only --package <id> --candidate <path>",
-    "  scripts/packages/checkout.mts composed --package <id> --candidate <path> --nemoclaw-checkout <path> --nemoclaw-commit <sha>",
+    "  scripts/packages/checkout.mts package-only --package <id> --candidate <path> --allow-package-code",
+    "  scripts/packages/checkout.mts composed --package <id> --candidate <path> --nemoclaw-checkout <path> --nemoclaw-commit <sha> --allow-package-code",
+    "",
+    "--allow-package-code acknowledges that rehearsal executes trusted candidate package code on the host. It is not an untrusted-package sandbox.",
   ].join("\n");
 }
 
-function readCliOptions(args: readonly string[]): PackageCheckoutOptions {
+export function readPackageCheckoutCliOptions(args: readonly string[]): PackageCheckoutOptions {
   const [mode, ...remaining] = args;
   if (mode === "--help" || mode === "-h") {
     process.stdout.write(`${usage()}\n`);
@@ -824,6 +1014,7 @@ function readCliOptions(args: readonly string[]): PackageCheckoutOptions {
       candidate: { type: "string" },
       "nemoclaw-checkout": { type: "string" },
       "nemoclaw-commit": { type: "string" },
+      "allow-package-code": { type: "boolean" },
     },
   });
   const packageId = values.package;
@@ -833,6 +1024,7 @@ function readCliOptions(args: readonly string[]): PackageCheckoutOptions {
     mode,
     packageId,
     candidatePackageDir,
+    allowPackageCode: values["allow-package-code"] ?? false,
     coreCheckoutDir: values["nemoclaw-checkout"],
     coreCommit: values["nemoclaw-commit"],
   };
@@ -848,7 +1040,7 @@ export function formatCheckoutResult(result: PackageCheckoutResult): string {
 }
 
 function main(): void {
-  const result = runPackageCheckoutRehearsal(readCliOptions(process.argv.slice(2)));
+  const result = runPackageCheckoutRehearsal(readPackageCheckoutCliOptions(process.argv.slice(2)));
   process.stdout.write(`${formatCheckoutResult(result)}\n`);
 }
 

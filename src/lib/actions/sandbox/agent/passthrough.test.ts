@@ -115,6 +115,26 @@ import {
   runAgentPassthrough,
 } from "./passthrough";
 
+const OPENCLAW_AGENT_COMMAND = {
+  argv: ["receipt-openclaw", "agent"],
+  output_mode: "bounded-text",
+  selector_options: ["--agent", "--session-id", "--session-key", "--to"],
+  selector_required: true,
+  value_options: [
+    "-a",
+    "-m",
+    "--message",
+    "--model",
+    "--provider",
+    "--reply-channel",
+    "--thinking",
+    "--timeout",
+  ],
+  boolean_options: ["--deliver"],
+  json_output_option: "--json",
+  timeout_option: "--timeout",
+} as const;
+
 function createPluginApi(): OpenClawPluginApi {
   return {
     id: "nemoclaw",
@@ -240,7 +260,7 @@ describe("runAgentPassthrough", () => {
       definition: {
         name: "hermes",
         runtime: { kind: "gateway", interactive_command: "hermes" },
-      } as ResolvedSandboxAgent["definition"],
+      } as unknown as ResolvedSandboxAgent["definition"],
       harnessPackage,
       harnessPackageMigration: null,
     });
@@ -294,7 +314,7 @@ describe("runAgentPassthrough", () => {
           interactive_command: "pi",
           headless_command: "receipt-pinned-pi --print",
         },
-      } as ResolvedSandboxAgent["definition"],
+      } as unknown as ResolvedSandboxAgent["definition"],
       harnessPackage,
       harnessPackageMigration: null,
     });
@@ -366,7 +386,7 @@ describe("runAgentPassthrough", () => {
     expect(writes.join("")).toContain("has not been qualified");
   });
 
-  it("keeps native OpenClaw passthrough when a headless package receives selector flags", async () => {
+  it("uses the receipt-pinned OpenClaw command declaration for selector flags", async () => {
     const execNonJson = vi.fn(((): never => {
       throw new Error("__exit:0");
     }) as NonNullable<AgentPassthroughDeps["execNonJson"]>);
@@ -388,8 +408,9 @@ describe("runAgentPassthrough", () => {
           interactive_command: "openclaw tui",
           headless_command: "nemoclaw-fabric run --config /sandbox/.openclaw/fabric.json",
           prompt_transport: "stdin",
+          agent_command: OPENCLAW_AGENT_COMMAND,
         },
-      } as ResolvedSandboxAgent["definition"],
+      } as unknown as ResolvedSandboxAgent["definition"],
       harnessPackage,
       harnessPackageMigration: null,
     });
@@ -404,9 +425,60 @@ describe("runAgentPassthrough", () => {
     expect(execMock).not.toHaveBeenCalled();
     expect(execNonJson).toHaveBeenCalledWith(
       "alpha",
-      ["openclaw", "agent", "--agent", "work", "--session-id", "s-1", "-m", "ping"],
+      ["receipt-openclaw", "agent", "--agent", "work", "--session-id", "s-1", "-m", "ping"],
       expect.anything(),
     );
+  });
+
+  it("never falls back to OpenClaw for an unknown receipt-backed package", async () => {
+    const execJson = vi.fn(((): never => {
+      throw new Error("__unexpected-json");
+    }) as NonNullable<AgentPassthroughDeps["execJson"]>);
+    const execNonJson = vi.fn(((): never => {
+      throw new Error("__unexpected-text");
+    }) as NonNullable<AgentPassthroughDeps["execNonJson"]>);
+    const recoverOllama = vi.fn();
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-terminal",
+      packageVersion: "0.1.0",
+      contentDigest: "8".repeat(64),
+    };
+    const entry = { agent: "future-terminal", harnessPackage };
+    getSandboxMock.mockReturnValueOnce(entry as never);
+    resolveLifecycleEligibleSandboxAgentMock.mockReturnValueOnce({
+      recordedAgent: "future-terminal",
+      effectiveAgentId: "future-terminal",
+      definition: {
+        name: "future-terminal",
+        runtime: {
+          kind: "terminal",
+          interactive_command: "future-terminal",
+          agent_command: {
+            argv: ["future-terminal", "run"],
+            output_mode: "direct",
+            boolean_options: ["--json"],
+          },
+        },
+      } as unknown as ResolvedSandboxAgent["definition"],
+      harnessPackage,
+      harnessPackageMigration: null,
+    });
+
+    await runAgentPassthrough(
+      "future-sandbox",
+      { extraArgs: ["--json", "--profile", "native"] },
+      { execJson, execNonJson, runOllamaRestartRecovery: recoverOllama },
+    );
+
+    expect(execMock).toHaveBeenCalledWith(
+      "future-sandbox",
+      ["future-terminal", "run", "--json", "--profile", "native"],
+      { tty: false },
+    );
+    expect(execJson).not.toHaveBeenCalled();
+    expect(execNonJson).not.toHaveBeenCalled();
+    expect(recoverOllama).not.toHaveBeenCalled();
   });
 
   it("dispatches a plain prompt through a receipt-pinned OpenClaw headless command", async () => {
@@ -899,12 +971,7 @@ describe("runAgentPassthrough", () => {
 
     expect(execMock).toHaveBeenCalledWith(
       "declared-argv",
-      [
-        "nemoclaw-fabric-run",
-        "--config",
-        "/sandbox/package/fabric.json",
-        "public-prompt",
-      ],
+      ["nemoclaw-fabric-run", "--config", "/sandbox/package/fabric.json", "public-prompt"],
       { tty: false },
     );
   });

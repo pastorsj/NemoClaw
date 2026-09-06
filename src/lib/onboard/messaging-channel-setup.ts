@@ -37,7 +37,10 @@ import {
 } from "./messaging-selector";
 
 export interface SetupSelectedMessagingChannelsOptions {
-  readonly agent?: { readonly name?: string } | null;
+  readonly agent?: {
+    readonly name?: string;
+    readonly defaultSandboxName?: string;
+  } | null;
   readonly sandboxName?: string | null;
   readonly interactive?: boolean;
   readonly googlechatTunnelRuntime?: Omit<GooglechatTunnelRuntimeDeps, "sandboxName">;
@@ -483,7 +486,7 @@ function resolveMessagingSetupSandboxName(options: SetupSelectedMessagingChannel
   if (explicitName) return explicitName;
   const envName = normalizeSandboxName(process.env.NEMOCLAW_SANDBOX_NAME);
   if (envName) return envName;
-  return options.agent?.name === "hermes" ? "hermes" : "my-assistant";
+  return normalizeSandboxName(options.agent?.defaultSandboxName) ?? "my-assistant";
 }
 
 function normalizeSandboxName(value: string | null | undefined): string | null {

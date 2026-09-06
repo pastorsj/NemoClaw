@@ -91,6 +91,12 @@ export function stageRebuildHermesDashboardConfig(
     );
     return false;
   }
+  // Receipt-backed packages restore dashboard intent through their startup
+  // adapter. These registry fields are only a decoder for pre-receipt rows.
+  if (agentAuthority.harnessPackage) {
+    for (const key of REBUILD_HERMES_DASHBOARD_ENV_KEYS) delete process.env[key];
+    return true;
+  }
   const rebuildAgent = agentAuthority.definition.name;
   const resolved = resolveRebuildHermesDashboardEnv(rebuildAgent, sb, controlUiPort);
   if (!resolved.ok) {

@@ -30,9 +30,12 @@ vi.mock("./mcp-bridge-provider", () => ({
 
 vi.mock("./mcp-bridge-state", () => ({
   bridgeState: (sandbox: SandboxEntry) => sandbox.mcp?.bridges ?? {},
-  ensureSandboxGatewaySelected: mocks.ensureSandboxGatewaySelected,
   getSandboxOrThrow: mocks.getSandboxOrThrow,
   setBridgeState: mocks.setBridgeState,
+}));
+
+vi.mock("./mcp-bridge/gateway-selection", () => ({
+  ensureSandboxGatewaySelected: mocks.ensureSandboxGatewaySelected,
 }));
 
 vi.mock("./mcp-bridge-validation", () => ({

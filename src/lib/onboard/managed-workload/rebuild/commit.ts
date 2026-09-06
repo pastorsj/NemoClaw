@@ -81,9 +81,13 @@ export function materializeManagedWorkloadReplacementEntry(
     reservationSessionId: undefined,
     openshellDriver: plan.providerId,
     agent: plan.agent,
+    ...(plan.previousAuthority.harnessPackage === null
+      ? {}
+      : { harnessPackage: plan.previousAuthority.harnessPackage }),
     fromDockerfile: null,
     imageTag: plan.replacementReceipt.reference,
     workload: plan.replacementReceipt,
+    dashboardRemoteBindPrepared: plan.handoff.previousDashboardRemoteBindPrepared,
     lifecycleGeneration: replacement.lifecycleGeneration,
     lifecycleLiveIdentityFingerprint: replacement.liveIdentityFingerprint,
   });

@@ -92,7 +92,10 @@ const {
 const {
   agentSupportsWebSearch,
   agentSupportsWebSearchProvider,
-}: typeof import("./onboard/web-search-support") = require("./onboard/web-search-support");
+  filterSelectedAgentWebSearchToolGateways,
+  selectedAgentResumesSandboxPrompts,
+  selectedAgentSupportsWebSearchProvider,
+}: typeof import("./onboard/web-search/support") = require("./onboard/web-search/support");
 const onboardDashboard: typeof import("./onboard/dashboard") = require("./onboard/dashboard");
 const dashboardRuntime: typeof import("./onboard/dashboard-runtime") = require("./onboard/dashboard-runtime");
 const {
@@ -240,6 +243,8 @@ const onboardProviders = require("./onboard/providers");
 const credentialProviderRegistration: typeof import("./onboard/credential-provider-registration") = require("./onboard/credential-provider-registration");
 const setupInferenceFactory: typeof import("./onboard/setup-inference") = require("./onboard/setup-inference");
 const hermesProviderAuth = require("./hermes-provider-auth");
+const { describeHarnessProviderBroker } =
+  require("./agent-runtime/provider-broker") as typeof import("./agent-runtime/provider-broker");
 const onboardHermesDashboard: typeof import("./onboard/hermes-dashboard") = require("./onboard/hermes-dashboard");
 const hermesAuth: typeof import("./onboard/hermes-auth") = require("./onboard/hermes-auth");
 const {
@@ -252,7 +257,7 @@ const {
 
 type HermesAuthMethod = import("./onboard/hermes-auth").HermesAuthMethod;
 function getHermesToolGatewayBroker(): any {
-  return require("./hermes-tool-gateway-broker");
+  return require("./actions/sandbox/legacy-hermes-tool-gateway-broker");
 }
 
 type RemoteProviderConfigEntry = {
@@ -1513,6 +1518,7 @@ const sandboxCreateOrchestrationRuntime = {
   getDefaultSandboxNameForAgent,
   getDockerDriverGatewayStateDir,
   getHermesToolGatewayBroker,
+  describeHarnessProviderBroker,
   getRequestedSandboxAgentName,
   getSandboxAgentDrift,
   getSandboxRecreateObservation,
@@ -2368,7 +2374,7 @@ function getSetupInferenceDeps(): SetupInferenceDeps {
     listSandboxes: registry.listSandboxes,
     unloadOllamaModels,
     hermesProviderAuth,
-    getHermesToolGatewayBroker,
+    describeHarnessProviderBroker,
     providerExistsInGateway,
     normalizeHermesAuthMethod,
     resolveHermesNousApiKey,
@@ -3103,7 +3109,8 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
           gatewayName: GATEWAY_NAME,
           apfInterceptorRequested: session?.apfInterceptorRequested === true,
           hermesPortableLifecycle:
-            lockedRuntime.portableRuntimeContext !== null && agent?.name === "hermes",
+            lockedRuntime.portableRuntimeContext !== null &&
+            sandboxGpuCreateFlow.isHermesPortableLifecycleMode(agent),
           ...authoritativeRebuildTarget.authoritativeRebuildSandboxFlowOptions(opts),
           recreateJournalTargetIntentFingerprint:
             opts.recreateJournalTargetIntentFingerprint ?? null,
@@ -3123,7 +3130,9 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
             revalidateHarnessPackageAuthority: harnessPackageOperation.revalidateSessionAuthority,
             resolvePath: preparedDcodeRuntime.resolveDockerfileProbePath,
             agentSupportsWebSearch,
-            agentSupportsWebSearchProvider,
+            filterSelectedAgentWebSearchToolGateways,
+            selectedAgentResumesSandboxPrompts,
+            selectedAgentSupportsWebSearchProvider,
             ...{ note, cliName },
             ...{
               loadSession: onboardSession.loadSession,

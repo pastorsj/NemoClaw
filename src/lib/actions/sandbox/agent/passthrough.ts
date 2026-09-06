@@ -19,11 +19,11 @@
 //      command. NemoClaw resolves the receipt-pinned manifest, then forwards
 //      agent flags verbatim. Terminal-runtime dispatch uses that manifest
 //      command only when it can be represented as simple whitespace-delimited
-//      argv tokens; shell quoting/escaping fails closed until manifests expose
-//      argv natively. A package explicitly selects private standard-input
-//      prompt transport; core never infers transport from an executable name.
-//      Bare, help, and option-first calls use the manifest's native command, so
-//      core does not need to understand a package-specific option grammar.
+//      argv tokens; shell quoting and escaping fail closed. A package explicitly
+//      selects private standard-input prompt transport. Packages with a native
+//      agent grammar declare its argv, selectors, value options, bounded output,
+//      and timeout option as finite data. Core never infers those semantics from
+//      a package ID or executable name.
 //    - Source-fix constraint: NemoClaw cannot prove agent type from anywhere
 //      except the registry, because the OpenShell exec transport has no
 //      pre-execution probe that reveals the sandbox's configured agent. A
@@ -53,7 +53,7 @@
 //      cannot be parsed for a `Phase:` line at all, the wrapper fails closed
 //      with exit 2 rather than dispatching against an unknown phase.
 //
-// 3. Selector-required guard (native OpenClaw argv mirror).
+// 3. Package-declared selector guard.
 //
 //    - Invalid state: upstream `openclaw agent` reports the missing-selector
 //      error on stderr but then exits with status `0` (success), so CLI
@@ -61,20 +61,12 @@
 //      and never learn that no selector was provided. The host-side mirror
 //      converts that misuse into a clean exit `2` with the same diagnostic
 //      before any in-sandbox dispatch runs.
-//    - Source boundary: OpenClaw owns the argv contract; NemoClaw mirrors
-//      only the selector requirement (one of `--agent`, `--session-id`,
-//      `--session-key`, `--to`) to surface a clean exit 2 with a usage hint
-//      before sending the argv into the sandbox. A plain positional prompt can
-//      use OpenClaw's receipt-pinned headless command when the manifest defines
-//      one. Calls with OpenClaw selector flags keep the native passthrough. The
-//      scan stops at the
-//      first literal `--`, mirroring the help-token boundary, so a token
-//      that looks like a selector after the argv separator is treated as
-//      OpenClaw's payload and not as the host-side selector.
-//    - Source-fix constraint: NemoClaw forwards the rest of OpenClaw's argv
-//      verbatim, so the mirror is intentionally narrow — only the missing-
-//      selector case is intercepted; everything else still flows through to
-//      the in-sandbox binary.
+//    - Source boundary: the receipt-pinned package owns the finite argv
+//      declaration. NemoClaw enforces only the package's declared selector
+//      requirement and stops scanning at the first literal `--`. The rest of
+//      the argv remains byte-for-byte package input. OpenClaw's former native
+//      grammar remains in `legacy-openclaw.ts` only for sandboxes without a
+//      package receipt.
 //
 // 4. Ollama restart recovery (best-effort lifecycle bridge). Ollama owns model
 //    runner lifetime, while NemoClaw owns the registered route and dispatch
@@ -134,14 +126,15 @@ import { getKnownSandboxTargetGatewayName } from "../gateway-target";
 import {
   type AgentDispatchRunner,
   agentDispatchDeadlineSeconds,
+  agentDispatchDeadlineFromRequest,
   isSilentAgentDispatch,
   isTimedOutAgentDispatch,
-  OPENCLAW_AGENT_BOOLEAN_FLAGS,
-  OPENCLAW_AGENT_VALUE_FLAGS,
   runAgentDispatch,
   SILENT_AGENT_DISPATCH_EXIT_CODE,
   TIMED_OUT_AGENT_TURN_EXIT_CODE,
 } from "./passthrough-dispatch";
+import { buildPackageAgentCommandPlan } from "./command-plan";
+import { buildLegacyOpenClawCommandPlan, isLegacyOpenClawSandbox } from "./legacy-openclaw";
 import {
   hasAgentPassthroughHelpToken,
   printAgentPassthroughHelp,
@@ -171,6 +164,7 @@ export type AgentNonJsonPassthroughDeps = {
   getGatewayName?: (sandboxName: string) => string | null;
   runDispatch?: AgentDispatchRunner;
   stdinIsTty?: () => boolean;
+  timeoutSeconds?: number;
 };
 
 export async function runAgentNonJsonPassthrough(
@@ -185,7 +179,10 @@ export async function runAgentNonJsonPassthrough(
     buildOpenshellExecArgs(
       sandboxName,
       wrapOpenClawAgentCommandWithRuntimeEnv(command),
-      { tty: false, timeoutSeconds: agentDispatchDeadlineSeconds(command) },
+      {
+        tty: false,
+        timeoutSeconds: deps.timeoutSeconds ?? agentDispatchDeadlineSeconds(command),
+      },
       (deps.getGatewayName ?? getKnownSandboxTargetGatewayName)(sandboxName) ?? undefined,
     ),
     {
@@ -274,6 +271,10 @@ type AgentPassthroughInvocation = {
   command: string[];
   stdinInput?: string;
   environment?: Readonly<Record<string, string>>;
+  outputMode?: "direct" | "bounded-text" | "bounded-json";
+  requestedTimeoutSeconds?: number | null;
+  missingSelectors?: readonly string[];
+  legacyOpenClaw?: boolean;
 };
 type FabricArgumentResult =
   | { kind: "native" }
@@ -466,19 +467,46 @@ function getPassthroughCommand(
       printAgentPassthroughHelp();
       return null;
     }
-    return { command: ["openclaw", "agent", ...extraArgs] };
+    const legacyPlan = buildLegacyOpenClawCommandPlan(extraArgs);
+    if (legacyPlan.kind === "help") return null;
+    if (legacyPlan.kind === "missing-selector") {
+      return {
+        command: [...legacyPlan.argv],
+        missingSelectors: legacyPlan.selectors,
+        legacyOpenClaw: true,
+      };
+    }
+    return {
+      command: [...legacyPlan.argv],
+      outputMode: legacyPlan.outputMode,
+      requestedTimeoutSeconds: legacyPlan.requestedTimeoutSeconds,
+      legacyOpenClaw: true,
+    };
   }
 
   // Rendering the wrapper's OpenClaw help does not dispatch into a sandbox.
   // Keep that read-only path available for legacy registry rows that predate
   // package authority, while executable commands still resolve and validate
   // the sandbox's exact retained package below.
-  if (
-    (lookup.agent === null || lookup.agent === "openclaw") &&
-    hasAgentPassthroughHelpToken(extraArgs)
-  ) {
-    printAgentPassthroughHelp();
-    return null;
+  if (isLegacyOpenClawSandbox(lookup.entry)) {
+    const legacyPlan = buildLegacyOpenClawCommandPlan(extraArgs);
+    if (legacyPlan.kind === "help") {
+      printAgentPassthroughHelp();
+      return null;
+    }
+    if (legacyPlan.kind === "missing-selector") {
+      return {
+        command: [...legacyPlan.argv],
+        missingSelectors: legacyPlan.selectors,
+        legacyOpenClaw: true,
+      };
+    }
+    return {
+      command: [...legacyPlan.argv],
+      outputMode: legacyPlan.outputMode,
+      requestedTimeoutSeconds: legacyPlan.requestedTimeoutSeconds,
+      legacyOpenClaw: true,
+    };
   }
 
   let authority: ReturnType<typeof resolveLifecycleEligibleSandboxAgent>;
@@ -495,17 +523,24 @@ function getPassthroughCommand(
 
   const agentName = authority.effectiveAgentId;
   const agent: AgentDefinition = authority.definition;
-  if (agentName === "openclaw") {
-    if (hasAgentPassthroughHelpToken(extraArgs)) {
+  if (
+    lookup.entry.harnessPackage &&
+    agent.runtime?.agent_command &&
+    (!isPlainPromptInvocation(extraArgs) || !agent.runtime?.headless_command)
+  ) {
+    const plan = buildPackageAgentCommandPlan(agent.runtime.agent_command, extraArgs);
+    if (plan.kind === "help") {
       printAgentPassthroughHelp();
       return null;
     }
-    // Selector and option-shaped calls retain OpenClaw's native argv contract.
-    // A positional prompt can use the package-owned headless contract without
-    // changing existing automation that calls `openclaw agent` flags.
-    if (!isPlainPromptInvocation(extraArgs) || !agent.runtime?.headless_command) {
-      return { command: ["openclaw", "agent", ...extraArgs] };
+    if (plan.kind === "missing-selector") {
+      return { command: [...plan.argv], missingSelectors: plan.selectors };
     }
+    return {
+      command: [...plan.argv],
+      outputMode: plan.outputMode,
+      requestedTimeoutSeconds: plan.requestedTimeoutSeconds,
+    };
   }
 
   const manifestCommand = isTerminalAgent(agent)
@@ -529,10 +564,6 @@ function getPassthroughCommand(
   );
 }
 
-function isOpenClawPassthroughCommand(command: readonly string[]): boolean {
-  return command[0] === "openclaw" && command[1] === "agent";
-}
-
 function rejectRegistryReadError(
   sandboxName: string,
   message: string,
@@ -548,65 +579,20 @@ function rejectRegistryReadError(
   return proc.exit(2);
 }
 
-function requestsOpenClawJsonOutput(extraArgs: readonly string[]): boolean {
-  // Invalid state: the host wrapper must pick captured JSON transport only for
-  // the top-level OpenClaw output flag, not for a literal "--json" consumed as
-  // a value by another OpenClaw option. Source boundary: upstream OpenClaw owns
-  // the complete argv grammar; NemoClaw mirrors documented flags only to choose
-  // the host transport path. Unknown options fail conservative to normal
-  // passthrough, where OpenClaw parses argv itself. Any newly documented value
-  // flag, including a `--json-*` name, must be added to the value-flag set and
-  // its tests together. Regression tests cover each documented value flag,
-  // documented equals-form value flags, documented boolean flags, unknown flag
-  // fallback, and the `--` terminator. Removal
-  // condition: OpenClaw exposes a machine-readable argv schema or NemoClaw stops
-  // special-casing the JSON transport path.
-  let skipNextValue = false;
-  for (const arg of extraArgs) {
-    if (skipNextValue) {
-      skipNextValue = false;
-      continue;
-    }
-    if (arg === "--") return false;
-    if (arg === "--json") return true;
-    if (arg.startsWith("--json=")) {
-      return !["0", "false", "no", "off"].includes(arg.slice("--json=".length).toLowerCase());
-    }
-    if (OPENCLAW_AGENT_VALUE_FLAGS.has(arg)) {
-      skipNextValue = true;
-      continue;
-    }
-    const equalsIndex = arg.indexOf("=");
-    if (
-      equalsIndex > 0 &&
-      arg.startsWith("--") &&
-      OPENCLAW_AGENT_VALUE_FLAGS.has(arg.slice(0, equalsIndex))
-    ) {
-      continue;
-    }
-    if (OPENCLAW_AGENT_BOOLEAN_FLAGS.has(arg)) continue;
-    if (arg.startsWith("-")) return false;
-  }
-  return false;
-}
-
-const TARGET_SELECTOR_FLAGS = ["--agent", "--session-id", "--session-key", "--to"] as const;
-
-function hasTargetSelector(args: readonly string[]): boolean {
-  for (const arg of args) {
-    if (arg === "--") return false;
-    if (TARGET_SELECTOR_FLAGS.some((flag) => arg === flag || arg.startsWith(`${flag}=`))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function rejectNoTargetSelector(proc: NonNullable<AgentPassthroughDeps["process"]>): never {
+function rejectNoTargetSelector(
+  proc: NonNullable<AgentPassthroughDeps["process"]>,
+  selectors: readonly string[],
+  legacyOpenClaw: boolean,
+): never {
+  const selectorList = selectors.map((selector) => `${selector} <value>`).join(", ");
   proc.stderr.write(
-    "  No target session selected. Use --agent <id>, --session-key <key>, --session-id <id>, or --to <E.164>.\n",
+    legacyOpenClaw
+      ? "  No target session selected. Use --agent <id>, --session-key <key>, --session-id <id>, or --to <E.164>.\n"
+      : `  No target selected. Use one of the package-declared selectors: ${selectorList}.\n`,
   );
-  proc.stderr.write("  Run `openclaw agents list` inside the sandbox to see available agents.\n");
+  if (legacyOpenClaw) {
+    proc.stderr.write("  Run `openclaw agents list` inside the sandbox to see available agents.\n");
+  }
   return proc.exit(2);
 }
 
@@ -678,27 +664,40 @@ export async function runAgentPassthrough(
   if (phase !== "Ready" && phase !== "Running") {
     rejectNotReadyForAgent(sandboxName, phase, proc);
   }
-  if (isOpenClawPassthroughCommand(command) && !hasTargetSelector(extraArgs)) {
-    rejectNoTargetSelector(proc);
+  if (invocation.missingSelectors) {
+    rejectNoTargetSelector(proc, invocation.missingSelectors, invocation.legacyOpenClaw ?? false);
   }
-  if (isOpenClawPassthroughCommand(command)) {
-    if (lookup.kind === "agent" && lookup.provider === OLLAMA_LOCAL_PROVIDER) {
-      const recoverOllama = deps.runOllamaRestartRecovery ?? runOllamaRestartRecovery;
-      recoverOllama(lookup, proc);
-    }
+  if (
+    invocation.outputMode !== undefined &&
+    invocation.outputMode !== "direct" &&
+    lookup.kind === "agent" &&
+    lookup.provider === OLLAMA_LOCAL_PROVIDER
+  ) {
+    const recoverOllama = deps.runOllamaRestartRecovery ?? runOllamaRestartRecovery;
+    recoverOllama(lookup, proc);
   }
-  if (isOpenClawPassthroughCommand(command) && requestsOpenClawJsonOutput(extraArgs)) {
-    const execJson = deps.execJson ?? runAgentJsonPassthrough;
-    await execJson(sandboxName, command, {
+  const timeoutSeconds = agentDispatchDeadlineFromRequest(
+    invocation.requestedTimeoutSeconds ?? null,
+  );
+  if (invocation.outputMode === "bounded-json") {
+    const passthroughProcess = {
       exit: proc.exit.bind(proc),
       stdout: proc.stdout ?? process.stdout,
       stderr: proc.stderr,
-    } satisfies AgentJsonPassthroughProcess);
+    } satisfies AgentJsonPassthroughProcess;
+    if (deps.execJson) {
+      await deps.execJson(sandboxName, command, passthroughProcess);
+    } else {
+      await runAgentJsonPassthrough(sandboxName, command, passthroughProcess, { timeoutSeconds });
+    }
     return;
   }
-  if (isOpenClawPassthroughCommand(command)) {
-    const execNonJson = deps.execNonJson ?? runAgentNonJsonPassthrough;
-    await execNonJson(sandboxName, command, proc);
+  if (invocation.outputMode === "bounded-text") {
+    if (deps.execNonJson) {
+      await deps.execNonJson(sandboxName, command, proc);
+    } else {
+      await runAgentNonJsonPassthrough(sandboxName, command, proc, { timeoutSeconds });
+    }
     return;
   }
   const exec = deps.exec ?? execSandbox;

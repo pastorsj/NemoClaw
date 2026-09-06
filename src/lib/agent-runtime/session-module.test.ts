@@ -67,6 +67,7 @@ function installFuturePackage(
       displayName: "Future Sessions",
       packageVersion: "1.0.0",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: "packages/nemoclaw-future-sessions/manifest.yaml",
     })}\n`,
   );
@@ -75,6 +76,16 @@ function installFuturePackage(
     [
       "name: future-sessions",
       "display_name: Future Sessions",
+      "config:",
+      "  dir: /sandbox/.future-sessions",
+      "  config_file: config.json",
+      "  format: json",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: Future Sessions does not expose mutable inference configuration.",
+      "messaging:",
+      "  support: disabled",
       "sessions:",
       `  operations: ${JSON.stringify(operations)}`,
       "",
@@ -151,12 +162,15 @@ describe("installed harness session adapter", () => {
     );
   });
 
-  it("loads typed delete behavior for a synthetic unknown package", () => {
+  it("loads typed captured delete behavior for a synthetic unknown package", () => {
     const installed = installFuturePackage(
       ["list", "delete"],
       SESSION_MODULE.replace(
         'return { kind: "unsupported", reason: "future " + request.operation + " unavailable" };',
-        'return request.operation === "delete" ? { kind: "stream", command: ["future-sessions", "delete", request.key] } : { kind: "unsupported", reason: "reset unavailable" };',
+        'return request.operation === "delete" ? { kind: "capture", command: ["future-sessions", "delete", request.key] } : { kind: "unsupported", reason: "reset unavailable" };',
+      ).replace(
+        'interpretSessionMutationOutput() {\n    return { kind: "refused", reason: "mutation unavailable" };\n  },',
+        'interpretSessionMutationOutput(input) {\n    const payload = JSON.parse(input.output);\n    return { kind: "completed", operation: "delete", key: payload.key, removedTranscript: true, entry: null };\n  },',
       ),
     );
     const adapter = loadHarnessSessionAdapterHostModule(installed.identity, { storeRoot });
@@ -170,7 +184,28 @@ describe("installed harness session adapter", () => {
         jsonOutput: false,
         verboseOutput: false,
       }),
-    ).toEqual({ kind: "stream", command: ["future-sessions", "delete", "session-1"] });
+    ).toEqual({ kind: "capture", command: ["future-sessions", "delete", "session-1"] });
+
+    expect(
+      adapter.interpretSessionMutationOutput({
+        request: {
+          operation: "delete",
+          key: "session-1",
+          agent: null,
+          keepTranscript: false,
+          jsonOutput: false,
+          verboseOutput: false,
+        },
+        plan: { kind: "capture", command: ["future-sessions", "delete", "session-1"] },
+        output: '{"key":"future:session-1"}',
+      }),
+    ).toEqual({
+      kind: "completed",
+      operation: "delete",
+      key: "future:session-1",
+      removedTranscript: true,
+      entry: null,
+    });
   });
 
   it("rejects manifest and delete-plan disagreement before execution", () => {
@@ -187,28 +222,6 @@ describe("installed harness session adapter", () => {
         verboseOutput: false,
       }),
     ).toThrow(/does not match its declared delete capability/u);
-  });
-
-  it("rejects an admin RPC for the wrong declared mutation", () => {
-    const installed = installFuturePackage(
-      ["list", "delete"],
-      SESSION_MODULE.replace(
-        'return { kind: "unsupported", reason: "future " + request.operation + " unavailable" };',
-        'return { kind: "admin-rpc", method: "sessions.reset", params: { key: request.key, reason: "reset" } };',
-      ),
-    );
-    const adapter = loadHarnessSessionAdapterHostModule(installed.identity, { storeRoot });
-
-    expect(() =>
-      adapter.buildSessionMutationPlan({
-        operation: "delete",
-        key: "session-1",
-        agent: null,
-        keepTranscript: false,
-        jsonOutput: false,
-        verboseOutput: false,
-      }),
-    ).toThrow(/admin RPC for the wrong delete operation/u);
   });
 
   it("classifies a missing fixed adapter module", () => {

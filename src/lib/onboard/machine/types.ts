@@ -22,6 +22,9 @@ export const ONBOARD_MACHINE_STATES = ONBOARD_MACHINE_STATE_IDS;
 
 export type OnboardMachineState = OnboardMachineStateId;
 
+/** Historical default-agent setup state; this is a workflow token, not a package ID. */
+export const LEGACY_OPENCLAW_SETUP_STATE = "openclaw" as const;
+
 export const ONBOARD_TERMINAL_MACHINE_STATES = ONBOARD_MACHINE_TERMINAL_STATE_IDS;
 
 export type OnboardTerminalMachineState = OnboardTerminalMachineStateId;

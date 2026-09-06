@@ -7,6 +7,7 @@ import {
 } from "../../inference/selection";
 import type { WebSearchConfig } from "../../inference/web-search";
 import type { DcodeAutoApprovalMode } from "../dcode-auto-approval";
+import { hasProviderlessApfAgentIntent } from "../experimental/portable-product-qualification";
 import { assertProviderlessInterceptorEnvironment } from "../entry-options";
 import type {
   createProviderRecoveryReceiptLedger,
@@ -32,7 +33,7 @@ import {
 } from "./prerequisite-repair";
 import type { OnboardMachineRunnerResult, OnboardMachineRunnerRuntime } from "./runner";
 import { type OnboardSequencePhase, runOnboardSequenceWithRunner } from "./sequence-runner";
-import type { OnboardMachineState } from "./types";
+import { LEGACY_OPENCLAW_SETUP_STATE, type OnboardMachineState } from "./types";
 
 export { prepareCoreOnboardFlowContext, prepareFinalOnboardFlowContext } from "./flow-handoff";
 
@@ -123,7 +124,7 @@ function hasProviderBackedApfIntent(context: OnboardFlowContext): boolean {
   const requestedAgentName = (context.agent as { readonly name?: unknown } | null)?.name;
   const requestsNondefaultAgent =
     typeof requestedAgentName === "string" &&
-    requestedAgentName.trim().toLowerCase() !== "openclaw";
+    hasProviderlessApfAgentIntent(requestedAgentName.trim().toLowerCase(), null);
   const routeValues = [
     context.provider,
     context.model,
@@ -213,29 +214,27 @@ export function createProviderInferenceOnboardFlowPhase<
         );
       }
       await options.deps.checkpointSandboxIdentity(sandboxName, context.agent);
-      const reserved = await options.deps.withGatewayRouteMutationLock(options.gatewayName, () =>
-        {
-          const harnessPackageAuthority = options.deps.revalidateHarnessPackageAuthority(
-            owningSession,
-            `reserve providerless inference route for sandbox ${JSON.stringify(sandboxName)}`,
-          );
-          return options.deps.reserveSandboxInferenceRoute(
-            sandboxName,
-            {
-              provider: null,
-              model: null,
-              endpointUrl: null,
-              endpointSource: null,
-              credentialEnv: null,
-              preferredInferenceApi: null,
-              gatewayName: options.gatewayName,
-              reservationSessionId,
-              ...harnessPackageAuthority,
-            },
-            { requireAbsent: true },
-          );
-        },
-      );
+      const reserved = await options.deps.withGatewayRouteMutationLock(options.gatewayName, () => {
+        const harnessPackageAuthority = options.deps.revalidateHarnessPackageAuthority(
+          owningSession,
+          `reserve providerless inference route for sandbox ${JSON.stringify(sandboxName)}`,
+        );
+        return options.deps.reserveSandboxInferenceRoute(
+          sandboxName,
+          {
+            provider: null,
+            model: null,
+            endpointUrl: null,
+            endpointSource: null,
+            credentialEnv: null,
+            preferredInferenceApi: null,
+            gatewayName: options.gatewayName,
+            reservationSessionId,
+            ...harnessPackageAuthority,
+          },
+          { requireAbsent: true },
+        );
+      });
       if (!reserved) {
         throw new Error(
           `APF interceptor onboarding could not reserve sandbox '${sandboxName}' for verified providerless creation.`,
@@ -478,7 +477,10 @@ export async function runCoreOnboardFlowSlice<Context extends OnboardFlowContext
     runtime: options.runtime,
     recordRepairEvent: options.recordRepairEvent,
   });
-  if ((state === "openclaw" || state === "agent_setup") && sandboxRepair.finalState !== state) {
+  if (
+    (state === LEGACY_OPENCLAW_SETUP_STATE || state === "agent_setup") &&
+    sandboxRepair.finalState !== state
+  ) {
     throw new Error(
       `Core onboarding prerequisite repair selected '${sandboxRepair.finalState}' for durable entry '${state}'`,
     );

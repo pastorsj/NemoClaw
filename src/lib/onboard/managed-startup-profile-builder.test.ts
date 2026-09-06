@@ -283,7 +283,7 @@ describe("buildManagedStartupProfile", () => {
               outputId: "openclawPluginPackage",
               required: true,
               value: {
-                manager: "openclaw-plugin",
+                manager: "node-package",
                 spec: "npm:@openclaw/discord@2026.7.1",
                 pin: true,
               },
@@ -297,7 +297,7 @@ describe("buildManagedStartupProfile", () => {
       buildSteps: Array<{ value?: Record<string, unknown> }>;
     };
     expect(plan.buildSteps[0]?.value).toEqual({
-      manager: "openclaw-plugin",
+      manager: "node-package",
       spec: "npm:@openclaw/discord@2026.7.1",
     });
     expect(JSON.stringify(decodeManagedStartupProfile(built.encodedProfile))).not.toContain(
@@ -331,7 +331,7 @@ describe("buildManagedStartupProfile", () => {
                 outputId: "openclawPluginPackage",
                 required: true,
                 value: {
-                  manager: "openclaw-plugin",
+                  manager: "node-package",
                   spec: "npm:@openclaw/discord@2026.7.1",
                   pin: "true",
                 },

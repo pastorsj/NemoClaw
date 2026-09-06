@@ -1,0 +1,299 @@
+[
+  {
+    "channelId": "telegram",
+    "config": {
+      "renders": [
+        {
+          "id": "telegram-hermes-env",
+          "kind": "env-lines",
+          "target": "~/.hermes/.env",
+          "lines": ["TELEGRAM_ALLOWED_USERS={{allowedIds.telegram.csv}}"]
+        },
+        {
+          "id": "telegram-hermes-config",
+          "kind": "json-fragment",
+          "target": "~/.hermes/config.yaml",
+          "path": "telegram",
+          "value": { "require_mention": "{{telegramConfig.requireMention}}" }
+        },
+        {
+          "id": "telegram-hermes-platform",
+          "kind": "json-fragment",
+          "target": "~/.hermes/config.yaml",
+          "path": "platforms.telegram",
+          "value": { "enabled": true }
+        }
+      ]
+    },
+    "policy": [{ "presetName": "telegram", "policyKeys": ["telegram"], "requiredAtCreate": true }],
+    "lifecycle": {
+      "hookIds": [
+        "telegram-token-paste",
+        "telegram-allowlist-aliases",
+        "telegram-config-prompt",
+        "telegram-get-me-reachability",
+        "telegram-gateway-conflict-status"
+      ]
+    }
+  },
+  {
+    "channelId": "discord",
+    "config": {
+      "renders": [
+        {
+          "id": "discord-hermes-env",
+          "kind": "env-lines",
+          "target": "~/.hermes/.env",
+          "lines": [
+            "NEMOCLAW_DISCORD_GUILD_IDS={{discord.guildIds.csv}}",
+            "DISCORD_ALLOWED_USERS={{discord.allowedUsers.csv}}",
+            "DISCORD_ALLOW_ALL_USERS={{discord.allowAllUsers}}"
+          ]
+        },
+        {
+          "id": "discord-hermes-config",
+          "kind": "json-fragment",
+          "target": "~/.hermes/config.yaml",
+          "path": "discord",
+          "value": {
+            "require_mention": "{{discord.requireMention}}",
+            "free_response_channels": "",
+            "allowed_channels": "",
+            "auto_thread": true,
+            "reactions": true,
+            "channel_prompts": {}
+          }
+        },
+        {
+          "id": "discord-hermes-platform",
+          "kind": "json-fragment",
+          "target": "~/.hermes/config.yaml",
+          "path": "platforms.discord",
+          "value": { "enabled": true }
+        }
+      ]
+    },
+    "policy": [
+      {
+        "presetName": "discord",
+        "policyKeys": ["discord"],
+        "requiredAtCreate": true,
+        "validationWarningLines": [
+          "Hermes validation uses its virtual-environment Python runtime:",
+          "nemohermes <name> exec -- /opt/hermes/.venv/bin/python -c \"import urllib.error, urllib.request; u='https://discord.com/api/v10/gateway';\ntry: print(urllib.request.urlopen(u, timeout=20).status)\nexcept urllib.error.HTTPError as error: print(error.code)\""
+        ]
+      }
+    ],
+    "lifecycle": { "hookIds": ["discord-token-paste", "discord-config-prompt"] }
+  },
+  {
+    "channelId": "wechat",
+    "config": {
+      "renders": [
+        {
+          "id": "wechat-hermes-env",
+          "kind": "env-lines",
+          "target": "~/.hermes/.env",
+          "lines": [
+            "WEIXIN_ACCOUNT_ID={{wechatConfig.accountId}}",
+            "WEIXIN_BASE_URL={{wechatConfig.baseUrl}}",
+            "WEIXIN_ALLOWED_USERS={{allowedIds.wechat.csv}}"
+          ]
+        },
+        {
+          "id": "wechat-hermes-platform",
+          "kind": "json-fragment",
+          "target": "~/.hermes/config.yaml",
+          "path": "platforms.weixin",
+          "value": { "enabled": true }
+        }
+      ]
+    },
+    "policy": [
+      { "presetName": "wechat", "policyKeys": ["wechat_bridge"], "requiredAtCreate": true }
+    ],
+    "lifecycle": {
+      "runtime": {
+        "envAliases": [
+          {
+            "envKey": "WECHAT_BOT_TOKEN",
+            "targetEnvKey": "WEIXIN_TOKEN",
+            "match": "^openshell:resolve:env:v[0-9]+_WECHAT_BOT_TOKEN$",
+            "value": "openshell:resolve:env:WECHAT_BOT_TOKEN"
+          }
+        ]
+      },
+      "hookIds": ["wechat-host-qr", "wechat-config-prompt", "wechat-health-check"]
+    }
+  },
+  {
+    "channelId": "slack",
+    "config": {
+      "renders": [
+        {
+          "id": "slack-hermes-env",
+          "kind": "env-lines",
+          "target": "~/.hermes/.env",
+          "lines": [
+            "SLACK_ALLOWED_USERS={{allowedIds.slack.csv}}",
+            "SLACK_ALLOWED_CHANNELS={{slackConfig.allowedChannels.csv}}"
+          ]
+        },
+        {
+          "id": "slack-hermes-platform",
+          "kind": "json-fragment",
+          "target": "~/.hermes/config.yaml",
+          "path": "platforms.slack",
+          "value": { "enabled": true, "extra": { "rich_blocks": true } }
+        }
+      ]
+    },
+    "policy": [{ "presetName": "slack", "policyKeys": ["slack"], "requiredAtCreate": true }],
+    "lifecycle": {
+      "runtime": {},
+      "hookIds": [
+        "slack-socket-mode-gateway-conflict",
+        "slack-socket-mode-gateway-status",
+        "slack-token-paste",
+        "slack-config-prompt",
+        "slack-credential-validation"
+      ]
+    }
+  },
+  {
+    "channelId": "whatsapp",
+    "config": {
+      "renders": [
+        {
+          "id": "whatsapp-hermes-env",
+          "kind": "env-lines",
+          "target": "~/.hermes/.env",
+          "lines": [
+            "WHATSAPP_ENABLED=true",
+            "WHATSAPP_MODE={{whatsappConfig.mode}}",
+            "WHATSAPP_DM_POLICY={{whatsappConfig.dmPolicy}}",
+            "WHATSAPP_ALLOWED_USERS={{allowedIds.whatsapp.csv}}"
+          ]
+        },
+        {
+          "id": "whatsapp-hermes-platform",
+          "kind": "json-fragment",
+          "target": "~/.hermes/config.yaml",
+          "path": "platforms.whatsapp",
+          "value": { "enabled": true }
+        }
+      ],
+      "statePaths": [
+        "platforms/whatsapp",
+        "profiles/dashboard-home/platforms/whatsapp/session",
+        "dashboard-home/platforms/whatsapp/session"
+      ]
+    },
+    "policy": [{ "presetName": "whatsapp", "policyKeys": ["whatsapp"] }],
+    "lifecycle": { "hookIds": ["whatsapp-config-prompt", "whatsapp-status-health"] }
+  },
+  {
+    "channelId": "teams",
+    "config": {
+      "renders": [
+        {
+          "id": "teams-hermes-env",
+          "kind": "env-lines",
+          "target": "~/.hermes/.env",
+          "lines": [
+            "TEAMS_CLIENT_ID={{teamsConfig.appId}}",
+            "TEAMS_TENANT_ID={{teamsConfig.tenantId}}",
+            "TEAMS_ALLOWED_USERS={{allowedIds.teams.csv}}",
+            "TEAMS_PORT={{teamsConfig.webhookPort}}"
+          ]
+        },
+        {
+          "id": "teams-hermes-platform",
+          "kind": "json-fragment",
+          "target": "~/.hermes/config.yaml",
+          "path": "platforms.teams",
+          "value": { "enabled": true }
+        }
+      ]
+    },
+    "policy": [{ "presetName": "teams", "policyKeys": ["teams"], "requiredAtCreate": true }],
+    "lifecycle": {
+      "runtime": {
+        "envAliases": [
+          {
+            "envKey": "MSTEAMS_APP_PASSWORD",
+            "targetEnvKey": "TEAMS_CLIENT_SECRET",
+            "match": "^openshell:resolve:env:v[0-9]+_MSTEAMS_APP_PASSWORD$",
+            "value": "openshell:resolve:env:MSTEAMS_APP_PASSWORD"
+          }
+        ]
+      },
+      "packageInstalls": [
+        {
+          "id": "hermesTeamsAppsPackage",
+          "manager": "python-package",
+          "spec": "microsoft-teams-apps==2.0.13.4",
+          "required": true
+        }
+      ],
+      "hookIds": [
+        "teams-host-forward-port-conflict",
+        "teams-host-forward-port-status",
+        "teams-token-paste",
+        "teams-config-prompt"
+      ]
+    }
+  },
+  {
+    "channelId": "googlechat",
+    "config": {
+      "renders": [
+        {
+          "id": "googlechat-hermes-env",
+          "kind": "env-lines",
+          "target": "~/.hermes/.env",
+          "lines": [
+            "GOOGLE_CHAT_PROJECT_ID={{googlechatConfig.projectId}}",
+            "GOOGLE_CHAT_SUBSCRIPTION_NAME={{googlechatConfig.subscriptionName}}",
+            "GOOGLE_CHAT_ALLOWED_USERS={{allowedIds.googlechat.csv}}"
+          ]
+        },
+        {
+          "id": "googlechat-hermes-platform",
+          "kind": "json-fragment",
+          "target": "~/.hermes/config.yaml",
+          "path": "platforms.google_chat",
+          "value": { "enabled": true }
+        }
+      ]
+    },
+    "policy": [{ "presetName": "googlechat", "policyKeys": ["googlechat_hermes"] }],
+    "lifecycle": {
+      "packageInstalls": [
+        {
+          "id": "hermesGooglePubsubPackage",
+          "manager": "python-package",
+          "spec": "google-cloud-pubsub==2.39.0",
+          "required": true
+        },
+        {
+          "id": "hermesGoogleApiClientPackage",
+          "manager": "python-package",
+          "spec": "google-api-python-client==2.194.0",
+          "required": true
+        },
+        {
+          "id": "hermesGoogleAuthPackage",
+          "manager": "python-package",
+          "spec": "google-auth==2.55.1",
+          "required": true
+        }
+      ],
+      "hookIds": [
+        "googlechat-service-account",
+        "googlechat-config-prompt",
+        "googlechat-hermes-config-prompt"
+      ]
+    }
+  }
+]

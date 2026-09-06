@@ -47,7 +47,14 @@ type HermesToolGatewayBroker = {
 const require = createRequire(import.meta.url);
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../../..");
 const HERMES_PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
-const BROKER_WRAPPER = path.join(REPO_ROOT, "src", "lib", "hermes-tool-gateway-broker.ts");
+const BROKER_WRAPPER = path.join(
+  REPO_ROOT,
+  "src",
+  "lib",
+  "actions",
+  "sandbox",
+  "legacy-hermes-tool-gateway-broker.ts",
+);
 const HERMES_CONTROL_CONTRACT = path.join(HERMES_PACKAGE_ROOT, "host", "tool-contract.ts");
 const SOURCE_REQUIRE_HOOK = path.join(REPO_ROOT, "test", "helpers", "onboard-script-mocks.cjs");
 const NAME_VALIDATION_CASES: readonly { label: string; value: unknown }[] = [
@@ -112,7 +119,7 @@ describe("Hermes tool-gateway package paths", () => {
     },
   );
 
-  it("loads host files from the integrity-checked active Hermes package", () => {
+  it("keeps the qualified provider runtime separate from an installed harness receipt", () => {
     const home = fs.mkdtempSync(
       path.join(fs.realpathSync.native(os.tmpdir()), "nemoclaw-hermes-host-package-"),
     );
@@ -125,9 +132,9 @@ describe("Hermes tool-gateway package paths", () => {
 
     const installed = installHermesPackage(home);
     const installedBroker = loadBroker();
-    const sourceHostDir = path.join(path.dirname(installed.packageManifest.manifestPath), "host");
+    const sourceHostDir = path.join(HERMES_PACKAGE_ROOT, "host");
     const runtimePaths = installedBroker.HERMES_TOOL_GATEWAY_RUNTIME_PATHS;
-    expect(runtimePaths.packageRoot).toBe(installed.packageRoot);
+    expect(runtimePaths.packageRoot).toBe(HERMES_PACKAGE_ROOT);
     expect(runtimePaths.hostDir).toBe(path.join(runtimePaths.runtimeRoot, "host"));
     expect(runtimePaths.script).toBe(path.join(runtimePaths.hostDir, "tool-broker.ts"));
     expect(runtimePaths.brokerCredentials).toBe(
@@ -156,8 +163,12 @@ describe("Hermes tool-gateway package paths", () => {
 
     const installedHash = installedBroker.brokerRuntimeHash();
     expect(installedHash).toBe(bundledHash);
-    const sourceRuntimeCredentials = path.join(sourceHostDir, "refresh-credentials.ts");
-    fs.appendFileSync(sourceRuntimeCredentials, "\n// test-only installed package change\n");
+    const installedRuntimeCredentials = path.join(
+      path.dirname(installed.packageManifest.manifestPath),
+      "host",
+      "refresh-credentials.ts",
+    );
+    fs.appendFileSync(installedRuntimeCredentials, "\n// test-only installed package change\n");
     expect(installedBroker.brokerRuntimeHash()).toBe(installedHash);
 
     let probeInvocation:
@@ -174,7 +185,7 @@ describe("Hermes tool-gateway package paths", () => {
     expect(probeInvocation?.executable).toBe(process.execPath);
     expect(probeInvocation?.argv).toEqual(["--experimental-strip-types", runtimePaths.script]);
     expect(probeInvocation?.env.HERMES_TOOL_GATEWAY_MATRIX_PATH).toBe(runtimePaths.matrix);
-    expect(() => loadBroker()).toThrow("object identity does not match its receipt");
+    expect(loadBroker().brokerRuntimeHash()).toBe(installedHash);
   });
 
   it("resolves package profiles from the Hermes receipt and retains the core fallback", () => {

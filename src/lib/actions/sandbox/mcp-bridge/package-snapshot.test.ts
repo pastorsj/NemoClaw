@@ -56,7 +56,7 @@ const SANDBOX = Object.freeze({
 const PLAN = Object.freeze({
   kind: "conditional-repair" as const,
   applicability: {
-    command: ["future-runtime-kind"],
+    command: { kind: "argv" as const, argv: ["future-runtime-kind"] },
     timeoutSeconds: 10,
     repairWhenOutput: "managed",
     skipWhenOutput: "legacy",
@@ -64,7 +64,11 @@ const PLAN = Object.freeze({
   },
   capability: { kind: "not-required" as const },
   execution: {
-    command: "future-repair",
+    command: {
+      kind: "shell" as const,
+      script: "future-repair",
+      shellTrust: "package-authored-code" as const,
+    },
     timeoutSeconds: 30,
     success: { kind: "exit-zero" as const },
     failureMessage: "Future repair failed.",

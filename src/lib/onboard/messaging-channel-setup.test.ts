@@ -354,7 +354,7 @@ describe("setupSelectedMessagingChannels", () => {
       ["telegram"],
       new Set(["telegram"]),
       manifests("telegram"),
-      { agent: { name: "hermes" } },
+      { agent: { name: "hermes", defaultSandboxName: "hermes" } },
     );
 
     expect(plan?.agent).toBe("hermes");
@@ -429,7 +429,7 @@ describe("setupSelectedMessagingChannels", () => {
       ["whatsapp"],
       new Set(["whatsapp"]),
       manifests("whatsapp"),
-      { agent: { name: "hermes" } },
+      { agent: { name: "hermes", defaultSandboxName: "hermes" } },
     );
 
     // The reply mode is a config question. Pairing still happens in-sandbox by

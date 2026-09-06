@@ -806,7 +806,7 @@ export function registerOpenClawIntegrityPinTests(group: OpenClawIntegrityPinTes
         const teamsPackage = teamsManifest?.agentPackages?.find(
           (agentPackage) =>
             agentPackage.agent === "openclaw" &&
-            agentPackage.manager === "openclaw-plugin" &&
+            agentPackage.manager === "node-package" &&
             agentPackage.id === "openclawPluginPackage",
         );
 
@@ -825,7 +825,7 @@ export function registerOpenClawIntegrityPinTests(group: OpenClawIntegrityPinTes
           (manifest.agentPackages ?? [])
             .filter(
               (agentPackage) =>
-                agentPackage.agent === "openclaw" && agentPackage.manager === "openclaw-plugin",
+                agentPackage.agent === "openclaw" && agentPackage.manager === "node-package",
             )
             .map((agentPackage) => {
               const packageSpec = agentPackage.spec
@@ -863,7 +863,7 @@ export function registerOpenClawIntegrityPinTests(group: OpenClawIntegrityPinTes
           const nonExactManifest = {
             ...slackManifest!,
             agentPackages: slackManifest!.agentPackages?.map((agentPackage) =>
-              agentPackage.agent === "openclaw" && agentPackage.manager === "openclaw-plugin"
+              agentPackage.agent === "openclaw" && agentPackage.manager === "node-package"
                 ? {
                     ...agentPackage,
                     spec: `npm:@openclaw/slack@${version}`,

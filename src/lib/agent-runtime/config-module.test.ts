@@ -25,6 +25,27 @@ const SOURCE_IDENTITY = Object.freeze({
 
 const CONFIG_MODULE = `
 module.exports = {
+  describeInferenceConfig() {
+    return { kind: "mutable", providerApiOverrides: [] };
+  },
+  prepareInferenceConfig(request) {
+    const config = JSON.parse(JSON.stringify(request.config));
+    config.runtime = {
+      model: request.route.model,
+      baseUrl: request.route.baseUrl,
+      api: request.route.api,
+    };
+    return {
+      kind: "mutation",
+      config,
+      changed: true,
+      postCommit: {
+        configSync: "required",
+        gatewayRestart: { kind: "not-required" },
+        sandboxReconcile: { kind: "not-required" },
+      },
+    };
+  },
   prepareConfigUpdate(request) {
     return {
       kind: "transaction",
@@ -86,6 +107,18 @@ function writeFixtureFile(relativePath: string, contents: string): void {
 function installFuturePackage(
   configModule = CONFIG_MODULE,
   restoreModule = RESTORE_MODULE,
+  inferenceDeclaration = [
+    "inference:",
+    "  config_update:",
+    "    support: mutable",
+    "    provider_api_overrides: []",
+    "    post_commit:",
+    "      config_sync: required",
+    "      gateway_restart: not-required",
+    "      sandbox_reconcile:",
+    "        kind: not-required",
+  ],
+  managedImageDeclaration: readonly string[] = [],
 ): InstalledHarnessPackage {
   writeFixtureFile(
     "nemoclaw-package.json",
@@ -96,6 +129,7 @@ function installFuturePackage(
       displayName: "Future Harness",
       packageVersion: "1.0.0",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: "packages/nemoclaw-future-harness/manifest.yaml",
     })}\n`,
   );
@@ -108,6 +142,8 @@ function installFuturePackage(
       "  dir: /sandbox/.future",
       "  config_file: config.json",
       "  format: json",
+      ...managedImageDeclaration,
+      ...inferenceDeclaration,
       "",
     ].join("\n"),
   );
@@ -142,6 +178,33 @@ describe("installed harness configuration adapter", () => {
     };
 
     expect(
+      adapter.prepareInferenceConfig({
+        config: {},
+        target,
+        route: {
+          upstreamProvider: "nvidia-prod",
+          model: "nvidia/future-model",
+          providerKey: "inference",
+          primaryModelRef: null,
+          baseUrl: "https://inference.local/v1",
+          api: "openai-completions",
+          compatibility: null,
+        },
+        contextWindow: 131_072,
+        reasoning: { effort: null, explicit: false },
+      }),
+    ).toMatchObject({
+      kind: "mutation",
+      changed: true,
+      config: {
+        runtime: {
+          model: "nvidia/future-model",
+          baseUrl: "https://inference.local/v1",
+          api: "openai-completions",
+        },
+      },
+    });
+    expect(
       adapter.prepareConfigUpdate({
         config: { allowPrivate: true },
         serializedConfig: '{"allowPrivate":true}',
@@ -175,6 +238,214 @@ describe("installed harness configuration adapter", () => {
         freshImagePluginInstalls: null,
       }),
     ).toEqual({ kind: "merged", content: "currentbackup", write: { kind: "atomic" } });
+  });
+
+  it("rejects an inference plan outside the finite result schema", () => {
+    const installed = installFuturePackage(
+      CONFIG_MODULE.replace("changed: true", 'changed: "yes"'),
+    );
+    const adapter = loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot });
+
+    expect(() =>
+      adapter.prepareInferenceConfig({
+        config: {},
+        target: {
+          directory: "/sandbox/.future",
+          file: "config.json",
+          format: "json",
+          sensitiveFiles: [],
+        },
+        route: {
+          upstreamProvider: "nvidia-prod",
+          model: "nvidia/future-model",
+          providerKey: "inference",
+          primaryModelRef: "inference/nvidia/future-model",
+          baseUrl: "https://inference.local/v1",
+          api: "openai-completions",
+          compatibility: null,
+        },
+        contextWindow: null,
+        reasoning: { effort: null, explicit: false },
+      }),
+    ).toThrow(/returned an invalid inference configuration update plan/u);
+  });
+
+  it("rejects an adapter that disagrees with its inference manifest declaration", () => {
+    const installed = installFuturePackage(
+      CONFIG_MODULE.replace(
+        'return { kind: "mutable", providerApiOverrides: [] };',
+        'return { kind: "unsupported", reason: "Not available." };',
+      ),
+    );
+    const adapter = loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot });
+
+    expect(() =>
+      adapter.describeInferenceConfig({
+        target: {
+          directory: "/sandbox/.future",
+          file: "config.json",
+          format: "json",
+          sensitiveFiles: [],
+        },
+      }),
+    ).toThrow(/does not match its manifest declaration/u);
+  });
+
+  it("rejects a future adapter that requests an undeclared sandbox command", () => {
+    const installed = installFuturePackage(
+      CONFIG_MODULE.replace(
+        'sandboxReconcile: { kind: "not-required" },',
+        'sandboxReconcile: { kind: "command", trigger: "when-config-changes", command: ["/usr/local/lib/future/reconcile"], timeoutSeconds: 30 },',
+      ),
+    );
+    const adapter = loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot });
+
+    expect(() =>
+      adapter.prepareInferenceConfig({
+        config: {},
+        target: {
+          directory: "/sandbox/.future",
+          file: "config.json",
+          format: "json",
+          sensitiveFiles: [],
+        },
+        route: {
+          upstreamProvider: "nvidia-prod",
+          model: "nvidia/future-model",
+          providerKey: "inference",
+          primaryModelRef: null,
+          baseUrl: "https://inference.local/v1",
+          api: "openai-completions",
+          compatibility: null,
+        },
+        contextWindow: null,
+        reasoning: { effort: null, explicit: false },
+      }),
+    ).toThrow(/does not match its manifest declaration/u);
+  });
+
+  it("rejects command reconciliation without a managed-image runtime identity at load time", () => {
+    const configModule = CONFIG_MODULE.replace(
+      'sandboxReconcile: { kind: "not-required" },',
+      'sandboxReconcile: { kind: "command", trigger: "when-config-changes", command: ["/usr/local/lib/future/reconcile"], timeoutSeconds: 30 },',
+    );
+    const installed = installFuturePackage(configModule, RESTORE_MODULE, [
+      "inference:",
+      "  config_update:",
+      "    support: mutable",
+      "    provider_api_overrides: []",
+      "    post_commit:",
+      "      config_sync: required",
+      "      gateway_restart: not-required",
+      "      sandbox_reconcile:",
+      "        kind: command",
+      "        trigger: when-config-changes",
+      "        command:",
+      "          - /usr/local/lib/future/reconcile",
+      "        timeout_seconds: 30",
+    ]);
+
+    let caught: unknown;
+    try {
+      loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(HarnessConfigModuleError);
+    expect((caught as Error).message).toMatch(/integrity validation/u);
+    const validationError = ((caught as Error).cause as Error | undefined)?.cause;
+    expect(validationError).toBeInstanceOf(HarnessConfigModuleError);
+    expect((validationError as Error).message).toMatch(
+      /without a valid managed-image runtime identity/u,
+    );
+  });
+
+  it("loads command reconciliation against the receipt-pinned managed-image identity", () => {
+    const configModule = CONFIG_MODULE.replace(
+      'sandboxReconcile: { kind: "not-required" },',
+      'sandboxReconcile: { kind: "command", trigger: "when-config-changes", command: ["/usr/local/lib/future/reconcile"], timeoutSeconds: 30 },',
+    );
+    const installed = installFuturePackage(
+      configModule,
+      RESTORE_MODULE,
+      [
+        "inference:",
+        "  config_update:",
+        "    support: mutable",
+        "    provider_api_overrides: []",
+        "    post_commit:",
+        "      config_sync: required",
+        "      gateway_restart: not-required",
+        "      sandbox_reconcile:",
+        "        kind: command",
+        "        trigger: when-config-changes",
+        "        command:",
+        "          - /usr/local/lib/future/reconcile",
+        "        timeout_seconds: 30",
+      ],
+      [
+        "managed_image:",
+        "  repository: nvcr.io/nvidia/nemoclaw-future-harness",
+        "  architectures:",
+        "    - linux/amd64",
+        "  runtime_identity:",
+        "    uid: 4321",
+        "    gid: 4322",
+        "    workdir: /sandbox",
+      ],
+    );
+
+    expect(() =>
+      loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot }),
+    ).not.toThrow();
+  });
+
+  it("rejects a package that omits the inference configuration declaration", () => {
+    const installed = installFuturePackage(CONFIG_MODULE, RESTORE_MODULE, []);
+
+    expect(() => loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot })).toThrow(
+      /manifest does not declare configuration adapter/u,
+    );
+  });
+
+  it("rejects a mutable declaration without bounded post-commit authority", () => {
+    const installed = installFuturePackage(CONFIG_MODULE, RESTORE_MODULE, [
+      "inference:",
+      "  config_update:",
+      "    support: mutable",
+      "    provider_api_overrides: []",
+    ]);
+
+    expect(() => loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot })).toThrow(
+      /manifest does not declare configuration adapter/u,
+    );
+  });
+
+  it("rejects inference adapter bytes that no longer match their package receipt", () => {
+    const installed = installFuturePackage();
+    fs.appendFileSync(
+      path.join(installed.packageRoot, "packages/nemoclaw-future-harness/host/config-adapter.cts"),
+      "\n",
+    );
+
+    expect(() => loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot })).toThrow(
+      /integrity validation/u,
+    );
+  });
+
+  it("rejects an uninstalled package identity", () => {
+    expect(() =>
+      loadHarnessConfigAdapterHostModule(
+        {
+          kind: "agent-runtime",
+          id: "unknown-harness",
+          packageVersion: "1.0.0",
+          contentDigest: "f".repeat(64),
+        },
+        { storeRoot },
+      ),
+    ).toThrow(HarnessConfigModuleError);
   });
 
   it("rejects an invalid configuration plan before core can execute it", () => {

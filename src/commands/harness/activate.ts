@@ -37,7 +37,7 @@ export default class HarnessActivateCommand extends NemoClawCommand {
     "Move one harness's active pointer to an existing verified immutable package receipt.";
   static usage = ["harness activate <id> --digest <sha256>"];
   static examples = [
-    "<%= config.bin %> harness activate openclaw --digest sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "<%= config.bin %> harness activate <id> --digest sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   ];
   static args = {
     id: Args.string({

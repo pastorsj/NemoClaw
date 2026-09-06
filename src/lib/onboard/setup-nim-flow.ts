@@ -33,7 +33,7 @@ import type { VllmProfile } from "../inference/vllm";
 import { promptManualModelId } from "../inference/model-prompts";
 import { isBackToSelection } from "../navigation";
 import type { HermesAuthMethod } from "./hermes-auth";
-import { isPortableExperimentalProfile } from "./experimental/portable-profile";
+import { isHermesPortableProduct } from "./experimental/portable-product-qualification";
 import { OnboardInferenceCapabilityCache } from "./inference-capability-cache";
 import {
   createLocalModelProfileIntegration,
@@ -261,7 +261,14 @@ function maybePromptForSupportedInferenceInputCapability(
   agent: AgentDefinition | null,
   model: string | null,
 ): Promise<void> {
-  if ((agent?.name ?? "openclaw") !== "openclaw") return Promise.resolve();
+  if (
+    agent &&
+    !agent.managedImage?.startup_profile_environment?.some(
+      (input) => input.name === "NEMOCLAW_INFERENCE_INPUTS",
+    )
+  ) {
+    return Promise.resolve();
+  }
   return deps.maybePromptForInferenceInputCapability(model);
 }
 
@@ -700,8 +707,8 @@ async function resolveFreshHermesPortableOllamaSelection(input: {
   inferenceCapabilityCache: OnboardInferenceCapabilityCache;
 }): Promise<ProviderSelectionResult | null> {
   if (
-    input.agent?.name !== "hermes" ||
-    !isPortableExperimentalProfile(process.env) ||
+    !input.agent ||
+    !isHermesPortableProduct(input.agent.name) ||
     input.requestedProvider !== "ollama" ||
     input.recoverProvider ||
     input.recoveredRegistryRoute !== null

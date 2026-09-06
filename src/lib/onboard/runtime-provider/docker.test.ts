@@ -98,7 +98,10 @@ describe("Docker runtime provider host doctor", () => {
 
 describe("Docker provider portable lifecycle dispatch", () => {
   it("routes active Hermes start before every Docker dependency (#9203)", () => {
-    const recoverPortableSandbox = vi.fn(() => ({ kind: "already-running" as const }));
+    const recoverPortableSandbox = vi.fn(() => ({
+      kind: "already-running" as const,
+      portableAgent: "hermes" as const,
+    }));
     const provider = createDockerRuntimeProviderBundle({
       hasPortableLifecycleReceipt: () => true,
       recoverPortableSandbox,
@@ -136,5 +139,27 @@ describe("Docker provider portable lifecycle dispatch", () => {
       hermesPortableVerified: true,
     });
     expect(stopPortableSandbox).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a future ordinary harness on the provider-neutral Docker lifecycle", () => {
+    const recoverSandbox = vi.fn(() => ({
+      recovered: true,
+      via: "started-running-original" as const,
+    }));
+    const provider = createDockerRuntimeProviderBundle({
+      recoverPortableSandbox: vi.fn(() => ({ kind: "not-installed" as const })),
+      findLabeledSandboxContainers: vi.fn(() => []),
+      recoverSandbox,
+      withLifecycleLockSync: (_sandboxName, operation) => operation(),
+    });
+    const lifecycle = supportedLifecycle(provider);
+
+    expect(
+      lifecycle.start({
+        ...lifecycleInput(),
+        sandbox: { ...lifecycleInput().sandbox, agent: "future-harness" },
+      }),
+    ).toEqual({ exitCode: 0 });
+    expect(recoverSandbox).toHaveBeenCalledWith("alpha", { readiness: "runtime-running" });
   });
 });

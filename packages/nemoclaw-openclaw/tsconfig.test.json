@@ -15,5 +15,5 @@
     "types": ["node"]
   },
   "include": ["**/*.ts", "**/*.mts"],
-  "exclude": ["node_modules", "plugin", "plugin/**"]
+  "exclude": ["node_modules", "plugin", "plugin/**", "messaging/messaging-build.mts"]
 }

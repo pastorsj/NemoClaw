@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
+import type {
+  HarnessManagedImageDeclaration,
+  HarnessManagedImagePublicationDeclaration,
+} from "@nvidia/nemoclaw-harness-contract";
 import { parseHarnessPackageIdentity } from "../../agent-runtime/package/identity-validation";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 
@@ -88,8 +91,6 @@ export function qualifiedManagedImageDeclaration(
     runtime_identity: MANAGED_IMAGE_RUNTIME_IDENTITIES[agent],
     workspace: MANAGED_IMAGE_WORKSPACES[agent],
     ...(stateRoot ? { state_root: stateRoot } : {}),
-    startup_profile_contract_version: MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
-    capability_contract_version: MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
   });
 }
 
@@ -106,6 +107,18 @@ export interface ManagedImageSourceIdentity {
 }
 
 /**
+ * Source identity carried by an operator-selected package publication. The
+ * installed package receipt is the trust boundary; this identity records
+ * provenance but does not claim that NemoClaw authenticated the publisher.
+ */
+export interface PackageManagedImageSourceIdentity {
+  readonly repository: string;
+  readonly revision: string;
+  readonly release: string;
+  readonly cohort: string;
+}
+
+/**
  * Immutable identity consumed by stock buildless onboarding for shipped
  * agents and by protected qualification for candidates.
  *
@@ -113,14 +126,17 @@ export interface ManagedImageSourceIdentity {
  * Other publication evidence (mutable aliases and base-image provenance) stays
  * outside this runtime identity.
  */
-interface ManagedImageContractFields<TAgent extends string> {
+interface ManagedImageContractFields<
+  TAgent extends string,
+  TSource extends PackageManagedImageSourceIdentity,
+> {
   readonly contractVersion: typeof MANAGED_IMAGE_CONTRACT_VERSION;
   readonly agent: TAgent;
   readonly platform: ManagedImagePlatform;
   readonly image: string;
   readonly digest: ManagedImageDigest;
   readonly reference: `${string}@${ManagedImageDigest}`;
-  readonly source: ManagedImageSourceIdentity;
+  readonly source: TSource;
   readonly startupProfileContractVersion: typeof MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION;
   readonly capabilityContractVersion: typeof MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION;
 }
@@ -132,12 +148,15 @@ interface ManagedImageContractFields<TAgent extends string> {
  */
 export interface PackageManagedImageContract<
   TAgent extends string = string,
-> extends ManagedImageContractFields<TAgent> {
+> extends ManagedImageContractFields<TAgent, PackageManagedImageSourceIdentity> {
   readonly harnessPackage: HarnessPackageIdentity;
 }
 
 /** Legacy product-qualified image evidence for NemoClaw's closed stock set. */
-export type ManagedImageContractV1 = ManagedImageContractFields<ManagedImageAgent>;
+export type ManagedImageContractV1 = ManagedImageContractFields<
+  ManagedImageAgent,
+  ManagedImageSourceIdentity
+>;
 
 export type ManagedImageContractCatalog = Readonly<Record<string, unknown>>;
 
@@ -145,6 +164,14 @@ const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 const REVISION_PATTERN = /^[0-9a-f]{40}$/u;
 const RELEASE_PATTERN = /^v[0-9]+(?:\.[0-9]+){1,3}(?:[-.][0-9A-Za-z][0-9A-Za-z.-]*)?$/u;
 const COHORT_PATTERN = /^ghrun-[1-9][0-9]{0,19}-[1-9][0-9]{0,9}$/u;
+const PACKAGE_SOURCE_REPOSITORY_PATTERN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,99})\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,99})$/u;
+const PACKAGE_SOURCE_COHORT_PATTERN = /^[a-z0-9](?:[a-z0-9.-]{0,127})$/u;
+const MAX_PACKAGE_SOURCE_REPOSITORY_BYTES = 201;
+const MAX_PACKAGE_SOURCE_RELEASE_BYTES = 128;
+const OCI_REPOSITORY_PATTERN =
+  /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9][0-9]{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+$/u;
+const MAX_OCI_REPOSITORY_BYTES = 512;
 
 export class ManagedImageContractError extends Error {
   constructor(message: string) {
@@ -187,6 +214,22 @@ function requireLiteral<T extends string | number>(value: unknown, expected: T, 
 
 function requirePattern(value: unknown, pattern: RegExp, field: string): string {
   if (typeof value !== "string" || !pattern.test(value)) {
+    throw new ManagedImageContractError(`${field} has an unsupported format`);
+  }
+  return value;
+}
+
+function requireBoundedPattern(
+  value: unknown,
+  pattern: RegExp,
+  maxBytes: number,
+  field: string,
+): string {
+  if (
+    typeof value !== "string" ||
+    Buffer.byteLength(value, "utf8") > maxBytes ||
+    !pattern.test(value)
+  ) {
     throw new ManagedImageContractError(`${field} has an unsupported format`);
   }
   return value;
@@ -237,7 +280,7 @@ function parseDeclaredManagedImageContract<TAgent extends string>(
   declaration: HarnessManagedImageDeclaration,
   expectedKeys: readonly string[],
   expectedPlatform?: ManagedImagePlatform,
-): ManagedImageContractFields<TAgent> {
+): ManagedImageContractFields<TAgent, ManagedImageSourceIdentity> {
   requireExactKeys(contract, expectedKeys, "contract");
 
   requireLiteral(
@@ -285,12 +328,12 @@ function parseDeclaredManagedImageContract<TAgent extends string>(
   const sourceCohort = requirePattern(source.cohort, COHORT_PATTERN, "contract.source.cohort");
   const startupProfileContractVersion = requireLiteral(
     contract.startupProfileContractVersion,
-    declaration.startup_profile_contract_version,
+    MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
     "contract.startupProfileContractVersion",
   );
   const capabilityContractVersion = requireLiteral(
     contract.capabilityContractVersion,
-    declaration.capability_contract_version,
+    MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
     "contract.capabilityContractVersion",
   );
 
@@ -312,6 +355,177 @@ function parseDeclaredManagedImageContract<TAgent extends string>(
   };
 }
 
+export function hasPackageManagedImagePublication(
+  declaration: HarnessManagedImageDeclaration,
+): declaration is HarnessManagedImageDeclaration & {
+  readonly publication: HarnessManagedImagePublicationDeclaration;
+} {
+  return declaration.publication !== undefined;
+}
+
+/**
+ * Bind package-declared immutable image publication data to the exact selected
+ * package receipt. This path intentionally does not consult NemoClaw's stock
+ * image catalogue and does not grant publisher authenticity.
+ */
+export function bindPackageDeclaredManagedImageContract<TAgent extends string>(
+  expectedHarnessPackage: HarnessPackageIdentity & { readonly id: TAgent },
+  declaration: HarnessManagedImageDeclaration,
+  expectedPlatform: ManagedImagePlatform,
+): PackageManagedImageContract<TAgent> {
+  const harnessPackage = requireHarnessPackageIdentity(
+    expectedHarnessPackage,
+    "expected harness package",
+  );
+  const publication: HarnessManagedImagePublicationDeclaration | undefined =
+    declaration.publication;
+  if (!publication) {
+    throw new ManagedImageContractError(
+      "package managed image declaration has no immutable publication",
+    );
+  }
+  if (!isRecord(publication)) {
+    throw new ManagedImageContractError("managed_image.publication must be an object");
+  }
+  requireBoundedPattern(
+    declaration.repository,
+    OCI_REPOSITORY_PATTERN,
+    MAX_OCI_REPOSITORY_BYTES,
+    "managed_image.repository",
+  );
+  if (
+    !Array.isArray(declaration.architectures) ||
+    declaration.architectures.length === 0 ||
+    declaration.architectures.length > MANAGED_IMAGE_PLATFORMS.length ||
+    new Set(declaration.architectures).size !== declaration.architectures.length ||
+    declaration.architectures.some((platform) => !isManagedImagePlatform(platform))
+  ) {
+    throw new ManagedImageContractError(
+      "managed_image.architectures must contain unique supported platforms",
+    );
+  }
+  requireExactKeys(publication, ["digests", "source"], "managed_image.publication");
+  const source = requireRecord(publication.source, "managed_image.publication.source");
+  requireExactKeys(
+    source,
+    ["cohort", "release", "repository", "revision"],
+    "managed_image.publication.source",
+  );
+  const digests = requireRecord(publication.digests, "managed_image.publication.digests");
+  const declaredPlatforms = [...declaration.architectures].sort();
+  requireExactKeys(digests, declaredPlatforms, "managed_image.publication.digests");
+  if (!declaration.architectures.includes(expectedPlatform)) {
+    throw new ManagedImageContractError(
+      `managed_image publication does not support ${JSON.stringify(expectedPlatform)}`,
+    );
+  }
+
+  const digest = requirePattern(
+    digests[expectedPlatform],
+    DIGEST_PATTERN,
+    `managed_image.publication.digests.${expectedPlatform}`,
+  ) as ManagedImageDigest;
+  const sourceRepository = requireBoundedPattern(
+    source.repository,
+    PACKAGE_SOURCE_REPOSITORY_PATTERN,
+    MAX_PACKAGE_SOURCE_REPOSITORY_BYTES,
+    "managed_image.publication.source.repository",
+  );
+  const sourceRevision = requirePattern(
+    source.revision,
+    REVISION_PATTERN,
+    "managed_image.publication.source.revision",
+  );
+  const sourceRelease = requireBoundedPattern(
+    source.release,
+    RELEASE_PATTERN,
+    MAX_PACKAGE_SOURCE_RELEASE_BYTES,
+    "managed_image.publication.source.release",
+  );
+  const sourceCohort = requirePattern(
+    source.cohort,
+    PACKAGE_SOURCE_COHORT_PATTERN,
+    "managed_image.publication.source.cohort",
+  );
+
+  return {
+    contractVersion: MANAGED_IMAGE_CONTRACT_VERSION,
+    agent: harnessPackage.id as TAgent,
+    platform: expectedPlatform,
+    image: declaration.repository,
+    digest,
+    reference: `${declaration.repository}@${digest}`,
+    source: {
+      repository: sourceRepository,
+      revision: sourceRevision,
+      release: sourceRelease,
+      cohort: sourceCohort,
+    },
+    startupProfileContractVersion: MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
+    capabilityContractVersion: MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
+    harnessPackage,
+  };
+}
+
+function parsePackageDeclaredManagedImageContract<TAgent extends string>(
+  value: Record<string, unknown>,
+  expectedHarnessPackage: HarnessPackageIdentity & { readonly id: TAgent },
+  declaration: HarnessManagedImageDeclaration,
+  expectedPlatform?: ManagedImagePlatform,
+): PackageManagedImageContract<TAgent> {
+  requireExactKeys(value, PACKAGE_MANAGED_IMAGE_CONTRACT_KEYS, "contract");
+  const harnessPackage = requireHarnessPackageIdentity(
+    value.harnessPackage,
+    "contract.harnessPackage",
+  );
+  const expectedPackage = requireHarnessPackageIdentity(
+    expectedHarnessPackage,
+    "expected harness package",
+  );
+  if (!harnessPackageIdentitiesEqual(harnessPackage, expectedPackage)) {
+    throw new ManagedImageContractError(
+      "contract.harnessPackage must match the exact expected harness package receipt",
+    );
+  }
+  if (!isManagedImagePlatform(value.platform)) {
+    throw new ManagedImageContractError(
+      `contract.platform must be one of: ${MANAGED_IMAGE_PLATFORMS.join(", ")}`,
+    );
+  }
+  if (expectedPlatform !== undefined && value.platform !== expectedPlatform) {
+    throw new ManagedImageContractError(
+      `contract.platform must be ${JSON.stringify(expectedPlatform)}`,
+    );
+  }
+  const expected = bindPackageDeclaredManagedImageContract(
+    expectedHarnessPackage,
+    declaration,
+    value.platform,
+  );
+  requireLiteral(value.contractVersion, expected.contractVersion, "contract.contractVersion");
+  requireLiteral(value.agent, expected.agent, "contract.agent");
+  requireLiteral(value.image, expected.image, "contract.image");
+  requireLiteral(value.digest, expected.digest, "contract.digest");
+  requireLiteral(value.reference, expected.reference, "contract.reference");
+  requireLiteral(
+    value.startupProfileContractVersion,
+    expected.startupProfileContractVersion,
+    "contract.startupProfileContractVersion",
+  );
+  requireLiteral(
+    value.capabilityContractVersion,
+    expected.capabilityContractVersion,
+    "contract.capabilityContractVersion",
+  );
+  const source = requireRecord(value.source, "contract.source");
+  requireExactKeys(source, ["cohort", "release", "repository", "revision"], "contract.source");
+  requireLiteral(source.repository, expected.source.repository, "contract.source.repository");
+  requireLiteral(source.revision, expected.source.revision, "contract.source.revision");
+  requireLiteral(source.release, expected.source.release, "contract.source.release");
+  requireLiteral(source.cohort, expected.source.cohort, "contract.source.cohort");
+  return expected;
+}
+
 /**
  * Validate one qualified immutable image against the selected package's
  * receipt-pinned declaration. The declaration constrains composition but is
@@ -325,6 +539,14 @@ export function parsePackageManagedImageContract<TAgent extends string>(
   expectedPlatform?: ManagedImagePlatform,
 ): PackageManagedImageContract<TAgent> {
   const contract = requireRecord(value, "contract");
+  if (hasPackageManagedImagePublication(declaration)) {
+    return parsePackageDeclaredManagedImageContract(
+      contract,
+      expectedHarnessPackage,
+      declaration,
+      expectedPlatform,
+    );
+  }
   const expectedPackage = requireHarnessPackageIdentity(
     expectedHarnessPackage,
     "expected harness package",

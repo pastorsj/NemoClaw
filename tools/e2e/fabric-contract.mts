@@ -4,8 +4,15 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { parseHarnessPackageManifest } from "../../src/lib/agent-runtime/package/manifest.ts";
+import * as identityValidation from "../../src/lib/agent-runtime/package/identity-validation.ts";
+import * as packageManifest from "../../src/lib/agent-runtime/package/manifest.ts";
+import * as packageTree from "../../src/lib/agent-runtime/package/tree.ts";
+import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/types.ts";
 import { readPrivateRegularFile } from "./private-file.mts";
+
+const { parseHarnessPackageIdentity } = identityValidation;
+const { parseHarnessPackageManifest } = packageManifest;
+const { validateHarnessPackageTree } = packageTree;
 
 const CONTRACT_VALUE_MAX_BYTES = 512;
 const PROCESS_MARKER_LIMIT = 16;
@@ -13,7 +20,6 @@ const PROCESS_MARKER_MAX_BYTES = 256;
 const HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const ADAPTER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const PYTHON_MODULE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/u;
-const SHA256_DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 const UNSAFE_TEXT_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const FABRIC_DESCRIPTOR_MAX_BYTES = 256 * 1024;
 const PACKAGE_DIRECTORY_ENTRY_LIMIT = 256;
@@ -62,7 +68,7 @@ export interface FabricPackageE2eTarget {
 }
 
 export interface InstalledFabricPackageReference {
-  readonly contentDigest: string;
+  readonly identity: HarnessPackageIdentity;
   readonly packageRoot: string;
 }
 
@@ -313,17 +319,28 @@ export function requireInstalledFabricE2eBinding(
 ): InstalledFabricE2eBinding {
   try {
     const contract = validateFabricHarnessE2eContract(contractValue);
+    const identity = parseHarnessPackageIdentity(reference.identity);
     if (
-      !SHA256_DIGEST_PATTERN.test(reference.contentDigest) ||
       !path.isAbsolute(reference.packageRoot) ||
       path.resolve(reference.packageRoot) !== reference.packageRoot ||
-      path.basename(reference.packageRoot) !== reference.contentDigest
+      path.basename(reference.packageRoot) !== identity.contentDigest
     ) {
       throw new Error("Installed Fabric package receipt is invalid");
     }
 
+    const packageTree = validateHarnessPackageTree(reference.packageRoot, {
+      sourceTrust: "mutable",
+    });
+    if (packageTree.contentDigest !== identity.contentDigest) {
+      throw new Error("Installed Fabric package tree does not match its receipt");
+    }
     const installed = parseHarnessPackageManifest(reference.packageRoot);
-    if (installed.envelope.id !== contract.packageId) {
+    if (
+      identity.id !== contract.packageId ||
+      installed.envelope.kind !== identity.kind ||
+      installed.envelope.id !== identity.id ||
+      installed.envelope.packageVersion !== identity.packageVersion
+    ) {
       throw new Error("Installed Fabric package identity does not match its E2E contract");
     }
     if (installed.manifest.name !== contract.packageId) {
@@ -346,6 +363,12 @@ export function requireInstalledFabricE2eBinding(
       }
     } else {
       requireUpstreamFabricDescriptor(contract);
+    }
+    if (
+      validateHarnessPackageTree(reference.packageRoot, { sourceTrust: "mutable" })
+        .contentDigest !== identity.contentDigest
+    ) {
+      throw new Error("Installed Fabric package tree changed during E2E contract validation");
     }
     return Object.freeze({
       adapterId: contract.adapterId,

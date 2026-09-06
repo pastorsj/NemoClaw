@@ -18,6 +18,7 @@
 import type { TrustedPrivateEndpointCapability } from "../../inference/endpoint-ssrf-preflight";
 import type { HermesAuthMethod } from "../hermes-auth";
 import type { OnboardInferenceCapabilityCache } from "../inference-capability-cache";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 
 export type SetupInferenceResult = { ok: true; retry?: undefined } | { retry: "selection" };
 
@@ -188,12 +189,11 @@ export type HermesDeps = CommonDeps & {
         runOpenshell: any;
         baseUrl?: string | undefined;
         toolGatewayPresets: string[];
+        harnessPackage?: HarnessPackageIdentity | null;
       },
     ): Promise<unknown>;
   };
-  getHermesToolGatewayBroker: () => {
-    getHermesToolGatewayProviderName(sandboxName: string): string;
-  };
+  describeHarnessProviderBroker: (identity: HarnessPackageIdentity, sandboxName: string) => string;
   providerExistsInGateway: (name: string) => boolean;
   normalizeHermesAuthMethod: (m: HermesAuthMethod | string | null) => HermesAuthMethod | null;
   resolveHermesNousApiKey: () => any;

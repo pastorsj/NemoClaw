@@ -7,7 +7,7 @@ import {
   type GatewayRestartFailureLayer,
   parseManagedGatewayControlCompletion,
   redactGatewayRestartFailureDetail,
-} from "../gateway-restart";
+} from "../runtime/gateway-result";
 import type { OpenShellCommandResult } from "../mcp-bridge-output";
 
 const TERMINAL_RECOVERY_LAYERS = new Set<GatewayRestartFailureLayer>([

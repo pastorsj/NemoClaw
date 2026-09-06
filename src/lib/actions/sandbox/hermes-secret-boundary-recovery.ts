@@ -3,7 +3,6 @@
 
 import * as agentRuntime from "../../agent/runtime";
 import { R } from "../../cli/terminal-style";
-import * as registry from "../../state/registry";
 import type { SandboxCommandResult } from "./process-recovery";
 
 export type SecretBoundaryRefusalReason =
@@ -23,10 +22,6 @@ type GatewaySupervisorRequest = (
   timeout?: number,
 ) => SandboxCommandResult | null;
 
-function isHermesAgent(agent: ReturnType<typeof agentRuntime.getSessionAgent>): boolean {
-  return !!agent && agent.name === "hermes";
-}
-
 function printValidatorStderr(stderr: string): void {
   if (!stderr.trim()) return;
   for (const line of stderr.split(/\r?\n/)) {
@@ -42,15 +37,15 @@ function printValidatorStderr(stderr: string): void {
  */
 export function enforceHermesSecretBoundaryOnRunningGateway(
   sandboxName: string,
-  agent: ReturnType<typeof agentRuntime.getSessionAgent>,
+  agent: ReturnType<typeof agentRuntime.getSessionAgent> | undefined,
   requestGatewaySupervisorAction: GatewaySupervisorRequest,
+  required = true,
 ): HermesSecretBoundaryEnforcement | null {
-  const persistedAgent = registry.getSandbox(sandboxName)?.agent;
-  if (persistedAgent !== "hermes") return null;
-  if (!isHermesAgent(agent)) {
+  if (!required) return null;
+  if (!agent) {
     console.error("");
     console.error(
-      `  ${R}Hermes agent definition could not be loaded for sandbox '${sandboxName}'.${R}`,
+      `  ${R}Agent definition could not be loaded for sandbox '${sandboxName}'.${R}`,
     );
     console.error("  Refusing recovery to keep the validator-enforced boundary intact.");
     return { refused: true, reason: "agent-missing", stderr: "" };

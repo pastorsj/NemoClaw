@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "../agent/defs";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import {
   parseTemporarySandboxBaseImageId,
   readSandboxBaseImageResolutionMetadata,
@@ -12,6 +13,7 @@ type StagedAgentBuild = {
   buildCtx: string;
   stagedDockerfile: string;
   baseImageResolutionMetadata: SandboxBaseImageResolutionMetadata | null;
+  verifyBuildCtx?: () => boolean;
 };
 
 type CreateAgentSandbox = (
@@ -19,6 +21,7 @@ type CreateAgentSandbox = (
   options: {
     resolutionHint?: SandboxBaseImageResolutionMetadata | null;
     forceBaseImageRefresh?: boolean;
+    harnessPackage?: HarnessPackageIdentity | null;
   },
 ) => StagedAgentBuild;
 
@@ -106,10 +109,12 @@ export function createAgentSandboxWithResolution(
   context: BaseImageResolutionContext,
   agent: AgentDefinition,
   createAgentSandbox: CreateAgentSandbox,
+  harnessPackage: HarnessPackageIdentity | null = null,
 ): StagedAgentBuild {
   const staged = createAgentSandbox(agent, {
     resolutionHint: context.resolutionHint,
     forceBaseImageRefresh: context.forceRefresh,
+    ...(harnessPackage ? { harnessPackage } : {}),
   });
   if (staged.baseImageResolutionMetadata) {
     if (isDisposableLocalRebuildMetadata(agent.name, staged.baseImageResolutionMetadata)) {

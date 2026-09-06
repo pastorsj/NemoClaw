@@ -19,12 +19,12 @@ import {
 import {
   assertMcpDestroyNotPending,
   bridgeState,
-  ensureSandboxGatewaySelected,
   getBridgeAdapter,
   getSandboxAgent,
   getSandboxOrThrow,
   requireSandboxHarnessPackage,
 } from "./mcp-bridge-state";
+import { ensureSandboxGatewaySelected } from "./mcp-bridge/gateway-selection";
 import type { McpBridgeTargetValidation } from "./mcp-bridge-url-validation";
 import { assertAuthenticatedBridgeEntry, validateSandboxName } from "./mcp-bridge-validation";
 

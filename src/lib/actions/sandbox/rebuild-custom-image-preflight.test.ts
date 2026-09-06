@@ -87,9 +87,9 @@ function hermesMessagingPlan() {
 
 describe("preflightRebuildImage", () => {
   it.each([
-    ["OpenClaw", "openclaw", null],
+    ["OpenClaw", "openclaw", "openclaw"],
     ["Hermes", "hermes", "hermes"],
-    ["qualified candidate", "pi", "pi"],
+    ["unknown package", "future-harness", "future-harness"],
   ] as const)(
     "uses the pinned %s definition for build-context and patch roots",
     async (_label, agentName, expectedPatchAgentName) => {
@@ -135,10 +135,8 @@ describe("preflightRebuildImage", () => {
         expect(prepareDockerfilePatch).toHaveBeenCalledWith(
           expect.objectContaining({
             rootDir: pinnedRoot,
-            agent: expectedPatchAgentName === null ? null : pinnedDefinition,
-            ...(expectedPatchAgentName === null
-              ? { baseDockerfilePath: pinnedBaseDockerfile }
-              : {}),
+            agent: pinnedDefinition,
+            baseDockerfilePath: pinnedBaseDockerfile,
           }),
         );
         expect(result.prepared.rebuildTarget).toEqual({

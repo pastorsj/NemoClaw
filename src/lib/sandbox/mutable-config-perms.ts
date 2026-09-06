@@ -8,6 +8,7 @@ import type {
 import { validateName } from "../runner";
 import { withMcpLifecycleLockSync } from "../state/mcp-lifecycle-lock-acquisition";
 import { resolveAgentConfig, type AgentConfigTarget } from "./agent-config";
+import { classifyLegacyConfigAgent } from "./legacy-config";
 import { loadInstalledConfigAdapter, toHarnessConfigTarget } from "./package-config";
 import {
   capturePrivilegedSandboxCommand,
@@ -104,7 +105,7 @@ export function inspectMutableConfigPermsForTarget(
   target: AgentConfigTarget,
   statModeOwner: (path: string) => string,
 ): MutableConfigPermsInspection {
-  if (target.agentName !== "openclaw") {
+  if (classifyLegacyConfigAgent(target.agentName) !== "sealed-json") {
     return {
       applies: false,
       skipReason: "agent",
@@ -270,7 +271,7 @@ export function repairMutableConfigPermsForTarget(
   target: AgentConfigTarget,
   applyMutableContract: () => void,
 ): MutableConfigRepairResult {
-  if (target.agentName !== "openclaw") {
+  if (classifyLegacyConfigAgent(target.agentName) !== "sealed-json") {
     return {
       applied: false,
       skipReason: "agent",
@@ -349,7 +350,7 @@ finally:
 `;
 
 export function mutableHermesConfigProbeCommand(target: AgentConfigTarget): readonly string[] {
-  if (target.agentName !== "hermes") {
+  if (classifyLegacyConfigAgent(target.agentName) !== "sealed-yaml") {
     throw new Error(`agent ${target.agentName} does not use the mutable Hermes config contract`);
   }
   return [

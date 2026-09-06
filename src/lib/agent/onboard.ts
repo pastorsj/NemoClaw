@@ -13,10 +13,10 @@ import { sleepSeconds } from "../core/wait";
 import { getProviderSelectionConfig } from "../inference/config";
 import { runSandboxConfigSync, sandboxConfigSyncArgs } from "../onboard/config-sync";
 import { isValidForwardPort } from "../onboard/dashboard-runtime";
-import {
-  resolveSandboxHermesApiPort,
-  retargetHermesApiPortInUrl,
-} from "../onboard/hermes-api-port";
+import { collectLegacyAgentStartupDiagnostics } from "./legacy-diagnostics";
+import { isLegacyOpenClawAgentName } from "../onboard/package/legacy-onboard";
+
+export { collectHermesStartupDiagnostics } from "./legacy-diagnostics";
 
 export {
   createHermesApiPortScopedSandboxEntryPoints,
@@ -128,10 +128,6 @@ export function pinTrustedAgentRemoteBaseImageOverrideForOperation(
   return baseImage.pinTrustedAgentRemoteBaseImageOverrideForOperation(overrideEnvVar, override);
 }
 
-export function hermesBaseImageSupportsMcp(imageRef: string): boolean {
-  return baseImage.hermesBaseImageSupportsMcp(imageRef);
-}
-
 export function ensureAgentBaseImage(
   agent: AgentDefinition,
   options: baseImage.EnsureAgentBaseImageOptions = {},
@@ -158,7 +154,7 @@ export function resolveAgent({
   session?: { agent?: string } | null;
 } = {}): AgentDefinition | null {
   const name = resolveAgentName({ agentFlag, session });
-  if (name === "openclaw") return null;
+  if (isLegacyOpenClawAgentName(name)) return null;
   requireCandidateQualificationEnabled(name);
   return loadAgent(name);
 }
@@ -167,7 +163,7 @@ export function resolveAgent({
  * Get the agent-specific network policy path, or null to use the default.
  */
 export function getAgentPolicyPath(agent: AgentDefinition): string | null {
-  if (agent.name === "openclaw") return null;
+  if (agent.policyAdditionsPath === null && isLegacyOpenClawAgentName(agent.name)) return null;
   return requireAgentPolicyAdditionsPath(agent);
 }
 
@@ -176,69 +172,6 @@ export function getAgentPolicyPath(agent: AgentDefinition): string | null {
  */
 function sleep(seconds: number): void {
   sleepSeconds(seconds);
-}
-
-const HERMES_TIRITH_MARKER_ABSENT = "tirith marker: absent";
-const HERMES_STARTUP_DIAGNOSTICS_SCRIPT = `
-set +e
-marker=/sandbox/.hermes/.tirith-install-failed
-if [ ! -e "$marker" ]; then
-  echo "${HERMES_TIRITH_MARKER_ABSENT}"
-  exit 0
-fi
-if [ -L "$marker" ]; then
-  echo "tirith marker: symlink (not read)"
-else
-  printf "tirith marker: "
-  head -c 200 "$marker" 2>/dev/null || printf "unreadable"
-  printf "\\n"
-fi
-
-tirith=/sandbox/.hermes/bin/tirith
-if [ -x "$tirith" ] && [ ! -L "$tirith" ]; then
-  echo "tirith binary: present executable ($tirith)"
-elif [ -e "$tirith" ]; then
-  echo "tirith binary: present but not executable ($tirith)"
-else
-  echo "tirith binary: missing ($tirith)"
-fi
-
-for log in /tmp/nemoclaw-start.log /tmp/gateway.log; do
-  if [ -f "$log" ] && [ ! -L "$log" ]; then
-    echo "--- tail: $log ---"
-    tail -n 40 "$log" 2>/dev/null || echo "(tail unavailable)"
-  elif [ -L "$log" ]; then
-    echo "--- tail: $log skipped (symlink) ---"
-  else
-    echo "--- tail: $log unavailable ---"
-  fi
-done
-`.trim();
-
-/**
- * Collect read-only Hermes startup diagnostics for Step 7 health timeouts.
- * Returns no extra lines when the Tirith marker is absent so non-Tirith
- * failures keep the existing terse error shape.
- */
-export function collectHermesStartupDiagnostics(
-  sandboxName: string,
-  runCaptureOpenshell: OnboardContext["runCaptureOpenshell"],
-): string[] {
-  const output = runCaptureOpenshell(
-    ["sandbox", "exec", "-n", sandboxName, "--", "sh", "-lc", HERMES_STARTUP_DIAGNOSTICS_SCRIPT],
-    { ignoreError: true },
-  );
-  const redactedOutput = String(redact(output ?? ""));
-  const lines = redactedOutput
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd())
-    .filter((line) => line.length > 0);
-
-  const markerLine = lines.find((line) => line.startsWith("tirith marker:"));
-  if (!markerLine || markerLine === HERMES_TIRITH_MARKER_ABSENT) {
-    return [];
-  }
-  return ["Hermes startup diagnostics:", ...lines.slice(0, 140)];
 }
 
 /**
@@ -289,13 +222,16 @@ function resolveAgentHealthProbeUrl(
   probeUrl: string,
 ): string {
   const sandbox = registry.getSandbox(sandboxName);
-  if (agent.name === "hermes") {
-    return retargetHermesApiPortInUrl(probeUrl, resolveSandboxHermesApiPort(sandbox ?? {}));
-  }
-
   const declaredPort = agent.healthProbe?.port;
-  if (declaredPort !== agent.forwardPort) return probeUrl;
-  return retargetHealthProbePort(probeUrl, declaredPort, sandbox?.dashboardPort);
+  const secondaryHealthPort =
+    sandbox?.agent === agent.name && agent.forward_ports?.includes(declaredPort ?? -1) === true;
+  const effectivePort =
+    declaredPort === agent.forwardPort
+      ? sandbox?.dashboardPort
+      : secondaryHealthPort
+        ? sandbox?.hermesApiPort
+        : null;
+  return retargetHealthProbePort(probeUrl, declaredPort, effectivePort);
 }
 
 /** Retarget a manifest probe only when its declared listener received a new port. */
@@ -358,7 +294,10 @@ export async function handleAgentSetup(
   provider: string,
   agent: AgentDefinition,
   resume: boolean,
-  _session: object | null,
+  session: {
+    readonly harnessPackage?: unknown;
+    readonly harnessPackageMigration?: unknown;
+  } | null,
   ctx: OnboardContext,
 ): Promise<void> {
   const {
@@ -565,10 +504,13 @@ export async function handleAgentSetup(
       revalidateSandboxIdentity?.(`record completed agent setup for sandbox '${sandboxName}'`);
       console.log(`  \u2713 ${agent.displayName} gateway is healthy`);
     } else {
-      const diagnostics =
-        agent.name === "hermes"
-          ? collectHermesStartupDiagnostics(sandboxName, runCaptureOpenshell)
-          : [];
+      const diagnostics = collectLegacyAgentStartupDiagnostics(
+        agent.name,
+        session,
+        sandboxName,
+        runCaptureOpenshell,
+        redact,
+      );
       await failAgentSetup(
         sandboxName,
         agent,
@@ -722,20 +664,17 @@ function printAdditionalForwardPorts(
   const declared = Array.isArray(agent.forward_ports) ? agent.forward_ports : [];
   if (declared.length === 0) return;
   const declaredApiPort = agent.healthProbe?.port;
-  // The manifest names Hermes' default API port. This sandbox owns its own, so
-  // announce the port the operator actually has to forward. Only Hermes
-  // allocates a per-sandbox API port; every other agent keeps its declared one.
+  // A manifest-declared secondary health port may receive a sandbox-specific
+  // allocation. The registry still carries the historical field name while
+  // the selection itself is driven entirely by declared port metadata.
+  const registeredSandbox = sandboxName ? registry.getSandbox(sandboxName) : undefined;
   const sandboxApiPort =
-    agent.name === "hermes"
-      ? resolveSandboxHermesApiPort(
-          (sandboxName ? registry.getSandbox(sandboxName) : undefined) ?? {},
-        )
-      : 0;
+    registeredSandbox?.agent === agent.name ? registeredSandbox.hermesApiPort : undefined;
   for (const declaredPort of declared) {
     if (!Number.isInteger(declaredPort) || declaredPort < 1024 || declaredPort > 65535) continue;
     if (declaredPort === primaryPort || declaredPort === agent.forwardPort) continue;
     const isApi = declaredPort === declaredApiPort;
-    const port = isApi && agent.name === "hermes" ? sandboxApiPort : declaredPort;
+    const port = isApi && isValidForwardPort(sandboxApiPort) ? sandboxApiPort : declaredPort;
     const sectionLabel = isApi ? "OpenAI-compatible API" : "additional port";
     console.log("");
     console.log(`  ${agent.displayName} ${sectionLabel}`);

@@ -6,7 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } fr
 // The ready summary resolves the sandbox's API port from the registry. Stub the
 // lookup so these unit tests never read the developer's real state file.
 const getSandboxMock = vi.hoisted(() =>
-  vi.fn((): { dashboardPort?: number | null; hermesApiPort?: number | null } | null => null),
+  vi.fn(
+    (): {
+      agent?: string | null;
+      dashboardPort?: number | null;
+      hermesApiPort?: number | null;
+    } | null => null,
+  ),
 );
 vi.mock("../state/registry", () => ({ getSandbox: getSandboxMock }));
 
@@ -20,7 +26,9 @@ vi.mock("../runner", async (importOriginal) => ({
 }));
 
 import { sandboxConfigSyncArgs } from "../onboard/config-sync";
+import { redact } from "../runner";
 import type { AgentDefinition } from "./defs";
+import { collectLegacyAgentStartupDiagnostics } from "./legacy-diagnostics";
 // Import source directly so tests cannot pass against a stale build.
 import {
   collectHermesStartupDiagnostics,
@@ -55,6 +63,18 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
       reason: "test fixture",
     },
     skillCapability: { support: "disabled", reason: "test fixture" },
+    stateLifecycle: {
+      backup_quiescence: { kind: "not-required" },
+      snapshot_restore: [],
+      rebuild: {
+        image_plugin_provenance: "not-required",
+        scheduled_work: {
+          support: "disabled",
+          reason: "This package does not run scheduled work.",
+        },
+        post_restore: { kind: "not-required" },
+      },
+    },
     managedImage: null,
     stateDirectories: [],
     stateDirs: [],
@@ -590,6 +610,8 @@ describe("agent setup session boundaries", () => {
     name: "hermes",
     displayName: "Hermes Agent",
     healthProbe: { url: "http://localhost:8642/health", port: 8642, timeout_seconds: 1 },
+    forwardPort: 18789,
+    forward_ports: [18789, 8642],
   });
 
   function probeUrlsFrom(
@@ -602,7 +624,7 @@ describe("agent setup session boundaries", () => {
   }
 
   it("probes the sandbox's own Hermes API port instead of the manifest default (#9739)", async () => {
-    getSandboxMock.mockReturnValue({ dashboardPort: 18791, hermesApiPort: 8643 });
+    getSandboxMock.mockReturnValue({ agent: "hermes", dashboardPort: 18791, hermesApiPort: 8643 });
     const runCaptureOpenshell = vi
       .fn<OnboardContext["runCaptureOpenshell"]>(() => "ok")
       .mockReturnValueOnce("NEMOCLAW_AGENT_BINARY_CHECK:ok");
@@ -628,7 +650,7 @@ describe("agent setup session boundaries", () => {
   });
 
   it("keeps the manifest probe port for a sandbox that owns the default API port (#9739)", async () => {
-    getSandboxMock.mockReturnValue({ hermesApiPort: 8642 });
+    getSandboxMock.mockReturnValue({ agent: "hermes", hermesApiPort: 8642 });
     const runCaptureOpenshell = vi
       .fn<OnboardContext["runCaptureOpenshell"]>(() => "ok")
       .mockReturnValueOnce("NEMOCLAW_AGENT_BINARY_CHECK:ok");
@@ -715,7 +737,7 @@ describe("agent setup session boundaries", () => {
   });
 
   it("retargets the resume health probe at the sandbox's own API port (#9739)", async () => {
-    getSandboxMock.mockReturnValue({ hermesApiPort: 8643 });
+    getSandboxMock.mockReturnValue({ agent: "hermes", hermesApiPort: 8643 });
     const runCaptureOpenshell = vi.fn<OnboardContext["runCaptureOpenshell"]>(() => "ok");
     const { context } = createAgentSetupContext(runCaptureOpenshell);
 
@@ -883,6 +905,28 @@ describe("handleAgentSetup guards", () => {
 });
 
 describe("collectHermesStartupDiagnostics", () => {
+  it("does not enter legacy diagnostics for a receipt-backed package", () => {
+    const runCapture = vi.fn(() => "tirith marker: download_failed\n");
+
+    expect(
+      collectLegacyAgentStartupDiagnostics(
+        "hermes",
+        {
+          harnessPackage: {
+            kind: "agent-runtime",
+            id: "hermes",
+            packageVersion: "1.0.0",
+            contentDigest: "a".repeat(64),
+          },
+        },
+        "alpha",
+        runCapture,
+        redact,
+      ),
+    ).toEqual([]);
+    expect(runCapture).not.toHaveBeenCalled();
+  });
+
   it("includes Tirith marker content and binary state when the marker is present", () => {
     const runCapture = vi.fn(() =>
       [
@@ -893,7 +937,7 @@ describe("collectHermesStartupDiagnostics", () => {
       ].join("\n"),
     );
 
-    const diagnostics = collectHermesStartupDiagnostics("alpha", runCapture);
+    const diagnostics = collectHermesStartupDiagnostics("alpha", runCapture, redact);
 
     expect(runCapture).toHaveBeenCalledWith(
       [
@@ -918,7 +962,7 @@ describe("collectHermesStartupDiagnostics", () => {
   it("returns no extra lines when the Tirith marker is absent", () => {
     const runCapture = vi.fn(() => "tirith marker: absent\n");
 
-    expect(collectHermesStartupDiagnostics("alpha", runCapture)).toEqual([]);
+    expect(collectHermesStartupDiagnostics("alpha", runCapture, redact)).toEqual([]);
   });
 
   it("redacts sensitive values from log tails", () => {
@@ -932,7 +976,7 @@ describe("collectHermesStartupDiagnostics", () => {
       ].join("\n"),
     );
 
-    const output = collectHermesStartupDiagnostics("alpha", runCapture).join("\n");
+    const output = collectHermesStartupDiagnostics("alpha", runCapture, redact).join("\n");
 
     expect(output).toContain("SLACK_BOT_TOKEN=");
     expect(output).not.toContain(slackToken);
@@ -969,7 +1013,7 @@ describe("printDashboardUi announces per-sandbox Hermes API ports (#8543)", () =
   });
 
   it("announces the sandbox's own API port instead of the manifest default", () => {
-    getSandboxMock.mockReturnValue({ hermesApiPort: 8643 });
+    getSandboxMock.mockReturnValue({ agent: "hermes", hermesApiPort: 8643 });
 
     printDashboardUi("hermes-clone", null, hermesShipped, {
       note: noteSpy,
@@ -998,7 +1042,7 @@ describe("printDashboardUi announces per-sandbox Hermes API ports (#8543)", () =
         auth: "none",
       },
     });
-    getSandboxMock.mockReturnValue({ hermesApiPort: 8645 });
+    getSandboxMock.mockReturnValue({ agent: "hermes", hermesApiPort: 8645 });
 
     printDashboardUi("hermes-api-box", null, hermesApiDashboard, {
       note: noteSpy,

@@ -20,6 +20,14 @@ import {
 } from "./onboard/gateway-binding";
 
 export { resolveGatewayName, resolveSandboxGatewayName };
+export {
+  captureOpenshell,
+  captureOpenshellForStatus,
+  captureResolvedOpenshell,
+  getOpenshellBinary,
+  getStatusProbeTimeoutMs,
+  runOpenshell,
+} from "./adapters/openshell/runtime";
 
 export const replaceOpenShellRuntimeSelectionEnv =
   openshellRuntime.replaceOpenShellRuntimeSelectionEnv;

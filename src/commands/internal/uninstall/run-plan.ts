@@ -9,13 +9,12 @@ import {
 import { backupAllUnderPortableHostFence } from "../../../lib/actions/maintenance";
 import { runUninstallPlanProduction } from "../../../lib/actions/uninstall/run-plan";
 import { CLI_DISPLAY_NAME, CLI_NAME } from "../../../lib/cli/branding";
-import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
+import { NemoClawInternalCommand } from "../../../lib/cli/internal-command";
 import { GATEWAY_PORT } from "../../../lib/core/ports";
 import { resolveGatewayName } from "../../../lib/onboard/gateway-binding";
 import { withSandboxMutationLock } from "../../../lib/state/mcp-lifecycle-lock";
 
-export default class InternalUninstallRunPlanCommand extends NemoClawCommand {
-  static hidden = true;
+export default class InternalUninstallRunPlanCommand extends NemoClawInternalCommand {
   static strict = true;
   static summary = `${CLI_DISPLAY_NAME} Uninstaller`;
   static description = `Remove host-side ${CLI_DISPLAY_NAME} resources.`;

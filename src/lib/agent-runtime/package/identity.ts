@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isPlainObject } from "../../core/json-types";
-import { parseHarnessPackageIdentity as parseReceiptHarnessPackageIdentity } from "./receipt";
+import { isPlainObject } from "../../shared/object-record";
+import {
+  harnessPackageIdentitiesEqual,
+  parseHarnessPackageIdentity as parseValidatedHarnessPackageIdentity,
+} from "./identity-validation";
 import type {
   HarnessPackageAuthority,
   HarnessPackageIdentity,
@@ -14,7 +17,7 @@ export type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
 } from "./types";
-export { parseHarnessPackageId } from "./receipt";
+export { harnessPackageIdentitiesEqual, parseHarnessPackageId } from "./identity-validation";
 
 const MIGRATION_FIELDS = new Set(["schemaVersion", "source", "legacyAgent", "migratedAt"]);
 const STANDARD_LEGACY_AGENTS = new Set(["openclaw", "hermes", "langchain-deepagents-code", "pi"]);
@@ -81,7 +84,7 @@ function requireMigrationAgent(value: unknown): string | null {
 }
 
 export function parseHarnessPackageIdentity(value: unknown): HarnessPackageIdentity {
-  return Object.freeze(parseReceiptHarnessPackageIdentity(value));
+  return Object.freeze(parseValidatedHarnessPackageIdentity(value));
 }
 
 export function serializeHarnessPackageIdentity(value: unknown): string {
@@ -95,17 +98,6 @@ export function isHarnessPackageIdentity(value: unknown): value is HarnessPackag
   } catch {
     return false;
   }
-}
-
-export function harnessPackageIdentitiesEqual(leftValue: unknown, rightValue: unknown): boolean {
-  const left = parseHarnessPackageIdentity(leftValue);
-  const right = parseHarnessPackageIdentity(rightValue);
-  return (
-    left.kind === right.kind &&
-    left.id === right.id &&
-    left.packageVersion === right.packageVersion &&
-    left.contentDigest === right.contentDigest
-  );
 }
 
 /** Compare complete persisted package authority without collapsing omission into null. */

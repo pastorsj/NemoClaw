@@ -1,0 +1,511 @@
+[
+  {
+    "channelId": "telegram",
+    "config": {
+      "renders": [
+        {
+          "id": "telegram-openclaw-channel",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "channels.telegram",
+          "value": {
+            "enabled": true,
+            "accounts": {
+              "default": {
+                "enabled": true,
+                "healthMonitor": { "enabled": false },
+                "proxy": "{{proxyUrl}}",
+                "groupPolicy": "{{telegramConfig.groupPolicy}}",
+                "dmPolicy": "{{allowedIds.telegram.dmPolicy}}",
+                "allowFrom": "{{allowedIds.telegram.values}}"
+              }
+            }
+          }
+        },
+        {
+          "id": "telegram-openclaw-groups",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "when": "{{telegramConfig.openclawGroups}}",
+          "path": "channels.telegram.groups",
+          "value": "{{telegramConfig.openclawGroups}}"
+        },
+        {
+          "id": "telegram-openclaw-plugin",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "plugins.entries.telegram",
+          "value": { "enabled": true }
+        }
+      ]
+    },
+    "policy": [
+      { "presetName": "telegram", "policyKeys": ["telegram_bot"], "requiredAtCreate": true }
+    ],
+    "lifecycle": {
+      "runtime": {
+        "channelName": "telegram",
+        "visibility": { "configKeys": ["telegram"], "logPatterns": ["telegram"] },
+        "nodePreloads": [
+          {
+            "module": "telegram-diagnostics",
+            "injectInto": ["boot", "connect"],
+            "optional": false,
+            "installMessage": "[channels] Installing Telegram diagnostics (provider readiness + inference errors)",
+            "installedMessage": "[channels] Telegram diagnostics installed (NODE_OPTIONS updated)"
+          }
+        ]
+      },
+      "hookIds": [
+        "telegram-token-paste",
+        "telegram-allowlist-aliases",
+        "telegram-config-prompt",
+        "telegram-openclaw-config-prompt",
+        "telegram-get-me-reachability",
+        "telegram-openclaw-bridge-health",
+        "telegram-gateway-conflict-status",
+        "telegram-status-health"
+      ]
+    }
+  },
+  {
+    "channelId": "discord",
+    "config": {
+      "renders": [
+        {
+          "id": "discord-openclaw-channel",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "channels.discord",
+          "value": {
+            "enabled": true,
+            "accounts": {
+              "default": {
+                "enabled": true,
+                "healthMonitor": { "enabled": false },
+                "proxy": "{{discordProxyUrl}}",
+                "dmPolicy": "{{discord.allowedUsers.dmPolicy}}",
+                "allowFrom": "{{discord.allowedUsers.values}}"
+              }
+            }
+          }
+        },
+        {
+          "id": "discord-openclaw-guilds",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "when": "{{discord.hasGuilds}}",
+          "path": "channels.discord",
+          "value": { "groupPolicy": "allowlist", "guilds": "{{discord.guilds}}" }
+        },
+        {
+          "id": "discord-openclaw-plugin",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "plugins.entries.discord",
+          "value": { "enabled": true }
+        }
+      ]
+    },
+    "policy": [
+      {
+        "presetName": "discord",
+        "policyKeys": ["discord"],
+        "requiredAtCreate": true,
+        "validationWarningLines": [
+          "OpenClaw validation uses its Node runtime:",
+          "node -e \"require('node:https').get('https://discord.com/api/v10/gateway',r=>console.log(r.statusCode)).on('error',e=>{console.error(e.message);process.exitCode=1})\""
+        ]
+      }
+    ],
+    "lifecycle": {
+      "runtime": {
+        "channelName": "discord",
+        "visibility": { "configKeys": ["discord"], "logPatterns": ["discord"] }
+      },
+      "packageInstalls": [
+        {
+          "id": "openclawPluginPackage",
+          "manager": "node-package",
+          "spec": "npm:@openclaw/discord@{{openclaw.version}}",
+          "pin": true,
+          "integrityByVersion": {
+            "2026.7.1": "sha512-tZfdC1YA8oVLvc2BK1w0F6rUljS5ugCOp2uWe0vPsbG1fbzVVIO4V32RoqZznGHe5u2R9u4n1aV5Z/qa1m2oFg=="
+          },
+          "tarballUrlByVersion": {
+            "2026.7.1": "https://registry.npmjs.org/@openclaw/discord/-/discord-2026.7.1.tgz"
+          },
+          "required": true
+        }
+      ],
+      "hookIds": ["discord-openclaw-bridge-health", "discord-token-paste", "discord-config-prompt"]
+    }
+  },
+  {
+    "channelId": "wechat",
+    "config": {
+      "renders": [
+        {
+          "id": "wechat-openclaw-plugin",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "plugins.entries.openclaw-weixin",
+          "value": { "enabled": true }
+        },
+        {
+          "id": "wechat-openclaw-channel",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "channels.openclaw-weixin",
+          "value": { "enabled": true }
+        }
+      ],
+      "statePaths": ["wechat", "openclaw-weixin"]
+    },
+    "policy": [
+      { "presetName": "wechat", "policyKeys": ["wechat_bridge"], "requiredAtCreate": true }
+    ],
+    "lifecycle": {
+      "runtime": {
+        "channelName": "openclaw-weixin",
+        "visibility": {
+          "configKeys": ["openclaw-weixin"],
+          "logPatterns": ["wechat", "openclaw-weixin"]
+        },
+        "nodePreloads": [
+          { "module": "wechat-account-placeholder", "injectInto": ["boot"], "optional": false },
+          {
+            "module": "wechat-diagnostics",
+            "injectInto": ["boot", "connect"],
+            "optional": false,
+            "installMessage": "[channels] Installing WeChat diagnostics (provider readiness + inference errors)",
+            "installedMessage": "[channels] WeChat diagnostics installed (NODE_OPTIONS updated)"
+          }
+        ]
+      },
+      "packageInstalls": [
+        {
+          "id": "openclawPluginPackage",
+          "manager": "node-package",
+          "spec": "npm:@tencent-weixin/openclaw-weixin@2.4.3",
+          "pin": true,
+          "integrity": "sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==",
+          "tarballUrl": "https://registry.npmjs.org/@tencent-weixin/openclaw-weixin/-/openclaw-weixin-2.4.3.tgz",
+          "runtimeLock": {
+            "cachePath": "/usr/local/share/nemoclaw/wechat-npm-cache",
+            "installCacheEnvKey": "NEMOCLAW_WECHAT_NPM_INSTALL_CACHE",
+            "lockFile": "/usr/local/lib/nemoclaw/wechat-runtime/package-lock.json",
+            "projectsRoot": "/sandbox/.openclaw/npm/projects",
+            "verifierPath": "/usr/local/lib/nemoclaw/verify-wechat-runtime-lock.mts",
+            "offline": true,
+            "legacyPeerDeps": true
+          },
+          "required": true
+        }
+      ],
+      "hookIds": [
+        "wechat-host-qr",
+        "wechat-config-prompt",
+        "wechat-seed-openclaw-account",
+        "wechat-health-check"
+      ]
+    }
+  },
+  {
+    "channelId": "slack",
+    "config": {
+      "renders": [
+        {
+          "id": "slack-openclaw-channel",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "channels.slack",
+          "value": {
+            "enabled": true,
+            "accounts": {
+              "default": {
+                "enabled": true,
+                "healthMonitor": { "enabled": false },
+                "dmPolicy": "{{allowedIds.slack.dmPolicy}}",
+                "allowFrom": "{{allowedIds.slack.values}}",
+                "groupPolicy": "{{allowedIds.slack.groupPolicy}}",
+                "channels": "{{allowedIds.slack.channels}}"
+              }
+            }
+          }
+        },
+        {
+          "id": "slack-openclaw-plugin",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "plugins.entries.slack",
+          "value": { "enabled": true }
+        }
+      ]
+    },
+    "policy": [{ "presetName": "slack", "policyKeys": ["slack"], "requiredAtCreate": true }],
+    "lifecycle": {
+      "runtime": {
+        "channelName": "slack",
+        "visibility": { "configKeys": ["slack"], "logPatterns": ["slack"] },
+        "nodePreloads": [
+          {
+            "module": "slack-channel-guard",
+            "injectInto": ["boot", "connect"],
+            "optional": false,
+            "installMessage": "[channels] Installing Slack channel guard (unhandled-rejection safety net)",
+            "installedMessage": "[channels] Slack channel guard installed (NODE_OPTIONS updated)"
+          }
+        ],
+        "secretScans": [
+          {
+            "path": "/sandbox/.openclaw/openclaw.json",
+            "pattern": "(?:xoxb|xapp)-(?!OPENSHELL-RESOLVE-ENV-)",
+            "message": "[SECURITY] Slack token leaked into {path} - refusing to serve",
+            "exitCode": 78
+          }
+        ]
+      },
+      "packageInstalls": [
+        {
+          "id": "openclawPluginPackage",
+          "manager": "node-package",
+          "spec": "npm:@openclaw/slack@{{openclaw.version}}",
+          "pin": true,
+          "integrityByVersion": {
+            "2026.7.1": "sha512-dwVGEVCmoTQrOIeZaSCIOPg8pT7hB883QQEXdp9EZUDzTGuvSc+KxH2iERSOV/59hROQctYdcobGn/vdB1H4XA=="
+          },
+          "tarballUrlByVersion": {
+            "2026.7.1": "https://registry.npmjs.org/@openclaw/slack/-/slack-2026.7.1.tgz"
+          },
+          "required": true
+        }
+      ],
+      "hookIds": [
+        "slack-socket-mode-gateway-conflict",
+        "slack-openclaw-bridge-health",
+        "slack-socket-mode-gateway-status",
+        "slack-status-health",
+        "slack-token-paste",
+        "slack-config-prompt",
+        "slack-credential-validation"
+      ]
+    }
+  },
+  {
+    "channelId": "whatsapp",
+    "config": {
+      "renders": [
+        {
+          "id": "whatsapp-openclaw-channel",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "channels.whatsapp",
+          "value": {
+            "enabled": true,
+            "accounts": { "default": { "enabled": true, "healthMonitor": { "enabled": false } } }
+          }
+        },
+        {
+          "id": "whatsapp-openclaw-plugin",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "plugins.entries.whatsapp",
+          "value": { "enabled": true }
+        }
+      ]
+    },
+    "policy": [{ "presetName": "whatsapp", "policyKeys": ["whatsapp"] }],
+    "lifecycle": {
+      "runtime": {
+        "channelName": "whatsapp",
+        "visibility": { "configKeys": ["whatsapp"], "logPatterns": ["whatsapp"] },
+        "nodePreloads": [
+          {
+            "module": "whatsapp-qr-compact",
+            "injectInto": ["connect"],
+            "optional": true,
+            "installMessage": "[channels] Installing WhatsApp compact-QR renderer (scan-friendly pairing)"
+          }
+        ]
+      },
+      "packageInstalls": [
+        {
+          "id": "openclawPluginPackage",
+          "manager": "node-package",
+          "spec": "npm:@openclaw/whatsapp@{{openclaw.version}}",
+          "pin": true,
+          "integrityByVersion": {
+            "2026.7.1": "sha512-wLY/Omc5fleRpl2lKGN8sxt/8hYfHGwLRezmWsk8oCbea5pRKUPE6ZX+wJO1O52NOJkAGCuiXvS7x0qIeKxXbQ=="
+          },
+          "tarballUrlByVersion": {
+            "2026.7.1": "https://registry.npmjs.org/@openclaw/whatsapp/-/whatsapp-2026.7.1.tgz"
+          },
+          "required": true
+        }
+      ],
+      "hookIds": ["whatsapp-status-health"]
+    }
+  },
+  {
+    "channelId": "teams",
+    "config": {
+      "renders": [
+        {
+          "id": "teams-openclaw-channel",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "channels.msteams",
+          "value": {
+            "enabled": true,
+            "appId": "{{teamsConfig.appId}}",
+            "tenantId": "{{teamsConfig.tenantId}}",
+            "webhook": { "port": "{{teamsConfig.webhookPort}}", "path": "/api/messages" },
+            "healthMonitor": { "enabled": false },
+            "streaming": { "mode": "off" },
+            "dmPolicy": "{{allowedIds.teams.dmPolicy}}",
+            "allowFrom": "{{allowedIds.teams.values}}",
+            "groupPolicy": "open",
+            "requireMention": "{{teamsConfig.requireMention}}"
+          }
+        },
+        {
+          "id": "teams-openclaw-plugin",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "plugins.entries.msteams",
+          "value": { "enabled": true }
+        }
+      ]
+    },
+    "policy": [{ "presetName": "teams", "policyKeys": ["teams"], "requiredAtCreate": true }],
+    "lifecycle": {
+      "runtime": {
+        "channelName": "msteams",
+        "visibility": { "configKeys": ["msteams"], "logPatterns": ["msteams", "teams"] },
+        "nodePreloads": [
+          {
+            "module": "msteams-message-hints",
+            "injectInto": ["boot", "connect"],
+            "optional": false,
+            "installMessage": "[channels] Installing Microsoft Teams message hint patch (native mentions)",
+            "installedMessage": "[channels] Microsoft Teams message hint patch installed (NODE_OPTIONS updated)"
+          }
+        ]
+      },
+      "packageInstalls": [
+        {
+          "id": "openclawPluginPackage",
+          "manager": "node-package",
+          "spec": "npm:@openclaw/msteams@{{openclaw.version}}",
+          "pin": true,
+          "integrityByVersion": {
+            "2026.7.1": "sha512-gG/Yk6HZAguHwrmKjsqdONbFz5WNy126PEAXQWNW/TulO1kIifQ6tktM16BQPNLnkmWqLbj+TrrO55Cjas1aFg=="
+          },
+          "tarballUrlByVersion": {
+            "2026.7.1": "https://registry.npmjs.org/@openclaw/msteams/-/msteams-2026.7.1.tgz"
+          },
+          "required": true
+        }
+      ],
+      "hookIds": [
+        "teams-host-forward-port-conflict",
+        "teams-host-forward-port-status",
+        "teams-token-paste",
+        "teams-config-prompt"
+      ]
+    }
+  },
+  {
+    "channelId": "googlechat",
+    "config": {
+      "renders": [
+        {
+          "id": "googlechat-openclaw-channel",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "channels.googlechat",
+          "value": {
+            "enabled": true,
+            "serviceAccountFile": "/nonexistent/googlechat-gateway-minted-no-service-account-file",
+            "audienceType": "{{googlechatConfig.audienceType}}",
+            "audience": "{{googlechatConfig.audience}}",
+            "appPrincipal": "{{googlechatConfig.appPrincipal}}",
+            "webhookPath": "/googlechat",
+            "healthMonitor": { "enabled": false },
+            "dm": {
+              "policy": "{{allowedIds.googlechat.dmPolicy}}",
+              "allowFrom": "{{allowedIds.googlechat.values}}"
+            }
+          }
+        },
+        {
+          "id": "googlechat-openclaw-plugin",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "plugins.entries.googlechat",
+          "value": { "enabled": true }
+        },
+        {
+          "id": "googlechat-openclaw-gateway-reload-off",
+          "kind": "json-fragment",
+          "target": "~/.openclaw/openclaw.json",
+          "path": "gateway.reload",
+          "value": { "mode": "off" }
+        }
+      ]
+    },
+    "policy": [{ "presetName": "googlechat", "policyKeys": ["googlechat"] }],
+    "lifecycle": {
+      "runtime": {
+        "channelName": "googlechat",
+        "visibility": { "configKeys": ["googlechat"], "logPatterns": ["googlechat"] },
+        "nodePreloads": [
+          {
+            "module": "googlechat-trusted-proxy-fetch",
+            "injectInto": ["boot"],
+            "optional": false,
+            "installMessage": "[channels] Installing Google Chat trusted-proxy-fetch patch (route googleapis via trusted env proxy)",
+            "installedMessage": "[channels] Google Chat trusted-proxy-fetch patch installed (NODE_OPTIONS updated)"
+          },
+          {
+            "module": "googlechat-outbound-auth",
+            "injectInto": ["boot"],
+            "optional": false,
+            "installMessage": "[channels] Installing Google Chat outbound-auth patch (gateway-minted bearer)",
+            "installedMessage": "[channels] Google Chat outbound-auth patch installed (NODE_OPTIONS updated)"
+          }
+        ],
+        "secretScans": [
+          {
+            "path": "/sandbox/.openclaw/openclaw.json",
+            "pattern": "-----BEGIN (?:RSA )?PRIVATE KEY-----",
+            "message": "[SECURITY] Google Chat service account private key leaked into {path} - refusing to serve",
+            "exitCode": 78
+          }
+        ]
+      },
+      "packageInstalls": [
+        {
+          "id": "openclawPluginPackage",
+          "manager": "node-package",
+          "spec": "npm:@openclaw/googlechat@{{openclaw.version}}",
+          "pin": true,
+          "integrityByVersion": {
+            "2026.7.1": "sha512-Dv0xOmcxAThEr6hoK+ioofHNu18hfbIceQrEHX3AHZPpOUiTJvToVpA5eX87NQINewwfSJf0gVhE6kSbSk2Aew=="
+          },
+          "tarballUrlByVersion": {
+            "2026.7.1": "https://registry.npmjs.org/@openclaw/googlechat/-/googlechat-2026.7.1.tgz"
+          },
+          "required": true
+        }
+      ],
+      "hookIds": [
+        "googlechat-tunnel-audience-gate",
+        "googlechat-service-account",
+        "googlechat-config-prompt",
+        "googlechat-openclaw-config-prompt"
+      ]
+    }
+  }
+]

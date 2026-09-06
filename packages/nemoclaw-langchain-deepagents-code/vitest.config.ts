@@ -104,10 +104,13 @@ export default defineConfig({
       ...deepAgentsPackageTestMoves.map(({ destination }) => destination),
       ...deepAgentsPackageSplitTests,
       "tests/host/adapter-build.test.ts",
+      "tests/host/inference-config.test.ts",
       "tests/host/config-url.test.ts",
+      "tests/host/messaging-adapter.test.ts",
       "tests/host/session-adapter.test.ts",
       "tests/host/startup-adapter.test.ts",
       "tests/image/fabric-runtime.test.ts",
+      "tests/runtime/backup-ready.test.ts",
     ],
   },
 });

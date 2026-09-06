@@ -26,7 +26,13 @@ import {
 import type { ProviderInferenceStateOptions, ProviderSelectionResult } from "./provider-inference";
 
 export type Gpu = { type: string } | null;
-export type Agent = { name: string; inference?: { provider_type?: string } } | null;
+export type Agent = {
+  name: string;
+  inference?: {
+    provider_type?: string;
+    refresh_route_for_messaging_providers?: readonly string[];
+  };
+} | null;
 export type Host = { cpus?: number };
 
 export const baseSelection: ProviderSelectionResult = {
@@ -97,10 +103,13 @@ export function createDeps(
       requiredEndpointUrl: null,
       requiredInferenceApi: null,
     })),
-    revalidateHarnessPackageAuthority: vi.fn(() => ({
-      harnessPackage: null,
-      harnessPackageMigration: null,
-    } as const)),
+    revalidateHarnessPackageAuthority: vi.fn(
+      () =>
+        ({
+          harnessPackage: null,
+          harnessPackageMigration: null,
+        }) as const,
+    ),
     setupNim: vi.fn(async () => ({ ...baseSelection })),
     setupInference: vi.fn<
       ProviderInferenceStateOptions<Gpu, Agent, Host>["deps"]["setupInference"]

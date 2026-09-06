@@ -262,6 +262,7 @@ process.env.HOME = ${JSON.stringify(home)};
 const registry = require("./src/lib/state/registry.js");
 const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
+const commandExecution = require("./src/lib/actions/sandbox/transport/command-execution.js");
 gatewayRuntime.gatewayRuntimeDependencies.captureOpenshell = (args, options = {}) => {
   const selectedGateway = options.env?.OPENSHELL_GATEWAY || "nemoclaw";
   return {
@@ -276,6 +277,10 @@ processRecovery.executeSandboxCommand = (_sandboxName, command) => {
   capturedCommand = command;
   return { status: 0, stdout: "registered", stderr: "" };
 };
+Object.defineProperty(commandExecution, "executeSandboxCommand", {
+  configurable: true,
+  value: processRecovery.executeSandboxCommand,
+});
 registry.registerSandbox({
   name: "custom-root-status",
   agent: "openclaw",
@@ -321,6 +326,7 @@ process.env.HOME = ${JSON.stringify(home)};
 const registry = require("./src/lib/state/registry.js");
 const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
+const commandExecution = require("./src/lib/actions/sandbox/transport/command-execution.js");
 gatewayRuntime.gatewayRuntimeDependencies.captureOpenshell = (args, options = {}) => {
   const selectedGateway = options.env?.OPENSHELL_GATEWAY || "nemoclaw";
   return {
@@ -331,6 +337,10 @@ gatewayRuntime.gatewayRuntimeDependencies.captureOpenshell = (args, options = {}
   };
 };
 processRecovery.executeSandboxCommand = () => ({ status: 0, stdout: "registered", stderr: "" });
+Object.defineProperty(commandExecution, "executeSandboxCommand", {
+  configurable: true,
+  value: processRecovery.executeSandboxCommand,
+});
 registry.registerSandbox({
   name: "persisted-status",
   agent: "current-disabled",

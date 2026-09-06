@@ -37,6 +37,27 @@ export function getTerminalCommand(
   return agent.runtime?.interactive_command ?? agent.runtime?.headless_command ?? null;
 }
 
+export type AgentInteractiveCommandPlan =
+  | { readonly kind: "command"; readonly command: string }
+  | { readonly kind: "unsupported"; readonly reason: string };
+
+/**
+ * Plan an interactive handoff using only a package definition's typed runtime
+ * declaration. Receipt-backed callers use this finite result so a package that
+ * omitted both commands cannot accidentally execute its package ID as shell
+ * source.
+ */
+export function planAgentInteractiveCommand(agent: AgentDefinition): AgentInteractiveCommandPlan {
+  const command =
+    agent.runtime?.interactive_command?.trim() || agent.runtime?.headless_command?.trim();
+  return command
+    ? { kind: "command", command }
+    : {
+        kind: "unsupported",
+        reason: "runtime.interactive_command or runtime.headless_command is not declared",
+      };
+}
+
 /**
  * Resolve the command a user types inside the sandbox to start the agent
  * interactively. Unlike getTerminalCommand, this reads
@@ -54,9 +75,8 @@ export function getInteractiveAgentCommand(
   // Mirror getTerminalCommand's interactive fallback: runtime-manifest.ts
   // permits a terminal agent that declares only headless_command, and without
   // this `launch` would execute the agent's own slug and fail with exit 127.
-  const manifestCommand =
-    agent?.runtime?.interactive_command?.trim() || agent?.runtime?.headless_command?.trim();
-  if (manifestCommand) return manifestCommand;
+  const manifestPlan = agent ? planAgentInteractiveCommand(agent) : null;
+  if (manifestPlan?.kind === "command") return manifestPlan.command;
   const name = agentName || "openclaw";
   if (name === "openclaw") return "openclaw tui";
   if (agent?.name) return agent.name;

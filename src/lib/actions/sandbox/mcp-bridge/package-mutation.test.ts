@@ -62,7 +62,11 @@ function registrationPlan(
 ): HarnessMcpRegistrationPlan {
   return {
     execution: {
-      command: "future-register",
+      command: {
+        kind: "shell",
+        script: "future-register",
+        shellTrust: "package-authored-code",
+      },
       timeoutSeconds: 15,
       success: { kind: "exit-zero" },
       failureMessage: "Future registration failed.",
@@ -79,7 +83,11 @@ function registrationPlan(
 function removalPlan(overrides: Partial<HarnessMcpRemovalPlan> = {}): HarnessMcpRemovalPlan {
   return {
     execution: {
-      command: "future-remove",
+      command: {
+        kind: "shell",
+        script: "future-remove",
+        shellTrust: "package-authored-code",
+      },
       timeoutSeconds: 15,
       success: { kind: "exit-zero" },
       failureMessage: "Future removal failed.",
@@ -153,7 +161,7 @@ describe("installed MCP package mutation", () => {
     mocks.buildRegistration.mockReturnValue(
       registrationPlan({
         execution: {
-          command: ["future-helper", "add"],
+          command: { kind: "argv", argv: ["future-helper", "add"] },
           timeoutSeconds: 620,
           success: {
             kind: "lifecycle-json",
@@ -231,7 +239,7 @@ describe("installed MCP package mutation", () => {
     mocks.buildRegistration.mockReturnValue(
       registrationPlan({
         execution: {
-          command: ["future-helper", "add"],
+          command: { kind: "argv", argv: ["future-helper", "add"] },
           timeoutSeconds: 620,
           success: {
             kind: "lifecycle-json",

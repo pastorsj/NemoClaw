@@ -11,17 +11,24 @@ import {
   type Stats,
 } from "node:fs";
 import path from "node:path";
+import type { HarnessScheduledWorkDeclaration } from "@nvidia/nemoclaw-harness-contract";
 import { type OpenRegularFile, openRegularFileNoFollow } from "../../adapters/fs/regular-file";
 
-const HERMES_RUNTIME_HOME = "/sandbox/.hermes";
-const HERMES_SANDBOX_HOME = "/sandbox";
 const MAX_JOBS_BYTES = 8 * 1024 * 1024;
 
-export interface HermesCronRestorePlan {
+type ManagedScheduledWorkDeclaration = Extract<
+  HarnessScheduledWorkDeclaration,
+  { readonly support: "managed" }
+>;
+
+export interface ScheduledWorkRestorePlan {
   activeJobs: number;
   scriptJobs: number;
   requiresDispatchGate: boolean;
 }
+
+/** @deprecated Pre-receipt name retained for focused compatibility tests. */
+export type HermesCronRestorePlan = ScheduledWorkRestorePlan;
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -40,8 +47,12 @@ function requirePathMetadata(target: string, description: string): Stats {
   return metadata;
 }
 
-function readJobs(profileLabel: string, profileBackupHome: string): Record<string, unknown>[] {
-  const jobsPath = path.join(profileBackupHome, "cron", "jobs.json");
+function readJobs(
+  profileLabel: string,
+  profileBackupHome: string,
+  jobsRelativePath: string,
+): Record<string, unknown>[] {
+  const jobsPath = path.join(profileBackupHome, jobsRelativePath);
   let jobsFile: OpenRegularFile;
   try {
     jobsFile = openRegularFileNoFollow(jobsPath);
@@ -80,13 +91,17 @@ function readJobs(profileLabel: string, profileBackupHome: string): Record<strin
   return jobs as Record<string, unknown>[];
 }
 
-function relativeRuntimeScript(rawScript: string, runtimeProfileHome: string): string {
-  const runtimeRoot = path.resolve(runtimeProfileHome, "scripts");
+function relativeRuntimeScript(
+  rawScript: string,
+  runtimeProfileHome: string,
+  scriptsRelativePath: string,
+): string {
+  const runtimeRoot = path.resolve(runtimeProfileHome, scriptsRelativePath);
   let candidate: string;
   if (rawScript === "~") {
-    candidate = HERMES_SANDBOX_HOME;
+    candidate = "/sandbox";
   } else if (rawScript.startsWith("~/")) {
-    candidate = path.join(HERMES_SANDBOX_HOME, rawScript.slice(2));
+    candidate = path.join("/sandbox", rawScript.slice(2));
   } else if (rawScript.startsWith("~")) {
     throw new Error("script path uses an unsupported user-home expansion");
   } else {
@@ -110,9 +125,10 @@ function validateBackupScript(
   script: string,
   profileBackupHome: string,
   runtimeProfileHome: string,
+  scriptsRelativePath: string,
 ): void {
-  const relativeScript = relativeRuntimeScript(script, runtimeProfileHome);
-  const scriptsRoot = path.join(profileBackupHome, "scripts");
+  const relativeScript = relativeRuntimeScript(script, runtimeProfileHome, scriptsRelativePath);
+  const scriptsRoot = path.join(profileBackupHome, scriptsRelativePath);
   const rootMetadata = requirePathMetadata(scriptsRoot, `${profileLabel} scripts root`);
   if (!rootMetadata.isDirectory()) {
     throw new Error(`${profileLabel} scripts root is not a directory`);
@@ -148,15 +164,16 @@ function validateBackupScript(
 
 function profileHomes(
   backupPath: string,
+  declaration: ManagedScheduledWorkDeclaration,
 ): Array<{ label: string; backupHome: string; runtimeHome: string }> {
-  const homes = [
+  const homes: Array<{ label: string; backupHome: string; runtimeHome: string }> = [
     {
       label: "default profile",
       backupHome: backupPath,
-      runtimeHome: HERMES_RUNTIME_HOME,
+      runtimeHome: declaration.runtime_root,
     },
   ];
-  const profilesRoot = path.join(backupPath, "profiles");
+  const profilesRoot = path.join(backupPath, declaration.profiles_path);
   let entries: Dirent[];
   try {
     entries = readdirSync(profilesRoot, { withFileTypes: true, encoding: "utf8" });
@@ -186,21 +203,28 @@ function profileHomes(
     homes.push({
       label: `named profile #${index + 1}`,
       backupHome: profileBackupHome,
-      runtimeHome: path.join(HERMES_RUNTIME_HOME, "profiles", entry.name),
+      runtimeHome: path.join(declaration.runtime_root, declaration.profiles_path, entry.name),
     });
   }
   return homes;
 }
 
-export function validateHermesCronRestoreBackup(backupPath: string): HermesCronRestorePlan {
-  const backupMetadata = requirePathMetadata(backupPath, "Hermes rebuild backup");
+export function validateScheduledWorkRestoreBackup(
+  backupPath: string,
+  declaration: ManagedScheduledWorkDeclaration,
+): HermesCronRestorePlan {
+  const backupMetadata = requirePathMetadata(backupPath, "scheduled-work rebuild backup");
   if (!backupMetadata.isDirectory()) {
-    throw new Error("Hermes rebuild backup is not a directory");
+    throw new Error("scheduled-work rebuild backup is not a directory");
   }
   let activeJobs = 0;
   let scriptJobs = 0;
-  for (const profile of profileHomes(backupPath)) {
-    for (const [index, job] of readJobs(profile.label, profile.backupHome).entries()) {
+  for (const profile of profileHomes(backupPath, declaration)) {
+    for (const [index, job] of readJobs(
+      profile.label,
+      profile.backupHome,
+      declaration.jobs_path,
+    ).entries()) {
       if (job.enabled === false || job.state === "paused") continue;
       activeJobs += 1;
       if (job.script === undefined || job.script === null || job.script === "") continue;
@@ -214,6 +238,7 @@ export function validateHermesCronRestoreBackup(backupPath: string): HermesCronR
         job.script.trim(),
         profile.backupHome,
         profile.runtimeHome,
+        declaration.scripts_path,
       );
     }
   }
@@ -222,4 +247,25 @@ export function validateHermesCronRestoreBackup(backupPath: string): HermesCronR
     scriptJobs,
     requiresDispatchGate: scriptJobs > 0,
   };
+}
+
+const LEGACY_HERMES_SCHEDULED_WORK: ManagedScheduledWorkDeclaration = {
+  support: "managed",
+  controller: {
+    command: [
+      "/opt/hermes/.venv/bin/python",
+      "-I",
+      "/usr/local/lib/nemoclaw/hermes-cron-restore-control.py",
+    ],
+    timeout_seconds: 180,
+  },
+  jobs_path: "cron/jobs.json",
+  scripts_path: "scripts",
+  profiles_path: "profiles",
+  runtime_root: "/sandbox/.hermes",
+};
+
+/** Pre-receipt compatibility for the historical Hermes backup validator. */
+export function validateHermesCronRestoreBackup(backupPath: string): HermesCronRestorePlan {
+  return validateScheduledWorkRestoreBackup(backupPath, LEGACY_HERMES_SCHEDULED_WORK);
 }

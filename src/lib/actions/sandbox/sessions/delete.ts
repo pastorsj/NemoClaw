@@ -12,17 +12,17 @@ import {
   deferSandboxLifecycleExit,
   runWithDeferredSandboxLifecycleExit,
 } from "../../../core/process-exit";
-import { assertHermesPortableCommandUnavailable } from "../../../onboard/experimental/portable-agent-lifecycle";
-import { withMcpLifecycleLock } from "../../../state/mcp-lifecycle-lock-acquisition";
 import { execSandbox } from "../exec";
-import { ensureLiveSandboxOrExit } from "../gateway-state";
-import { callOpenclawGateway } from "./gateway-rpc";
 import { deleteLegacySandboxSession } from "./legacy-delete";
+import { captureSessionMutationOutput } from "./mutation-capture";
 import {
-  confirmSessionPackageAuthority,
-  resolveSessionPackageAuthority,
-  type SessionPackageAuthority,
-} from "./package-authority";
+  assertSessionCommandAvailable,
+  confirmSessionCommandAuthority,
+  ensureLiveSessionSandbox,
+  resolveSessionCommandAuthority,
+  type SessionCommandAuthority,
+  withSessionCommandLock,
+} from "./command-authority";
 
 export interface SessionsDeleteOptions {
   readonly key: string;
@@ -57,7 +57,7 @@ function buildDeleteRequest(
 }
 
 function buildSessionDeletePlan(
-  authority: SessionPackageAuthority,
+  authority: SessionCommandAuthority,
   request: Extract<HarnessSessionMutationPlanRequest, { readonly operation: "delete" }>,
 ): HarnessSessionMutationPlan {
   try {
@@ -72,11 +72,11 @@ function buildSessionDeletePlan(
 
 function confirmSessionDeletePlan(
   sandboxName: string,
-  authority: SessionPackageAuthority,
+  authority: SessionCommandAuthority,
   request: Extract<HarnessSessionMutationPlanRequest, { readonly operation: "delete" }>,
   expectedPlan: HarnessSessionMutationPlan,
 ) {
-  const currentAdapter = confirmSessionPackageAuthority(sandboxName, authority.identity);
+  const currentAdapter = confirmSessionCommandAuthority(sandboxName, authority.identity);
   let currentPlan: HarnessSessionMutationPlan;
   try {
     currentPlan = currentAdapter.buildSessionMutationPlan(request);
@@ -125,12 +125,12 @@ export async function deleteSandboxSession(
   sandboxName: string,
   options: SessionsDeleteOptions,
 ): Promise<SessionsDeleteResult> {
-  const authority = resolveSessionPackageAuthority(sandboxName);
+  const authority = resolveSessionCommandAuthority(sandboxName);
   if (authority === null) return deleteLegacySandboxSession(sandboxName, options);
 
   return runWithDeferredSandboxLifecycleExit(() =>
-    withMcpLifecycleLock(sandboxName, async () => {
-      assertHermesPortableCommandUnavailable(sandboxName, "sandbox:sessions:delete");
+    withSessionCommandLock(sandboxName, async () => {
+      assertSessionCommandAvailable(sandboxName, "sandbox:sessions:delete");
       const request = buildDeleteRequest(options);
       const plan = buildSessionDeletePlan(authority, request);
       if (plan.kind === "unsupported" || plan.kind === "refused") {
@@ -138,7 +138,7 @@ export async function deleteSandboxSession(
       }
 
       // Capability refusal happens before liveness can issue any OpenShell call.
-      await ensureLiveSandboxOrExit(sandboxName, {
+      await ensureLiveSessionSandbox(sandboxName, {
         allowNonReadyPhase: true,
         exit: deferSandboxLifecycleExit,
       });
@@ -149,18 +149,13 @@ export async function deleteSandboxSession(
         throw new Error("unreachable: streamed session deletion terminated the process");
       }
 
-      const { payload } = callOpenclawGateway({
-        sandboxName,
-        method: plan.method,
-        params: plan.params,
-        exit: deferSandboxLifecycleExit,
-      });
+      const output = captureSessionMutationOutput(sandboxName, "delete", plan.command);
       let interpreted: HarnessSessionMutationOutput;
       try {
         interpreted = currentAdapter.interpretSessionMutationOutput({
           request,
           plan,
-          payload: payload as unknown as Record<string, never>,
+          output,
         });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);

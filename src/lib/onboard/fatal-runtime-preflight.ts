@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getBuildIdentity } from "../core/version";
+import { getBuildIdentity } from "../core/build-identity";
 import { detectGpu, type GpuDetection } from "../inference/nim";
 import {
   collectGatewayObservations,

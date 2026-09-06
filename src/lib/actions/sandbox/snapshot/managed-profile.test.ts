@@ -2,25 +2,142 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
-import { describe, expect, it } from "vitest";
+import type { HarnessStartupSettings } from "@nvidia/nemoclaw-harness-contract";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { managedStartupE2eProfile } from "../../../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
+import type { HarnessPackageIdentity } from "../../../agent-runtime/package/identity";
+import type { ResolvedSandboxAgent } from "../../../onboard/sandbox-agent";
 import {
   MANAGED_IMAGE_REPOSITORIES,
   type ShippedManagedImageAgent,
 } from "../../../onboard/managed-image/contract";
 import {
+  encodeManagedStartupDurableProfile,
   encodeManagedStartupProfile,
+  fingerprintManagedStartupDurableProfile,
   fingerprintManagedStartupProfile,
 } from "../../../onboard/managed-startup/profile";
+import { managedWorkloadAuthorityDependencies } from "../../../onboard/workload/authority";
 import type { RuntimeProviderBundle } from "../../../onboard/runtime-provider/contract";
 import type { SandboxEntry, SandboxWorkloadReceipt } from "../../../state/registry/types";
 import {
+  inspectManagedSnapshotCloneSupport,
   prepareManagedSnapshotProfileRestore,
   readManagedSnapshotProfileAuthority,
   rejectManagedSnapshotCloneUntilRebind,
 } from "./managed-profile";
+
+const ORIGINAL_PACKAGE_RESOLVER =
+  managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent;
+const FUTURE_PACKAGE: HarnessPackageIdentity = {
+  kind: "agent-runtime",
+  id: "future-harness",
+  packageVersion: "1.2.3",
+  contentDigest: "9".repeat(64),
+};
+const FUTURE_MANAGED_IMAGE = {
+  repository: "registry.example/team/future-harness",
+  architectures: ["linux/amd64"],
+  runtime_identity: { uid: 1234, gid: 1234, workdir: "/sandbox" },
+} as const;
+const FUTURE_DESIRED_STATE: HarnessStartupSettings = {
+  configuration: {},
+  inference: {
+    routeProvider: "inference",
+    upstreamProvider: "nvidia",
+    model: "nvidia/future-model",
+    routedBaseUrl: "https://inference.local/v1",
+    upstreamEndpointUrl: null,
+    api: "openai-completions",
+    primaryModelRef: null,
+    compatibility: null,
+    inputModalities: null,
+  },
+  proxy: {
+    managedHost: "10.200.0.1",
+    managedPort: 3128,
+    hostHttpUrl: null,
+    hostHttpsUrl: null,
+    hostNoProxy: [],
+  },
+  dashboard: { mode: "disabled" },
+  tools: { disclosure: "progressive", enabledGateways: [] },
+  messaging: { plan: null },
+  tuning: {
+    contextWindow: null,
+    maxTokens: null,
+    reasoning: null,
+    reasoningEffort: null,
+  },
+  corporateCa: { bundleSha256: null },
+};
+
+function futureWorkload(
+  profilePackage: HarnessPackageIdentity = FUTURE_PACKAGE,
+): Extract<SandboxWorkloadReceipt, { kind: "managed-image" }> {
+  const encodedProfile = encodeManagedStartupDurableProfile({
+    schemaVersion: 1,
+    profileKind: "package",
+    agent: profilePackage.id,
+    harnessPackage: profilePackage,
+    desiredState: FUTURE_DESIRED_STATE,
+    packageConfig: { extension: { retained: true } },
+    corporateCa: { bundleSha256: null },
+  });
+  return {
+    schemaVersion: 1 as const,
+    kind: "managed-image" as const,
+    reference: `${FUTURE_MANAGED_IMAGE.repository}@sha256:${"8".repeat(64)}`,
+    platform: "linux/amd64" as const,
+    release: "v0.0.100",
+    sourceRevision: "d".repeat(40),
+    sourceCohort: "ghrun-100-1",
+    capabilityContractVersion: 1 as const,
+    startupProfileContractVersion: 1 as const,
+    encodedProfile,
+    startupProfileSha256: createHash("sha256").update(encodedProfile, "utf8").digest("hex"),
+    credentialProxyReplayRequired: false,
+    shared: true,
+  };
+}
+
+function futureSandbox(receipt = futureWorkload()): SandboxEntry {
+  return {
+    name: "alpha",
+    agent: FUTURE_PACKAGE.id,
+    harnessPackage: FUTURE_PACKAGE,
+    openshellDriver: "mxc",
+    imageTag: receipt.reference,
+    fromDockerfile: null,
+    workload: receipt,
+  };
+}
+
+function useFuturePackageResolver(): void {
+  managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = vi.fn((entry) => {
+    if (!isDeepStrictEqual(entry.harnessPackage, FUTURE_PACKAGE)) {
+      throw new Error("installed future harness receipt changed");
+    }
+    return {
+      recordedAgent: FUTURE_PACKAGE.id,
+      effectiveAgentId: FUTURE_PACKAGE.id,
+      definition: {
+        name: FUTURE_PACKAGE.id,
+        packageRoot: "/installed/future-harness",
+        managedImage: FUTURE_MANAGED_IMAGE,
+      },
+      harnessPackage: FUTURE_PACKAGE,
+      harnessPackageMigration: null,
+    } as unknown as ResolvedSandboxAgent;
+  });
+}
+
+afterEach(() => {
+  managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = ORIGINAL_PACKAGE_RESOLVER;
+});
 
 function workload(
   agent: ShippedManagedImageAgent,
@@ -97,32 +214,35 @@ function provider(accepted = true, managedProfileRestore = true): RuntimeProvide
 }
 
 describe("managed snapshot profile restore", () => {
-  it.each([
-    "openclaw",
-    "hermes",
-    "langchain-deepagents-code",
-  ] as const)("validates exact secret-free %s profile authority", (agent) => {
-    const receipt = workload(agent);
-    const source = { sandboxName: "alpha", agentType: agent, workload: receipt };
+  it.each(["openclaw", "hermes", "langchain-deepagents-code"] as const)(
+    "validates exact secret-free %s profile authority",
+    (agent) => {
+      const receipt = workload(agent);
+      const source = { sandboxName: "alpha", agentType: agent, workload: receipt };
 
-    const plan = prepareManagedSnapshotProfileRestore(source, sandbox(agent, receipt), provider());
+      const plan = prepareManagedSnapshotProfileRestore(
+        source,
+        sandbox(agent, receipt),
+        provider(),
+      );
 
-    expect(plan).toMatchObject({
-      schemaVersion: 1,
-      providerId: "mxc",
-      sourceSandboxName: "alpha",
-      targetSandboxName: "alpha",
-      authority: {
-        agent,
-        receipt,
-        profile: { agent },
-      },
-      providerRestoreAuthority: {
-        agent,
-        profileFingerprint: fingerprintManagedStartupProfile(managedStartupE2eProfile(agent)),
-      },
-    });
-  });
+      expect(plan).toMatchObject({
+        schemaVersion: 1,
+        providerId: "mxc",
+        sourceSandboxName: "alpha",
+        targetSandboxName: "alpha",
+        authority: {
+          agent,
+          receipt,
+          profile: { agent },
+        },
+        providerRestoreAuthority: {
+          agent,
+          profileFingerprint: fingerprintManagedStartupProfile(managedStartupE2eProfile(agent)),
+        },
+      });
+    },
+  );
 
   it("returns null for legacy snapshots without managed workload authority", () => {
     expect(
@@ -165,6 +285,79 @@ describe("managed snapshot profile restore", () => {
         managedStartupE2eProfile("openclaw", true),
       ),
     });
+  });
+
+  it("validates an unknown receipt-backed package before reporting clone unsupported", () => {
+    useFuturePackageResolver();
+    const receipt = futureWorkload();
+    const source = {
+      sandboxName: "alpha",
+      agentType: FUTURE_PACKAGE.id,
+      harnessPackage: FUTURE_PACKAGE,
+      workload: receipt,
+    };
+
+    const support = inspectManagedSnapshotCloneSupport(source);
+    const restorePlan = prepareManagedSnapshotProfileRestore(
+      source,
+      futureSandbox(receipt),
+      provider(),
+    );
+    if (support.kind !== "unsupported") {
+      throw new Error("expected package clone support to be unavailable");
+    }
+
+    expect(support).toMatchObject({
+      kind: "unsupported",
+      reason: "receipt-backed package clone rebind is not implemented",
+      authority: {
+        agent: FUTURE_PACKAGE.id,
+        harnessPackage: FUTURE_PACKAGE,
+        contract: { harnessPackage: FUTURE_PACKAGE },
+        profile: { profileKind: "package", harnessPackage: FUTURE_PACKAGE },
+      },
+    });
+    expect(Object.isFrozen(support)).toBe(true);
+    expect(restorePlan).toMatchObject({
+      authority: { harnessPackage: FUTURE_PACKAGE },
+      providerRestoreAuthority: {
+        agent: FUTURE_PACKAGE.id,
+        profileFingerprint: fingerprintManagedStartupDurableProfile(support.authority.profile),
+      },
+    });
+  });
+
+  it.each([
+    ["version", { ...FUTURE_PACKAGE, packageVersion: "1.2.4" }],
+    ["digest", { ...FUTURE_PACKAGE, contentDigest: "7".repeat(64) }],
+  ] as const)(
+    "rejects unknown-package %s drift before clone support is granted",
+    (_field, drift) => {
+      useFuturePackageResolver();
+
+      expect(() =>
+        inspectManagedSnapshotCloneSupport({
+          sandboxName: "alpha",
+          agentType: FUTURE_PACKAGE.id,
+          harnessPackage: drift,
+          workload: futureWorkload(),
+        }),
+      ).toThrow(/invalid managed workload authority/u);
+    },
+  );
+
+  it("rejects a package profile whose embedded receipt identity drifted", () => {
+    useFuturePackageResolver();
+    const driftedProfilePackage = { ...FUTURE_PACKAGE, packageVersion: "1.2.4" };
+
+    expect(() =>
+      inspectManagedSnapshotCloneSupport({
+        sandboxName: "alpha",
+        agentType: FUTURE_PACKAGE.id,
+        harnessPackage: FUTURE_PACKAGE,
+        workload: futureWorkload(driftedProfilePackage),
+      }),
+    ).toThrow(/invalid managed workload authority/u);
   });
 
   it("rejects provider refusal and cross-sandbox or cross-agent rebind", () => {

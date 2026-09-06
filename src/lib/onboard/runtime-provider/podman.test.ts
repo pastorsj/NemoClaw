@@ -347,6 +347,38 @@ describe("managed Podman runtime provider", () => {
     ).not.toContain("docker");
   });
 
+  it("renders a receipt-selected numeric runtime identity for Podman execution", () => {
+    const runtime = providerHarness("openclaw");
+    const lifecycle = runtime.providers.podman?.lifecycle;
+    expect(lifecycle).toMatchObject({ supported: true });
+    const supportedLifecycle = lifecycle as Extract<
+      NonNullable<typeof lifecycle>,
+      { readonly supported: true }
+    >;
+
+    supportedLifecycle.start({
+      environment: {},
+      log: vi.fn(),
+      sandbox: runtime.entry,
+      sandboxName: runtime.sandboxName,
+    });
+    supportedLifecycle.privilegedSandboxControl.execute({
+      registeredSandboxNames: [runtime.sandboxName],
+      sandbox: runtime.entry,
+      sandboxName: runtime.sandboxName,
+      command: ["/trusted/reconcile"],
+      executionUser: { uid: 4321, gid: 4322 },
+      sanitizeEnvironment: true,
+      timeoutMs: 9000,
+    });
+
+    expect(runtime.lifecycle.capture).toHaveBeenLastCalledWith(
+      expect.arrayContaining(["--user", "4321:4322", CONTAINER_ID, "/trusted/reconcile"]),
+      9000,
+      undefined,
+    );
+  });
+
   it("routes stopped state cleanup through the Podman workload-cleanup engine", () => {
     const sandboxName = "podman-cleanup";
     const lifecycle = lifecycleEngine(sandboxName);

@@ -18,13 +18,17 @@ type MessagingChannelId = MessagingState["plan"]["channels"][number]["channelId"
 function messagingState(
   sandboxName: string,
   channels: readonly MessagingChannelId[],
+  options: {
+    readonly agent?: string;
+    readonly degradedDiagnostics?: "gateway-log-tail";
+  } = {},
 ): MessagingState {
   return {
     schemaVersion: 1,
     plan: {
       schemaVersion: 1,
       sandboxName,
-      agent: "openclaw",
+      agent: options.agent ?? "openclaw",
       workflow: "onboard",
       channels: channels.map((channelId) => ({
         channelId,
@@ -44,6 +48,15 @@ function messagingState(
       buildSteps: [],
       stateUpdates: [],
       healthChecks: [],
+      ...(options.degradedDiagnostics
+        ? {
+            packageBuild: {
+              configRoot: `~/.${options.agent ?? "future-harness"}`,
+              packageManagers: [],
+              degradedDiagnostics: options.degradedDiagnostics,
+            },
+          }
+        : {}),
     },
   };
 }
@@ -997,7 +1010,7 @@ describe("inventory commands", () => {
     ).toBe(true);
   });
 
-  it("surfaces Hermes gateway log when messaging is degraded", () => {
+  it("surfaces package-declared gateway logs for an unknown receipt package", () => {
     const lines: string[] = [];
     const checkMessagingBridgeHealth = vi
       .fn()
@@ -1014,8 +1027,12 @@ describe("inventory commands", () => {
           {
             name: "alpha",
             model: "m",
-            messaging: messagingState("alpha", ["telegram"]),
-            agent: "hermes",
+            messaging: messagingState("alpha", ["telegram"], {
+              agent: "future-harness",
+              degradedDiagnostics: "gateway-log-tail",
+            }),
+            agent: "future-harness",
+            harnessPackage: {},
           },
         ],
         defaultSandbox: "alpha",

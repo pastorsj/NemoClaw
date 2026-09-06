@@ -13,6 +13,11 @@ import type {
   SandboxScopeWarmupResult,
 } from "../../actions/sandbox/auto-pair-warmup";
 import { WATCHER_STATUS_TIMEOUT_MS } from "../../actions/sandbox/auto-pair-warmup";
+import {
+  packageDevicePairingIncompleteMessage,
+  settlePackageDevicePairing,
+} from "../sandbox-create/device-pairing";
+import type { HarnessDevicePairingSettlementDeclaration } from "@nvidia/nemoclaw-harness-contract";
 
 export {
   OPENCLAW_ONBOARDING_PAIRING_FINAL_OBSERVATION_TIMEOUT_MS,
@@ -364,6 +369,15 @@ export const finalizationHandlerDeps = {
     return settleOrdinaryOpenClawPairing(name, defaultPairingSettlementDeps());
   },
   ordinaryOpenClawPairingIncompleteMessage,
+  settlePackageDevicePairing(
+    name: string,
+    packageId: string,
+    declaration: HarnessDevicePairingSettlementDeclaration,
+    executionUser: { readonly uid: number; readonly gid: number },
+  ): ReturnType<typeof settlePackageDevicePairing> {
+    return settlePackageDevicePairing(name, packageId, declaration, executionUser);
+  },
+  packageDevicePairingIncompleteMessage,
   readRegistryAgent(name: string): string | null {
     try {
       const value = finalizationHandlerRuntime.loadRegistryPersistence().load().sandboxes[

@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { managedStartupE2eProfile } from "../../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
 import { mapManagedStartupProfileToAgentEnvironment as mapManagedStartupProfileWithAdapter } from "../../onboard/managed-startup/agent-environment";
+import { managedStartupSettingsFromProfile } from "../../onboard/managed-startup/package-profile";
 import * as managedWorkload from "../../onboard/workload/rebuild";
 import * as registry from "../../state/registry";
 import type { SandboxEntry } from "../../state/registry/types";
@@ -38,6 +39,148 @@ const handoff = {
 } as managedWorkload.ManagedWorkloadRebuildHandoff;
 
 describe("managed workload rebuild mutation guard", () => {
+  it("rebuilds a synthetic receipt-backed package from current authoritative intent", () => {
+    const previousProfile = managedStartupE2eProfile("pi");
+    const previousDesiredState = {
+      ...managedStartupSettingsFromProfile(previousProfile),
+      configuration: { agent: "future-harness" },
+      dashboard: { agent: "future-harness", mode: "disabled" as const },
+    };
+    const catalogHandoff = {
+      agent: "future-harness",
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "future-harness",
+        packageVersion: "1.2.3",
+        contentDigest: "9".repeat(64),
+      },
+      previousProfile: {
+        profileKind: "package",
+        desiredState: previousDesiredState,
+      },
+      previousReceipt: { credentialProxyReplayRequired: false },
+      previousDashboardRemoteBindPrepared: false,
+      corporateCa: null,
+    } as unknown as managedWorkload.ManagedWorkloadRebuildCatalogHandoff;
+    const targetConfig = {
+      agentDefinition: { runtime: { kind: "terminal" } },
+      resumeConfig: {
+        provider: "nvidia",
+        model: "nvidia/new-model",
+        preferredInferenceApi: "openai-completions",
+        endpointUrl: null,
+        compatibleEndpointReasoning: null,
+        compatibleEndpointReasoningEffort: null,
+      },
+      durableConfig: { webSearchConfig: null },
+      hermesToolGateways: [],
+    } as unknown as RebuildTargetConfig;
+    const stage = vi
+      .spyOn(managedWorkload, "stagePreparedManagedPackageWorkloadRebuildProfile")
+      .mockReturnValue(handoff as managedWorkload.PackageManagedWorkloadRebuildHandoff);
+    vi.spyOn(managedRebuildProfileDependencies, "getSandboxInferenceConfig").mockReturnValue({
+      providerKey: "inference",
+      primaryModelRef: "inference/nvidia/new-model",
+      inferenceBaseUrl: "https://inference.local/v1",
+      inferenceApi: "openai-completions",
+      inferenceCompat: null,
+    });
+
+    expect(
+      prepareManagedRebuildProfileHandoff({
+        catalogHandoff,
+        targetConfig,
+        recreateOptions: {
+          controlUiPort: null,
+          toolDisclosure: "direct",
+          dcodeAutoApprovalMode: "disabled",
+          observabilityEnabled: false,
+          dcodeAutoApprovalRequestedExplicitly: false,
+          observabilityRequestedExplicitly: false,
+        } as RebuildRecreateOnboardOpts,
+        messagingPlan: null,
+        environment: {},
+      }),
+    ).toBe(handoff);
+    expect(stage).toHaveBeenCalledExactlyOnceWith(
+      catalogHandoff,
+      expect.objectContaining({
+        inference: expect.objectContaining({ model: "nvidia/new-model" }),
+        messagingPlan: null,
+        toolDisclosure: "direct",
+      }),
+    );
+  });
+
+  it("forwards explicit DCode package controls through startup reconciliation", () => {
+    const previousProfile = managedStartupE2eProfile("langchain-deepagents-code");
+    const catalogHandoff = {
+      agent: "langchain-deepagents-code",
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "langchain-deepagents-code",
+        packageVersion: "1.2.3",
+        contentDigest: "9".repeat(64),
+      },
+      previousProfile: {
+        profileKind: "package",
+        desiredState: managedStartupSettingsFromProfile(previousProfile),
+      },
+      previousReceipt: { credentialProxyReplayRequired: false },
+      previousDashboardRemoteBindPrepared: false,
+      corporateCa: null,
+    } as unknown as managedWorkload.ManagedWorkloadRebuildCatalogHandoff;
+    const targetConfig = {
+      agentDefinition: { runtime: { kind: "terminal" } },
+      resumeConfig: {
+        provider: "nvidia",
+        model: "nvidia/new-model",
+        preferredInferenceApi: "openai-completions",
+        endpointUrl: "https://integrate.api.nvidia.com/v1",
+        compatibleEndpointReasoning: null,
+        compatibleEndpointReasoningEffort: null,
+      },
+      durableConfig: { webSearchConfig: null },
+      hermesToolGateways: [],
+    } as unknown as RebuildTargetConfig;
+    const stage = vi
+      .spyOn(managedWorkload, "stagePreparedManagedPackageWorkloadRebuildProfile")
+      .mockReturnValue(handoff as managedWorkload.PackageManagedWorkloadRebuildHandoff);
+    vi.spyOn(managedRebuildProfileDependencies, "getSandboxInferenceConfig").mockReturnValue({
+      providerKey: "inference",
+      primaryModelRef: "inference/nvidia/new-model",
+      inferenceBaseUrl: "https://inference.local/v1",
+      inferenceApi: "openai-completions",
+      inferenceCompat: null,
+    });
+
+    expect(
+      prepareManagedRebuildProfileHandoff({
+        catalogHandoff,
+        targetConfig,
+        recreateOptions: {
+          controlUiPort: null,
+          toolDisclosure: "direct",
+          dcodeAutoApprovalMode: "thread-opt-in",
+          observabilityEnabled: true,
+          dcodeAutoApprovalRequestedExplicitly: true,
+          observabilityRequestedExplicitly: true,
+        } as RebuildRecreateOnboardOpts,
+        messagingPlan: null,
+        toolDisclosureRequestedExplicitly: true,
+        environment: {},
+      }),
+    ).toBe(handoff);
+    expect(stage).toHaveBeenCalledWith(
+      catalogHandoff,
+      expect.objectContaining({
+        approvalMode: "thread-opt-in",
+        observabilityEnabled: true,
+        toolDisclosure: "direct",
+      }),
+    );
+  });
+
   it("blocks deletion when durable workload authority changes", () => {
     vi.spyOn(registry, "getSandbox").mockReturnValue(entry);
 
@@ -75,11 +218,13 @@ describe("managed workload rebuild mutation guard", () => {
   it("stages compatible-endpoint OpenClaw reasoning authority before deletion", () => {
     const catalogHandoff = {
       agent: "openclaw",
+      harnessPackage: null,
       previousProfile: {
         inference: { model: "previous-model", upstreamProvider: "nvidia-prod" },
         dashboard: { agent: "openclaw", bindAddress: "127.0.0.1", wslExposure: false },
       },
     } as unknown as managedWorkload.ManagedWorkloadRebuildCatalogHandoff;
+    if (catalogHandoff.harnessPackage) throw new Error("expected legacy handoff");
     const targetConfig = {
       agentDefinition: {},
       resumeConfig: {
@@ -167,6 +312,7 @@ describe("managed workload rebuild mutation guard", () => {
     const browserUrl = "https://secure-link.example/dashboard";
     const catalogHandoff = {
       agent: "hermes",
+      harnessPackage: null,
       previousProfile: {
         ...previousProfile,
         dashboard: { ...previousDashboard, browserUrl },
@@ -174,6 +320,7 @@ describe("managed workload rebuild mutation guard", () => {
       previousReceipt: { credentialProxyReplayRequired: false },
       corporateCa: null,
     } as unknown as managedWorkload.ManagedWorkloadRebuildCatalogHandoff;
+    if (catalogHandoff.harnessPackage) throw new Error("expected legacy handoff");
     const targetConfig = {
       agentDefinition: {},
       resumeConfig: {
@@ -233,6 +380,9 @@ describe("managed workload rebuild mutation guard", () => {
       messagingPlan: null,
       environment,
     });
+    if ("profileKind" in prepared.replacementProfile.profile) {
+      throw new Error("expected legacy replacement profile");
+    }
 
     expect(prepared.replacementProfile.profile.dashboard).toMatchObject({
       agent: "hermes",
@@ -259,6 +409,9 @@ describe("managed workload rebuild mutation guard", () => {
       messagingPlan: null,
       environment,
     });
+    if ("profileKind" in loopbackPrepared.replacementProfile.profile) {
+      throw new Error("expected legacy replacement profile");
+    }
 
     expect(loopbackPrepared.replacementProfile.profile.dashboard).toMatchObject({
       browserUrl: "http://127.0.0.2:29443/dashboard",

@@ -11,7 +11,7 @@ import {
   assertPersistedAuthenticatedBridgeEntry,
   validateMcpCredentialEnvName,
 } from "./mcp-bridge-validation";
-import { executeSandboxExecCommand } from "./process-recovery";
+import { executeSandboxExecCommand } from "./transport/command-execution";
 
 const MCP_CREDENTIAL_REVISION_OBSERVATION_RE = /^(?:absent|canonical|v[0-9]{1,20})$/;
 
@@ -273,8 +273,7 @@ export function waitForDetachedMcpCredential(
         sandboxName,
         buildMcpCredentialDetachedCommand(envName),
         runtimeSelection,
-      )
-        ?.status === 0,
+      )?.status === 0,
     Number.isFinite(timeoutSeconds) && timeoutSeconds > 0 ? timeoutSeconds : 30,
     1_000,
   );

@@ -70,7 +70,10 @@ function withPrivilegedExecMocks<T>(
       },
     ) => { assertRuntimeAuthority: () => void; containerId: string; dockerHost: string } | null;
   },
-  run: (helper: typeof import("./privileged-exec")) => T,
+  run: (
+    helper: typeof import("./privileged-exec"),
+    dockerControl?: import("../onboard/runtime-provider/contract").RuntimeProviderPrivilegedSandboxControl,
+  ) => T,
 ): T {
   const priorHelper = require.cache[helperPath];
   const priorCurrentRuntimeProviders = require.cache[currentRuntimeProvidersPath];
@@ -190,7 +193,7 @@ function withPrivilegedExecMocks<T>(
   } as any;
 
   try {
-    return run(require(helperPath));
+    return run(require(helperPath), dockerControl);
   } finally {
     restoreRequireCacheEntry(helperPath, priorHelper);
     restoreRequireCacheEntry(currentRuntimeProvidersPath, priorCurrentRuntimeProviders);
@@ -954,6 +957,56 @@ describe("privileged sandbox exec routing", () => {
         timeout: 5000,
       },
     ]);
+  });
+
+  it("renders a receipt-selected numeric runtime identity for Docker execution", () => {
+    withPrivilegedExecMocks(
+      {
+        getSandbox: () => ({ name: "alpha", openshellDriver: "docker" }),
+        listSandboxes: () => ({ sandboxes: [{ name: "alpha" }], defaultSandbox: "alpha" }),
+        dockerCapture: () => "immutable-alpha-id\topenshell-alpha\n",
+      },
+      (_helper, dockerControl) => {
+        expect(dockerControl?.buildLegacyDockerArgv).toBeTypeOf("function");
+        expect(
+          dockerControl?.buildLegacyDockerArgv?.({
+            registeredSandboxNames: ["alpha"],
+            sandbox: { name: "alpha", openshellDriver: "docker" },
+            sandboxName: "alpha",
+            command: ["/trusted/reconcile"],
+            executionUser: { uid: 4321, gid: 4322 },
+            sanitizeEnvironment: true,
+          }),
+        ).toEqual(
+          expect.arrayContaining([
+            "--user",
+            "4321:4322",
+            "immutable-alpha-id",
+            "/trusted/reconcile",
+          ]),
+        );
+      },
+    );
+  });
+
+  it("refuses execution when the receipt-pinned runtime provider changed", () => {
+    const dockerCapture = vi.fn(() => "immutable-alpha-id\topenshell-alpha\n");
+    withPrivilegedExecMocks(
+      {
+        getSandbox: () => ({ name: "alpha", openshellDriver: "docker" }),
+        listSandboxes: () => ({ sandboxes: [{ name: "alpha" }], defaultSandbox: "alpha" }),
+        dockerCapture,
+      },
+      ({ executePrivilegedSandboxCommand }) => {
+        expect(() =>
+          executePrivilegedSandboxCommand("alpha", ["/trusted/reconcile"], {
+            expectedProviderId: "podman",
+            expectedResourceHandle: "immutable-alpha-id",
+          }),
+        ).toThrow("Runtime provider identity changed");
+      },
+    );
+    expect(dockerCapture).not.toHaveBeenCalled();
   });
 
   it("clears interpreter and dynamic-loader injection variables for root control", () => {

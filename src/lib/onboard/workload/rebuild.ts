@@ -2,8 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isDeepStrictEqual } from "node:util";
-import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
+import type {
+  HarnessManagedImageDeclaration,
+  HarnessStartupSettings,
+} from "@nvidia/nemoclaw-harness-contract";
 import type { AgentDefinition } from "../../agent-runtime/manifest-types";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
+import { loadHarnessStartupProfileAdapterHostModule } from "../../agent-runtime/startup-module";
 import { readCandidateQualificationReceipt } from "../../agent/candidate";
 import { cloneAndDeepFreeze } from "../../core/immutable";
 import { getVersion } from "../../core/version";
@@ -17,23 +22,34 @@ import {
   qualifiedManagedImageDeclaration,
   type ManagedImageAgent,
   type ManagedImageContractV1,
+  type PackageManagedImageContract,
+  parsePackageManagedImageContract,
   parseStockManagedImageContract,
 } from "../managed-image/contract";
+import {
+  buildManagedStartupPackageProfile,
+  type BuiltManagedStartupPackageProfile,
+} from "../managed-startup/package-profile";
+import {
+  buildManagedStartupPackagePreparationInput,
+  type ManagedStartupPackagePreparationSource,
+} from "../managed-startup/package-input";
 import {
   type BuiltManagedStartupOnboardProfile,
   buildManagedStartupOnboardProfile,
   type ManagedStartupOnboardProfileInput,
 } from "../managed-startup/onboard-profile";
 import type {
+  ManagedStartupDurableProfile,
   ManagedStartupProfile,
-  ManagedStartupReasoningEffort,
 } from "../managed-startup/profile";
 import type { RuntimeProviderBundle } from "../runtime-provider/contract";
 import { requireRuntimeProviderMutationAuthority } from "../runtime-provider/registry";
 import {
   type ManagedWorkloadAuthority,
   type ManagedWorkloadReceipt,
-  readManagedWorkloadAuthority,
+  type PackageManagedWorkloadAuthority,
+  readDurableManagedWorkloadAuthority,
 } from "./authority";
 
 export type { ManagedWorkloadReceipt } from "./authority";
@@ -51,26 +67,25 @@ import {
   resolveSandboxWorkloadSource,
   type SandboxWorkloadRuntimeCapabilities,
 } from "./source";
+import {
+  managedWorkloadRebuildProfileEnvironment,
+  type ManagedWorkloadRebuildProfileOverrides,
+} from "./rebuild-compat";
 
-const HOST_PROXY_ENV_NAMES = [
-  "HTTP_PROXY",
-  "HTTPS_PROXY",
-  "NO_PROXY",
-  "http_proxy",
-  "https_proxy",
-  "no_proxy",
-] as const;
+export {
+  managedWorkloadRebuildProfileEnvironment,
+  type ManagedWorkloadRebuildProfileOverrides,
+} from "./rebuild-compat";
 
-export interface ManagedWorkloadRebuildCatalogHandoff {
+interface ManagedWorkloadRebuildCatalogHandoffCommon {
   readonly schemaVersion: 1;
   readonly providerId: string;
-  readonly agent: ManagedImageAgent;
   /** Receipt-pinned package declaration retained across rebuild preparation. */
   readonly managedImage: HarnessManagedImageDeclaration;
   /** Exact authority retained until a replacement has become Ready. */
   readonly previousReceipt: ManagedWorkloadReceipt;
-  readonly previousContract: ManagedImageContractV1;
-  readonly previousProfile: ManagedStartupProfile;
+  /** Durable authorization marker for an already-prepared remote dashboard. */
+  readonly previousDashboardRemoteBindPrepared: boolean;
   /** Exact current-release image selected from one complete all-agent catalog. */
   readonly replacement: PreparedSandboxWorkloadSource & {
     readonly source: ManagedImageWorkloadSource;
@@ -79,13 +94,39 @@ export interface ManagedWorkloadRebuildCatalogHandoff {
   readonly corporateCa: ResolvedCorporateCa | null;
 }
 
-export interface ManagedWorkloadRebuildHandoff extends ManagedWorkloadRebuildCatalogHandoff {
-  /**
-   * Fully rendered replacement profile. It is prepared before any provider or
-   * registry mutation, then consumed verbatim by the staged replacement.
-   */
-  readonly replacementProfile: BuiltManagedStartupOnboardProfile;
+export interface LegacyManagedWorkloadRebuildCatalogHandoff extends ManagedWorkloadRebuildCatalogHandoffCommon {
+  readonly agent: ManagedImageAgent;
+  readonly harnessPackage?: null;
+  readonly previousContract: ManagedImageContractV1;
+  readonly previousProfile: ManagedStartupProfile;
 }
+
+export interface PackageManagedWorkloadRebuildCatalogHandoff extends ManagedWorkloadRebuildCatalogHandoffCommon {
+  readonly agent: string;
+  readonly harnessPackage: HarnessPackageIdentity;
+  readonly previousContract: PackageManagedImageContract;
+  readonly previousProfile: Extract<
+    ManagedStartupDurableProfile,
+    { readonly profileKind: "package" }
+  >;
+}
+
+export type ManagedWorkloadRebuildCatalogHandoff =
+  | LegacyManagedWorkloadRebuildCatalogHandoff
+  | PackageManagedWorkloadRebuildCatalogHandoff;
+
+export type LegacyManagedWorkloadRebuildHandoff = LegacyManagedWorkloadRebuildCatalogHandoff & {
+  readonly replacementProfile: BuiltManagedStartupOnboardProfile;
+};
+
+export type PackageManagedWorkloadRebuildHandoff = PackageManagedWorkloadRebuildCatalogHandoff & {
+  readonly replacementProfile: BuiltManagedStartupPackageProfile;
+};
+
+/** Fully rendered replacement profile retained before provider or registry mutation. */
+export type ManagedWorkloadRebuildHandoff =
+  | LegacyManagedWorkloadRebuildHandoff
+  | PackageManagedWorkloadRebuildHandoff;
 
 export class ManagedWorkloadRebuildError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -95,7 +136,7 @@ export class ManagedWorkloadRebuildError extends Error {
 }
 
 function requireProviderBoundAuthority(
-  authority: ManagedWorkloadAuthority,
+  authority: ManagedWorkloadAuthority | PackageManagedWorkloadAuthority,
   runtime: SandboxWorkloadRuntimeCapabilities,
   provider: RuntimeProviderBundle,
 ): void {
@@ -126,6 +167,7 @@ function requireProviderBoundAuthority(
 
 export const managedWorkloadRebuildDependencies = {
   prepareSandboxWorkloadSource,
+  loadHarnessStartupProfileAdapterHostModule,
 };
 
 /**
@@ -134,7 +176,16 @@ export const managedWorkloadRebuildDependencies = {
  * never falls back to a Dockerfile or a mutable tag.
  */
 export async function prepareManagedWorkloadRebuildHandoff(
-  entry: Pick<SandboxEntry, "agent" | "fromDockerfile" | "imageTag" | "workload">,
+  entry: Pick<
+    SandboxEntry,
+    | "agent"
+    | "dashboardRemoteBindPrepared"
+    | "fromDockerfile"
+    | "harnessPackage"
+    | "harnessPackageMigration"
+    | "imageTag"
+    | "workload"
+  >,
   options: {
     readonly runtime: SandboxWorkloadRuntimeCapabilities;
     readonly provider: RuntimeProviderBundle;
@@ -142,11 +193,9 @@ export async function prepareManagedWorkloadRebuildHandoff(
     readonly version?: string;
   },
 ): Promise<ManagedWorkloadRebuildCatalogHandoff | null> {
-  const authority = readManagedWorkloadAuthority(entry, options.agentDefinition);
+  const authority = readDurableManagedWorkloadAuthority(entry, options.agentDefinition);
   if (!authority) return null;
-  const managedImage = options.agentDefinition
-    ? options.agentDefinition.managedImage
-    : qualifiedManagedImageDeclaration(authority.agent);
+  const managedImage = authority.managedImage;
   if (
     managedImage === null ||
     (options.agentDefinition !== undefined && options.agentDefinition.name !== authority.agent)
@@ -158,7 +207,7 @@ export async function prepareManagedWorkloadRebuildHandoff(
   requireProviderBoundAuthority(authority, options.runtime, options.provider);
 
   let replacement: PreparedSandboxWorkloadSource;
-  if (isCandidateManagedImageAgent(authority.agent)) {
+  if (authority.harnessPackage === null && isCandidateManagedImageAgent(authority.agent)) {
     // A candidate publishes outside the all-agent release cohort, so its
     // replacement comes from the protected qualification receipt rather than
     // the current release catalog.
@@ -203,6 +252,7 @@ export async function prepareManagedWorkloadRebuildHandoff(
       replacement = await managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource({
         agentName: authority.agent,
         managedImage,
+        ...(authority.harnessPackage === null ? {} : { harnessPackage: authority.harnessPackage }),
         legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
         runtime: options.runtime,
         version: options.version ?? getVersion(),
@@ -229,37 +279,65 @@ export async function prepareManagedWorkloadRebuildHandoff(
     );
   }
 
-  return cloneAndDeepFreeze({
+  const common = {
     schemaVersion: 1 as const,
     providerId: options.provider.identity.id,
-    agent: authority.agent,
     managedImage,
     previousReceipt: authority.receipt,
-    previousContract: authority.contract,
-    previousProfile: authority.profile,
+    previousDashboardRemoteBindPrepared: entry.dashboardRemoteBindPrepared === true,
     replacement: {
       ...replacement,
       source: replacement.source,
     },
     corporateCa: authority.corporateCa,
-  });
+  };
+  if (authority.harnessPackage === null) {
+    const handoff: LegacyManagedWorkloadRebuildCatalogHandoff = {
+      ...common,
+      agent: authority.agent,
+      harnessPackage: null,
+      previousContract: authority.contract,
+      previousProfile: authority.profile,
+    };
+    return cloneAndDeepFreeze(handoff);
+  }
+  const handoff: PackageManagedWorkloadRebuildCatalogHandoff = {
+    ...common,
+    agent: authority.agent,
+    harnessPackage: authority.harnessPackage,
+    previousContract: authority.contract,
+    previousProfile: authority.profile,
+  };
+  return cloneAndDeepFreeze(handoff);
 }
 
 /** Revalidate the retained handoff against the live registry row and provider. */
 export function managedWorkloadRebuildHandoffMatchesEntry(
   handoff: ManagedWorkloadRebuildCatalogHandoff,
-  entry: Pick<SandboxEntry, "agent" | "fromDockerfile" | "imageTag" | "workload"> | null,
+  entry: Pick<
+    SandboxEntry,
+    | "agent"
+    | "dashboardRemoteBindPrepared"
+    | "fromDockerfile"
+    | "harnessPackage"
+    | "harnessPackageMigration"
+    | "imageTag"
+    | "workload"
+  > | null,
   provider: RuntimeProviderBundle,
 ): boolean {
   if (!entry || provider.identity.id !== handoff.providerId) return false;
   try {
-    const current = readManagedWorkloadAuthority(entry, {
+    const current = readDurableManagedWorkloadAuthority(entry, {
       name: handoff.agent,
       managedImage: handoff.managedImage,
     });
     return (
       current !== null &&
       current.agent === handoff.agent &&
+      (entry.dashboardRemoteBindPrepared === true) ===
+        handoff.previousDashboardRemoteBindPrepared &&
+      isDeepStrictEqual(current.harnessPackage, handoff.harnessPackage) &&
       provider.workload.acceptsReceipt(current.receipt) &&
       isDeepStrictEqual(current.receipt, handoff.previousReceipt) &&
       isDeepStrictEqual(current.contract, handoff.previousContract) &&
@@ -270,77 +348,97 @@ export function managedWorkloadRebuildHandoffMatchesEntry(
   }
 }
 
-export interface ManagedWorkloadRebuildProfileOverrides {
-  readonly openClawContextWindow?: number;
-  readonly openClawReasoning?: boolean;
-  readonly openClawReasoningEffort?: ManagedStartupReasoningEffort;
-}
-
-/**
- * Keep the source sandbox's proxy contract while allowing every other
- * profile-backed rebuild setting to come from current authoritative intent.
- * Credential-bearing proxy values remain launch-only and are reacquired from
- * the operator environment only when the durable receipt requires replay.
- */
-export function managedWorkloadRebuildProfileEnvironment(
-  handoff: ManagedWorkloadRebuildCatalogHandoff,
-  environment: NodeJS.ProcessEnv,
-  overrides: ManagedWorkloadRebuildProfileOverrides = {},
-): NodeJS.ProcessEnv {
-  const result: NodeJS.ProcessEnv = {
-    NEMOCLAW_PROXY_HOST: handoff.previousProfile.proxy.managedHost,
-    NEMOCLAW_PROXY_PORT: String(handoff.previousProfile.proxy.managedPort),
-  };
-  const previous = handoff.previousProfile;
-  if (previous.agent === "openclaw" && previous.agentConfig.agent === "openclaw") {
-    const config = previous.agentConfig;
-    const contextWindow = overrides.openClawContextWindow ?? previous.tuning.contextWindow;
-    if (contextWindow !== null) result.NEMOCLAW_CONTEXT_WINDOW = String(contextWindow);
-    if (previous.tuning.maxTokens !== null) {
-      result.NEMOCLAW_MAX_TOKENS = String(previous.tuning.maxTokens);
-    }
-    const reasoning = overrides.openClawReasoning ?? previous.tuning.reasoning;
-    if (reasoning !== null) result.NEMOCLAW_REASONING = String(reasoning);
-    const reasoningEffort = overrides.openClawReasoningEffort ?? previous.tuning.reasoningEffort;
-    if (reasoningEffort !== null) result.NEMOCLAW_REASONING_EFFORT = reasoningEffort;
-    if (previous.inference.inputModalities !== null) {
-      result.NEMOCLAW_INFERENCE_INPUTS = previous.inference.inputModalities.join(",");
-    }
-    result.NEMOCLAW_AGENT_TIMEOUT = String(config.agentTimeoutSeconds);
-    if (config.heartbeatEvery !== null) {
-      result.NEMOCLAW_AGENT_HEARTBEAT_EVERY = config.heartbeatEvery;
-    }
-    result.NEMOCLAW_EXTRA_AGENTS_JSON_B64 = Buffer.from(
-      JSON.stringify(config.extraAgents),
-      "utf8",
-    ).toString("base64");
-    result.NEMOCLAW_MINIMAL_BOOTSTRAP = config.minimalBootstrap ? "1" : "0";
-    result.NEMOCLAW_OPENCLAW_OTEL = config.otel.enabled ? "1" : "0";
-    result.NEMOCLAW_OPENCLAW_OTEL_ENDPOINT = config.otel.endpointUrl;
-    result.NEMOCLAW_OPENCLAW_OTEL_SERVICE_NAME = config.otel.serviceName;
-    result.NEMOCLAW_OPENCLAW_OTEL_SAMPLE_RATE = String(config.otel.sampleRate);
-  } else if (previous.agent === "hermes" && previous.tuning.contextWindow !== null) {
-    result.NEMOCLAW_CONTEXT_WINDOW = String(previous.tuning.contextWindow);
-  }
-
-  if (handoff.previousReceipt.credentialProxyReplayRequired) {
-    for (const name of HOST_PROXY_ENV_NAMES) {
-      const value = environment[name];
-      if (value !== undefined) result[name] = value;
-    }
-    return result;
-  }
-  const proxy = handoff.previousProfile.proxy;
-  if (proxy.hostHttpUrl) result.HTTP_PROXY = proxy.hostHttpUrl;
-  if (proxy.hostHttpsUrl) result.HTTPS_PROXY = proxy.hostHttpsUrl;
-  if (proxy.hostNoProxy.length > 0) result.NO_PROXY = proxy.hostNoProxy.join(",");
-  return result;
-}
-
 type ManagedWorkloadRebuildProfileInput = Omit<
   ManagedStartupOnboardProfileInput,
   "agentName" | "environment" | "corporateCa"
 >;
+
+/** Reconcile one package profile without consulting the built-in harness catalogue. */
+export function stageManagedPackageWorkloadRebuildProfile(
+  handoff: PackageManagedWorkloadRebuildCatalogHandoff,
+  desiredState: HarnessStartupSettings,
+  adapter = managedWorkloadRebuildDependencies.loadHarnessStartupProfileAdapterHostModule(
+    handoff.harnessPackage,
+  ),
+): PackageManagedWorkloadRebuildHandoff {
+  let replacementProfile: BuiltManagedStartupPackageProfile;
+  try {
+    const result = adapter.reconcileStartupProfile({
+      packageId: handoff.harnessPackage.id,
+      harnessPackage: handoff.harnessPackage,
+      desiredState,
+      currentPackageConfig: handoff.previousProfile.packageConfig,
+    });
+    if (result.kind === "unsupported") {
+      throw new Error(
+        `harness package '${handoff.harnessPackage.id}' does not support startup reconciliation: ${result.reason}`,
+      );
+    }
+    replacementProfile = buildManagedStartupPackageProfile({
+      harnessPackage: handoff.harnessPackage,
+      desiredState,
+      packageConfig: result.packageConfig,
+      credentialProxyReplayRequired: handoff.previousReceipt.credentialProxyReplayRequired,
+      dashboardRemoteBindPrepared: handoff.previousDashboardRemoteBindPrepared,
+      ...(handoff.previousReceipt.corporateCaB64 === undefined
+        ? {}
+        : { corporateCaB64: handoff.previousReceipt.corporateCaB64 }),
+    });
+  } catch (error) {
+    throw new ManagedWorkloadRebuildError(
+      `the package startup profile could not be reconciled from authoritative rebuild state: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { cause: error },
+    );
+  }
+  return cloneAndDeepFreeze({ ...handoff, replacementProfile });
+}
+
+/** Let the exact package normalize current operator intent before opaque config reconciliation. */
+export function stagePreparedManagedPackageWorkloadRebuildProfile(
+  handoff: PackageManagedWorkloadRebuildCatalogHandoff,
+  source: ManagedStartupPackagePreparationSource,
+): PackageManagedWorkloadRebuildHandoff {
+  try {
+    const adapter = managedWorkloadRebuildDependencies.loadHarnessStartupProfileAdapterHostModule(
+      handoff.harnessPackage,
+    );
+    const preparedInput = buildManagedStartupPackagePreparationInput(
+      source,
+      adapter.startupProfileEnvironment,
+    );
+    const result = adapter.prepareStartupProfile({
+      packageId: handoff.harnessPackage.id,
+      harnessPackage: handoff.harnessPackage,
+      phase: "rebuild",
+      input: preparedInput.input,
+      previousDesiredState: handoff.previousProfile.desiredState,
+    });
+    if (result.kind === "unsupported") {
+      throw new Error(
+        `harness package '${handoff.harnessPackage.id}' does not support startup profile preparation: ${result.reason}`,
+      );
+    }
+    if (
+      result.credentialProxyReplayRequired !==
+        handoff.previousReceipt.credentialProxyReplayRequired ||
+      result.dashboardRemoteBindPrepared !== handoff.previousDashboardRemoteBindPrepared ||
+      preparedInput.corporateCaB64 !== handoff.previousReceipt.corporateCaB64
+    ) {
+      throw new Error("the package changed durable startup preparation authority");
+    }
+    return stageManagedPackageWorkloadRebuildProfile(handoff, result.desiredState, adapter);
+  } catch (error) {
+    if (error instanceof ManagedWorkloadRebuildError) throw error;
+    throw new ManagedWorkloadRebuildError(
+      `the package startup profile could not be prepared from authoritative rebuild state: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { cause: error },
+    );
+  }
+}
 
 /**
  * Render every fallible replacement-profile input while the old workload is
@@ -349,10 +447,20 @@ type ManagedWorkloadRebuildProfileInput = Omit<
  */
 export function stageManagedWorkloadRebuildProfile(
   handoff: ManagedWorkloadRebuildCatalogHandoff,
-  input: ManagedWorkloadRebuildProfileInput,
+  input: ManagedWorkloadRebuildProfileInput | null,
   environment: NodeJS.ProcessEnv = process.env,
   overrides: ManagedWorkloadRebuildProfileOverrides = {},
 ): ManagedWorkloadRebuildHandoff {
+  if (handoff.harnessPackage) {
+    throw new ManagedWorkloadRebuildError(
+      "receipt-backed startup profiles require package-owned preparation",
+    );
+  }
+  if (input === null) {
+    throw new ManagedWorkloadRebuildError(
+      "legacy startup profile reconstruction requires current authoritative intent",
+    );
+  }
   let replacementProfile: BuiltManagedStartupOnboardProfile;
   try {
     replacementProfile = buildManagedStartupOnboardProfile({
@@ -405,11 +513,13 @@ export function prepareSandboxWorkloadSourceFromRebuildHandoff(
     source = resolveSandboxWorkloadSource({
       agentName: handoff.agent,
       managedImage: handoff.managedImage,
+      harnessPackage: handoff.harnessPackage,
       legacyDockerfilePath: "",
       runtime,
       catalog: { [handoff.agent]: handoff.replacement.source.contract },
       policy: "require-managed",
-      candidateAgentsEnabled: isCandidateManagedImageAgent(handoff.agent),
+      candidateAgentsEnabled:
+        !handoff.harnessPackage && isCandidateManagedImageAgent(handoff.agent),
     });
   } catch (error) {
     throw new SandboxWorkloadPreparationError(
@@ -456,14 +566,21 @@ export function buildManagedWorkloadRebuildReceipt(
       "the replacement receipt does not belong to the selected provider",
     );
   }
-  let contract: ManagedImageContractV1;
+  let contract: ManagedImageContractV1 | PackageManagedImageContract;
   try {
-    contract = parseStockManagedImageContract(
-      handoff.replacement.source.contract,
-      handoff.agent,
-      handoff.managedImage,
-      handoff.previousContract.platform,
-    );
+    contract = !handoff.harnessPackage
+      ? parseStockManagedImageContract(
+          handoff.replacement.source.contract,
+          handoff.agent,
+          handoff.managedImage,
+          handoff.previousContract.platform,
+        )
+      : parsePackageManagedImageContract(
+          handoff.replacement.source.contract,
+          handoff.harnessPackage,
+          handoff.managedImage,
+          handoff.previousContract.platform,
+        );
   } catch (error) {
     throw new ManagedWorkloadRebuildError(
       "the replacement image contract does not match the exact rebuild agent and platform",
@@ -479,6 +596,15 @@ export function buildManagedWorkloadRebuildReceipt(
   if (profile.profile.agent !== handoff.agent) {
     throw new ManagedWorkloadRebuildError(
       "the replacement startup profile does not match the exact rebuild agent",
+    );
+  }
+  if (
+    handoff.harnessPackage &&
+    handoff.replacementProfile.dashboardRemoteBindPrepared !==
+      handoff.previousDashboardRemoteBindPrepared
+  ) {
+    throw new ManagedWorkloadRebuildError(
+      "the replacement startup profile changed the durable remote-dashboard preparation marker",
     );
   }
   const receipt: ManagedWorkloadReceipt = {
@@ -497,7 +623,9 @@ export function buildManagedWorkloadRebuildReceipt(
     ...(profile.corporateCaB64 === undefined ? {} : { corporateCaB64: profile.corporateCaB64 }),
     shared: true,
   };
-  const validatedReceipt = cloneSandboxWorkloadReceipt(receipt);
+  const validatedReceipt = cloneSandboxWorkloadReceipt(receipt, {
+    harnessPackage: handoff.harnessPackage ?? null,
+  });
   if (validatedReceipt?.kind !== "managed-image" || !isDeepStrictEqual(validatedReceipt, receipt)) {
     throw new ManagedWorkloadRebuildError(
       "the replacement startup profile and image contract do not form valid durable authority",

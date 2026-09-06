@@ -96,7 +96,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(f.backupSandboxStateMock).toHaveBeenCalledWith("alpha", { name: null });
   });
 
-  it("repairs mutable permissions before reporting an OpenClaw restore", async () => {
+  it("repairs mutable permissions before reporting a receipt-backed restore", async () => {
     const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
     const source = packageManagedSandbox("alpha", OPENCLAW_PACKAGE);
     configureCloneRegistry(source);
@@ -117,9 +117,9 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
 
     const output = consoleLog.mock.calls.flat().join("\n");
     expect(f.mutableConfigMock.repairMutableConfigPermsMock).toHaveBeenCalledWith("alpha");
-    expect(output).toContain("OpenClaw config permissions restored");
+    expect(output).toContain("Mutable config permissions restored");
     expect(output).toContain("Restored 1 directories, 1 files");
-    expect(output.indexOf("OpenClaw config permissions restored")).toBeLessThan(
+    expect(output.indexOf("Mutable config permissions restored")).toBeLessThan(
       output.indexOf("Restored 1 directories, 1 files"),
     );
   });
@@ -254,7 +254,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(f.restoreSandboxStateMock).not.toHaveBeenCalled();
   });
 
-  it("fails after restore when OpenClaw config permission verification fails", async () => {
+  it("fails after restore when mutable config permission verification fails", async () => {
     const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
     const source = packageManagedSandbox("alpha", OPENCLAW_PACKAGE);
     configureCloneRegistry(source);
@@ -279,7 +279,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     await expect(runSandboxSnapshot("alpha", { kind: "restore" })).rejects.toMatchObject({
       exitCode: 1,
       lines: [
-        "State restored into 'alpha', but OpenClaw config permissions could not be verified.",
+        "State restored into 'alpha', but mutable config permissions could not be verified.",
         expect.stringContaining("nemoclaw alpha doctor --fix"),
         "Details: openclaw.json remains read-only",
       ],
@@ -289,7 +289,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     );
   });
 
-  it("fails after restore when OpenClaw config permission repair throws", async () => {
+  it("fails after restore when mutable config permission repair throws", async () => {
     const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
     const source = packageManagedSandbox("alpha", OPENCLAW_PACKAGE);
     configureCloneRegistry(source);
@@ -312,7 +312,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     await expect(runSandboxSnapshot("alpha", { kind: "restore" })).rejects.toMatchObject({
       exitCode: 1,
       lines: [
-        "State restored into 'alpha', but OpenClaw config permissions could not be verified.",
+        "State restored into 'alpha', but mutable config permissions could not be verified.",
         expect.stringContaining("nemoclaw alpha doctor --fix"),
         "Details: permission repair unavailable",
       ],
@@ -811,11 +811,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       runWhen(name === "nemocua" && !repositorySelectable, () => {
         throw new Error("repository qualification was withdrawn");
       });
-      return {
-        name,
-        packageRoot: `/repo/agents/${name}`,
-        policyAdditionsPath: `/repo/agents/${name}/policy-additions.yaml`,
-      };
+      return f.snapshotAgentDefinition(name);
     });
     f.getSandboxMock.mockImplementation((name) => entries.get(name ?? "") ?? null);
     f.getLatestBackupMock.mockReturnValue(repositorySnapshot());
@@ -858,9 +854,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     ]);
     let definitionChanged = false;
     f.loadAgentMock.mockImplementation((name) => ({
-      name,
-      packageRoot: `/repo/agents/${name}`,
-      policyAdditionsPath: `/repo/agents/${name}/policy-additions.yaml`,
+      ...f.snapshotAgentDefinition(name),
       stateFiles: definitionChanged ? [{ path: "different.json", strategy: "copy" as const }] : [],
     }));
     f.getSandboxMock.mockImplementation((name) => entries.get(name ?? "") ?? null);
@@ -904,9 +898,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     f.loadAgentMock.mockImplementation((name) => {
       definitionSelections += 1;
       return {
-        name,
-        packageRoot: `/repo/agents/${name}`,
-        policyAdditionsPath: `/repo/agents/${name}/policy-additions.yaml`,
+        ...f.snapshotAgentDefinition(name),
         stateFiles: [
           {
             path: definitionSelections === 1 ? "outer-selection.json" : "locked-selection.json",
@@ -950,9 +942,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     const entries = configureCloneRegistry(source);
     let definitionChanged = false;
     f.loadAgentMock.mockImplementation((name) => ({
-      name,
-      packageRoot: `/repo/agents/${name}`,
-      policyAdditionsPath: `/repo/agents/${name}/policy-additions.yaml`,
+      ...f.snapshotAgentDefinition(name),
       stateFiles: definitionChanged ? [{ path: "different.json", strategy: "copy" as const }] : [],
     }));
     f.getLatestBackupMock.mockReturnValue(repositorySnapshot());
@@ -981,9 +971,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     const entries = configureCloneRegistry(source);
     let definitionChanged = false;
     f.loadAgentMock.mockImplementation((name) => ({
-      name,
-      packageRoot: `/repo/agents/${name}`,
-      policyAdditionsPath: `/repo/agents/${name}/policy-additions.yaml`,
+      ...f.snapshotAgentDefinition(name),
       stateFiles: definitionChanged ? [{ path: "different.json", strategy: "copy" as const }] : [],
     }));
     let pendingTargetReads = 0;

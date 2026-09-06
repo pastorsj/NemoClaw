@@ -16,6 +16,7 @@ import {
   resolveAgentBaselinePolicy,
   resolveAgentDefinitionBaselinePolicy,
   resolveSandboxBaselinePolicy,
+  sandboxUsesNpmCompatibility,
 } from "./index";
 
 const tempDirs: string[] = [];
@@ -51,8 +52,8 @@ afterEach(() => {
 });
 
 describe("sandbox baseline policy resolution (#7194)", () => {
-  it.each([null, "openclaw"])("uses the OpenClaw baseline for agent %s (#7194)", (agent) => {
-    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "alpha", agent } as never);
+  it("uses the historical OpenClaw baseline when a row records no agent (#7194)", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "alpha", agent: null } as never);
     const loadAgentSpy = vi.spyOn(agentDefs, "loadAgent");
 
     expect(resolveSandboxBaselinePolicy("alpha")?.policyPath).toBe(
@@ -189,14 +190,46 @@ describe("agent definition baseline policy resolution", () => {
     expect(loadAgentSpy).not.toHaveBeenCalled();
   });
 
-  it("keeps the name-based OpenClaw resolver on the reviewed repository policy", () => {
-    const loadAgentSpy = vi.spyOn(agentDefs, "loadAgent").mockImplementation(() => {
-      throw new Error("loadAgent must not run");
-    });
-
-    expect(resolveAgentBaselinePolicy("openclaw")?.policyPath).toBe(
-      path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
+  it("selects npm overlap handling from an unknown receipt package's reviewed baseline", () => {
+    const fixtureParent = fs.mkdtempSync(
+      path.join(process.cwd(), "node_modules/.cache/nemoclaw-npm-package-tests-"),
     );
-    expect(loadAgentSpy).not.toHaveBeenCalled();
+    tempDirs.push(fixtureParent);
+    const home = path.join(fixtureParent, "home");
+    const storeRoot = path.join(home, ".nemoclaw", "harnesses");
+    const reviewedPolicy = fs.readFileSync(
+      path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
+      "utf8",
+    );
+    const fixture = createHarnessPackageFixture({
+      fixtureParent: path.join(fixtureParent, "fixture"),
+      storeRoot,
+      agentPolicyAdditionsContent: reviewedPolicy,
+    });
+    const installed = fixture.installLocal({
+      id: "synthetic-npm-harness",
+      packageVersion: "1.0.0",
+    });
+    vi.stubEnv("HOME", home);
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "alpha",
+      agent: "synthetic-npm-harness",
+      harnessPackage: installed.identity,
+    } as never);
+
+    expect(sandboxUsesNpmCompatibility("alpha")).toBe(true);
+  });
+
+  it("uses a named package definition without a core package-name branch", () => {
+    const policyPath = writePolicy(
+      fs.readFileSync(path.join(ROOT, "packages/nemoclaw-hermes/policy-additions.yaml"), "utf8"),
+    );
+    const loadAgentSpy = vi.spyOn(agentDefs, "loadAgent").mockReturnValue({
+      name: "future-harness",
+      policyAdditionsPath: policyPath,
+    } as never);
+
+    expect(resolveAgentBaselinePolicy("future-harness")?.policyPath).toBe(policyPath);
+    expect(loadAgentSpy).toHaveBeenCalledWith("future-harness");
   });
 });

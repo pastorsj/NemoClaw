@@ -5,9 +5,10 @@ import { isDeepStrictEqual } from "node:util";
 
 import * as agentRuntime from "../../agent/runtime";
 import type { AgentDefinition } from "../../agent-runtime/manifest-types";
-import { spawnExitCode } from "../../core/process-exit";
+import { hasHarnessPackageAuthority } from "../../agent-runtime/status-agent";
+import { spawnExitCode } from "../../core/process-status";
 import { resolveSandboxGatewayName } from "../../gateway-runtime-action";
-import { normalizeSandboxAgentName } from "../../onboard/sandbox-agent";
+import { normalizeSandboxAgentName } from "../../onboard/sandbox-agent/naming";
 import {
   captureSandboxCommandAgentAuthority,
   requireCurrentSandboxCommandAgentAuthority,
@@ -20,7 +21,6 @@ import {
   prepareInteractiveSession,
   printInteractiveSessionHints,
 } from "./connect";
-import { prepareHermesLightTerminalSkin } from "./connect-hermes-light-skin";
 import {
   buildOpenshellExecArgs,
   execSandbox,
@@ -47,6 +47,12 @@ import {
   publishLaunchReadiness,
   withLaunchReadinessMutationGate,
 } from "./launch-readiness";
+import { prepareLegacyHermesLightSkin } from "./legacy-skin";
+import {
+  hasMatchingHermesPortableLaunchAgents,
+  isHermesPortableDisposition,
+  isHermesPortableRegistryAgent,
+} from "./hermes-portable-launch";
 
 const LAUNCH_READINESS_FENCE_REPAIR =
   "Launch readiness evidence could not be safely invalidated. Repair the current user's secure OS runtime authority and NemoClaw state permissions, then retry.";
@@ -149,10 +155,10 @@ async function inspectLaunchReadinessForLaunch(
 }> {
   const inspect = deps.inspectLaunchReadiness ?? inspectLaunchReadiness;
   const readSandbox = deps.getSandbox ?? getKnownSandboxTarget;
-  if (inspectPortableAgentReceiptDisposition(sandboxName).kind !== "hermes") {
+  if (!isHermesPortableDisposition(inspectPortableAgentReceiptDisposition(sandboxName))) {
     return { decision: await inspect(sandboxName), hermesAuthority: null };
   }
-  if (readSandbox(sandboxName)?.agent !== "hermes") {
+  if (!isHermesPortableRegistryAgent(readSandbox(sandboxName))) {
     throw new Error("Hermes portable registry authority changed before launch readiness.");
   }
 
@@ -216,7 +222,9 @@ async function launchAgentWithPortableAuthority(
   beforeAgentExec?: () => void,
 ): Promise<void> {
   const runOrdinaryAgent = async (): Promise<void> => {
-    prepareHermesLightTerminalSkin(sandboxName, agent, process.env);
+    if (!hasHarnessPackageAuthority(entry)) {
+      prepareLegacyHermesLightSkin(sandboxName, entry, agent, process.env);
+    }
     beforeAgentExec?.();
     await execSandbox(sandboxName, command, {
       tty: true,
@@ -265,10 +273,10 @@ async function launchAgentWithPortableAuthority(
       );
     }
     const current = inspectPortableAgentReceiptDisposition(sandboxName);
-    if ((current.kind === "hermes") !== hermesPortableSnapshot) {
+    if (isHermesPortableDisposition(current) !== hermesPortableSnapshot) {
       throw new Error("Hermes portable lifecycle authority changed before agent launch.");
     }
-    if (current.kind !== "hermes") {
+    if (!isHermesPortableDisposition(current)) {
       beforeOrdinaryLaunch?.();
       await runOrdinaryAgent();
       return;
@@ -276,12 +284,17 @@ async function launchAgentWithPortableAuthority(
     if (current.phase !== "active") {
       throw new Error("Hermes portable lifecycle authority changed before agent launch.");
     }
+    if (!entry) {
+      throw new Error("Hermes portable registry authority is missing before agent launch.");
+    }
     const registered = readSandbox(sandboxName);
     if (
-      agent?.name !== "hermes" ||
-      entry?.agent !== "hermes" ||
       !registered ||
-      registered.agent !== "hermes" ||
+      !hasMatchingHermesPortableLaunchAgents({
+        selectedAgent: agent?.name,
+        capturedAgent: entry.agent,
+        currentAgent: registered.agent,
+      }) ||
       registered.gatewayName !== entry.gatewayName ||
       registered.lifecycleGeneration !== entry.lifecycleGeneration ||
       current.gatewayName !== entry.gatewayName ||
@@ -312,10 +325,10 @@ async function launchAgentWithPortableAuthority(
     const finalReceipt = inspectPortableAgentReceiptDisposition(sandboxName);
     const finalRegistered = readSandbox(sandboxName);
     if (
-      finalReceipt.kind !== "hermes" ||
+      !isHermesPortableDisposition(finalReceipt) ||
       finalReceipt.phase !== "active" ||
       !finalRegistered ||
-      finalRegistered.agent !== "hermes" ||
+      !isHermesPortableRegistryAgent(finalRegistered) ||
       finalRegistered.gatewayName !== registered.gatewayName ||
       finalRegistered.lifecycleGeneration !== registered.lifecycleGeneration ||
       finalRegistered.lifecycleLiveIdentityFingerprint !==
@@ -351,7 +364,7 @@ export async function launchSandbox(
     if (decision.kind === "accepted") {
       const acceptedDecision = decision;
       const disposition = inspectPortableAgentReceiptDisposition(sandboxName);
-      const hermesPortable = disposition.kind === "hermes";
+      const hermesPortable = isHermesPortableDisposition(disposition);
       acceptedReadinessSetup = () => {
         printInteractiveSessionHints(sandboxName);
         completeReadinessQualifiedInteractiveSessionSetup(
@@ -417,9 +430,19 @@ export async function launchSandbox(
   const { agent, sb, hermesPortable = false } = session;
   const packageAgentAuthority = captureReceiptBackedLaunchAgentAuthority(agent, sb, deps);
   const launchAgent = packageAgentAuthority?.definition ?? agent;
-  const agentCommand = agentRuntime.getInteractiveAgentCommand(launchAgent, sb?.agent);
-  if (!agentCommand) {
-    throw new Error(`Cannot resolve an interactive command for sandbox '${sandboxName}'.`);
+  let agentCommand: string;
+  if (packageAgentAuthority) {
+    const packageCommandPlan = agentRuntime.planAgentInteractiveCommand(
+      packageAgentAuthority.definition,
+    );
+    if (packageCommandPlan.kind === "unsupported") {
+      throw new Error(
+        `Harness package '${packageAgentAuthority.definition.name}' does not support interactive launch: ${packageCommandPlan.reason}.`,
+      );
+    }
+    agentCommand = packageCommandPlan.command;
+  } else {
+    agentCommand = agentRuntime.getInteractiveAgentCommand(launchAgent, sb?.agent);
   }
 
   // `connect` runs this immediately before opening its SSH session. It is not

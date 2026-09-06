@@ -699,6 +699,13 @@ export function createSandboxGpuCreateAttemptRunner(
       return sandboxId;
     };
     const streamCreate = async () => {
+      if (
+        input.prebuild.imageRef === null &&
+        input.prebuild.verifyBuildCtx &&
+        !input.prebuild.verifyBuildCtx()
+      ) {
+        throw new Error("Staged harness package bytes changed before the Docker build");
+      }
       const createResult = await streamSandboxCreateWithPublicImageCredentialIsolation(
         managedBootstrap != null,
         input.sandboxName,

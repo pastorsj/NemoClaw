@@ -3,6 +3,7 @@
 
 import { isCandidateAgent, readCandidateQualificationReceipt } from "../../agent/candidate";
 import type { AgentDefinition } from "../../agent/defs";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 import { getVersion } from "../../core/version";
 import type { SandboxMessagingPlan } from "../../messaging/manifest";
 import type { SandboxWorkloadReceipt } from "../../state/registry/types";
@@ -30,15 +31,14 @@ import {
   qualifiedManagedImageDeclaration,
 } from "../managed-image/contract";
 import {
+  buildLegacyManagedStartupProfile,
+  buildManagedStartupInferenceCandidates,
   type BuiltManagedStartupOnboardProfile,
-  buildManagedStartupOnboardProfile,
-  type ManagedStartupOnboardProfileInput,
-} from "../managed-startup/onboard-profile";
-import {
-  buildManagedStartupPackageProfile,
   type BuiltManagedStartupPackageProfile,
-  managedStartupSettingsFromProfile,
-} from "../managed-startup/package-profile";
+  type LoadHarnessStartupProfileAdapter,
+  type ManagedStartupOnboardProfileInput,
+  prepareInitialManagedStartupPackageProfile,
+} from "../managed-startup/profile-selection";
 import { createManagedStartupRootApplyRequest } from "../managed-startup/root-apply";
 import {
   managedStartupStateRoots,
@@ -101,7 +101,6 @@ type ManagedProfileInput = Omit<
   "agentName" | "corporateCa" | "inference"
 >;
 type ResolveBuildPatchInput = Parameters<typeof resolveSandboxBuildPatch>[0];
-type SandboxInferenceConfig = import("../../inference/config").SandboxInferenceConfig;
 type BootstrapProvider = RuntimeProviderBundle & {
   readonly bootstrap: RuntimeProviderManagedImageBootstrapSurface;
 };
@@ -155,21 +154,20 @@ export function createManagedStateVolumeOnboardLifecycle(
 export interface ManagedWorkloadOnboardDependencies {
   readonly resolveAgentInferenceApi: typeof import("../../inference/config").resolveAgentInferenceApi;
   readonly getSandboxInferenceConfig: typeof import("../../inference/config").getSandboxInferenceConfig;
+  readonly loadHarnessStartupProfileAdapter?: LoadHarnessStartupProfileAdapter;
 }
 
 export interface CreateManagedWorkloadOnboardRuntimeInput {
   readonly computePlan: OpenShellComputePlan;
   readonly managedWorkloadRebuild: ManagedWorkloadRebuildHandoff | null;
   readonly tempManagedRuntime: boolean;
-  readonly stockManagedRuntime: boolean;
+  readonly managedRuntimeEnabled: boolean;
   readonly tempManagedRuntimeCatalog: string | null;
   readonly agentName: string;
   /** Receipt-pinned definition selected for this exact onboarding transaction. */
   readonly agentDefinition?: Pick<AgentDefinition, "managedImage" | "name">;
   /** Exact installed package selected for this onboarding transaction. */
-  readonly harnessPackage?:
-    | import("../../agent-runtime/package/types").HarnessPackageIdentity
-    | null;
+  readonly harnessPackage?: HarnessPackageIdentity | null;
   readonly legacyDockerfilePath: string;
   readonly customDockerfilePath: string | null;
   readonly rootDir: string;
@@ -191,15 +189,22 @@ export interface ManagedWorkloadOnboardRuntime {
   ): BuiltManagedStartupOnboardProfile | BuiltManagedStartupPackageProfile | null;
 }
 
-export function shouldActivateStockManagedRuntime(input: {
+export function shouldActivateManagedRuntime(input: {
   readonly portableLifecycle: boolean;
   readonly hermesPortableLifecycle: boolean;
   readonly agentName: string;
   readonly agentDefinition?: Pick<AgentDefinition, "managedImage" | "name">;
+  readonly harnessPackage?: HarnessPackageIdentity | null;
 }): boolean {
+  if (input.portableLifecycle || input.hermesPortableLifecycle) return false;
+  if (input.harnessPackage) {
+    return (
+      input.harnessPackage.id === input.agentName &&
+      input.agentDefinition?.name === input.agentName &&
+      input.agentDefinition.managedImage !== null
+    );
+  }
   return (
-    !input.portableLifecycle &&
-    !input.hermesPortableLifecycle &&
     (input.agentDefinition === undefined ||
       (input.agentDefinition.name === input.agentName &&
         input.agentDefinition.managedImage !== null)) &&
@@ -269,6 +274,11 @@ export function createManagedWorkloadOnboardRuntime(
   input: CreateManagedWorkloadOnboardRuntimeInput,
   dependencies: ManagedWorkloadOnboardDependencies,
 ): ManagedWorkloadOnboardRuntime {
+  if (input.harnessPackage && input.agentDefinition === undefined) {
+    throw new Error(
+      "Receipt-backed managed workload startup requires its receipt-pinned agent definition.",
+    );
+  }
   const agentDefinition =
     input.agentDefinition ??
     ({
@@ -295,7 +305,7 @@ export function createManagedWorkloadOnboardRuntime(
     : {
         ...discoveredRuntimeCapabilities,
         managedImageSelectionPolicy: "prefer-managed" as const,
-        managedImages: input.stockManagedRuntime
+        managedImages: input.managedRuntimeEnabled
           ? discoveredRuntimeCapabilities.managedImages
           : null,
       };
@@ -311,7 +321,7 @@ export function createManagedWorkloadOnboardRuntime(
     | null = null;
 
   const ensurePreparedWorkload = async (): Promise<PreparedSandboxWorkloadSource> => {
-    const liveCatalogRevision = input.stockManagedRuntime
+    const liveCatalogRevision = input.managedRuntimeEnabled
       ? liveE2eManagedImageRevision(input.startupProfile.environment)
       : null;
     const liveCatalog = liveE2eManagedImageCatalog(input.startupProfile.environment);
@@ -345,9 +355,12 @@ export function createManagedWorkloadOnboardRuntime(
           catalogPath: input.tempManagedRuntimeCatalog ?? liveCatalog?.path ?? null,
           ...(liveCatalog ? { expectedCatalogRevision: liveCatalog.revision } : {}),
           ...(catalogRevision ? { catalogRevision } : {}),
-          acceptedCandidateContract: isCandidateAgent(input.agentName)
-            ? readCandidateQualificationReceipt(input.agentName)
-            : null,
+          // An installed package receipt is the package authority. Candidate
+          // qualification is only part of the legacy, no-receipt path.
+          acceptedCandidateContract:
+            !input.harnessPackage && isCandidateAgent(input.agentName)
+              ? readCandidateQualificationReceipt(input.agentName)
+              : null,
         });
     const prepared = await preparedWorkloadPromise;
     if (prepared.fallbackDiagnostic && !fallbackReported) {
@@ -374,51 +387,65 @@ export function createManagedWorkloadOnboardRuntime(
     if (preparedProfile) return preparedProfile;
     const selectedModel = input.model?.trim() || "unconfigured";
     const selectedProvider = input.provider?.trim() || null;
-    const inferenceApi =
-      input.agentName === "langchain-deepagents-code"
-        ? "openai-completions"
-        : dependencies.resolveAgentInferenceApi(
-            input.agentName,
-            selectedProvider,
-            input.preferredInferenceApi,
-          );
-    const inference: SandboxInferenceConfig = dependencies.getSandboxInferenceConfig(
+    if (input.harnessPackage) {
+      const candidates = buildManagedStartupInferenceCandidates(
+        selectedModel,
+        selectedProvider,
+        input.preferredInferenceApi,
+        dependencies.getSandboxInferenceConfig,
+      );
+      preparedProfile = prepareInitialManagedStartupPackageProfile(
+        {
+          harnessPackage: input.harnessPackage,
+          source: {
+            inference: {
+              selectedProvider,
+              model: selectedModel,
+              endpointUrl: input.endpointUrl,
+              resolvedContextWindow: null,
+              reasoningEnabled: null,
+              reasoningEffort: null,
+              candidates,
+            },
+            dashboard: {
+              managed: input.startupProfile.manageDashboard,
+              url: input.startupProfile.chatUiUrl,
+              port: input.startupProfile.effectiveDashboardPort,
+              bindAddress: input.startupProfile.dashboardBindAddress,
+              wslExposure: input.startupProfile.wslExposure,
+              forwarding: {
+                enabled: input.startupProfile.hermesDashboardState.enabled,
+                publicPort: input.startupProfile.hermesDashboardState.config?.port ?? null,
+                internalPort:
+                  input.startupProfile.hermesDashboardState.config?.internalPort ?? null,
+                tuiEnabled: input.startupProfile.hermesDashboardState.config?.tuiEnabled ?? false,
+              },
+            },
+            webSearch: input.startupProfile.webSearch,
+            toolDisclosure: input.startupProfile.toolDisclosure,
+            enabledToolGateways: input.startupProfile.hermesToolGateways,
+            messagingPlan: input.startupProfile.messagingPlan,
+            approvalMode: input.startupProfile.dcodeAutoApprovalMode,
+            observabilityEnabled: input.startupProfile.observabilityEnabled,
+            environment: input.startupProfile.environment,
+            corporateCa: resolveCorporateCa(input.startupProfile.environment),
+          },
+        },
+        dependencies.loadHarnessStartupProfileAdapter,
+      );
+      return preparedProfile;
+    }
+    const builtProfile = buildLegacyManagedStartupProfile({
+      agentName: input.agentName,
       selectedModel,
       selectedProvider,
-      inferenceApi,
-    );
-    const builtProfile = buildManagedStartupOnboardProfile({
-      agentName: input.agentName,
-      inference: {
-        routeProvider: inference.providerKey,
-        upstreamProvider: selectedProvider ?? inference.providerKey,
-        model: selectedModel,
-        routedBaseUrl: inference.inferenceBaseUrl,
-        upstreamEndpointUrl:
-          input.agentName === "langchain-deepagents-code" ? input.endpointUrl : null,
-        api: inference.inferenceApi as
-          | "openai-completions"
-          | "openai-responses"
-          | "anthropic-messages",
-        primaryModelRef: input.agentName === "openclaw" ? inference.primaryModelRef : null,
-        compatibility: input.agentName === "openclaw" ? (inference.inferenceCompat ?? {}) : null,
-      },
-      ...input.startupProfile,
-      corporateCa: resolveCorporateCa(input.startupProfile.environment),
+      preferredInferenceApi: input.preferredInferenceApi,
+      endpointUrl: input.endpointUrl,
+      startupProfile: input.startupProfile,
+      resolveAgentInferenceApi: dependencies.resolveAgentInferenceApi,
+      getSandboxInferenceConfig: dependencies.getSandboxInferenceConfig,
     });
-    preparedProfile = input.harnessPackage
-      ? buildManagedStartupPackageProfile({
-          harnessPackage: input.harnessPackage,
-          settings: managedStartupSettingsFromProfile(builtProfile.profile),
-          ...(builtProfile.corporateCaB64 === undefined
-            ? {}
-            : { corporateCaB64: builtProfile.corporateCaB64 }),
-          credentialProxyReplayRequired: builtProfile.credentialProxyReplayRequired,
-          dashboardRemoteBindPrepared:
-            builtProfile.profile.dashboard.agent === "openclaw" &&
-            builtProfile.profile.dashboard.mode === "remote",
-        })
-      : builtProfile;
+    preparedProfile = builtProfile;
     return preparedProfile;
   };
 
@@ -582,11 +609,7 @@ export async function prepareOnboardSandboxWorkloadLaunch(
     });
     const profile = input.runtime.ensurePreparedProfile(input.workload);
     if (!profile) throw new Error("Managed sandbox workload is missing its startup profile.");
-    dashboardRemoteBindPrepared =
-      "dashboardRemoteBindPrepared" in profile
-        ? profile.dashboardRemoteBindPrepared
-        : profile.profile.dashboard.agent === "openclaw" &&
-          profile.profile.dashboard.mode === "remote";
+    dashboardRemoteBindPrepared = profile.dashboardRemoteBindPrepared;
     const rootApplyRequest = createManagedStartupRootApplyRequest({
       agent: profile.profile.agent,
       encodedProfile: profile.encodedProfile,
@@ -624,6 +647,7 @@ export async function prepareOnboardSandboxWorkloadLaunch(
         buildId,
         dockerDriverGateway: input.gpu.dockerDriverGateway,
         origin: buildContext.origin,
+        ...(buildContext.verifyBuildCtx ? { verifyBuildCtx: buildContext.verifyBuildCtx } : {}),
       },
     });
   }

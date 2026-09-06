@@ -616,6 +616,23 @@ describe("runSandboxGpuCreateFlow proof authorization", () => {
 });
 
 describe("runSandboxGpuCreateFlow native failure and readiness", () => {
+  it("rejects staged package drift at the gateway Docker handoff", async () => {
+    const input = createInput();
+    const verifyBuildCtx = vi.fn(() => false);
+    input.prebuild = {
+      ...input.prebuild,
+      imageRef: null,
+      imageId: null,
+      verifyBuildCtx,
+    };
+
+    await expect(runSandboxGpuCreateFlow(input, createDeps())).rejects.toThrow(
+      "Staged harness package bytes changed before the Docker build",
+    );
+    expect(verifyBuildCtx).toHaveBeenCalledOnce();
+    expect(mocks.streamSandboxCreate).not.toHaveBeenCalled();
+  });
+
   it("bounds the streamed sandbox readiness probe", async () => {
     const deps = createDeps();
     mocks.streamSandboxCreate.mockImplementationOnce(async (...args) => {

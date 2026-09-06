@@ -5,7 +5,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { buildAgentDefinition } from "../agent-runtime/manifest-loader";
-import { loadManifestRecord } from "../agent-runtime/manifest-readers";
+import {
+  loadLegacyRepositoryManifest,
+  loadValidatedHarnessManifest,
+} from "../agent-runtime/manifest-readers";
 import { isCuaEnabled } from "../cua/feature";
 import { ROOT } from "../runner";
 import type { AgentAliasTarget } from "./aliases";
@@ -37,7 +40,7 @@ export function listAgentRuntimePackageLocations(): readonly AgentManifestLocati
         const manifestName = packageJson.nemoclaw?.harnessManifest;
         if (typeof manifestName !== "string" || manifestName !== "manifest.yaml") return [];
         const manifestPath = path.join(packageRoot, manifestName);
-        const manifest = loadManifestRecord(manifestPath);
+        const manifest = loadValidatedHarnessManifest(manifestPath);
         const name = typeof manifest.name === "string" ? manifest.name : "";
         return name ? [{ name, packageRoot, manifestPath }] : [];
       } catch {
@@ -68,9 +71,12 @@ export function readAgentAliasTargets(
     if (name === "nemocua" && !isCuaEnabled(env)) return [];
     if (isCandidateAgent(name) && !isCandidateAgentSelectable(name, env)) return [];
     try {
-      const location = findAgentManifestLocation(name) ?? legacyAgentManifestLocation(name);
+      const packageLocation = findAgentManifestLocation(name);
+      const location = packageLocation ?? legacyAgentManifestLocation(name);
       const definition = buildAgentDefinition({
-        manifest: loadManifestRecord(location.manifestPath),
+        manifest: packageLocation
+          ? loadValidatedHarnessManifest(location.manifestPath, location.name)
+          : loadLegacyRepositoryManifest(location.manifestPath),
         manifestPath: location.manifestPath,
         packageRoot: location.packageRoot,
       });

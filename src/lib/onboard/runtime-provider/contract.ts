@@ -344,6 +344,8 @@ export interface RuntimeProviderPrivilegedSandboxCommandInput {
   readonly sandboxName: string;
   readonly registeredSandboxNames: readonly string[];
   readonly command: readonly string[];
+  /** Defaults to root; package operations may select a receipt-validated numeric identity. */
+  readonly executionUser?: { readonly uid: number; readonly gid: number };
   readonly input?: Buffer;
   readonly sanitizeEnvironment: boolean;
   readonly expectedResourceHandle?: string;

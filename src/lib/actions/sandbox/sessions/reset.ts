@@ -12,17 +12,17 @@ import {
   deferSandboxLifecycleExit,
   runWithDeferredSandboxLifecycleExit,
 } from "../../../core/process-exit";
-import { assertHermesPortableCommandUnavailable } from "../../../onboard/experimental/portable-agent-lifecycle";
-import { withMcpLifecycleLock } from "../../../state/mcp-lifecycle-lock-acquisition";
 import { execSandbox } from "../exec";
-import { ensureLiveSandboxOrExit } from "../gateway-state";
-import { callOpenclawGateway } from "./gateway-rpc";
 import { resetLegacySandboxSession } from "./legacy-reset";
+import { captureSessionMutationOutput } from "./mutation-capture";
 import {
-  confirmSessionPackageAuthority,
-  resolveSessionPackageAuthority,
-  type SessionPackageAuthority,
-} from "./package-authority";
+  assertSessionCommandAvailable,
+  confirmSessionCommandAuthority,
+  ensureLiveSessionSandbox,
+  resolveSessionCommandAuthority,
+  type SessionCommandAuthority,
+  withSessionCommandLock,
+} from "./command-authority";
 
 export type SessionsResetReason = "reset" | "new";
 
@@ -59,7 +59,7 @@ function buildResetRequest(
 }
 
 function buildSessionResetPlan(
-  authority: SessionPackageAuthority,
+  authority: SessionCommandAuthority,
   request: Extract<HarnessSessionMutationPlanRequest, { readonly operation: "reset" }>,
 ): HarnessSessionMutationPlan {
   try {
@@ -74,11 +74,11 @@ function buildSessionResetPlan(
 
 function confirmSessionResetPlan(
   sandboxName: string,
-  authority: SessionPackageAuthority,
+  authority: SessionCommandAuthority,
   request: Extract<HarnessSessionMutationPlanRequest, { readonly operation: "reset" }>,
   expectedPlan: HarnessSessionMutationPlan,
 ) {
-  const currentAdapter = confirmSessionPackageAuthority(sandboxName, authority.identity);
+  const currentAdapter = confirmSessionCommandAuthority(sandboxName, authority.identity);
   let currentPlan: HarnessSessionMutationPlan;
   try {
     currentPlan = currentAdapter.buildSessionMutationPlan(request);
@@ -119,19 +119,19 @@ export async function resetSandboxSession(
   sandboxName: string,
   options: SessionsResetOptions,
 ): Promise<SessionsResetResult> {
-  const authority = resolveSessionPackageAuthority(sandboxName);
+  const authority = resolveSessionCommandAuthority(sandboxName);
   if (authority === null) return resetLegacySandboxSession(sandboxName, options);
 
   return runWithDeferredSandboxLifecycleExit(() =>
-    withMcpLifecycleLock(sandboxName, async () => {
-      assertHermesPortableCommandUnavailable(sandboxName, "sandbox:sessions:reset");
+    withSessionCommandLock(sandboxName, async () => {
+      assertSessionCommandAvailable(sandboxName, "sandbox:sessions:reset");
       const request = buildResetRequest(options);
       const plan = buildSessionResetPlan(authority, request);
       if (plan.kind === "unsupported" || plan.kind === "refused") {
         return stopSessionReset(plan.reason);
       }
 
-      await ensureLiveSandboxOrExit(sandboxName, {
+      await ensureLiveSessionSandbox(sandboxName, {
         allowNonReadyPhase: true,
         exit: deferSandboxLifecycleExit,
       });
@@ -140,18 +140,13 @@ export async function resetSandboxSession(
         await execSandbox(sandboxName, plan.command, {}, { exit: deferSandboxLifecycleExit });
         throw new Error("unreachable: streamed session reset terminated the process");
       }
-      const { payload } = callOpenclawGateway({
-        sandboxName,
-        method: plan.method,
-        params: plan.params,
-        exit: deferSandboxLifecycleExit,
-      });
+      const output = captureSessionMutationOutput(sandboxName, "reset", plan.command);
       let interpreted: HarnessSessionMutationOutput;
       try {
         interpreted = currentAdapter.interpretSessionMutationOutput({
           request,
           plan,
-          payload: payload as unknown as Record<string, never>,
+          output,
         });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);

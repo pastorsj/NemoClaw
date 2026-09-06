@@ -11,10 +11,12 @@ import { dockerSpawnSync } from "../adapters/docker";
 import { getGatewayClusterContainerName } from "../adapters/openshell/gateway-drift";
 import { resolveOpenshell } from "../adapters/openshell/resolve";
 import * as agentRuntime from "../agent/runtime";
+import { hasHarnessPackageAuthority } from "../agent-runtime/status-agent";
 import { resolveSandboxGatewayName } from "../onboard/gateway-binding";
 import type { RuntimeProviderChannelStopTransport } from "../onboard/runtime-provider/access";
 import * as registry from "../state/registry";
 import { GATEWAY_STOP_SCRIPT } from "./gateway-stop-script";
+import { isLegacyGatewayStopTarget } from "./legacy-stop";
 
 type Reporter = (message: string) => void;
 type StopAttemptResult = ReturnType<typeof spawnSync>;
@@ -71,9 +73,16 @@ export function stopSandboxChannels(sandboxName: string, deps: SandboxGatewaySto
   }
   const agent = (deps.getRegisteredAgent ?? agentRuntime.getRegisteredAgent)(sandbox);
 
-  if (sandbox?.agent && sandbox.agent !== "openclaw" && !agent) {
+  if (hasHarnessPackageAuthority(sandbox) && !agent) {
     warn(
-      `Could not resolve registered agent '${sandbox.agent}' for sandbox ` +
+      `Could not resolve receipt-backed harness '${sandbox?.agent ?? "unknown"}' for sandbox ` +
+        `'${validatedSandboxName}'; skipping in-sandbox gateway stop.`,
+    );
+    return;
+  }
+  if (!agent && !isLegacyGatewayStopTarget(sandbox)) {
+    warn(
+      `Could not resolve registered agent '${sandbox?.agent ?? "unknown"}' for sandbox ` +
         `'${validatedSandboxName}'; skipping in-sandbox gateway stop.`,
     );
     return;

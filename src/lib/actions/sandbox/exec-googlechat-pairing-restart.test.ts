@@ -14,6 +14,7 @@ import {
   type ExecSandboxDeps,
   type SandboxExecCleanupDeps,
 } from "./exec";
+import { resolveLegacyGoogleChatApprovalAgent } from "./exec-legacy";
 import { restartSandboxGatewayWithDeps } from "./gateway-restart";
 
 const CLEANUP_SKIPPED: SandboxExecCleanupDeps = {
@@ -72,6 +73,20 @@ afterEach(() => {
 });
 
 describe("Google Chat pairing approval gateway activation (#8553)", () => {
+  it("refuses to interpret package-specific approval argv for an arbitrary receipt", () => {
+    expect(() =>
+      resolveLegacyGoogleChatApprovalAgent({
+        agent: "future-harness",
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: "future-harness",
+          packageVersion: "1.0.0",
+          contentDigest: "a".repeat(64),
+        },
+      }),
+    ).toThrow(/do not declare a Google Chat approval command hook/u);
+  });
+
   it("recognizes only a direct Google Chat pairing approval with a code", () => {
     expect(
       isGoogleChatPairingApproval(["openclaw", "pairing", "approve", "googlechat", "ABCD1234"]),

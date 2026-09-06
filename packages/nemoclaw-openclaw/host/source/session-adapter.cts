@@ -11,6 +11,7 @@ import type {
   HarnessSessionListOutputRequest,
   HarnessSessionListPlan,
   HarnessSessionListPlanRequest,
+  HarnessSessionJsonValue,
   HarnessSessionMutationOutput,
   HarnessSessionMutationOutputRequest,
   HarnessSessionMutationPlan,
@@ -99,6 +100,11 @@ function parseJsonPayload(output: string): unknown | null {
     }
   }
   return null;
+}
+
+function parsedJsonValue(value: unknown): HarnessSessionJsonValue {
+  // Values reaching this helper came from JSON.parse; the host validates the returned adapter value.
+  return (value ?? null) as HarnessSessionJsonValue;
 }
 
 function sessionArray(payload: unknown): unknown[] | null {
@@ -250,6 +256,16 @@ const AGENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SESSION_KEY_PATTERN = /^[\x20-\x7E]{1,256}$/;
 const SESSION_KEY_REJECT_PATTERN = /["'`$\\\n\r\t]/;
 const CANONICAL_SESSION_KEY_PATTERN = /^agent:([A-Za-z0-9][A-Za-z0-9._-]{0,63}):/;
+const SESSION_ADMIN_COMMAND = "/usr/local/bin/nemoclaw-openclaw-session-admin";
+
+type SessionMutationResolution =
+  | { readonly kind: "refused"; readonly reason: string }
+  | {
+      readonly kind: "resolved";
+      readonly key: string;
+      readonly method: "sessions.delete" | "sessions.reset";
+      readonly params: Readonly<Record<string, string | boolean>>;
+    };
 
 function normalizedAgentId(value: string): string | null {
   const trimmed = value.trim();
@@ -277,9 +293,9 @@ function canonicalSessionKey(agent: string, key: string): string | null {
   return `agent:${agent}:${key}`;
 }
 
-function buildSessionMutationPlan(
+function resolveSessionMutationRequest(
   request: HarnessSessionMutationPlanRequest,
-): HarnessSessionMutationPlan {
+): SessionMutationResolution {
   const rawKey = normalizedSessionKey(request.key);
   if (rawKey === null) {
     return {
@@ -312,15 +328,28 @@ function buildSessionMutationPlan(
 
   return request.operation === "delete"
     ? {
-        kind: "admin-rpc",
+        kind: "resolved",
+        key,
         method: "sessions.delete",
         params: { key, deleteTranscript: !request.keepTranscript },
       }
     : {
-        kind: "admin-rpc",
+        kind: "resolved",
+        key,
         method: "sessions.reset",
         params: { key, reason: request.reason },
       };
+}
+
+function buildSessionMutationPlan(
+  request: HarnessSessionMutationPlanRequest,
+): HarnessSessionMutationPlan {
+  const resolved = resolveSessionMutationRequest(request);
+  if (resolved.kind === "refused") return resolved;
+  return {
+    kind: "capture",
+    command: [SESSION_ADMIN_COMMAND, resolved.method, JSON.stringify(resolved.params)],
+  };
 }
 
 function gatewayFailureReason(
@@ -338,17 +367,18 @@ function gatewayFailureReason(
 function interpretSessionMutationOutput(
   input: HarnessSessionMutationOutputRequest,
 ): HarnessSessionMutationOutput {
-  if (!isRecord(input.payload)) {
+  const payload = parseJsonPayload(input.output);
+  if (!isRecord(payload)) {
     return {
       kind: "refused",
       reason: `Gateway returned an unexpected sessions.${input.request.operation} payload.`,
     };
   }
-  const plannedKey =
-    typeof input.plan.params.key === "string" ? input.plan.params.key : input.request.key;
-  const failure = gatewayFailureReason(input.request.operation, plannedKey, input.payload);
+  const resolved = resolveSessionMutationRequest(input.request);
+  if (resolved.kind === "refused") return resolved;
+  const failure = gatewayFailureReason(input.request.operation, resolved.key, payload);
   if (failure !== null) return { kind: "refused", reason: failure };
-  if (input.payload.ok !== true || typeof input.payload.key !== "string") {
+  if (payload.ok !== true || typeof payload.key !== "string") {
     return {
       kind: "refused",
       reason: `Gateway returned an unexpected sessions.${input.request.operation} payload.`,
@@ -358,20 +388,20 @@ function interpretSessionMutationOutput(
     return {
       kind: "completed",
       operation: "delete",
-      key: input.payload.key,
+      key: payload.key,
       removedTranscript:
-        typeof input.payload.removedTranscript === "boolean"
-          ? input.payload.removedTranscript
+        typeof payload.removedTranscript === "boolean"
+          ? payload.removedTranscript
           : !input.request.keepTranscript,
-      entry: input.payload.entry ?? null,
+      entry: parsedJsonValue(payload.entry),
     };
   }
   return {
     kind: "completed",
     operation: "reset",
-    key: input.payload.key,
+    key: payload.key,
     reason: input.request.reason,
-    entry: input.payload.entry ?? null,
+    entry: parsedJsonValue(payload.entry),
   };
 }
 

@@ -33,7 +33,7 @@ const mocks = vi.hoisted(() => {
     listSandboxPolicies: vi.fn(),
     rebuildSandbox: vi.fn().mockResolvedValue(undefined),
     restartSandboxGateway: vi.fn().mockReturnValue({ ok: true }),
-    recoverSandboxWithHermesCronRestore: vi.fn().mockResolvedValue(undefined),
+    recoverSandboxStateAfterRestore: vi.fn().mockResolvedValue(undefined),
     runSandboxDoctor: vi.fn().mockResolvedValue(undefined),
     getSandboxStatusReport: vi.fn().mockResolvedValue({
       found: true,
@@ -62,7 +62,7 @@ vi.mock("../../lib/actions/sandbox/destroy", () => ({
 }));
 
 vi.mock("../../lib/actions/sandbox/runtime/hermes-cron-restore-recovery", () => ({
-  recoverSandboxWithHermesCronRestore: mocks.recoverSandboxWithHermesCronRestore,
+  recoverSandboxStateAfterRestore: mocks.recoverSandboxStateAfterRestore,
 }));
 
 vi.mock("../../lib/actions/sandbox/rebuild", () => ({
@@ -167,7 +167,7 @@ describe("sandbox oclif command adapters", () => {
       await GatewayRestartCliCommand.run(["alpha", "--quiet"], rootDir);
 
       expect(mocks.connectSandbox).toHaveBeenCalledWith("alpha", { probeOnly: true });
-      expect(mocks.recoverSandboxWithHermesCronRestore).toHaveBeenCalledWith("alpha");
+      expect(mocks.recoverSandboxStateAfterRestore).toHaveBeenCalledWith("alpha");
       expect(mocks.destroySandbox).toHaveBeenCalledWith("alpha", { force: false, yes: true });
       expect(mocks.rebuildSandbox).toHaveBeenCalledWith("alpha", {
         dcodeAutoApprovalMode: "thread-opt-in",

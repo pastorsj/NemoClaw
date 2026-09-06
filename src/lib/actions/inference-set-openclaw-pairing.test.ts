@@ -6,12 +6,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
   completeInferencePostCommit,
   finalizeInferenceMutation,
-  type InferenceSetOpenClawPairingDeps,
-  type InferenceSetOpenClawPairingTarget,
-  settleInferenceSetOpenClawPairing,
 } from "./inference-set-gateway-restart";
+import {
+  type LegacyOpenClawPairingDeps,
+  type LegacyOpenClawPairingTarget,
+  settleLegacyOpenClawPairing,
+} from "./inference-set/legacy";
 
-const TARGET: InferenceSetOpenClawPairingTarget = {
+const TARGET: LegacyOpenClawPairingTarget = {
   sandboxName: "alpha",
   gatewayName: "nemoclaw-8080",
   openclawVersion: "2026.7.1",
@@ -25,10 +27,10 @@ function observation(state: "settled" | "pairing-only") {
 
 function pairingDeps(
   options: {
-    observePairing?: InferenceSetOpenClawPairingDeps["observePairing"];
-    approval?: ReturnType<InferenceSetOpenClawPairingDeps["approveScopeRequest"]>;
+    observePairing?: LegacyOpenClawPairingDeps["observePairing"];
+    approval?: ReturnType<LegacyOpenClawPairingDeps["approveScopeRequest"]>;
   } = {},
-): InferenceSetOpenClawPairingDeps {
+): LegacyOpenClawPairingDeps {
   return {
     observePairing: vi.fn(options.observePairing ?? (() => observation("settled"))),
     publishScopeRequest: vi.fn(),
@@ -36,11 +38,11 @@ function pairingDeps(
   };
 }
 
-describe("settleInferenceSetOpenClawPairing", () => {
+describe("settleLegacyOpenClawPairing", () => {
   it("accepts exact settled scope state without publishing a request (#9527)", () => {
     const deps = pairingDeps();
 
-    expect(settleInferenceSetOpenClawPairing(TARGET, deps)).toEqual({
+    expect(settleLegacyOpenClawPairing(TARGET, deps)).toEqual({
       ok: true,
     });
     expect(deps.publishScopeRequest).not.toHaveBeenCalled();
@@ -61,7 +63,7 @@ describe("settleInferenceSetOpenClawPairing", () => {
       return "approved";
     });
 
-    expect(settleInferenceSetOpenClawPairing(TARGET, deps)).toEqual({
+    expect(settleLegacyOpenClawPairing(TARGET, deps)).toEqual({
       ok: true,
     });
     expect(deps.publishScopeRequest).toHaveBeenCalledWith(TARGET);
@@ -78,7 +80,7 @@ describe("settleInferenceSetOpenClawPairing", () => {
       approval: "ambiguous",
     });
 
-    expect(settleInferenceSetOpenClawPairing(TARGET, deps)).toEqual({
+    expect(settleLegacyOpenClawPairing(TARGET, deps)).toEqual({
       ok: true,
     });
   });
@@ -89,7 +91,7 @@ describe("settleInferenceSetOpenClawPairing", () => {
       approval: "ambiguous",
     });
 
-    expect(settleInferenceSetOpenClawPairing(TARGET, deps)).toEqual({
+    expect(settleLegacyOpenClawPairing(TARGET, deps)).toEqual({
       ok: false,
       failureLayer: "approval-ambiguous",
     });
@@ -102,7 +104,7 @@ describe("settleInferenceSetOpenClawPairing", () => {
       }),
     });
 
-    const result = settleInferenceSetOpenClawPairing(TARGET, deps);
+    const result = settleLegacyOpenClawPairing(TARGET, deps);
 
     expect(result).toEqual({
       ok: false,
@@ -119,7 +121,7 @@ describe("settleInferenceSetOpenClawPairing", () => {
       approval: "rejected",
     });
 
-    expect(settleInferenceSetOpenClawPairing(TARGET, deps)).toEqual({
+    expect(settleLegacyOpenClawPairing(TARGET, deps)).toEqual({
       ok: false,
       failureLayer: "approval-rejected",
     });
@@ -130,7 +132,7 @@ describe("settleInferenceSetOpenClawPairing", () => {
       observePairing: vi.fn(() => observation("pairing-only")),
     });
 
-    expect(settleInferenceSetOpenClawPairing(TARGET, deps)).toEqual({
+    expect(settleLegacyOpenClawPairing(TARGET, deps)).toEqual({
       ok: false,
       failureLayer: "final-state-unsettled",
     });
@@ -144,7 +146,7 @@ describe("settleInferenceSetOpenClawPairing", () => {
       throw new Error("credential=do-not-report");
     });
 
-    const result = settleInferenceSetOpenClawPairing(TARGET, deps);
+    const result = settleLegacyOpenClawPairing(TARGET, deps);
 
     expect(result).toEqual({
       ok: false,
@@ -164,23 +166,44 @@ describe("settleInferenceSetOpenClawPairing", () => {
         }),
     });
 
-    expect(settleInferenceSetOpenClawPairing(TARGET, deps)).toEqual({
+    expect(settleLegacyOpenClawPairing(TARGET, deps)).toEqual({
       ok: false,
       failureLayer: "final-state-unavailable",
     });
     expect(deps.approveScopeRequest).toHaveBeenCalledOnce();
   });
 
-  it("fails closed when required convergence has no pairing target (#9527)", () => {
+  it("fails closed when receipt-backed package reconciliation does not converge", () => {
     const appendAuditEntry = vi.fn();
     const log = vi.fn();
-    const settleOpenClawPairing = vi.fn(() => ({ ok: true }) as const);
+    const reconcilePackageSandbox = vi.fn(() => {
+      throw new Error("credential=do-not-report");
+    });
+    const identity = {
+      kind: "agent-runtime",
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    } as const;
     const mutation = finalizeInferenceMutation(
       {
-        agentName: "openclaw",
+        agentName: "future-harness",
         configChanged: true,
         nextApi: "openai-completions",
-        previousApi: "openai-completions",
+        packageIdentity: identity,
+        postCommit: {
+          configSync: "required",
+          gatewayRestart: {
+            kind: "when-api-changes",
+            previousApi: "openai-completions",
+          },
+          sandboxReconcile: {
+            kind: "command",
+            trigger: "when-config-changes",
+            command: ["/usr/local/lib/nemoclaw/inference-reconcile"],
+            timeoutSeconds: 30,
+          },
+        },
         result: {
           sandboxName: "alpha",
           provider: "nvidia-prod",
@@ -205,16 +228,22 @@ describe("settleInferenceSetOpenClawPairing", () => {
               forwardRecovered: true,
             }) as const,
         ),
-        settleOpenClawPairing,
+        reconcilePackageSandbox,
       }),
-    ).toThrow("OpenClaw gateway pairing did not converge (pairing-target-unavailable)");
-    expect(settleOpenClawPairing).not.toHaveBeenCalled();
+    ).toThrow("installed package reconciliation did not converge");
+    expect(reconcilePackageSandbox).toHaveBeenCalledWith("alpha", identity, {
+      kind: "command",
+      trigger: "when-config-changes",
+      command: ["/usr/local/lib/nemoclaw/inference-reconcile"],
+      timeoutSeconds: 30,
+    });
     expect(log.mock.calls.flat().join("\n")).not.toContain("Inference route synced");
     expect(appendAuditEntry).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "inference_set",
         sandbox: "alpha",
-        reason: "inference set openclaw:nvidia-prod:nvidia/model-b (pairing convergence pending)",
+        reason:
+          "inference set future-harness:nvidia-prod:nvidia/model-b (package reconciliation pending)",
       }),
     );
     expect(JSON.stringify(appendAuditEntry.mock.calls)).not.toContain("credential=");

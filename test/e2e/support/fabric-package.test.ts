@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { validateHarnessPackageTree } from "../../../src/lib/agent-runtime/package/tree.ts";
 import {
   requireInstalledFabricE2eBinding,
   type FabricHarnessE2eContract,
@@ -64,6 +65,11 @@ function discoverBundledFabricFixtures(): readonly {
 const BUNDLED_PACKAGE_CASES = discoverBundledFabricFixtures();
 
 const temporaryDirectories: string[] = [];
+const FABRIC_BINDING_TEST_ROOT = path.join(
+  process.cwd(),
+  "node_modules/.cache/nemoclaw-fabric-binding-tests",
+);
+fs.mkdirSync(FABRIC_BINDING_TEST_ROOT, { recursive: true, mode: 0o700 });
 
 interface InstalledPackageFixtureOptions {
   readonly descriptorAdapterId?: string;
@@ -97,10 +103,10 @@ function writeInstalledPackageFixture(
   readonly descriptorPath: string | undefined;
   readonly reference: InstalledFabricPackageReference;
 } {
-  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-binding-"));
+  const temporaryRoot = fs.mkdtempSync(path.join(FABRIC_BINDING_TEST_ROOT, "fixture-"));
   temporaryDirectories.push(temporaryRoot);
-  const contentDigest = "a".repeat(64);
-  const packageRoot = path.join(temporaryRoot, contentDigest);
+  const sourceRoot = path.join(temporaryRoot, "package-source");
+  let packageRoot = sourceRoot;
   const packageDirectory = path.join(packageRoot, "packages", `nemoclaw-${contract.packageId}`);
   fs.mkdirSync(packageDirectory, { recursive: true });
   fs.writeFileSync(
@@ -112,6 +118,7 @@ function writeInstalledPackageFixture(
       displayName: "Future Harness",
       packageVersion: "1.0.0",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: `packages/nemoclaw-${contract.packageId}/manifest.yaml`,
     })}\n`,
     "utf8",
@@ -121,10 +128,33 @@ function writeInstalledPackageFixture(
     [
       `name: ${options.manifestId ?? contract.packageId}`,
       "runtime:",
+      "  kind: terminal",
+      "  prompt_transport: stdin",
       `  headless_command: ${JSON.stringify(
         options.headlessCommand ??
           `nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config ${contract.configPath}`,
       )}`,
+      "config:",
+      `  dir: /sandbox/.${contract.packageId}`,
+      "  config_file: config.json",
+      "  format: json",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: This synthetic package has fixed inference configuration.",
+      "messaging:",
+      "  support: disabled",
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    image_plugin_provenance: not-required",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: This synthetic package does not run scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
       "",
     ].join("\n"),
     "utf8",
@@ -149,9 +179,25 @@ function writeInstalledPackageFixture(
       "utf8",
     );
   }
+  const contentDigest = validateHarnessPackageTree(sourceRoot, {
+    sourceTrust: "mutable",
+  }).contentDigest;
+  packageRoot = path.join(temporaryRoot, contentDigest);
+  fs.renameSync(sourceRoot, packageRoot);
+  if (descriptorPath) {
+    descriptorPath = path.join(packageRoot, path.relative(sourceRoot, descriptorPath));
+  }
   return {
     descriptorPath,
-    reference: { contentDigest, packageRoot },
+    reference: {
+      identity: {
+        kind: "agent-runtime",
+        id: contract.packageId,
+        packageVersion: "1.0.0",
+        contentDigest,
+      },
+      packageRoot,
+    },
   };
 }
 
@@ -255,6 +301,28 @@ describe("generic Fabric package E2E", () => {
     expect(() => requireInstalledFabricE2eBinding(contract, fixture.reference)).toThrow(
       "Installed Fabric package does not match its package-owned E2E contract",
     );
+  });
+
+  it("rejects package bytes that no longer match the receipt digest", () => {
+    const contract = futureFabricContract();
+    const fixture = writeInstalledPackageFixture(contract);
+    fs.appendFileSync(fixture.descriptorPath!, "\n", "utf8");
+
+    expect(() => requireInstalledFabricE2eBinding(contract, fixture.reference)).toThrow(
+      "Installed Fabric package does not match its package-owned E2E contract",
+    );
+  });
+
+  it("rejects a receipt whose version or complete identity differs from the package", () => {
+    const contract = futureFabricContract();
+    const fixture = writeInstalledPackageFixture(contract);
+
+    expect(() =>
+      requireInstalledFabricE2eBinding(contract, {
+        ...fixture.reference,
+        identity: { ...fixture.reference.identity, packageVersion: "2.0.0" },
+      }),
+    ).toThrow("Installed Fabric package does not match its package-owned E2E contract");
   });
 
   it.each(BUNDLED_PACKAGE_CASES)(

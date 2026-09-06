@@ -62,6 +62,7 @@ function createBuiltHarnessArtifact(fixtureRoot: string): string {
       displayName: "Example Runtime",
       packageVersion: "1.2.3",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: "agents/example-runtime/manifest.yaml",
     })}\n`,
   );

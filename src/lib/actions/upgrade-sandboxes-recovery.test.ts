@@ -37,6 +37,7 @@ import {
   upgradeSandboxes,
   upgradeSandboxesDependencies,
 } from "./upgrade-sandboxes";
+import { isConfirmedLegacyManagedUpgradeSandbox } from "./upgrade/legacy";
 
 type UpgradeSandboxes = typeof upgradeSandboxes;
 
@@ -48,6 +49,24 @@ const MANIFEST_DIR_BY_AGENT: Record<ManifestAgentType, string> = {
   openclaw: "/sandbox/.openclaw",
   hermes: "/sandbox/.hermes",
 };
+
+describe("legacy managed-image upgrade classification", () => {
+  it("never grants legacy confirmation to a receipt-backed future harness", () => {
+    expect(
+      isConfirmedLegacyManagedUpgradeSandbox({
+        name: "future-box",
+        agent: "future-harness",
+        harnessPackage: harnessPackage("future-harness"),
+      } as registry.SandboxEntry),
+    ).toBe(false);
+    expect(
+      isConfirmedLegacyManagedUpgradeSandbox({
+        name: "legacy-box",
+        agent: "openclaw",
+      } as registry.SandboxEntry),
+    ).toBe(true);
+  });
+});
 
 function harnessPackage(agentType: string, digest = "a".repeat(64)) {
   return {
@@ -174,7 +193,7 @@ function createRecoveryHarness(
           nemoclawVersion: string | null;
           fromDockerfile: string | null;
           pendingRouteReservation: true;
-          harnessPackage: ReturnType<typeof harnessPackage>;
+          harnessPackage: ReturnType<typeof harnessPackage> | undefined;
         }>
       >
     >;
@@ -729,7 +748,7 @@ describe("upgrade-sandboxes prepared backup recovery (#6114)", () => {
     const harness = createRecoveryHarness(["legacy-box"], {
       liveOutput: "other-box Ready",
       registryOverrides: {
-        "legacy-box": { nemoclawVersion: null },
+        "legacy-box": { harnessPackage: undefined, nemoclawVersion: null },
       },
       useRealManagedEvidence: true,
     });
@@ -752,7 +771,7 @@ describe("upgrade-sandboxes prepared backup recovery (#6114)", () => {
     const harness = createRecoveryHarness(["legacy-box"], {
       confirmedLegacyManagedNames: ["legacy-box"],
       registryOverrides: {
-        "legacy-box": { agent: null, nemoclawVersion: null },
+        "legacy-box": { agent: null, harnessPackage: undefined, nemoclawVersion: null },
       },
       useRealManagedEvidence: true,
     });
@@ -770,7 +789,7 @@ describe("upgrade-sandboxes prepared backup recovery (#6114)", () => {
     const harness = createRecoveryHarness(["legacy-box"], {
       confirmedLegacyManagedNames: ["other-box"],
       registryOverrides: {
-        "legacy-box": { agent: null, nemoclawVersion: null },
+        "legacy-box": { agent: null, harnessPackage: undefined, nemoclawVersion: null },
       },
       useRealManagedEvidence: true,
     });
@@ -793,7 +812,7 @@ describe("upgrade-sandboxes prepared backup recovery (#6114)", () => {
       const harness = createRecoveryHarness(["legacy-box"], {
         confirmedLegacyManagedNames,
         registryOverrides: {
-          "legacy-box": { agent: null, nemoclawVersion: null },
+          "legacy-box": { agent: null, harnessPackage: undefined, nemoclawVersion: null },
         },
         useRealManagedEvidence: true,
       });
@@ -813,6 +832,7 @@ describe("upgrade-sandboxes prepared backup recovery (#6114)", () => {
       registryOverrides: {
         "custom-box": {
           agent: null,
+          harnessPackage: undefined,
           nemoclawVersion: null,
           fromDockerfile: "/tmp/custom.Dockerfile",
         },
@@ -832,7 +852,11 @@ describe("upgrade-sandboxes prepared backup recovery (#6114)", () => {
     const harness = createRecoveryHarness(["dcode-box"], {
       confirmedLegacyManagedNames: ["dcode-box"],
       registryOverrides: {
-        "dcode-box": { agent: "langchain-deepagents-code", nemoclawVersion: null },
+        "dcode-box": {
+          agent: "langchain-deepagents-code",
+          harnessPackage: undefined,
+          nemoclawVersion: null,
+        },
       },
       useRealManagedEvidence: true,
     });

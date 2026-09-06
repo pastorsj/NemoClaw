@@ -11,6 +11,8 @@ import type {
   HarnessConfigUpdateRequest,
   HarnessInferenceConfigRequest,
   HarnessInferenceConfigSupport,
+  HarnessInferenceConfigUpdatePlan,
+  HarnessInferenceConfigUpdateRequest,
   HarnessConfigUrlPolicy,
   HarnessConfigUrlRequest,
   HarnessExitZeroCommand,
@@ -35,7 +37,17 @@ export type {
   HarnessConfigUpdatePlan,
   HarnessConfigUpdateRequest,
   HarnessInferenceConfigRequest,
+  HarnessInferenceConfigPostCommit,
   HarnessInferenceConfigSupport,
+  HarnessInferenceConfigUpdatePlan,
+  HarnessInferenceConfigUpdateRequest,
+  HarnessInferenceApi,
+  HarnessInferenceReasoning,
+  HarnessInferenceRoute,
+  HarnessSandboxReconcileDeclaration,
+  HarnessSandboxReconcileRequest,
+  HarnessSandboxReconcileResult,
+  HarnessSandboxReconcileTrigger,
   HarnessConfigUrlPolicy,
   HarnessConfigUrlRequest,
   HarnessExitZeroCommand,
@@ -134,9 +146,43 @@ const commandSchema = configCommandSchema({
 });
 const exitZeroCommandSchema = configCommandSchema(exitZeroSuccessSchema);
 
+const sandboxReconcileCommandSchema: AnySchemaObject = Object.freeze({
+  type: "array",
+  minItems: 1,
+  maxItems: 32,
+  items: {
+    type: "string",
+    minLength: 1,
+    maxLength: 4096,
+    pattern: "^[^\\u0000\\r\\n]+$",
+  },
+});
+
+const sandboxReconcileManifestSchema: AnySchemaObject = Object.freeze({
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind"],
+      properties: { kind: { const: "not-required" } },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "trigger", "command", "timeout_seconds"],
+      properties: {
+        kind: { const: "command" },
+        trigger: { enum: ["after-config-sync", "when-config-changes"] },
+        command: sandboxReconcileCommandSchema,
+        timeout_seconds: { type: "integer", minimum: 1, maximum: 120 },
+      },
+    },
+  ],
+});
+
 const configManifestSchema: AnySchemaObject = Object.freeze({
   type: "object",
-  required: ["name", "config"],
+  required: ["name", "config", "inference"],
   properties: {
     name: { type: "string", minLength: 1, maxLength: 256 },
     config: {
@@ -146,6 +192,63 @@ const configManifestSchema: AnySchemaObject = Object.freeze({
         dir: canonicalAbsolutePathSchema,
         config_file: relativeFileSchema,
         format: { type: "string", minLength: 1, maxLength: 64 },
+      },
+    },
+    inference: {
+      type: "object",
+      required: ["config_update"],
+      properties: {
+        config_update: {
+          oneOf: [
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["support", "provider_api_overrides", "post_commit"],
+              properties: {
+                support: { const: "mutable" },
+                provider_api_overrides: {
+                  type: "array",
+                  maxItems: 32,
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["provider", "api"],
+                    properties: {
+                      provider: {
+                        type: "string",
+                        minLength: 1,
+                        maxLength: 256,
+                        pattern: "^[A-Za-z0-9._-]+$",
+                      },
+                      api: {
+                        enum: ["openai-completions", "anthropic-messages", "openai-responses"],
+                      },
+                    },
+                  },
+                },
+                post_commit: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["config_sync", "gateway_restart", "sandbox_reconcile"],
+                  properties: {
+                    config_sync: { enum: ["best-effort", "required"] },
+                    gateway_restart: { enum: ["not-required", "when-api-changes"] },
+                    sandbox_reconcile: sandboxReconcileManifestSchema,
+                  },
+                },
+              },
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["support", "reason"],
+              properties: {
+                support: { const: "unsupported" },
+                reason: { type: "string", minLength: 1, maxLength: 8192 },
+              },
+            },
+          ],
+        },
       },
     },
   },
@@ -175,16 +278,190 @@ const inferenceSupportSchema: AnySchemaObject = Object.freeze({
     {
       type: "object",
       additionalProperties: false,
-      required: ["kind"],
-      properties: { kind: { const: "mutable" } },
+      required: ["kind", "providerApiOverrides"],
+      properties: {
+        kind: { const: "mutable" },
+        providerApiOverrides: {
+          type: "array",
+          maxItems: 32,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["provider", "api"],
+            properties: {
+              provider: {
+                type: "string",
+                minLength: 1,
+                maxLength: 256,
+                pattern: "^[A-Za-z0-9._-]+$",
+              },
+              api: {
+                enum: ["openai-completions", "anthropic-messages", "openai-responses"],
+              },
+            },
+          },
+        },
+      },
     },
     {
       type: "object",
       additionalProperties: false,
       required: ["kind", "reason"],
       properties: {
-        kind: { const: "immutable" },
+        kind: { const: "unsupported" },
         reason: { type: "string", minLength: 1, maxLength: 8192 },
+      },
+    },
+  ],
+});
+
+const inferenceApiSchema: AnySchemaObject = Object.freeze({
+  enum: ["openai-completions", "anthropic-messages", "openai-responses"],
+});
+
+const inferenceUpdateRequestSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["target", "config", "route", "contextWindow", "reasoning"],
+  properties: {
+    target: configTargetSchema,
+    config: { type: "object" },
+    route: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "upstreamProvider",
+        "model",
+        "providerKey",
+        "primaryModelRef",
+        "baseUrl",
+        "api",
+        "compatibility",
+      ],
+      properties: {
+        upstreamProvider: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+          pattern: "^[^\\u0000\\r\\n]+$",
+        },
+        model: {
+          type: "string",
+          minLength: 1,
+          maxLength: 4096,
+          pattern: "^[A-Za-z0-9._:/-]+$",
+        },
+        providerKey: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+          pattern: "^[A-Za-z0-9._-]+$",
+        },
+        primaryModelRef: {
+          anyOf: [
+            { type: "null" },
+            {
+              type: "string",
+              minLength: 1,
+              maxLength: 4096,
+              pattern: "^[A-Za-z0-9._:/-]+$",
+            },
+          ],
+        },
+        baseUrl: {
+          type: "string",
+          minLength: 1,
+          maxLength: 4096,
+          pattern: "^https://inference[.]local(?:/v1)?$",
+        },
+        api: inferenceApiSchema,
+        compatibility: { anyOf: [{ type: "null" }, { type: "object" }] },
+      },
+    },
+    contextWindow: {
+      anyOf: [{ type: "null" }, { type: "integer", minimum: 1, maximum: 2_147_483_647 }],
+    },
+    reasoning: {
+      type: "object",
+      additionalProperties: false,
+      required: ["effort", "explicit"],
+      properties: {
+        effort: { anyOf: [{ type: "null" }, { enum: ["low", "medium", "high"] }] },
+        explicit: { type: "boolean" },
+      },
+    },
+  },
+});
+
+const inferencePostCommitSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["configSync", "gatewayRestart", "sandboxReconcile"],
+  properties: {
+    configSync: { enum: ["best-effort", "required"] },
+    gatewayRestart: {
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind"],
+          properties: { kind: { const: "not-required" } },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "previousApi"],
+          properties: {
+            kind: { const: "when-api-changes" },
+            previousApi: { anyOf: [{ type: "null" }, inferenceApiSchema] },
+          },
+        },
+      ],
+    },
+    sandboxReconcile: {
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind"],
+          properties: { kind: { const: "not-required" } },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "trigger", "command", "timeoutSeconds"],
+          properties: {
+            kind: { const: "command" },
+            trigger: { enum: ["after-config-sync", "when-config-changes"] },
+            command: sandboxReconcileCommandSchema,
+            timeoutSeconds: { type: "integer", minimum: 1, maximum: 120 },
+          },
+        },
+      ],
+    },
+  },
+});
+
+const inferenceUpdateResultSchema: AnySchemaObject = Object.freeze({
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "reason"],
+      properties: {
+        kind: { const: "unsupported" },
+        reason: { type: "string", minLength: 1, maxLength: 8192 },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "config", "changed", "postCommit"],
+      properties: {
+        kind: { const: "mutation" },
+        config: { type: "object" },
+        changed: { type: "boolean" },
+        postCommit: inferencePostCommitSchema,
       },
     },
   ],
@@ -406,6 +683,15 @@ export const HARNESS_CONFIG_ADAPTER_CONTRACT = defineHarnessAdapterContract({
       requestSchema: inferenceRequestSchema,
       resultSchema: inferenceSupportSchema,
       resultDescription: "inference configuration support",
+    }),
+    prepareInference: defineHarnessAdapterOperation<
+      HarnessInferenceConfigUpdateRequest,
+      HarnessInferenceConfigUpdatePlan
+    >({
+      exportName: "prepareInferenceConfig",
+      requestSchema: inferenceUpdateRequestSchema,
+      resultSchema: inferenceUpdateResultSchema,
+      resultDescription: "inference configuration update plan",
     }),
     prepareUpdate: defineHarnessAdapterOperation<
       HarnessConfigUpdateRequest,

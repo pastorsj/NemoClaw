@@ -155,6 +155,7 @@ export function resolveSandboxCreateIntent({
   gpuCreateArgs,
   resourceCreateArgs = [],
   hostMounts = [],
+  sandboxDriverMounts = [],
   gpuRoutePlan,
   sandboxGpuLogMessage,
   extraPlaceholderKeys = [],
@@ -217,6 +218,15 @@ export function resolveSandboxCreateIntent({
             target,
             readOnly: true,
             ...(sourceIdentity ? { sourceIdentity: { ...sourceIdentity } } : {}),
+          })),
+        }
+      : {}),
+    ...(sandboxDriverMounts.length > 0
+      ? {
+          sandboxDriverMounts: sandboxDriverMounts.map((mount) => ({
+            ...mount,
+            drivers: [...mount.drivers],
+            ...(mount.options ? { options: [...mount.options] } : {}),
           })),
         }
       : {}),

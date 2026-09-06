@@ -21,14 +21,11 @@ import {
   isStationGb300ProductName,
   type StationProfile,
 } from "../readiness/station-qualification";
-import {
-  allMessagingChannelPolicyPresets,
-  requiredMessagingChannelPolicyPresets,
-} from "./messaging-policy-presets";
+import { requiredMessagingChannelPolicyPresets } from "./messaging-policy-presets";
 import { requiredOpenclawOtelPolicyPresets } from "./openclaw-otel-policy-presets";
 import { filterSuppressedAgentRequiredPresets } from "./policy-tier-suppression";
 import { cleanupTempDir, createExactTempFileCleanup, secureTempFile } from "./temp-files";
-import { isPortableExperimentalProfile } from "./experimental/portable-profile";
+import { isHermesPortableProduct } from "./experimental/portable-product-qualification";
 
 export type InitialSandboxPolicy = {
   policyPath: string;
@@ -47,8 +44,6 @@ export function discloseInitialSandboxPolicy(policy: InitialSandboxPolicy): void
     policy.sourceBytes?.toString("utf8") ?? fs.readFileSync(policy.policyPath, "utf8"),
   );
 }
-
-const HERMES_MESSAGING_POLICY_KEYS = getMessagingPolicyKeysByChannel({ agent: "hermes" });
 
 const PROC_PATH = "/proc";
 const PROC_COMM_READ_WRITE_PATHS = ["/proc/self/comm", "/proc/self/task/*/comm"];
@@ -386,9 +381,10 @@ export function getCredentialBindingProviders(policyContent: string): string[] {
   return [...providers];
 }
 
-function filterHermesInactiveMessagingPolicies(
+function filterInactiveMessagingPolicies(
   policyContent: string,
   activeMessagingChannels: string[],
+  agent: string,
 ): { content: string; changed: boolean } {
   const parsed = YAML.parse(policyContent);
   if (!isObjectRecord(parsed) || !isObjectRecord(parsed.network_policies)) {
@@ -396,8 +392,9 @@ function filterHermesInactiveMessagingPolicies(
   }
 
   const active = new Set(activeMessagingChannels);
+  const messagingPolicyKeys = getMessagingPolicyKeysByChannel({ agent });
   let changed = false;
-  for (const [channel, policyKeys] of Object.entries(HERMES_MESSAGING_POLICY_KEYS)) {
+  for (const [channel, policyKeys] of Object.entries(messagingPolicyKeys)) {
     if (active.has(channel)) continue;
     for (const key of policyKeys) {
       if (Object.prototype.hasOwnProperty.call(parsed.network_policies, key)) {
@@ -504,11 +501,9 @@ function resolveInitialSandboxCreatePolicy(
         ? requiredOpenclawOtelPolicyPresets(options.agentName ?? "openclaw")
         : [];
     const isHermesPolicyFromPath = isHermesPolicyPath(basePolicyPath);
-    const isHermesPolicy = options.agentName === "hermes" || isHermesPolicyFromPath;
     const policyAgent = options.agentName ?? (isHermesPolicyFromPath ? "hermes" : null);
-    const messagingCreateTimePresets = isHermesPolicy
-      ? allMessagingChannelPolicyPresets(activeMessagingChannels)
-      : requiredMessagingChannelPolicyPresets(activeMessagingChannels);
+    const messagingCreateTimePresets =
+      requiredMessagingChannelPolicyPresets(activeMessagingChannels);
     const requestedCreateTimePresets = filterSuppressedAgentRequiredPresets(
       [
         ...new Set([
@@ -522,8 +517,12 @@ function resolveInitialSandboxCreatePolicy(
     );
     const dedupe = (values: string[]) => [...new Set(values.filter(Boolean))];
 
-    if (isHermesPolicy) {
-      const filtered = filterHermesInactiveMessagingPolicies(basePolicy, activeMessagingChannels);
+    if (policyAgent) {
+      const filtered = filterInactiveMessagingPolicies(
+        basePolicy,
+        activeMessagingChannels,
+        policyAgent,
+      );
       if (filtered.changed) {
         adoptPolicy(filtered.content, "nemoclaw-agent-policy");
       }
@@ -583,7 +582,7 @@ export function prepareInitialSandboxCreatePolicy(
   activeMessagingChannels: string[],
   options: InitialPolicyOptions = {},
 ): InitialSandboxPolicy {
-  const exactCleanup = options.agentName === "hermes" && isPortableExperimentalProfile();
+  const exactCleanup = isHermesPortableProduct(options.agentName);
   return resolveInitialSandboxCreatePolicy(basePolicyPath, activeMessagingChannels, options, {
     materialize: createTempPolicyMaterializer(exactCleanup),
     exactCleanup,
@@ -694,7 +693,7 @@ export function planHermesPortableInitialSandboxPolicy(
   activeMessagingChannels: string[],
   options: InitialPolicyOptions,
 ): InitialSandboxPolicy {
-  if (options.agentName !== "hermes" || !isPortableExperimentalProfile()) {
+  if (!isHermesPortableProduct(options.agentName)) {
     throw new Error("Hermes portable policy planning requires the schema-5 profile.");
   }
   return resolveInitialSandboxCreatePolicy(basePolicyPath, activeMessagingChannels, options, {

@@ -1,20 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import os from "node:os";
+export { normalizeProcessExitCode, spawnExitCode } from "./process-status";
 
 const SANDBOX_LIFECYCLE_DEFERRED_EXIT = Symbol.for("nemoclaw.sandbox-lifecycle.deferred-exit");
-
-/** Normalize Node exit values while failing closed for present malformed values. */
-export function normalizeProcessExitCode(
-  value: number | string | null | undefined,
-  absentExitCode = 0,
-): number {
-  if (value === null || value === undefined) return absentExitCode;
-  if (value === "") return 1;
-  const exitCode = Number(value);
-  return Number.isInteger(exitCode) ? exitCode : 1;
-}
 
 export class SandboxLifecycleDeferredExit extends Error {
   readonly [SANDBOX_LIFECYCLE_DEFERRED_EXIT] = true;
@@ -61,14 +50,4 @@ export async function runWithDeferredSandboxLifecycleExit<T>(
     if (!isSandboxLifecycleDeferredExit(error)) throw error;
     return exit(error.exitCode);
   }
-}
-
-export function spawnExitCode(result: {
-  status: number | null;
-  signal?: NodeJS.Signals | null;
-}): number {
-  if (result.status !== null) return result.status;
-  if (!result.signal) return 1;
-  const signalNumber = os.constants.signals[result.signal];
-  return signalNumber ? 128 + signalNumber : 1;
 }

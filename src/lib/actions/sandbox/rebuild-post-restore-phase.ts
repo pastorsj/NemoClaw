@@ -2,14 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { CLI_NAME } from "../../cli/branding";
+import type { HarnessScheduledWorkDeclaration } from "@nvidia/nemoclaw-harness-contract";
 import { D, G, R, YW } from "../../cli/terminal-style";
 import type { SandboxMessagingPlan } from "../../messaging";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import * as sandboxVersion from "../../sandbox/version";
 import {
+  inspectMutableConfigPerms,
   inspectMutableHermesConfigPerms,
   repairMutableConfigPerms,
 } from "../../sandbox/mutable-config-perms";
+import {
+  packageDevicePairingIncompleteMessage,
+  settlePackageDevicePairing,
+} from "../../onboard/sandbox-create/device-pairing";
 import * as registry from "../../state/registry";
 import { ensureMessagingHostForwardAfterRebuild } from "./messaging-host-forward-lifecycle";
 import { executeSandboxExecCommand } from "./process-recovery";
@@ -23,12 +29,17 @@ import type { RebuildBail, RebuildLog } from "./rebuild-credential-preflight";
 import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
 import {
   completeHermesCronRestoreAfterGatewayReplacement,
+  completeScheduledWorkRestoreAfterRuntimeReplacement,
   type HermesCronRestoreIdentity,
+  type ScheduledWorkRestoreIdentity,
   isHermesCronRestoreDrainMarkerRollbackFailure,
   printHermesGatewayRestoreRecovery,
   restartHermesGatewayAfterStateRestore,
+  restartPackageRuntimeAfterStateRestore,
   verifyHermesGatewayAfterStateRestore,
   verifyHermesGatewayAfterStateRestoreForCronGate,
+  verifyPackageRuntimeAfterStateRestore,
+  verifyPackageRuntimeAfterStateRestoreForScheduledWorkGate,
 } from "./rebuild-hermes-post-restore";
 import {
   type McpRebuildPreparation,
@@ -38,15 +49,22 @@ import {
 } from "./rebuild-mcp-phase";
 import {
   finalizePendingMessagingRemovalsAfterRestore,
+  reapplyMessagingManifestAfterPackageRepair,
   reapplyMessagingManifestAfterOpenClawDoctor,
 } from "./rebuild-messaging-phase";
 import { reconcileStalePinnedSessionModelsAfterRebuild } from "./reconcile-session-models";
 import { establishRestoredSandboxGatewayPairing } from "./restore-gateway-pairing";
+import { legacyRebuildRequestsStateAction } from "./rebuild/legacy-state";
+import { executeReceiptBackedStateCommand } from "./state-lifecycle";
 
 export {
   type HermesCronRestoreIdentity,
+  type ScheduledWorkRestoreIdentity,
   HermesCronRestoreIncompleteError,
+  ScheduledWorkRestoreIncompleteError,
+  recoverScheduledWorkRestore,
   recoverHermesCronRestore,
+  runScheduledWorkRestoreTransaction,
   runHermesCronRestoreTransaction,
 } from "./rebuild-hermes-post-restore";
 
@@ -100,7 +118,13 @@ export interface RebuildPostRestorePhaseInput {
   mcpEntries: McpRebuildPreparation["entries"];
   mcpRuntimeSelection?: McpRebuildPreparation["runtimeSelection"];
   restoreSucceeded: boolean;
+  scheduledWorkRestoreIdentity?: ScheduledWorkRestoreIdentity;
+  /** Explicit no-receipt compatibility input; receipt-backed packages use the generic field. */
   hermesCronRestoreIdentity?: HermesCronRestoreIdentity;
+  scheduledWorkDeclaration?: Extract<
+    HarnessScheduledWorkDeclaration,
+    { readonly support: "managed" }
+  > | null;
   preparedBackupRecovery: boolean;
   versionCheck: ReturnType<typeof sandboxVersion.checkAgentVersion>;
   log: RebuildLog;
@@ -111,10 +135,8 @@ export interface RebuildPostRestoreVerification {
   readonly mutableConfigPermissionsVerified: boolean;
 }
 
-function printHermesApiTokenChangeNotice(sandboxName: string, targetAgentName: string): void {
-  if (targetAgentName !== "hermes") {
-    return;
-  }
+function printApiTokenChangeNotice(sandboxName: string, required: boolean): void {
+  if (!required) return;
   console.log(`    ${YW}\u26a0${R} Hermes API bearer token changed during rebuild.`);
   console.log(
     `    Retrieve the new token with \`${CLI_NAME} ${sandboxName} gateway-token --quiet\`.`,
@@ -240,9 +262,334 @@ async function repairOpenClawStateAfterRestore(input: {
   return { registryEntry, mutableConfigPermissionsVerified, mutablePermsRepairUnverified };
 }
 
+async function runReceiptBackedPackagePostRestore(input: {
+  readonly phase: RebuildPostRestorePhaseInput;
+  readonly requireCurrentAgentAuthority: (stage: string) => RebuildSandboxEntry | null;
+}): Promise<RebuildPostRestoreVerification | undefined> {
+  const { phase, requireCurrentAgentAuthority } = input;
+  const {
+    sandboxName,
+    agentAuthority,
+    messagingPlan,
+    backupManifest,
+    mcpEntries,
+    mcpRuntimeSelection,
+    restoreSucceeded,
+    scheduledWorkRestoreIdentity,
+    scheduledWorkDeclaration,
+    preparedBackupRecovery,
+    versionCheck,
+    log,
+    bail,
+  } = phase;
+  const receipt = agentAuthority.harnessPackage;
+  if (!receipt) return bail("Receipt-backed post-restore authority is unavailable.");
+  const agentDefinition = agentAuthority.definition;
+  const postRestore = agentDefinition.stateLifecycle.rebuild.post_restore;
+  const runtimeOptions = buildSelectedRuntimeOptions(mcpRuntimeSelection);
+  const runtimeLifecycleOptions = { agentDefinition, ...runtimeOptions };
+  let current = requireCurrentAgentAuthority("before package post-restore work");
+  if (!current) return;
+  let effectiveMessagingPlan = messagingPlan;
+  let mutableConfigPermissionsVerified = postRestore.kind === "not-required";
+  let postRestoreIncomplete = false;
+
+  const failPackageStateCommand = (purpose: string, detail: string): undefined => {
+    console.error(`  ${YW}\u26a0${R} ${agentDefinition.displayName} ${purpose} failed: ${detail}`);
+    bail(`${agentDefinition.displayName} ${purpose} failed during rebuild.`);
+    return undefined;
+  };
+
+  if (postRestore.kind === "managed") {
+    if (postRestore.command) {
+      const commandResult = executeReceiptBackedStateCommand(
+        sandboxName,
+        current,
+        agentDefinition,
+        postRestore.command,
+      );
+      if (commandResult.kind !== "completed") {
+        return failPackageStateCommand(
+          "post-restore command",
+          commandResult.kind === "failed" ? commandResult.detail : commandResult.reason,
+        );
+      }
+      current = requireCurrentAgentAuthority("after package post-restore command");
+      if (!current) return;
+      log(`Completed ${agentDefinition.displayName} package post-restore command`);
+    }
+
+    if (postRestore.reapply_messaging) {
+      try {
+        await reapplyMessagingManifestAfterPackageRepair(
+          sandboxName,
+          effectiveMessagingPlan,
+          log,
+          mcpRuntimeSelection,
+        );
+      } catch (error) {
+        return failPackageStateCommand(
+          "messaging manifest reapply",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      current = requireCurrentAgentAuthority("after package messaging replay");
+      if (!current) return;
+    }
+
+    if (postRestore.mutable_config === "repair") {
+      const repair = repairMutableConfigPerms(sandboxName);
+      mutableConfigPermissionsVerified = repair.applied && repair.verified;
+      if (!mutableConfigPermissionsVerified) {
+        const detail = repair.applied ? repair.errors.join("; ") : repair.reason;
+        return failPackageStateCommand("mutable config repair", detail);
+      }
+      current = requireCurrentAgentAuthority("after package mutable config repair");
+      if (!current) return;
+    }
+  }
+
+  try {
+    const finalized = finalizePendingMessagingRemovalsAfterRestore(
+      effectiveMessagingPlan,
+      log,
+      mcpRuntimeSelection,
+    );
+    if (finalized !== effectiveMessagingPlan && finalized) {
+      current = requireCurrentAgentAuthority("before pending messaging removal publication");
+      if (!current) return;
+      const updated = registry.updateSandboxIfCurrent(current, {
+        messaging: { schemaVersion: 1, plan: finalized },
+      });
+      if (!updated) return bail("Could not retire pending messaging removals after rebuild.");
+      current = updated;
+      effectiveMessagingPlan = finalized;
+    }
+  } catch (error) {
+    return bail(
+      `Could not finalize pending messaging removals after rebuild: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  const restartRequired = postRestore.kind === "managed" && postRestore.restart_runtime;
+  current = requireCurrentAgentAuthority("before package runtime restart");
+  if (!current) return;
+  const restartState = restartPackageRuntimeAfterStateRestore(
+    sandboxName,
+    restartRequired,
+    runtimeLifecycleOptions,
+  );
+
+  current = requireCurrentAgentAuthority("before managed MCP restoration");
+  if (!current) return;
+  const mcpBridgeRestoreUnverified = !(await restoreMcpAfterRebuild(
+    sandboxName,
+    mcpEntries,
+    agentDefinition,
+    mcpRuntimeSelection,
+  ));
+  current = requireCurrentAgentAuthority("after managed MCP restoration");
+  if (!current) return;
+
+  let integrityUnverified = false;
+  const integrity = postRestore.kind === "managed" ? postRestore.config_integrity : null;
+  if (integrity?.kind === "commands") {
+    if (mcpBridgeRestoreUnverified) {
+      integrityUnverified = true;
+    } else {
+      for (const [purpose, command] of [
+        ["config integrity refresh", integrity.refresh],
+        ["config integrity verification", integrity.verify],
+      ] as const) {
+        const result = executeReceiptBackedStateCommand(
+          sandboxName,
+          current,
+          agentDefinition,
+          command,
+        );
+        if (result.kind !== "completed") {
+          integrityUnverified = true;
+          log(`${purpose} failed: ${result.kind === "failed" ? result.detail : result.reason}`);
+          break;
+        }
+        current = requireCurrentAgentAuthority(`after package ${purpose}`);
+        if (!current) return;
+      }
+    }
+  }
+
+  if (postRestore.kind === "managed" && postRestore.settle_device_pairing) {
+    const declaration = agentDefinition.runtime?.device_pairing_settlement;
+    const runtimeIdentity = agentDefinition.managedImage?.runtime_identity;
+    if (!declaration || !runtimeIdentity) {
+      return bail(
+        `${agentDefinition.displayName} requested device-pairing settlement without a package command and runtime identity.`,
+      );
+    }
+    const settlement = await settlePackageDevicePairing(
+      sandboxName,
+      receipt.id,
+      declaration,
+      runtimeIdentity,
+    );
+    if (settlement.kind !== "settled") {
+      return bail(
+        packageDevicePairingIncompleteMessage(
+          agentDefinition.displayName,
+          sandboxName,
+          settlement.reason,
+        ),
+      );
+    }
+    current = requireCurrentAgentAuthority("after package device-pairing settlement");
+    if (!current) return;
+  }
+
+  if (scheduledWorkRestoreIdentity && !scheduledWorkDeclaration) {
+    return bail("A scheduled-work restore gate has no receipt-backed package declaration.");
+  }
+  const runtimeVerification =
+    scheduledWorkRestoreIdentity && scheduledWorkDeclaration
+      ? verifyPackageRuntimeAfterStateRestoreForScheduledWorkGate(
+          sandboxName,
+          restartRequired,
+          restartState,
+          scheduledWorkDeclaration,
+          scheduledWorkRestoreIdentity,
+          runtimeLifecycleOptions,
+        )
+      : {
+          state: verifyPackageRuntimeAfterStateRestore(
+            sandboxName,
+            restartRequired,
+            restartState,
+            runtimeLifecycleOptions,
+          ),
+          replacementIdentity: undefined,
+        };
+  const runtimeRestoreUnverified = runtimeVerification.state === "unverified";
+
+  if (postRestore.kind === "managed" && postRestore.mutable_config === "verify") {
+    const inspection = inspectMutableConfigPerms(sandboxName);
+    mutableConfigPermissionsVerified = inspection.applies && inspection.ok;
+    if (!mutableConfigPermissionsVerified) {
+      log(
+        `Package mutable config verification failed: ${
+          inspection.applies ? inspection.issues.join("; ") : inspection.reason
+        }`,
+      );
+      postRestoreIncomplete = true;
+    }
+  } else if (postRestore.kind === "managed" && postRestore.mutable_config === "not-required") {
+    mutableConfigPermissionsVerified = true;
+  }
+
+  let verifiedAgentVersion: string | null = null;
+  if (versionCheck.expectedVersion) {
+    registry.updateSandbox(sandboxName, { agentVersion: null });
+    const rebuiltVersion = probeRebuiltAgentVersion(sandboxName);
+    if (
+      rebuiltVersion.verificationFailed ||
+      rebuiltVersion.sandboxVersion !== versionCheck.expectedVersion
+    ) {
+      registry.updateSandbox(sandboxName, { agentVersion: null });
+      return bail("Replacement agent version did not match the authoritative rebuild target.");
+    }
+    verifiedAgentVersion = rebuiltVersion.sandboxVersion;
+  }
+
+  if (scheduledWorkRestoreIdentity && scheduledWorkDeclaration) {
+    const replacementIdentity = runtimeVerification.replacementIdentity;
+    if (runtimeRestoreUnverified || mcpBridgeRestoreUnverified || !replacementIdentity) {
+      console.error(
+        "  Scheduled-work dispatch remains drained because replacement runtime state was not verified.",
+      );
+      return bail("Scheduled-work restore validation failed; dispatch was not re-enabled.");
+    }
+    try {
+      completeScheduledWorkRestoreAfterRuntimeReplacement(
+        sandboxName,
+        scheduledWorkDeclaration,
+        scheduledWorkRestoreIdentity,
+        replacementIdentity,
+      );
+    } catch (error) {
+      console.error(
+        `  Scheduled-work dispatch remains drained: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return bail("Scheduled-work restore validation failed; dispatch was not re-enabled.");
+    }
+    current = requireCurrentAgentAuthority("after scheduled-work restore completion");
+    if (!current) return;
+  }
+
+  current = requireCurrentAgentAuthority("before final registry publication");
+  if (!current) return;
+  const published = registry.updateSandboxIfCurrent(current, {
+    agentVersion: verifiedAgentVersion,
+  });
+  if (!published) return bail("The recreated registry row changed before final publication.");
+  current = requireCurrentAgentAuthority("after final registry publication");
+  if (!current) return;
+
+  const messagingHostForwardUnverified = !ensureMessagingHostForwardAfterRebuild(
+    sandboxName,
+    effectiveMessagingPlan,
+    mcpRuntimeSelection,
+  );
+  if (integrity?.kind === "commands" && !integrityUnverified) {
+    const finalIntegrity = executeReceiptBackedStateCommand(
+      sandboxName,
+      current,
+      agentDefinition,
+      integrity.verify,
+    );
+    integrityUnverified = finalIntegrity.kind !== "completed";
+  }
+  if (!requireCurrentAgentAuthority("before final package rebuild reporting")) return;
+
+  const complete =
+    restoreSucceeded &&
+    !mcpBridgeRestoreUnverified &&
+    !runtimeRestoreUnverified &&
+    !messagingHostForwardUnverified &&
+    !integrityUnverified &&
+    !postRestoreIncomplete &&
+    mutableConfigPermissionsVerified;
+  console.log("");
+  if (!complete) {
+    if (backupManifest) console.error(`  Backup is preserved at: ${backupManifest.backupPath}`);
+    if (preparedBackupRecovery) {
+      return bail(
+        `Prepared backup recovery for '${sandboxName}' completed with unverified post-restore state.`,
+      );
+    }
+    return bail(
+      `${agentDefinition.displayName} post-restore verification failed for '${sandboxName}'.`,
+    );
+  }
+
+  console.log(`  ${G}✓${R} Sandbox '${sandboxName}' rebuild completed`);
+  if (versionCheck.expectedVersion) {
+    console.log(`    Now running: ${agentDefinition.displayName} v${versionCheck.expectedVersion}`);
+  }
+  if (postRestore.kind === "managed" && postRestore.notify_gateway_token_change) {
+    console.log(
+      `    ${YW}\u26a0${R} ${agentDefinition.displayName} API bearer token changed during rebuild.`,
+    );
+    console.log(
+      `    Retrieve the new token with \`${CLI_NAME} ${sandboxName} gateway-token --quiet\`.`,
+    );
+  }
+  return { mutableConfigPermissionsVerified };
+}
+
 function finishRebuildPostRestore(input: {
   readonly sandboxName: string;
   readonly targetAgentName: string;
+  readonly stateLifecycle: ResolvedSandboxAgent["definition"]["stateLifecycle"];
   readonly rebuiltAgentName: string;
   readonly expectedVersion: string | null;
   readonly terminalAgent: boolean;
@@ -263,6 +610,7 @@ function finishRebuildPostRestore(input: {
   const {
     sandboxName,
     targetAgentName,
+    stateLifecycle,
     rebuiltAgentName,
     expectedVersion,
     terminalAgent,
@@ -339,14 +687,14 @@ function finishRebuildPostRestore(input: {
     return bail(`State restore remained incomplete after rebuilding '${sandboxName}'.`);
   }
   if (
-    targetAgentName === "openclaw" &&
+    legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "verify-config-integrity") &&
     !mcpBridgeRestoreUnverified &&
     (mutableConfigHashRefreshUnverified || finalMutableConfigHashUnverified)
   ) {
     return bail("OpenClaw config integrity verification failed after rebuild.");
   }
   if (
-    targetAgentName === "hermes" &&
+    legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "restart-runtime-after-restore") &&
     (hermesGatewayRestoreUnverified || mcpBridgeRestoreUnverified)
   ) {
     return bail(`Hermes post-restore verification failed for '${sandboxName}'.`);
@@ -356,7 +704,10 @@ function finishRebuildPostRestore(input: {
       `Prepared backup recovery for '${sandboxName}' completed with unverified post-restore state.`,
     );
   }
-  printHermesApiTokenChangeNotice(sandboxName, targetAgentName);
+  printApiTokenChangeNotice(
+    sandboxName,
+    legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "notify-api-token-change"),
+  );
   return { mutableConfigPermissionsVerified };
 }
 
@@ -419,6 +770,16 @@ export async function runRebuildPostRestorePhase(
   if (!verifiedRecreatedEntry) return;
   const targetAgentName = agentAuthority.effectiveAgentId;
   const agentDef = agentAuthority.definition;
+  const stateLifecycle = agentDef.stateLifecycle;
+  if (agentAuthority.harnessPackage) {
+    if (Array.isArray(stateLifecycle.rebuild)) {
+      return bail("Receipt-backed package state lifecycle authority is invalid.");
+    }
+    return runReceiptBackedPackagePostRestore({
+      phase: input,
+      requireCurrentAgentAuthority,
+    });
+  }
   const selectedRuntimeOptions = buildSelectedRuntimeOptions(mcpRuntimeSelection);
   const selectedAgentRuntimeOptions = {
     agentDefinition: agentDef,
@@ -432,7 +793,7 @@ export async function runRebuildPostRestorePhase(
   let messagingHostForwardUnverified = false;
   let effectiveMessagingPlan = messagingPlan;
 
-  if (targetAgentName === "openclaw") {
+  if (legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "repair-upgraded-state")) {
     const repair = await repairOpenClawStateAfterRestore({
       sandboxName,
       messagingPlan,
@@ -484,7 +845,7 @@ export async function runRebuildPostRestorePhase(
   if (!verifiedRecreatedEntry) return;
   const hermesGatewayRestartState = restartHermesGatewayAfterStateRestore(
     sandboxName,
-    targetAgentName,
+    legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "restart-runtime-after-restore"),
     selectedAgentRuntimeOptions,
   );
   verifiedRecreatedEntry = requireCurrentAgentAuthority("before managed MCP restoration");
@@ -497,9 +858,12 @@ export async function runRebuildPostRestorePhase(
   ));
   verifiedRecreatedEntry = requireCurrentAgentAuthority("after managed MCP restoration");
   if (!verifiedRecreatedEntry) return;
-  if (targetAgentName === "openclaw" && mcpBridgeRestoreUnverified) {
+  if (
+    legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "verify-config-integrity") &&
+    mcpBridgeRestoreUnverified
+  ) {
     mutableConfigHashRefreshUnverified = true;
-  } else if (targetAgentName === "openclaw") {
+  } else if (legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "verify-config-integrity")) {
     log("Refreshing mutable OpenClaw config hash after MCP restoration");
     if (
       !refreshMutableOpenClawConfigHashAfterPostRestoreWrites(sandboxName, log, mcpRuntimeSelection)
@@ -515,7 +879,7 @@ export async function runRebuildPostRestorePhase(
       }
     }
   }
-  if (targetAgentName === "openclaw") {
+  if (legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "restore-device-pairing")) {
     const gatewayRestored = await restoreOpenClawGatewayPairing(
       sandboxName,
       requireCurrentAgentAuthority,
@@ -527,7 +891,7 @@ export async function runRebuildPostRestorePhase(
   const hermesGatewayVerification = hermesCronRestoreIdentity
     ? verifyHermesGatewayAfterStateRestoreForCronGate(
         sandboxName,
-        targetAgentName,
+        legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "restart-runtime-after-restore"),
         hermesGatewayRestartState,
         hermesCronRestoreIdentity,
         selectedAgentRuntimeOptions,
@@ -535,7 +899,7 @@ export async function runRebuildPostRestorePhase(
     : {
         state: verifyHermesGatewayAfterStateRestore(
           sandboxName,
-          targetAgentName,
+          legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "restart-runtime-after-restore"),
           hermesGatewayRestartState,
           selectedAgentRuntimeOptions,
         ),
@@ -576,7 +940,7 @@ export async function runRebuildPostRestorePhase(
     verifiedAgentVersion = rebuiltVersion.sandboxVersion;
   }
   if (
-    targetAgentName === "hermes" &&
+    legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "verify-mutable-config") &&
     (hermesGatewayRestoreState === "healthy" || hermesGatewayRestoreState === "recovered")
   ) {
     const mutableConfigVerification = inspectMutableHermesConfigPerms(sandboxName);
@@ -684,7 +1048,7 @@ export async function runRebuildPostRestorePhase(
     messagingHostForwardUnverified = true;
   }
   if (
-    targetAgentName === "openclaw" &&
+    legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "verify-config-integrity") &&
     !mcpBridgeRestoreUnverified &&
     !mutableConfigHashRefreshUnverified &&
     !finalMutableConfigHashUnverified
@@ -704,6 +1068,7 @@ export async function runRebuildPostRestorePhase(
   return finishRebuildPostRestore({
     sandboxName,
     targetAgentName,
+    stateLifecycle,
     rebuiltAgentName,
     expectedVersion: versionCheck.expectedVersion,
     terminalAgent: agentDef.runtime?.kind === "terminal",

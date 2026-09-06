@@ -12,7 +12,7 @@ import {
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
 import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
-import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
+import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-target.mts";
 import { DEFAULT_HOSTED_INFERENCE_BASE_URL } from "../fixtures/hosted-inference.ts";
 import { inferenceResponseModel } from "../fixtures/inference-switch-retry.ts";
 import {

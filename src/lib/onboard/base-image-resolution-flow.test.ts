@@ -44,16 +44,14 @@ describe("base image resolution flow", () => {
     vi.clearAllMocks();
   });
 
-  it.each([
-    "1",
-    "true",
-    "YES",
-    "on",
-  ])("recognizes the %s refresh environment value (#4680)", (value) => {
-    expect(isSandboxBaseImageRefreshRequested({ NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH: value })).toBe(
-      true,
-    );
-  });
+  it.each(["1", "true", "YES", "on"])(
+    "recognizes the %s refresh environment value (#4680)",
+    (value) => {
+      expect(
+        isSandboxBaseImageRefreshRequested({ NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH: value }),
+      ).toBe(true);
+    },
+  );
 
   it("captures a recorded hint for warm runs and exposes patch options (#4680)", () => {
     mocks.dockerImageInspectFormat.mockReturnValue(
@@ -109,12 +107,21 @@ describe("base image resolution flow", () => {
       stagedDockerfile: "/tmp/hermes-build/Dockerfile",
       baseImageResolutionMetadata: resolvedMetadata,
     };
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    };
     const createAgentSandbox = vi.fn(() => staged);
 
-    expect(createAgentSandboxWithResolution(context, agent, createAgentSandbox)).toBe(staged);
+    expect(
+      createAgentSandboxWithResolution(context, agent, createAgentSandbox, harnessPackage),
+    ).toBe(staged);
     expect(createAgentSandbox).toHaveBeenCalledWith(agent, {
       resolutionHint: recordedMetadata,
       forceBaseImageRefresh: true,
+      harnessPackage,
     });
     expect(context.preResolvedMetadata).toBe(resolvedMetadata);
   });

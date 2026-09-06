@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
-import { resolveSourceBuildIdentity } from "../../core/version";
+import { resolveSourceBuildIdentity } from "../../core/build-identity";
 import { getManagedInferenceServingCatalogRegistries } from "./adapter-registry";
 import { compileTrustedServingCatalog, serializeCompiledServingCatalog } from "./catalog";
 import type {

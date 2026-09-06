@@ -3,6 +3,14 @@
 
 import { inspectOpenShellSandboxIdentityFingerprint } from "../../adapters/openshell/sandbox-identity-cli";
 import { runOpenshell } from "../../adapters/openshell/runtime";
+import {
+  getCredential as getStoredCredential,
+  normalizeCredentialValue as normalizeStoredCredentialValue,
+  prompt as promptForCredential,
+} from "../../credentials/store";
+
+export { listLegacyChannelStatePaths } from "../../messaging/legacy-profile";
+export { legacyMessagingPolicyWarningAgent } from "./policy-channel-legacy";
 
 type MessagingProviderTokenDefinition = {
   name: string;
@@ -35,6 +43,7 @@ type LegacyOnboardProvidersModule = {
 };
 
 type RebuildModule = typeof import("./rebuild");
+type CredentialStoreModule = typeof import("../../credentials/store");
 type PrivilegedExecModule = typeof import("../../sandbox/privileged-exec");
 type SetupInferenceModule = typeof import("../../onboard/setup-inference");
 type SandboxProviderCleanupModule = typeof import("../../onboard/sandbox-provider-cleanup");
@@ -66,6 +75,28 @@ function gatewayRunner(gatewayName: string): typeof runOpenshell {
  * onboarding and rebuild modules at policy-channel import time.
  */
 export const policyChannelDependencies = {
+  /** Keep interactive credential I/O behind the channel workflow's injectable boundary. */
+  prompt(
+    ...args: Parameters<CredentialStoreModule["prompt"]>
+  ): ReturnType<CredentialStoreModule["prompt"]> {
+    return promptForCredential(...args);
+  },
+  getCredential(
+    ...args: Parameters<CredentialStoreModule["getCredential"]>
+  ): ReturnType<CredentialStoreModule["getCredential"]> {
+    return getStoredCredential(...args);
+  },
+  normalizeCredentialValue(
+    ...args: Parameters<CredentialStoreModule["normalizeCredentialValue"]>
+  ): ReturnType<CredentialStoreModule["normalizeCredentialValue"]> {
+    return normalizeStoredCredentialValue(...args);
+  },
+  /** Run an OpenShell command through the same replaceable workflow boundary. */
+  runOpenshell(
+    ...args: Parameters<typeof runOpenshell>
+  ): ReturnType<typeof runOpenshell> {
+    return runOpenshell(...args);
+  },
   /** Use stopped Docker cleanup only after both in-sandbox cleanup attempts fail. */
   clearStoppedSandboxStateRoots(
     sandboxName: string,

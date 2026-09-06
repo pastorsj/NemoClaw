@@ -5,7 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { loadAgent } from "../../../agent/defs";
 import type { SandboxEntry } from "../../../state/registry";
-import { LaunchReadinessEvidenceError, resolveTrustedLaunchAgent } from "./health";
+import {
+  LaunchReadinessEvidenceError,
+  LaunchReadinessObservationError,
+  resolveTrustedLaunchAgent,
+} from "./health";
 
 const PACKAGE_IDENTITY = Object.freeze({
   kind: "agent-runtime" as const,
@@ -73,6 +77,23 @@ describe("launch-readiness agent authority", () => {
         loadAgent: () => loadAgent("langchain-deepagents-code"),
       }),
     ).toThrow(LaunchReadinessEvidenceError);
+  });
+
+  it("reports unsupported session readiness for a commandless package", () => {
+    const commandlessAgent = Object.freeze({
+      ...loadAgent("hermes"),
+      name: "future-harness",
+      runtime: { kind: "gateway" as const },
+    });
+
+    expect(() =>
+      resolveTrustedLaunchAgent(packageBackedEntry(), {
+        getRegisteredAgent: () => commandlessAgent,
+        listAgents: () => {
+          throw new Error("ambient catalogue must not be consulted");
+        },
+      }),
+    ).toThrow(LaunchReadinessObservationError);
   });
 
   it("retains the ambient catalogue path for legacy rows", () => {

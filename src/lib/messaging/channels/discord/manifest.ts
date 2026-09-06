@@ -208,7 +208,7 @@ export const discordManifest = {
     {
       id: "openclawPluginPackage",
       agent: "openclaw",
-      manager: "openclaw-plugin",
+      manager: "node-package",
       spec: "npm:@openclaw/discord@{{openclaw.version}}",
       pin: true,
       integrityByVersion: {

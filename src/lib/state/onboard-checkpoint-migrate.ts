@@ -4,11 +4,9 @@
 import fs from "node:fs";
 
 import { isObjectRecord, type JsonValue } from "../core/json-types";
-import {
-  harnessPackageIdentitiesEqual,
-  parseHarnessPackageIdentity,
-  type HarnessPackageIdentity,
-} from "../agent-runtime/package/identity";
+import { parseHarnessPackageIdentity } from "../agent-runtime/package/identity";
+import { harnessPackageIdentitiesEqual } from "../agent-runtime/package/identity-validation";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import type { WebSearchConfig } from "../inference/web-search";
 import {
   getActiveChannelIdsFromPlan,

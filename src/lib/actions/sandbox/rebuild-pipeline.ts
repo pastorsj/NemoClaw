@@ -34,6 +34,7 @@ import { runRebuildDestroyPhase } from "./rebuild-destroy-phase";
 import { REBUILD_HERMES_DASHBOARD_ENV_KEYS } from "./rebuild-durable-config";
 import {
   disposeRebuildAgentBaseImagePreflight,
+  legacyRebuildPreservesScheduledWork,
   removeStaleRebuildDockerOrphan,
   snapshotOpenShellEnv,
 } from "./rebuild-flow-helpers";
@@ -41,10 +42,13 @@ import { mcpRebuildRequiresRuntimeSelection } from "./rebuild-mcp-phase";
 import { stageMessagingManifestPlanForRebuild } from "./rebuild-messaging-phase";
 import {
   type HermesCronRestoreIdentity,
-  HermesCronRestoreIncompleteError,
+  type ScheduledWorkRestoreIdentity,
+  ScheduledWorkRestoreIncompleteError,
   printHermesCronRestoreRecoveryCommand,
   recoverHermesCronRestore,
+  recoverScheduledWorkRestore,
   runHermesCronRestoreTransaction,
+  runScheduledWorkRestoreTransaction,
   runRebuildPostRestorePhase,
 } from "./rebuild-post-restore-phase";
 import { printRebuildPreflightFailure } from "./rebuild-preflight-error";
@@ -56,6 +60,7 @@ import {
 import {
   finalizePreparedRebuildImageMessagingPlan,
   runHermesCronRestoreBackupPreflight,
+  runScheduledWorkRestoreBackupPreflight,
   runRebuildPreflightPhase,
 } from "./rebuild-preflight-phase";
 import {
@@ -466,18 +471,34 @@ async function rebuildSandboxUnlocked(
       // Validate the completed backup artifact produced above, not the mutable live
       // tree. This gate therefore follows backup creation and precedes every
       // destructive rebuild phase.
-      const hermesCronRestorePreflight = runHermesCronRestoreBackupPreflight({
-        rebuildAgent,
-        backupPath: backup.backupManifest?.backupPath ?? null,
-        backedUpDirs: backup.backupManifest?.backedUpDirs ?? [],
-        log,
-        bail,
-      });
-      if (!hermesCronRestorePreflight) return;
-      const hermesCronRestorePlan = hermesCronRestorePreflight.plan;
+      const packageScheduledWork = targetConfig.agentAuthority.harnessPackage
+        ? targetConfig.agentDefinition.stateLifecycle.rebuild.scheduled_work
+        : null;
+      const scheduledWorkDeclaration =
+        packageScheduledWork?.support === "managed" ? packageScheduledWork : null;
+      const preserveLegacyScheduledWork =
+        !targetConfig.agentAuthority.harnessPackage &&
+        legacyRebuildPreservesScheduledWork(rebuildAgent);
+      const scheduledWorkRestorePreflight = scheduledWorkDeclaration
+        ? runScheduledWorkRestoreBackupPreflight({
+            declaration: scheduledWorkDeclaration,
+            backupPath: backup.backupManifest?.backupPath ?? null,
+            backedUpDirs: backup.backupManifest?.backedUpDirs ?? [],
+            log,
+            bail,
+          })
+        : runHermesCronRestoreBackupPreflight({
+            preserveScheduledWork: preserveLegacyScheduledWork,
+            backupPath: backup.backupManifest?.backupPath ?? null,
+            backedUpDirs: backup.backupManifest?.backedUpDirs ?? [],
+            log,
+            bail,
+          });
+      if (!scheduledWorkRestorePreflight) return;
+      const scheduledWorkRestorePlan = scheduledWorkRestorePreflight.plan;
 
       const preservedEnv = backup.backupManifest?.preservedEnv ?? [];
-      if (preparedImage && messagingPlan?.agent === "hermes" && preservedEnv.length > 0) {
+      if (preparedImage && messagingPlan && preservedEnv.length > 0) {
         const finalizedImage = finalizePreparedRebuildImageMessagingPlan(
           preparedImage,
           messagingPlan,
@@ -485,7 +506,7 @@ async function rebuildSandboxUnlocked(
         );
         if (!finalizedImage.ok) {
           printRebuildPreflightFailure(
-            `the retained replacement image could not include preserved Hermes messaging state: ${finalizedImage.detail}`,
+            `the retained replacement image could not include preserved package messaging state: ${finalizedImage.detail}`,
             "The existing sandbox is untouched. Retry the rebuild after checking the replacement image inputs.",
             "Replacement sandbox image finalization failed",
             bail,
@@ -589,6 +610,9 @@ async function rebuildSandboxUnlocked(
           agentDefinition: targetConfig.agentDefinition,
           targetImageIsCustom: Boolean(fromDockerfile),
           backupManifest: recoveryBackup,
+          reconcileLegacyDashboard:
+            !targetConfig.agentAuthority.harnessPackage &&
+            legacyRebuildPreservesScheduledWork(rebuildAgent),
           ...(recreateJournal.runtimeSelection
             ? { runtimeSelection: recreateJournal.runtimeSelection }
             : {}),
@@ -605,6 +629,7 @@ async function rebuildSandboxUnlocked(
             ? { mcpRuntimeSelection: recreateJournal.runtimeSelection }
             : {}),
           restoreSucceeded: restored.restoreSucceeded,
+          scheduledWorkDeclaration,
           preparedBackupRecovery: true,
           versionCheck,
           log,
@@ -615,17 +640,23 @@ async function rebuildSandboxUnlocked(
         // persisted gate active until the backup and all post-restore state
         // have been applied and verified, then validate the restored cron tree
         // before reopening dispatch or retiring recovery records.
-        if (rebuildAgent === "hermes") {
+        if (scheduledWorkDeclaration || preserveLegacyScheduledWork) {
           try {
-            const outcome = recoverHermesCronRestore(sandboxName);
+            const outcome = scheduledWorkDeclaration
+              ? recoverScheduledWorkRestore(sandboxName, scheduledWorkDeclaration)
+              : recoverHermesCronRestore(sandboxName);
             if (outcome === "unsupported") {
               console.error("");
               console.error(
-                "  The accepted Hermes replacement does not provide cron restore recovery.",
+                scheduledWorkDeclaration
+                  ? "  The accepted package replacement does not provide scheduled-work restore recovery."
+                  : "  The accepted Hermes replacement does not provide cron restore recovery.",
               );
               console.error(`  Backup is preserved at: ${backup.backupManifest?.backupPath}`);
               return bail(
-                "Hermes cron restore recovery is unavailable; the replacement journal was retained.",
+                scheduledWorkDeclaration
+                  ? "Scheduled-work restore recovery is unavailable; the replacement journal was retained."
+                  : "Hermes cron restore recovery is unavailable; the replacement journal was retained.",
               );
             }
             if (outcome === "operator-drain-preserved") {
@@ -633,16 +664,24 @@ async function rebuildSandboxUnlocked(
                 "  Hermes cron restore gate cleared; the independent operator drain remains active.",
               );
             }
-            log(`Hermes cron restore recovery for accepted replacement: ${outcome}`);
+            log(
+              scheduledWorkDeclaration
+                ? `Scheduled-work restore recovery for accepted replacement: ${outcome}`
+                : `Hermes cron restore recovery for accepted replacement: ${outcome}`,
+            );
           } catch (error) {
             console.error("");
             console.error(
-              `  Hermes cron restore could not validate and release the accepted replacement: ${rebuildFailureDetail(error)}`,
+              scheduledWorkDeclaration
+                ? `  Scheduled-work restore could not validate and release the accepted replacement: ${rebuildFailureDetail(error)}`
+                : `  Hermes cron restore could not validate and release the accepted replacement: ${rebuildFailureDetail(error)}`,
             );
             console.error(`  Backup is preserved at: ${backup.backupManifest?.backupPath}`);
             printHermesCronRestoreRecoveryCommand(sandboxName);
             return bail(
-              "Hermes cron restore recovery failed; the replacement journal was retained.",
+              scheduledWorkDeclaration
+                ? "Scheduled-work restore recovery failed; the replacement journal was retained."
+                : "Hermes cron restore recovery failed; the replacement journal was retained.",
             );
           }
         }
@@ -798,7 +837,7 @@ async function rebuildSandboxUnlocked(
           fromDockerfile,
           rebuildAgent,
           messagingPlan,
-          rebuildsHermesSandbox: rebuildAgent === "hermes",
+          rebuildsHermesSandbox: hasHermesToolGateways,
           hermesToolGateways,
           hasHermesToolGateways,
           policySourcePath: backup.policySourcePath,
@@ -823,36 +862,56 @@ async function rebuildSandboxUnlocked(
           agentDefinition: targetConfig.agentDefinition,
           targetImageIsCustom: Boolean(fromDockerfile),
           backupManifest: backup.backupManifest,
+          reconcileLegacyDashboard:
+            !targetConfig.agentAuthority.harnessPackage &&
+            legacyRebuildPreservesScheduledWork(rebuildAgent),
           ...(mcpPreparation.runtimeSelection
             ? { runtimeSelection: mcpPreparation.runtimeSelection }
             : {}),
           log,
         });
+      let scheduledWorkRestoreIdentity: ScheduledWorkRestoreIdentity | undefined;
       let hermesCronRestoreIdentity: HermesCronRestoreIdentity | undefined;
-      const restored = hermesCronRestorePlan?.requiresDispatchGate
+      const restored = scheduledWorkRestorePlan?.requiresDispatchGate
         ? (() => {
             try {
-              const transaction = runHermesCronRestoreTransaction(
-                sandboxName,
-                restore,
-                (state, identity) => {
-                  log(
-                    `Hermes cron restore gate ${state}: pid=${String(identity.pid)}, startTime=${String(identity.start_time)}`,
-                  );
-                },
-              );
-              hermesCronRestoreIdentity = transaction.identity;
+              const onGateTransition = (state: "acquired", identity: HermesCronRestoreIdentity) => {
+                log(
+                  `Scheduled-work restore gate ${state}: pid=${String(identity.pid)}, startTime=${String(identity.start_time)}`,
+                );
+              };
+              const transaction = scheduledWorkDeclaration
+                ? runScheduledWorkRestoreTransaction(
+                    sandboxName,
+                    scheduledWorkDeclaration,
+                    restore,
+                    onGateTransition,
+                  )
+                : runHermesCronRestoreTransaction(sandboxName, restore, onGateTransition);
+              if (scheduledWorkDeclaration) {
+                scheduledWorkRestoreIdentity = transaction.identity;
+              } else {
+                hermesCronRestoreIdentity = transaction.identity;
+              }
               return transaction.result;
             } catch (error) {
               console.error("");
               console.error(
-                error instanceof HermesCronRestoreIncompleteError
-                  ? "  Hermes cron dispatch remains drained because state restore was incomplete."
-                  : `  Hermes cron restore could not validate and reactivate dispatch: ${rebuildFailureDetail(error)}`,
+                error instanceof ScheduledWorkRestoreIncompleteError
+                  ? scheduledWorkDeclaration
+                    ? "  Scheduled-work dispatch remains drained because state restore was incomplete."
+                    : "  Hermes cron dispatch remains drained because state restore was incomplete."
+                  : scheduledWorkDeclaration
+                    ? `  Scheduled-work restore could not validate and reactivate dispatch: ${rebuildFailureDetail(error)}`
+                    : `  Hermes cron restore could not validate and reactivate dispatch: ${rebuildFailureDetail(error)}`,
               );
               console.error(`  Backup is preserved at: ${backup.backupManifest?.backupPath}`);
               printHermesCronRestoreRecoveryCommand(sandboxName);
-              return bail("Hermes cron restore validation failed; dispatch was not re-enabled.");
+              return bail(
+                scheduledWorkDeclaration
+                  ? "Scheduled-work restore validation failed; dispatch was not re-enabled."
+                  : "Hermes cron restore validation failed; dispatch was not re-enabled.",
+              );
             }
           })()
         : restore();
@@ -865,7 +924,9 @@ async function rebuildSandboxUnlocked(
         mcpEntries: mcpPreparation.entries,
         mcpRuntimeSelection: mcpPreparation.runtimeSelection,
         restoreSucceeded: restored.restoreSucceeded,
+        scheduledWorkRestoreIdentity,
         hermesCronRestoreIdentity,
+        scheduledWorkDeclaration,
         preparedBackupRecovery,
         versionCheck,
         log,

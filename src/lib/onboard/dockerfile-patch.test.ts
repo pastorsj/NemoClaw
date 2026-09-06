@@ -187,7 +187,7 @@ describe("dockerfile patch helpers", () => {
 
     expect(patch).toThrow(/Dockerfile is missing ARG NEMOCLAW_OPENCLAW_OTEL_ENDPOINT/);
     expect(() => patch({ agentName: "hermes" })).toThrow(
-      "NEMOCLAW_OPENCLAW_OTEL_ENDPOINT is not supported by hermes",
+      /Dockerfile is missing ARG NEMOCLAW_OPENCLAW_OTEL_ENDPOINT/,
     );
   });
 

@@ -11,7 +11,7 @@ import type { SandboxMessagingPlan } from "../../../src/lib/messaging/manifest";
 import { readManagedWorkloadAuthority } from "../../../src/lib/onboard/workload/authority.ts";
 import { readSandboxBaseImageResolutionMetadata } from "../../../src/lib/sandbox-base-image";
 import { createSession } from "../../../src/lib/state/onboard-session.ts";
-import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
+import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-target.mts";
 import type { SandboxEntry } from "../../../src/lib/state/registry/types.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
 import { trackGuardedSandboxNameDelete } from "../fixtures/cleanup.ts";

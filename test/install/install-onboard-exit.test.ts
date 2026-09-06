@@ -194,16 +194,16 @@ describe("install.sh harness package selection", () => {
     expect(result.output).toContain("exit_after_guidance=false");
   });
 
-  it("installs an explicit standard selector even when another package is ready", () => {
+  it("delegates an explicit package selector even when another package is ready", () => {
     const result = runHarnessSelectionFlow({
       outcomes: [READY, READY],
-      selector: "hermes",
+      selector: "future-harness",
     });
 
     expect(result.status, result.output).toBe(0);
     expect(result.calls).toEqual([
       "internal installer reconcile-harnesses --json",
-      "harness install hermes",
+      "harness install future-harness",
       "internal installer reconcile-harnesses --json",
     ]);
   });

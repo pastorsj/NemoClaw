@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { installHarnessPackage } from "./install";
 import {
   HarnessPackageStoreIntegrityError,
+  activateHarnessPackage,
   readInstalledHarnessPackage,
   resolvePinnedHarnessPackage,
   type InstalledHarnessPackage,
@@ -53,6 +54,7 @@ function packageEnvelope(packageVersion: string): Record<string, unknown> {
     displayName: "OpenClaw",
     packageVersion,
     minimumNemoClawVersion: "0.0.113",
+    maximumNemoClawVersionExclusive: "0.0.121",
     manifest: "packages/nemoclaw-openclaw/manifest.yaml",
   };
 }
@@ -70,7 +72,35 @@ function writePackage(packageVersion = "1.0.0", payload = "first payload\n"): vo
   writeFixtureFile("nemoclaw-package.json", `${JSON.stringify(packageEnvelope(packageVersion))}\n`);
   writeFixtureFile(
     "packages/nemoclaw-openclaw/manifest.yaml",
-    "name: openclaw\ndisplay_name: OpenClaw\ndescription: Reviewed runtime adapter\n",
+    [
+      "name: openclaw",
+      "display_name: OpenClaw",
+      "description: Reviewed runtime adapter",
+      "runtime:",
+      "  kind: gateway",
+      "config:",
+      "  dir: /sandbox/.openclaw",
+      "  config_file: openclaw.json",
+      "  format: json",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: This synthetic package has fixed inference configuration.",
+      "messaging:",
+      "  support: disabled",
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    image_plugin_provenance: not-required",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: This package does not run scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
+      "",
+    ].join("\n"),
   );
   writeFixtureFile("runtime/payload.txt", payload);
 }
@@ -167,6 +197,29 @@ describe("installHarnessPackage", () => {
     expect(fs.lstatSync(immutableObject, { bigint: true }).mtimeNs).toBe(objectStat.mtimeNs);
   });
 
+  it("publishes the captured package tree when its source changes during publication", () => {
+    const result = installHarnessPackage(
+      { packageRoot: sourceRoot, sourceIdentity: FIRST_SOURCE_IDENTITY },
+      {
+        storeRoot,
+        dependencies: {
+          onPublicationCheckpoint: (checkpoint) => {
+            if (checkpoint === "before-object-publication") {
+              writeFixtureFile("runtime/payload.txt", "later payload\n");
+            }
+          },
+        },
+      },
+    );
+
+    expect(fs.readFileSync(path.join(result.packageRoot, "runtime/payload.txt"), "utf8")).toBe(
+      "first payload\n",
+    );
+    expect(fs.readFileSync(path.join(sourceRoot, "runtime/payload.txt"), "utf8")).toBe(
+      "later payload\n",
+    );
+  });
+
   it("rejects changed bytes that retain the same package version", () => {
     const first = install();
     writePackage("1.0.0", "changed payload\n");
@@ -261,24 +314,52 @@ describe("installHarnessPackage", () => {
     },
   );
 
-  it("rejects an incompatible package before creating package-store state", () => {
+  it.each([
+    ["below the minimum", "0.0.112", false, "requires NemoClaw 0.0.113 or newer"],
+    ["at the minimum", "0.0.113", true, ""],
+    ["below the maximum", "0.0.114", true, ""],
+    ["at the maximum", "0.0.115", false, "requires NemoClaw older than 0.0.115"],
+    ["above the maximum", "0.0.116", false, "requires NemoClaw older than 0.0.115"],
+  ])("handles a running core %s", (_label, nemoclawVersion, compatible, expectedMessage) => {
     const envelope = packageEnvelope("1.0.0");
-    envelope.minimumNemoClawVersion = "0.0.114";
+    envelope.maximumNemoClawVersionExclusive = "0.0.115";
     writeFixtureFile("nemoclaw-package.json", `${JSON.stringify(envelope)}\n`);
 
-    expect(() =>
+    const operation = () =>
       installHarnessPackage(
         { packageRoot: sourceRoot, sourceIdentity: FIRST_SOURCE_IDENTITY },
         {
           storeRoot,
-          getBuildIdentity: () => ({
-            nemoclawVersion: "0.0.113-99-gabcdef0",
-            sourceRevision: "a".repeat(40),
-          }),
+          getBuildIdentity: () => ({ nemoclawVersion, sourceRevision: "a".repeat(40) }),
         },
-      ),
-    ).toThrow("requires NemoClaw 0.0.114 or newer");
-    expect(fs.readdirSync(storeRoot)).toEqual([]);
+      );
+    if (compatible) {
+      expect(operation().identity.id).toBe("openclaw");
+    } else {
+      expect(operation).toThrow(expectedMessage);
+      expect(fs.readdirSync(storeRoot)).toEqual([]);
+    }
+  });
+
+  it("refuses an existing pinned receipt after the running core leaves its window", () => {
+    const installed = install();
+    const incompatibleCore = {
+      storeRoot,
+      getBuildIdentity: () => ({
+        nemoclawVersion: "0.0.121",
+        sourceRevision: "a".repeat(40),
+      }),
+    };
+
+    expect(() => readInstalledHarnessPackage("openclaw", incompatibleCore)).toThrow(
+      "requires NemoClaw older than 0.0.121",
+    );
+    expect(() => resolvePinnedHarnessPackage(installed.identity, incompatibleCore)).toThrow(
+      "requires NemoClaw older than 0.0.121",
+    );
+    expect(() =>
+      activateHarnessPackage("openclaw", installed.identity.contentDigest, incompatibleCore),
+    ).toThrow("requires NemoClaw older than 0.0.121");
   });
 
   it("rejects package authoring content before creating package-store state", () => {

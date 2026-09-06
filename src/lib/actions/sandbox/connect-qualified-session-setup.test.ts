@@ -22,6 +22,18 @@ function entry(agent: string | null): SandboxEntry {
   } as SandboxEntry;
 }
 
+function receiptEntry(agent: string): SandboxEntry {
+  return {
+    ...entry(agent),
+    harnessPackage: {
+      kind: "agent-runtime",
+      id: agent,
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    },
+  } as SandboxEntry;
+}
+
 describe("readiness-qualified interactive session setup", () => {
   it("delegates complete OpenClaw fallback to the existing pairing path once (#9023)", () => {
     const runApprovalPass = vi.fn();
@@ -88,5 +100,25 @@ describe("readiness-qualified interactive session setup", () => {
 
     expect(runApprovalPass).toHaveBeenCalledOnce();
     expect(runApprovalPass).toHaveBeenCalledWith("alpha", "nemoclaw");
+  });
+
+  it("leaves interactive setup to a synthetic receipt-backed package", () => {
+    const runApprovalPass = vi.fn();
+    const futureAgent = {
+      ...loadAgent("openclaw"),
+      name: "future-harness",
+      displayName: "Future Harness",
+      hasDevicePairing: false,
+    };
+
+    completeInteractiveSessionSetup("alpha", receiptEntry("future-harness"), runApprovalPass);
+    completeReadinessQualifiedInteractiveSessionSetup(
+      "alpha",
+      futureAgent,
+      receiptEntry("future-harness"),
+      runApprovalPass,
+    );
+
+    expect(runApprovalPass).not.toHaveBeenCalled();
   });
 });

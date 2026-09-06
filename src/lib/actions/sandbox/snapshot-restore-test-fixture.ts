@@ -178,10 +178,35 @@ export const validateSnapshotRestoreMutationMock = vi.fn(
     }
   },
 );
-export const loadAgentMock = vi.fn((name: string) => ({
-  name,
-  policyAdditionsPath: name === "openclaw" ? null : `/repo/agents/${name}/policy-additions.yaml`,
-}));
+export function snapshotAgentDefinition(name: string, packageRoot = `/repo/agents/${name}`) {
+  const openClaw = name === "openclaw";
+  return {
+    name,
+    packageRoot,
+    policyAdditionsPath: openClaw ? null : `/repo/agents/${name}/policy-additions.yaml`,
+    runtime: {
+      kind: name === "langchain-deepagents-code" ? ("terminal" as const) : ("gateway" as const),
+    },
+    hasDevicePairing: openClaw,
+    configPaths: {
+      dir: `/sandbox/.${name}`,
+      configFile: openClaw ? "openclaw.json" : "config.yaml",
+      envFile: null,
+      format: openClaw ? "json" : "yaml",
+    },
+    stateLifecycle: {
+      backup_quiescence: { kind: "not-required" as const },
+      snapshot_restore: openClaw ? (["repair-mutable-config"] as const) : [],
+      rebuild: {
+        image_plugin_provenance: "not-required" as const,
+        scheduled_work: { support: "disabled" as const, reason: "test fixture" },
+        post_restore: { kind: "not-required" as const },
+      },
+    },
+  } as unknown as AgentDefinition;
+}
+
+export const loadAgentMock = vi.fn((name: string) => snapshotAgentDefinition(name));
 function installedHarnessPackage(identity: HarnessPackageIdentity) {
   const packageRoot = `/state/harnesses/objects/${identity.contentDigest}`;
   const manifestPath = `${packageRoot}/manifest.yaml`;
@@ -200,6 +225,7 @@ function installedHarnessPackage(identity: HarnessPackageIdentity) {
         displayName: identity.id,
         packageVersion: identity.packageVersion,
         minimumNemoClawVersion: "0.0.113",
+        maximumNemoClawVersionExclusive: "0.0.121",
         manifest: "manifest.yaml",
       },
       manifest: { name: identity.id },
@@ -221,16 +247,18 @@ function installedHarnessPackage(identity: HarnessPackageIdentity) {
 
 export const buildAgentDefinitionMock = vi.fn(
   ({ manifest, packageRoot }: { manifest: Record<string, unknown>; packageRoot: string }) =>
-    ({
-      name: manifest.name,
-      packageRoot,
-      policyAdditionsPath: `${packageRoot}/policy-additions.yaml`,
-    }) as AgentDefinition,
+    snapshotAgentDefinition(String(manifest.name), packageRoot),
 );
 export const resolvePinnedHarnessPackageMock = vi.fn(installedHarnessPackage);
 export const captureOpenshellMock = vi.fn<
   (args: string[], opts?: Record<string, unknown>) => OpenshellCaptureResult
 >((args) => defaultOpenshellResponses(args));
+export const executePrivilegedSandboxCommandMock = vi.fn(() => ({
+  status: 0,
+  signal: null,
+  stdout: Buffer.from("NEMOCLAW_STATE_BACKUP=ready\n"),
+  stderr: Buffer.alloc(0),
+}));
 export const readSandboxPolicyMock = vi.fn<SyncOpenShellSandboxPolicyReader["readSandboxPolicy"]>(
   () => ({
     ok: true,
@@ -489,6 +517,10 @@ vi.mock("../../adapters/openshell/runtime", () => ({
   getOpenshellBinary: vi.fn(() => "openshell"),
   runOpenshell: runOpenshellMock,
 }));
+vi.mock("../../sandbox/privileged-exec", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../sandbox/privileged-exec")>()),
+  executePrivilegedSandboxCommand: executePrivilegedSandboxCommandMock,
+}));
 
 vi.mock("../../adapters/openshell/sandbox-policy-cli", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../adapters/openshell/sandbox-policy-cli")>()),
@@ -693,17 +725,10 @@ export function resetSnapshotRestoreMocks(): void {
   getSandboxMock.mockReturnValue(null);
   isGatewayHealthyMock.mockReturnValue(true);
   listBackupsMock.mockReturnValue([]);
-  loadAgentMock.mockImplementation((name: string) => ({
-    name,
-    policyAdditionsPath: name === "openclaw" ? null : `/repo/agents/${name}/policy-additions.yaml`,
-  }));
+  loadAgentMock.mockImplementation((name: string) => snapshotAgentDefinition(name));
   buildAgentDefinitionMock.mockImplementation(
     ({ manifest, packageRoot }: { manifest: Record<string, unknown>; packageRoot: string }) =>
-      ({
-        name: manifest.name,
-        packageRoot,
-        policyAdditionsPath: `${packageRoot}/policy-additions.yaml`,
-      }) as AgentDefinition,
+      snapshotAgentDefinition(String(manifest.name), packageRoot),
   );
   resolvePinnedHarnessPackageMock.mockImplementation(installedHarnessPackage);
   resolveAgentBaselinePolicyMock.mockImplementation(resolveTestAgentBaselinePolicy);

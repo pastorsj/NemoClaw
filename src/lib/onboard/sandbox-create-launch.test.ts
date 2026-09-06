@@ -91,6 +91,49 @@ describe("buildSandboxRuntimeEnvArgs", () => {
     expect(envArgs).not.toContain("NEMOCLAW_PROXY_PORT=3128");
   });
 
+  it("does not select legacy runtime controls for a receipt-backed package", () => {
+    const envArgs = buildSandboxRuntimeEnvArgs({
+      agent: {
+        ...packageOwnedAgent("openclaw"),
+        configPaths: { dir: "/sandbox/.openclaw" },
+        runtime: { kind: "gateway" },
+      } as any,
+      observabilityEnabled: true,
+      chatUiUrl: "",
+      manageDashboard: false,
+      getDashboardForwardPort: () => "0",
+      hermesDashboardState: disabledHermesDashboardState,
+      extraPlaceholderKeys: [],
+      env: {
+        NEMOCLAW_AUTO_PAIR_DEADLINE_SECS: "30",
+        NEMOCLAW_MCP_SHADOW_DIAGNOSTICS: "1",
+        NEMOCLAW_MCP_TOOLS_LIST_TIMEOUT_MS: "3000",
+      },
+    }).envArgs;
+
+    expect(envArgs.some((entry) => entry.startsWith("OPENCLAW_"))).toBe(false);
+    expect(envArgs.some((entry) => entry.startsWith("NEMOCLAW_AUTO_PAIR_"))).toBe(false);
+    expect(envArgs).not.toContain("NEMOCLAW_MCP_SHADOW_DIAGNOSTICS=1");
+    expect(envArgs).not.toContain("NEMOCLAW_MCP_TOOLS_LIST_TIMEOUT_MS=3000");
+    expect(envArgs).not.toContain("NEMOCLAW_OBSERVABILITY=1");
+  });
+
+  it("uses runtime kind rather than package ID for proxy credential isolation", () => {
+    const render = (kind: "gateway" | "terminal") =>
+      buildSandboxRuntimeEnvArgs({
+        agent: { ...packageOwnedAgent("future-harness"), runtime: { kind } } as any,
+        chatUiUrl: "",
+        manageDashboard: false,
+        getDashboardForwardPort: () => "0",
+        hermesDashboardState: disabledHermesDashboardState,
+        extraPlaceholderKeys: [],
+        env: { HTTPS_PROXY: "https://user:pass@proxy.example:8443" },
+      }).envArgs;
+
+    expect(render("terminal").some((entry) => entry.startsWith("HTTPS_PROXY="))).toBe(false);
+    expect(render("gateway")).toContain("HTTPS_PROXY=https://user:pass@proxy.example:8443");
+  });
+
   it.each([
     ["invalid host", { NEMOCLAW_PROXY_HOST: "bad:ipv6::host" }],
     ["invalid port", { NEMOCLAW_PROXY_PORT: "70000" }],
@@ -580,7 +623,7 @@ describe("prepareSandboxCreateLaunch", () => {
 
   it("drops credential-bearing proxy URLs from Deep Agents Code sandbox create env", () => {
     const result = prepareSandboxCreateLaunch({
-      agent: { name: "langchain-deepagents-code" } as any,
+      agent: { name: "langchain-deepagents-code", runtime: { kind: "terminal" } } as any,
       chatUiUrl: "",
       createArgs: ["--name", "deepagents"],
       env: {
@@ -799,7 +842,13 @@ describe("prepareSandboxCreateLaunchWithPrebuild", () => {
 
   it.each([
     ["OpenClaw", null],
-    ["Hermes", { name: "hermes" }],
+    [
+      "Hermes",
+      {
+        name: "hermes",
+        sandbox_create: { generated_image_build: "local-buildkit-required" },
+      },
+    ],
   ])(
     "fails closed for a generated %s image after a local BuildKit failure",
     async (_agentName, agent) => {
@@ -833,11 +882,11 @@ describe("prepareSandboxCreateLaunchWithPrebuild", () => {
     },
   );
 
-  it("preserves the gateway builder for generated Deep Agents Code images", async () => {
+  it("preserves the gateway builder when a package does not require local BuildKit", async () => {
     const buildCtx = createTrustedBuildContext();
     const dockerfile = path.join(buildCtx, "Dockerfile");
     const result = await prepareSandboxCreateLaunchWithPrebuild({
-      agent: { name: "langchain-deepagents-code" } as any,
+      agent: { name: "future-terminal" } as any,
       chatUiUrl: "",
       createArgs: ["--from", dockerfile, "--name", "demo"],
       env: {},
@@ -866,6 +915,39 @@ describe("prepareSandboxCreateLaunchWithPrebuild", () => {
     });
     expect(result.createCommand).toContain(`sandbox create --from ${dockerfile} --name demo`);
     expect(result.createCommand).not.toContain("nemoclaw-sandbox-local");
+  });
+
+  it("requires local BuildKit when an unknown package declares that image requirement", async () => {
+    const buildCtx = createTrustedBuildContext();
+    const dockerfile = path.join(buildCtx, "Dockerfile");
+
+    await expect(
+      prepareSandboxCreateLaunchWithPrebuild({
+        agent: {
+          name: "future-gateway",
+          sandbox_create: { generated_image_build: "local-buildkit-required" },
+        } as any,
+        chatUiUrl: "",
+        createArgs: ["--from", dockerfile, "--name", "demo"],
+        env: {},
+        extraPlaceholderKeys: [],
+        getDashboardForwardPort: () => "0",
+        hermesDashboardState: disabledHermesDashboardState,
+        manageDashboard: false,
+        openshellShellCommand: (args) => args.join(" "),
+        sandboxName: "demo",
+        buildEnv: () => ({}),
+        prebuild: {
+          buildCtx,
+          buildId: "build-123",
+          dockerDriverGateway: true,
+          env: { NEMOCLAW_SANDBOX_PREBUILD: "1" },
+          buildImage: async () => 1,
+          log: vi.fn(),
+          origin: "generated",
+        },
+      }),
+    ).rejects.toThrow("Local BuildKit build failed (exit 1)");
   });
 
   it("preserves the rootless gateway path for a generated portable Hermes image", async () => {

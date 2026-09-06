@@ -10,10 +10,12 @@
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 import * as defs from "../../agent/defs";
+import type { ChannelManifest } from "../../messaging/manifest";
 import * as registry from "../../state/registry";
 import {
   persistManifestChannelDisabledPlan,
   persistManifestChannelRemovePlan,
+  resolvePackageChannelStatePaths,
 } from "./policy-channel";
 
 function agentFixture(name: string): defs.AgentDefinition {
@@ -109,5 +111,42 @@ describe("persistManifestChannelDisabledPlan with non-messaging agent (#5729)", 
 
     expect(result).toBeNull();
     expect(updateSandboxMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("receipt-backed package channel state", () => {
+  it("resolves an unknown package id from its composed manifest without an id branch", () => {
+    const packageId = "future-harness";
+    const manifest: ChannelManifest = {
+      schemaVersion: 1,
+      id: "future-channel",
+      displayName: "Future Channel",
+      supportedAgents: [packageId],
+      auth: { mode: "none" },
+      inputs: [],
+      credentials: [],
+      render: [],
+      hooks: [],
+      state: { [packageId]: ["state/future-channel", "sessions/future-channel"] },
+    };
+
+    expect(
+      resolvePackageChannelStatePaths(
+        {
+          name: packageId,
+          configPaths: {
+            dir: "/sandbox/.future-harness",
+            configFile: "config.json",
+            envFile: null,
+            format: "json",
+          },
+        },
+        [manifest],
+        "future-channel",
+      ),
+    ).toEqual([
+      "/sandbox/.future-harness/state/future-channel",
+      "/sandbox/.future-harness/sessions/future-channel",
+    ]);
   });
 });

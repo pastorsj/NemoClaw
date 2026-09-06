@@ -10,15 +10,19 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { installHomeMcpHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 
 const mocks = vi.hoisted(() => ({
-  executeGatewaySupervisorAction: vi.fn(),
   executeSandboxCommand: vi.fn(),
   getSandbox: vi.fn(),
 }));
 
-vi.mock("../../../../src/lib/actions/sandbox/process-recovery", () => ({
-  executeGatewaySupervisorAction: mocks.executeGatewaySupervisorAction,
-  executeSandboxCommand: mocks.executeSandboxCommand,
-}));
+vi.mock(
+  "../../../../src/lib/actions/sandbox/transport/command-execution",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../../src/lib/actions/sandbox/transport/command-execution")
+    >()),
+    executeSandboxCommand: mocks.executeSandboxCommand,
+  }),
+);
 
 vi.mock("../../../../src/lib/state/registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../../src/lib/state/registry")>()),

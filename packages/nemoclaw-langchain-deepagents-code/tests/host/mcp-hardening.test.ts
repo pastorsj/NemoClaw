@@ -26,11 +26,13 @@ const mcpAdapter = loadPackageHostModule<{
   }): {
     kind: "conditional-repair";
     applicability: {
-      command: string;
+      command: { kind: "shell"; script: string; shellTrust: "package-authored-code" };
       repairWhenOutput: string;
       skipWhenOutput: string;
     };
-    execution: { command: string };
+    execution: {
+      command: { kind: "shell"; script: string; shellTrust: "package-authored-code" };
+    };
   };
 }>("mcp-adapter.cts");
 
@@ -54,7 +56,7 @@ function runPackageSnapshotRepair(
   entries: Array<{ server: string; url: string; headers: Record<string, string> }> = [],
 ) {
   const plan = mcpAdapter.buildMcpSnapshotRestorePlan({ sandboxName: "sandbox", entries });
-  const command = plan.execution.command
+  const command = plan.execution.command.script
     .replace("/opt/venv/bin/python3", "python3")
     .replace(JSON.stringify(managedProjectionPath), JSON.stringify(configPath));
   return spawnSync("/bin/sh", ["-c", command], {
@@ -91,9 +93,15 @@ describe("Deep Agents managed MCP runtime hardening", () => {
         repairWhenOutput: "v2",
         skipWhenOutput: "legacy",
       },
-      execution: { command: expect.stringContaining("reset_projection(expected)") },
+      execution: {
+        command: {
+          kind: "shell",
+          script: expect.stringContaining("reset_projection(expected)"),
+          shellTrust: "package-authored-code",
+        },
+      },
     });
-    expect(plan.applicability.command).toContain("NEMOCLAW_DEEPAGENTS_RUNTIME_TEST_ANCHOR");
+    expect(plan.applicability.command.script).toContain("NEMOCLAW_DEEPAGENTS_RUNTIME_TEST_ANCHOR");
   });
 
   it.each(["symlink", "FIFO"] as const)(

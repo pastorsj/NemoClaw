@@ -17,12 +17,8 @@ import {
   providerMatchesManagedCredential,
   providerShapeDetail,
 } from "./mcp-bridge-provider";
-import {
-  bridgeState,
-  ensureSandboxGatewaySelected,
-  getSandboxOrThrow,
-  setBridgeState,
-} from "./mcp-bridge-state";
+import { bridgeState, getSandboxOrThrow, setBridgeState } from "./mcp-bridge-state";
+import { ensureSandboxGatewaySelected } from "./mcp-bridge/gateway-selection";
 import { assertAuthenticatedBridgeEntry, validateSandboxName } from "./mcp-bridge-validation";
 
 export interface McpDestroyPreparation {

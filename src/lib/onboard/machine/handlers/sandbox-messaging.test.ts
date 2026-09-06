@@ -23,6 +23,7 @@ import { makeMessagingPlan } from "../../../../../test/helpers/messaging-plan-fi
 import { setupMessagingChannels } from "../../messaging-channel-setup";
 import type { GatewayCredentialOnlyProviderInspection } from "../../gateway-provider-metadata";
 import { getActiveChannelsFromPlan } from "../../messaging-plan-session";
+import { selectedAgentResumesSandboxPrompts } from "../../web-search/support";
 import {
   hasMessagingCredentialDrift,
   reconcileReusedSandboxMessaging,
@@ -248,6 +249,7 @@ function reconcileDeps(plans: readonly (SandboxMessagingPlan | null)[]) {
       (name: string, type: string, credentialEnv: string) => GatewayCredentialOnlyProviderInspection
     >(() => ({ kind: "missing" })),
     providerMatchesGatewayCredential: vi.fn(() => false),
+    selectedAgentResumesSandboxPrompts,
   };
 }
 

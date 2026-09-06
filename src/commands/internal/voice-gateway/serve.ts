@@ -8,10 +8,9 @@ import {
   runVoiceGatewayServe,
 } from "../../../lib/actions/voice-gateway/serve";
 import { DEFAULT_VOICE_GATEWAY_LISTEN_PORT } from "../../../lib/voice-gateway/contracts";
-import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
+import { NemoClawInternalCommand } from "../../../lib/cli/internal-command";
 
-export default class InternalVoiceGatewayServeCommand extends NemoClawCommand {
-  static hidden = true;
+export default class InternalVoiceGatewayServeCommand extends NemoClawInternalCommand {
   static strict = true;
   static summary = "Internal: serve the experimental voice gateway";
   static description =

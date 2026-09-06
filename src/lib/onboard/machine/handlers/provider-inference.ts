@@ -21,6 +21,7 @@ import { checkpointSandboxIdentityMatches } from "../../checkpoint-replay";
 import type { OnboardInferenceCapabilityCache } from "../../inference-capability-cache";
 import type { RepairLocalInferenceSystemdOverrideOptions } from "../../local-inference-topology";
 import { resolveModelRouterPort } from "../../model-router";
+import { legacyMessagingRouteRefreshRequired } from "../../package/legacy-onboard";
 import { promptOnboardConfigurationReview } from "../../prompt-helpers";
 import {
   describeIgnoredReasoningEffortEnv,
@@ -173,10 +174,7 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
   deps: {
     checkGatewayRouteCompatibility: CurrentGatewayRouteCompatibilityCheck;
     preflightGatewayRouteDiscovery: CurrentGatewayRouteDiscoveryPreflight;
-    revalidateHarnessPackageAuthority(
-      session: Session,
-      operation: string,
-    ): HarnessPackageAuthority;
+    revalidateHarnessPackageAuthority(session: Session, operation: string): HarnessPackageAuthority;
     getSandboxRecoveryAuthority(
       sandboxName: string,
       sessionId: string | null | undefined,
@@ -199,10 +197,7 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
       ) => GatewayRouteDiscoveryConstraints,
       canProbeRoute?: (provider: string) => boolean,
       recoverySessionId?: string | null,
-      revalidateSandboxIdentity?: (
-        route: ProviderInferenceProbeRoute,
-        operation: string,
-      ) => void,
+      revalidateSandboxIdentity?: (route: ProviderInferenceProbeRoute, operation: string) => void,
     ): Promise<ProviderSelectionResult>;
     setupInference(
       sandboxName: string | null,
@@ -808,16 +803,26 @@ function hasActiveMessagingChannels(
   );
 }
 
-function shouldRefreshCompatibleEndpointRouteForMessaging(
+function shouldRefreshInferenceRouteForMessaging(
   provider: string | null,
   selectedMessagingChannels: string[],
   session: Session | null,
   agent: unknown,
 ): boolean {
+  if (provider === null || !hasActiveMessagingChannels(selectedMessagingChannels, session)) {
+    return false;
+  }
+  if (session?.harnessPackage != null) {
+    const declaredProviders = (
+      agent as {
+        inference?: { readonly refresh_route_for_messaging_providers?: readonly string[] };
+      } | null
+    )?.inference?.refresh_route_for_messaging_providers;
+    return declaredProviders?.includes(provider) === true;
+  }
   return (
     provider === "compatible-endpoint" &&
-    agentName(agent) === "openclaw" &&
-    hasActiveMessagingChannels(selectedMessagingChannels, session)
+    legacyMessagingRouteRefreshRequired(agent as { readonly name?: unknown } | null)
   );
 }
 
@@ -1369,11 +1374,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         sandboxName,
         deps.ensureManagedLlamaCppResumeReady,
       );
-      const recovery = await deps.ensureResumeProviderReady(
-        gatewayName,
-        provider,
-        credentialEnv,
-      );
+      const recovery = await deps.ensureResumeProviderReady(gatewayName, provider, credentialEnv);
       forceInferenceSetup ||= recovery.forceInferenceSetup;
       credentialEnv = recovery.credentialEnv;
       // Rebuild may be resuming a legacy session whose step marker was never
@@ -1415,12 +1416,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       // of the stored gateway credential and suppression of the unauthenticated
       // host smoke.
       if (
-        shouldRefreshCompatibleEndpointRouteForMessaging(
-          provider,
-          selectedMessagingChannels,
-          session,
-          agent,
-        )
+        shouldRefreshInferenceRouteForMessaging(provider, selectedMessagingChannels, session, agent)
       ) {
         if (!hydratedCredential) {
           deps.log(
@@ -1433,8 +1429,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         deps.log("  [resume] Refreshing compatible-endpoint inference route for messaging.");
       }
       deps.skippedStepMessage("provider_selection", `${provider} / ${model}`);
-      const selectedAgentName = (agent as { name?: string } | null)?.name;
-      if ((!selectedAgentName || selectedAgentName === "openclaw") && reusableResumeSandboxName) {
+      if (reusableResumeSandboxName) {
         deps.log(`  [resume] Reusing sandbox name: ${reusableResumeSandboxName}.`);
       }
       await deps.recordStateSkipped("provider_selection", {

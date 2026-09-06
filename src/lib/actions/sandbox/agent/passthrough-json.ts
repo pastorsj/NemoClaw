@@ -42,6 +42,7 @@ export type AgentJsonPassthroughDeps = {
   provenanceLines?: (raw: string) => string[];
   incompleteTurnSignal?: (raw: string) => OpenClawIncompleteTurnSignal | null;
   runDispatch?: AgentDispatchRunner;
+  timeoutSeconds?: number;
 };
 
 export function defaultGetOpenshellBinary(): string {
@@ -74,7 +75,7 @@ export async function runAgentJsonPassthrough(
     buildOpenshellExecArgs(
       sandboxName,
       wrapOpenClawAgentCommandWithRuntimeEnv(command),
-      { tty: false, timeoutSeconds: agentDispatchDeadlineSeconds(command) },
+      { tty: false, timeoutSeconds: deps.timeoutSeconds ?? agentDispatchDeadlineSeconds(command) },
       (deps.getGatewayName ?? getKnownSandboxTargetGatewayName)(sandboxName) ?? undefined,
     ),
     {

@@ -55,6 +55,8 @@ import type { VerifiedSandboxCreateBoundary } from "./types";
 import { applyOnboardVmDnsMonkeypatch } from "./vm-dns-monkeypatch";
 import { OnboardRestoreSnapshotDriftError } from "./session-bootstrap";
 
+const HERMES_GPU_PROOF_DISPOSITION = "hermes" as const;
+
 export type CreatedSandboxFinalizationOptions = {
   sandboxName: string;
   gatewayName?: string;
@@ -441,7 +443,7 @@ export function createCreatedSandboxCompletionActions(
           `committing GPU capability for sandbox '${options.finalization.sandboxName}'`,
         );
         await verifyCreatedProviderGpu(created!);
-      } else if (providerGpuDisposition === "hermes") {
+      } else if (providerGpuDisposition === HERMES_GPU_PROOF_DISPOSITION) {
         deps.revalidateSandboxIdentity?.(
           `recording GPU capability for sandbox '${options.finalization.sandboxName}'`,
         );

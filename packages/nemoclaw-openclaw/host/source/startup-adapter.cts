@@ -252,6 +252,304 @@ function buildStartupPlan(adapterRequest: StartupAdapterRequest): HarnessStartup
   };
 }
 
-const startupAdapter: HarnessStartupAdapterModule<StartupAdapterRequest> = { buildStartupPlan };
+function requireStartupProfileAuthority(
+  request: Parameters<HarnessStartupAdapterModule["buildInitialStartupProfile"]>[0],
+): void {
+  if (request.packageId !== PACKAGE_ID || request.harnessPackage.id !== PACKAGE_ID) {
+    fail("startup profile identity is inconsistent");
+  }
+}
+
+function preparationValue(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+  name: string,
+): string | null {
+  const value = request.input.environment[name];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+function positiveInteger(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+  name: string,
+  fallback: number,
+  maximum = 1_000_000_000,
+): number {
+  const raw = preparationValue(request, name);
+  if (raw === null) return fallback;
+  if (!/^[1-9][0-9]*$/u.test(raw)) fail(`${name} must be a positive integer`);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value > maximum) {
+    fail(`${name} must be a positive integer no greater than ${String(maximum)}`);
+  }
+  return value;
+}
+
+function reasoningEffort(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+): "default" | "low" | "medium" | "high" {
+  const value = preparationValue(request, "NEMOCLAW_REASONING_EFFORT")?.toLowerCase() ?? "default";
+  if (value === "default" || value === "low" || value === "medium" || value === "high") {
+    return value;
+  }
+  return fail("NEMOCLAW_REASONING_EFFORT is invalid");
+}
+
+function inputModalities(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+): readonly ("text" | "image")[] {
+  const raw = preparationValue(request, "NEMOCLAW_INFERENCE_INPUTS");
+  if (raw === null) return ["text"];
+  const values = raw.split(",").map((value) => value.trim());
+  if (
+    values.length === 0 ||
+    values.some((value) => value !== "text" && value !== "image") ||
+    new Set(values).size !== values.length
+  ) {
+    fail("NEMOCLAW_INFERENCE_INPUTS must contain unique text/image values");
+  }
+  return values as readonly ("text" | "image")[];
+}
+
+function extraAgents(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+): NonNullable<HarnessStartupSettings["configuration"]["extraAgents"]> {
+  const raw = preparationValue(request, "NEMOCLAW_EXTRA_AGENTS_JSON");
+  const encoded = preparationValue(request, "NEMOCLAW_EXTRA_AGENTS_JSON_B64");
+  if (raw !== null && encoded !== null) fail("extra-agent inputs conflict");
+  if (raw === null && encoded === null) {
+    return { agents: [], defaults: { subagents: {} }, main: {} };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw ?? decodeCanonicalBase64(encoded!));
+  } catch {
+    return fail("extra-agent input must contain JSON");
+  }
+  if (Array.isArray(parsed))
+    return { agents: parsed as HarnessStartupJsonObject[], defaults: { subagents: {} }, main: {} };
+  if (parsed === null || typeof parsed !== "object")
+    return fail("extra-agent input must be an object or array");
+  const record = parsed as Record<string, unknown>;
+  if (
+    !Array.isArray(record.agents) ||
+    typeof record.defaults !== "object" ||
+    typeof record.main !== "object"
+  ) {
+    return fail("extra-agent object is incomplete");
+  }
+  return {
+    agents: record.agents as HarnessStartupJsonObject[],
+    defaults: record.defaults as HarnessStartupJsonObject,
+    main: record.main as HarnessStartupJsonObject,
+  };
+}
+
+function decodeCanonicalBase64(value: string): string {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)) {
+    return fail("NEMOCLAW_EXTRA_AGENTS_JSON_B64 must contain canonical base64");
+  }
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const bytes: number[] = [];
+  for (let offset = 0; offset < value.length; offset += 4) {
+    const digits = value
+      .slice(offset, offset + 4)
+      .split("")
+      .map((character) => (character === "=" ? 0 : alphabet.indexOf(character)));
+    const bits = (digits[0]! << 18) | (digits[1]! << 12) | (digits[2]! << 6) | digits[3]!;
+    bytes.push((bits >> 16) & 0xff);
+    if (value[offset + 2] !== "=") bytes.push((bits >> 8) & 0xff);
+    if (value[offset + 3] !== "=") bytes.push(bits & 0xff);
+  }
+  return decodeURIComponent(bytes.map((byte) => `%${byte.toString(16).padStart(2, "0")}`).join(""));
+}
+
+function prepareStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["prepareStartupProfile"]> {
+  if (request.packageId !== PACKAGE_ID || request.harnessPackage.id !== PACKAGE_ID) {
+    fail("startup profile identity is inconsistent");
+  }
+  const input = request.input;
+  const candidate = input.inference.candidates[0] ?? fail("inference candidate is required");
+  if (!input.dashboard.managed || input.dashboard.port < 1024) {
+    fail("managed dashboard state is required");
+  }
+  const bind = input.dashboard.bindAddress;
+  if (bind !== null && bind !== "0.0.0.0") fail("dashboard bind address is invalid");
+  let dashboardHost: string;
+  try {
+    dashboardHost = new URL(input.dashboard.url).hostname;
+  } catch {
+    return fail("dashboard URL is invalid");
+  }
+  const remote =
+    bind === "0.0.0.0" ||
+    input.dashboard.wslExposure ||
+    !["127.0.0.1", "localhost", "::1", "[::1]"].includes(dashboardHost);
+  const webSearch = input.webSearch ?? { enabled: false, provider: null };
+  const otelEnabled = preparationValue(request, "NEMOCLAW_OPENCLAW_OTEL");
+  const reasoning = preparationValue(request, "NEMOCLAW_REASONING");
+  if (reasoning !== null && reasoning !== "true" && reasoning !== "false") {
+    fail("NEMOCLAW_REASONING must be true or false");
+  }
+  const heartbeatEvery = preparationValue(request, "NEMOCLAW_AGENT_HEARTBEAT_EVERY");
+  if (heartbeatEvery !== null && !/^\d+(?:s|m|h)$/u.test(heartbeatEvery)) {
+    fail("NEMOCLAW_AGENT_HEARTBEAT_EVERY is invalid");
+  }
+  const sampleRate = Number(
+    preparationValue(request, "NEMOCLAW_OPENCLAW_OTEL_SAMPLE_RATE") ?? "1.0",
+  );
+  if (!Number.isFinite(sampleRate) || sampleRate < 0 || sampleRate > 1) {
+    fail("NEMOCLAW_OPENCLAW_OTEL_SAMPLE_RATE is invalid");
+  }
+  const minimalBootstrap = preparationValue(request, "NEMOCLAW_MINIMAL_BOOTSTRAP");
+  if (minimalBootstrap !== null && minimalBootstrap !== "0" && minimalBootstrap !== "1") {
+    fail("NEMOCLAW_MINIMAL_BOOTSTRAP must be 0 or 1");
+  }
+  const previous = request.previousDesiredState;
+  const targetChanged =
+    previous !== null &&
+    (previous.inference.model !== input.inference.model ||
+      previous.inference.upstreamProvider !== input.inference.selectedProvider);
+  const contextWindow =
+    request.phase === "rebuild" && input.inference.resolvedContextWindow !== null
+      ? input.inference.resolvedContextWindow
+      : targetChanged
+        ? fail(
+            `cannot determine a context window for '${input.inference.selectedProvider ?? candidate.routeProvider}/${input.inference.model}'`,
+          )
+        : positiveInteger(
+            request,
+            "NEMOCLAW_CONTEXT_WINDOW",
+            previous?.tuning.contextWindow ?? 131_072,
+            4_194_304,
+          );
+  const preparedReasoning =
+    request.phase === "rebuild"
+      ? input.inference.selectedProvider === "compatible-endpoint" &&
+        input.inference.reasoningEnabled === true
+      : reasoning === "true";
+  const preparedReasoningEffort =
+    request.phase === "rebuild"
+      ? input.inference.selectedProvider === "compatible-endpoint" &&
+        candidate.api === "openai-completions"
+        ? (input.inference.reasoningEffort ?? "default")
+        : "default"
+      : reasoningEffort(request);
+  const desiredState: HarnessStartupSettings = {
+    configuration: {
+      agent: PACKAGE_ID,
+      webSearch: { enabled: webSearch.enabled, provider: webSearch.provider ?? "brave" },
+      otel: {
+        enabled:
+          otelEnabled !== null && !["0", "false", "no", "off"].includes(otelEnabled.toLowerCase()),
+        endpointUrl:
+          preparationValue(request, "NEMOCLAW_OPENCLAW_OTEL_ENDPOINT") ??
+          "http://host.openshell.internal:4318",
+        serviceName:
+          preparationValue(request, "NEMOCLAW_OPENCLAW_OTEL_SERVICE_NAME") ?? "openclaw-gateway",
+        sampleRate,
+      },
+      agentTimeoutSeconds: positiveInteger(request, "NEMOCLAW_AGENT_TIMEOUT", 600),
+      heartbeatEvery,
+      extraAgents: extraAgents(request),
+      deviceAuth: { disabled: true, optOutSource: "managed-onboard" },
+      minimalBootstrap: minimalBootstrap === "1",
+    },
+    inference: {
+      routeProvider: candidate.routeProvider,
+      upstreamProvider: input.inference.selectedProvider ?? candidate.routeProvider,
+      model: input.inference.model,
+      routedBaseUrl: candidate.routedBaseUrl,
+      upstreamEndpointUrl: null,
+      api: candidate.api,
+      primaryModelRef: candidate.primaryModelRef,
+      compatibility: candidate.compatibility ?? {},
+      inputModalities: inputModalities(request),
+    },
+    proxy: input.proxy,
+    dashboard: {
+      agent: PACKAGE_ID,
+      mode: remote ? "remote" : "loopback",
+      url: input.dashboard.url,
+      port: input.dashboard.port,
+      bindAddress: bind === "0.0.0.0" ? bind : "127.0.0.1",
+      wslExposure: input.dashboard.wslExposure,
+    },
+    tools: { disclosure: input.tools.disclosure, enabledGateways: [] },
+    messaging: { plan: input.messagingPlan },
+    tuning: {
+      contextWindow,
+      maxTokens: positiveInteger(request, "NEMOCLAW_MAX_TOKENS", 4096),
+      reasoning: preparedReasoning,
+      reasoningEffort: preparedReasoningEffort,
+    },
+    corporateCa: input.corporateCa,
+  };
+  buildStartupPlan({ packageId: PACKAGE_ID, settings: desiredState, applicationEnvironment: {} });
+  return {
+    kind: "prepared",
+    desiredState,
+    credentialProxyReplayRequired: input.credentialProxyPresent,
+    dashboardRemoteBindPrepared: remote,
+  };
+}
+
+function packageConfigForDesiredState(
+  request: Parameters<HarnessStartupAdapterModule["buildInitialStartupProfile"]>[0],
+): StartupPackageConfig {
+  requireStartupProfileAuthority(request);
+  buildStartupPlan({
+    packageId: request.packageId,
+    settings: request.desiredState,
+    applicationEnvironment: {},
+  });
+  return { settings: request.desiredState } as unknown as StartupPackageConfig;
+}
+
+function canonicalStartupJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalStartupJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalStartupJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? fail("startup profile contains a non-JSON value");
+}
+
+function buildInitialStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["buildInitialStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["buildInitialStartupProfile"]> {
+  return { kind: "package-config", packageConfig: packageConfigForDesiredState(request) };
+}
+
+function reconcileStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["reconcileStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["reconcileStartupProfile"]> {
+  normalizeStartupRequest({
+    profileKind: "package",
+    packageId: request.packageId,
+    harnessPackage: request.harnessPackage,
+    packageConfig: request.currentPackageConfig as StartupPackageConfig,
+    corporateCa: request.desiredState.corporateCa,
+    applicationEnvironment: {},
+  });
+  const packageConfig = packageConfigForDesiredState(request);
+  return {
+    kind: "package-config",
+    packageConfig,
+    changed:
+      canonicalStartupJson(packageConfig) !== canonicalStartupJson(request.currentPackageConfig),
+  };
+}
+
+const startupAdapter: HarnessStartupAdapterModule<StartupAdapterRequest> = {
+  buildStartupPlan,
+  prepareStartupProfile,
+  buildInitialStartupProfile,
+  reconcileStartupProfile,
+};
 
 export = startupAdapter;

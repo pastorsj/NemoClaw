@@ -52,13 +52,13 @@ import {
   assertMcpDestroyNotPending,
   assertNoDerivedResourceCollision,
   bridgeState,
-  ensureSandboxGatewaySelected,
   getBridgeAdapter,
   getSandboxAgent,
   getSandboxOrThrow,
   nowIso,
   writeBridgeEntry,
 } from "./mcp-bridge-state";
+import { ensureSandboxGatewaySelected } from "./mcp-bridge/gateway-selection";
 import { assertMcpCommandRuntimeAvailable } from "./mcp-bridge-runtime-capabilities";
 import type { McpBridgeTargetValidation } from "./mcp-bridge-url-validation";
 import {

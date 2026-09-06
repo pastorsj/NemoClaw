@@ -115,6 +115,42 @@ describe("Hermes sandbox connect light terminal skin", () => {
     expectConnectSucceeded(harness, exitSpy);
   });
 
+  it("leaves synthetic receipt-backed interactive hooks to the package", async () => {
+    vi.stubEnv("TERM_PROGRAM", "Apple_Terminal");
+    vi.stubEnv("COLORFGBG", "0;15");
+    const legacySkin = requireDist("../../src/lib/actions/sandbox/legacy-skin.js");
+    const prepareLegacySkinSpy = vi.spyOn(legacySkin, "prepareLegacyHermesLightSkin");
+    const legacyBroker = requireDist("../../src/lib/actions/sandbox/legacy-broker.js");
+    const ensureLegacyBrokerSpy = vi.spyOn(legacyBroker, "ensureLegacyHermesToolBroker");
+    const harness = createConnectHarness({
+      agentName: "hermes",
+      hermesConfig: { model: "test" },
+      registryEntry: {
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: "future-harness",
+          packageVersion: "1.0.0",
+          contentDigest: "a".repeat(64),
+        },
+        hermesToolGateways: ["managed-tool"],
+      },
+      sessionAgent: {
+        name: "hermes",
+        runtime: { kind: "gateway", interactive_command: "hermes" },
+      },
+    });
+
+    await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(0)");
+
+    expect(prepareLegacySkinSpy).not.toHaveBeenCalled();
+    expect(ensureLegacyBrokerSpy).not.toHaveBeenCalled();
+    expect(harness.resolveAgentConfigSpy).not.toHaveBeenCalled();
+    expect(harness.readSandboxConfigSpy).not.toHaveBeenCalled();
+    expect(harness.writeSandboxConfigSpy).not.toHaveBeenCalled();
+    expect(skinWriteCalls(harness)).toHaveLength(0);
+    expectConnectSucceeded(harness, exitSpy);
+  });
+
   it("does not prepare the NemoClaw Hermes light skin when the sandbox Hermes config already sets display.skin (#6380)", async () => {
     vi.stubEnv("TERM_PROGRAM", "Apple_Terminal");
     vi.stubEnv("COLORFGBG", "0;15");

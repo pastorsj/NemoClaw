@@ -3,7 +3,6 @@
 
 import { describe, expect, it } from "vitest";
 
-import { isRuntimeIdentityConfig } from "../../packages/nemoclaw-openclaw/plugin/src/blueprint/runtime-identity.ts";
 import { compileConfigSchema } from "../../scripts/validate-configs.mts";
 
 const validate = compileConfigSchema("schemas/blueprint.schema.json");
@@ -41,27 +40,25 @@ describe("blueprint runtime identity schema", () => {
     expect(validate(blueprintWithIdentity(runtimeIdentity)), JSON.stringify(validate.errors)).toBe(
       true,
     );
-    expect(isRuntimeIdentityConfig(runtimeIdentity)).toBe(true);
   });
 
   it("rejects an identity-provider discriminator", () => {
     expect(validate(blueprintWithIdentity({ okta: runtimeIdentity }))).toBe(false);
   });
 
-  it.each([
-    "NODE_OPTIONS",
-    "MYTOKEN",
-    "OPENSHELL_TOKEN",
-  ])("rejects unsafe secret-material name %s", (refreshTokenEnvironment) => {
-    expect(
-      validate(
-        blueprintWithIdentity({
-          ...runtimeIdentity,
-          refresh_token_env: refreshTokenEnvironment,
-        }),
-      ),
-    ).toBe(false);
-  });
+  it.each(["NODE_OPTIONS", "MYTOKEN", "OPENSHELL_TOKEN"])(
+    "rejects unsafe secret-material name %s",
+    (refreshTokenEnvironment) => {
+      expect(
+        validate(
+          blueprintWithIdentity({
+            ...runtimeIdentity,
+            refresh_token_env: refreshTokenEnvironment,
+          }),
+        ),
+      ).toBe(false);
+    },
+  );
 
   it("rejects identity values forwarded by the general subprocess allowlist", () => {
     expect(
@@ -80,6 +77,5 @@ describe("blueprint runtime identity schema", () => {
       client_id_env: "OTHER_ID",
     };
     expect(validate(blueprintWithIdentity(unsupportedIdentity))).toBe(false);
-    expect(isRuntimeIdentityConfig(unsupportedIdentity)).toBe(false);
   });
 });

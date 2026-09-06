@@ -12,7 +12,7 @@ import * as registry from "../../state/registry";
 import { enforceHermesSecretBoundaryOnRunningGateway } from "./hermes-secret-boundary-recovery";
 
 const SANDBOX = "hermes-box";
-const HERMES_AGENT = { name: "hermes" } as AgentDefinition;
+const HERMES_AGENT = { name: "future-gateway" } as AgentDefinition;
 
 let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -41,7 +41,7 @@ describe("enforceHermesSecretBoundaryOnRunningGateway", () => {
     mockSandboxAgent("openclaw");
     const exec = vi.fn();
 
-    const result = enforceHermesSecretBoundaryOnRunningGateway(SANDBOX, HERMES_AGENT, exec);
+    const result = enforceHermesSecretBoundaryOnRunningGateway(SANDBOX, HERMES_AGENT, exec, false);
 
     expect(result).toBeNull();
     expect(exec).not.toHaveBeenCalled();

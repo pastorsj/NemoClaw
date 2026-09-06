@@ -6,11 +6,9 @@ import path from "node:path";
 import { SUPPORTED_GATEWAY_CAPABILITIES } from "../core/gateway-capabilities";
 import { isObjectRecord } from "../core/json-types";
 import { DEFAULT_GATEWAY_PORT } from "../core/ports";
-import {
-  harnessPackageIdentitiesEqual,
-  parseHarnessPackageIdentity,
-  type HarnessPackageIdentity,
-} from "../agent-runtime/package/identity";
+import { parseHarnessPackageIdentity } from "../agent-runtime/package/identity";
+import { harnessPackageIdentitiesEqual } from "../agent-runtime/package/identity-validation";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import { normalizeWebSearchConfig, type WebSearchConfig } from "../inference/web-search";
 import { NAME_MAX_LENGTH, NAME_VALID_PATTERN } from "../name-validation";
 import { isOnboardMachineState } from "../onboard/machine/transitions";

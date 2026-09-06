@@ -34,3 +34,8 @@ export function canIgnorePortableOpenClawReceipt(
     recordedAgent !== "openclaw"
   );
 }
+
+/** True only for the explicit registry identity used by the Portable receipt. */
+export function isRecordedPortableOpenClawAgent(recordedAgent: string | null | undefined): boolean {
+  return recordedAgent === "openclaw";
+}

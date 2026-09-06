@@ -181,7 +181,7 @@ export type SandboxWorkloadReceipt =
       readonly platform?: "linux/amd64" | "linux/arm64";
       readonly release: string;
       readonly sourceRevision: string;
-      /** Exact all-agent publication cohort that produced the immutable image. */
+      /** Exact publication cohort; stock images use one all-agent cohort. */
       readonly sourceCohort: string;
       readonly capabilityContractVersion: 1;
       readonly startupProfileContractVersion: 1;

@@ -75,6 +75,7 @@ export interface PoliciesStateOptions<Agent, WebSearchConfig> {
         disabledChannels: string[] | null | undefined;
         enabledChannels: string[];
         hermesToolGateways: string[];
+        packagePolicyPresets?: readonly string[] | null;
         agent?: string | null;
         observabilityEnabled?: boolean | null;
         webSearchConfig: WebSearchConfig | null;
@@ -107,6 +108,7 @@ export interface PoliciesStateOptions<Agent, WebSearchConfig> {
         tierName?: string | null;
         webSearchSupported: boolean;
         hermesToolGateways: string[];
+        packagePolicyPresets?: readonly string[] | null;
         onSelection: (policyPresets: string[]) => void;
       },
     ): Promise<string[]>;
@@ -269,6 +271,9 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
       tierName: null,
       webSearchSupported,
       hermesToolGateways,
+      packagePolicyPresets:
+        (agent as { mcpCapability?: { policy_presets?: readonly string[] } } | null)
+          ?.mcpCapability?.policy_presets ?? null,
       onSelection: () => undefined,
     });
     if (hostLocalInferenceRouteOnly) verifySandboxInferenceRoute();

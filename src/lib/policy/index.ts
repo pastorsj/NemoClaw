@@ -38,14 +38,13 @@ import {
 import { resolveSandboxGatewayName } from "../onboard/gateway-binding";
 import { assertNoOpenShellGatewayEndpointOverride } from "../openshell-gateway-endpoint-guard";
 import { OPENSHELL_SANDBOX_HOST_BRIDGE } from "../private-networks";
-import { ROOT } from "../runner";
+import { ROOT, redact } from "../runner";
 import {
   captureSandboxCommandAgentAuthority,
   requireCurrentSandboxCommandAgentAuthority,
   type SandboxCommandAgentAuthority,
 } from "../sandbox/command-agent";
 import { diagnosticPreview, isValidName, NAME_ALLOWED_FORMAT } from "../sandbox-name-contract";
-import { redact } from "../security/redact";
 import * as registry from "../state/registry";
 import {
   digestBaselineEntry,
@@ -54,7 +53,11 @@ import {
   removeBaselineEntryFromPolicy,
 } from "./baseline-exclusion";
 import { inspectGatewayPresetNames, inspectPresetContentGatewayState } from "./gateway-state";
-import { reconcileTeamsOutlookLoginCredentialBinding } from "./microsoft-login-credential-binding";
+import {
+  legacyUsesNpmPolicyCompatibility,
+  legacyUsesTeamsOutlookSharedLogin,
+  reconcileTeamsOutlookLoginCredentialBinding,
+} from "./messaging-policy";
 import {
   parseOpenShellPolicy,
   stripProviderComposedPolicies,
@@ -385,8 +388,7 @@ function loadAgentPresetContent(
   } catch {
     return null;
   }
-  const expectedAgent =
-    sandboxAgent ?? (pinnedAgentDefinition?.name === "openclaw" ? "openclaw" : null);
+  const expectedAgent = sandboxAgent ?? pinnedAgentDefinition?.name ?? null;
   if (!expectedAgent) return null;
   if (pinnedAgentDefinition && pinnedAgentDefinition.name !== expectedAgent) {
     throw new Error(
@@ -483,7 +485,9 @@ function loadPresetForSandbox(
     loadAgentPresetContent(sandboxName, presetName, builtinPresetContent, agentDefinition) ||
     builtinPresetContent;
   return presetName === "outlook" &&
-    sandboxAgent !== "hermes" &&
+    (sandbox?.messaging?.plan.packageBuild?.credentialPolicyReconciliation ===
+      "teams-outlook-shared-login" ||
+      legacyUsesTeamsOutlookSharedLogin(sandbox)) &&
     configuredMessagingChannels.includes("teams")
     ? reconcileTeamsOutlookLoginCredentialBinding(resolvedPresetContent, sandboxName, true)
     : resolvedPresetContent;
@@ -1555,7 +1559,7 @@ function openClawNpmReviewedEntries(baselinePolicyContent: string): {
   preset: PolicyObject;
 } {
   const baseline = getBaselineEntry(baselinePolicyContent, OPENCLAW_NPM_BASELINE_KEY);
-  const npmPresetContent = loadPresetForAgent("npm", { agent: "openclaw" });
+  const npmPresetContent = loadCentralPreset("npm");
   const preset = parseNetworkPolicies(npmPresetContent)?.[OPENCLAW_NPM_PRESET_KEY];
   if (!baseline || !isPolicyObject(preset)) {
     throw new Error("Cannot reconcile OpenClaw npm policy compatibility: reviewed inputs missing.");
@@ -1657,20 +1661,28 @@ function restoreOpenClawNpmCompatibility(
 
 function resolveSandboxOpenClawNpmBaseline(sandboxName: string): string | null {
   const sandbox = registry.getSandbox(sandboxName);
-  // Legacy and unregistered rows historically use OpenClaw preset content.
-  // Activation still requires an exact reviewed npm_registry entry in the
-  // live policy, so this fallback cannot inject or broaden a missing key.
-  const agent = sandbox?.harnessPackage
-    ? captureSandboxCommandAgentAuthority(sandbox).definition.name
-    : sandbox?.agent || "openclaw";
-  if (agent !== "openclaw") return null;
+  if (!sandbox?.harnessPackage && !legacyUsesNpmPolicyCompatibility(sandbox)) return null;
   const baseline = resolveSandboxBaselinePolicy(sandboxName);
   if (!baseline) {
     throw new Error(
       `Cannot reconcile OpenClaw npm policy compatibility for '${sandboxName}': the reviewed baseline is unavailable.`,
     );
   }
+  // Receipt-backed packages select this overlap repair by declaring the
+  // reviewed baseline entry in their package policy. Unknown packages whose
+  // baseline omits it remain unaffected.
+  if (sandbox?.harnessPackage && !getBaselineEntry(baseline.content, OPENCLAW_NPM_BASELINE_KEY)) {
+    return null;
+  }
   return baseline.content;
+}
+
+function sandboxUsesNpmCompatibility(sandboxName: string): boolean {
+  try {
+    return resolveSandboxOpenClawNpmBaseline(sandboxName) !== null;
+  } catch {
+    return false;
+  }
 }
 
 function openClawNpmExclusionStateError(
@@ -1713,6 +1725,8 @@ function getOpenClawNpmCompatibilityState(
   }
 }
 
+const getNpmCompatibilityState = getOpenClawNpmCompatibilityState;
+
 function policyHasNetworkPolicy(policyContent: string, policyKey: string): boolean {
   return isPolicyObject(parseNetworkPolicies(policyContent)?.[policyKey]);
 }
@@ -1724,6 +1738,8 @@ function logOpenClawNpmCompatibilityDisclosure(logger: (line: string) => void = 
   );
   logger("    Removing the npm preset restores the exact reviewed GET-only baseline route.");
 }
+
+const logNpmCompatibilityDisclosure = logOpenClawNpmCompatibilityDisclosure;
 
 function mergePresetNamesIntoPolicy(
   currentPolicy: string,
@@ -1763,20 +1779,16 @@ function mergePresetNamesIntoPolicy(
   }
 
   let policy = merged;
+  const reviewedNpmBaseline = resolveAgentBaselinePolicy(options.agent);
   if (
-    (options.agent === undefined || options.agent === null || options.agent === "openclaw") &&
     appliedPresets.includes("npm") &&
-    !policyHasNetworkPolicy(merged, PERSONAL_OPEN_INTERNET_POLICY_KEY)
+    !policyHasNetworkPolicy(merged, PERSONAL_OPEN_INTERNET_POLICY_KEY) &&
+    reviewedNpmBaseline &&
+    getBaselineEntry(reviewedNpmBaseline.content, OPENCLAW_NPM_BASELINE_KEY)
   ) {
-    const reviewedBaseline = resolveAgentBaselinePolicy("openclaw");
-    if (!reviewedBaseline) {
-      throw new Error(
-        "Cannot reconcile OpenClaw npm policy compatibility: reviewed baseline missing.",
-      );
-    }
     policy = activateOpenClawNpmCompatibility(
       merged,
-      reviewedBaseline.content,
+      reviewedNpmBaseline.content,
       policyHasNetworkPolicy(currentPolicy, OPENCLAW_NPM_PRESET_KEY),
     ).policy;
   }
@@ -2064,10 +2076,8 @@ function resolveAgentDefinitionBaselinePolicy(
 function resolveAgentBaselinePolicy(
   agentName: string | null | undefined,
 ): { agent: string; policyPath: string; content: string } | null {
-  const resolvedAgent = agentName || "openclaw";
-  if (resolvedAgent !== "openclaw") {
-    return resolveAgentDefinitionBaselinePolicy(loadAgent(resolvedAgent));
-  }
+  if (agentName) return resolveAgentDefinitionBaselinePolicy(loadAgent(agentName));
+  const resolvedAgent = "openclaw";
   const policyPath = path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
   let content: string;
   try {
@@ -3062,6 +3072,7 @@ export {
   filterSetupPolicyPresets,
   getAppliedPresets,
   getGatewayPresets,
+  getNpmCompatibilityState,
   getOpenClawNpmCompatibilityState,
   getPresetContentGatewayState,
   getPresetEndpoints,
@@ -3076,6 +3087,7 @@ export {
   loadPresetForSandbox,
   loadPresetFromFile,
   logOpenClawNpmCompatibilityDisclosure,
+  logNpmCompatibilityDisclosure,
   logPresetNoNewEgress,
   logPresetScope,
   logPresetScopeForState,
@@ -3098,4 +3110,5 @@ export {
   selectForRemoval,
   selectFromList,
   setupPolicyPresetSupported,
+  sandboxUsesNpmCompatibility,
 };

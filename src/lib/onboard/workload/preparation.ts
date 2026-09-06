@@ -15,6 +15,7 @@ import {
   resolveManagedImageCatalogFromGhcr,
 } from "../managed-image/catalog";
 import {
+  hasPackageManagedImagePublication,
   isCandidateManagedImageAgent,
   isManagedImageAgent,
   isShippedManagedImageAgent,
@@ -409,12 +410,11 @@ export async function prepareSandboxWorkloadSource(
 ): Promise<PreparedSandboxWorkloadSource> {
   const policy = input.policy ?? input.runtime.managedImageSelectionPolicy;
   const stockManagedAgent = isManagedImageAgent(input.agentName);
-  const receiptBackedPackageSelection =
-    input.harnessPackage != null && input.managedImage != null;
+  const receiptBackedPackageSelection = input.harnessPackage != null && input.managedImage != null;
   const acceptedCandidateContract =
     !receiptBackedPackageSelection && isCandidateManagedImageAgent(input.agentName)
-    ? (input.acceptedCandidateContract ?? null)
-    : null;
+      ? (input.acceptedCandidateContract ?? null)
+      : null;
   const candidateSelection = acceptedCandidateContract !== null;
   const cannotSelectManaged =
     input.customDockerfilePath != null ||
@@ -446,6 +446,51 @@ export async function prepareSandboxWorkloadSource(
   if (input.catalog && input.catalogPath) {
     throw new SandboxWorkloadPreparationError(
       "managed image catalog has conflicting content authorities",
+    );
+  }
+
+  const platform = managedImageRuntimePlatform(input.runtime);
+  if (platform === null) {
+    throw new SandboxWorkloadPreparationError(
+      `driver '${input.runtime.driverName}' has no unambiguous managed-image host platform`,
+    );
+  }
+
+  if (receiptBackedPackageSelection && hasPackageManagedImagePublication(input.managedImage!)) {
+    let source: SandboxWorkloadSource;
+    try {
+      source = resolveSandboxWorkloadSource({
+        agentName: input.agentName,
+        managedImage: input.managedImage,
+        harnessPackage: input.harnessPackage,
+        legacyDockerfilePath: input.legacyDockerfilePath,
+        customDockerfilePath: input.customDockerfilePath,
+        runtime: input.runtime,
+        catalog: {},
+        policy,
+      });
+    } catch (error) {
+      throw new SandboxWorkloadPreparationError(
+        `package-declared managed image publication for '${input.agentName}' failed closed validation`,
+        { cause: error },
+      );
+    }
+    if (source.kind !== "managed-image") {
+      throw new SandboxWorkloadPreparationError(
+        `package-declared managed image publication for '${input.agentName}' did not resolve to an immutable image`,
+      );
+    }
+    return {
+      source,
+      release: source.contract.source.release,
+      fallbackDiagnostic: null,
+    };
+  }
+
+  if (receiptBackedPackageSelection && !stockManagedAgent && !input.catalog && !input.catalogPath) {
+    return unavailableResult(
+      input,
+      `package '${input.agentName}' does not declare an immutable managed image publication`,
     );
   }
 
@@ -482,12 +527,6 @@ export async function prepareSandboxWorkloadSource(
   }
 
   let catalog: ManagedImageContractCatalog;
-  const platform = managedImageRuntimePlatform(input.runtime);
-  if (platform === null) {
-    throw new SandboxWorkloadPreparationError(
-      `driver '${input.runtime.driverName}' has no unambiguous managed-image host platform`,
-    );
-  }
   try {
     catalog = input.catalog
       ? input.catalog

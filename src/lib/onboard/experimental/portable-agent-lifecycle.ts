@@ -39,6 +39,9 @@ import {
 import { defaultPortableDemoStateDir } from "./portable-runtime-receipt-readiness";
 
 export type PortableAgentLifecycleDeps = PortableDemoLifecycleDeps & HermesPortableLifecycleDeps;
+export type PortableAgentLifecycleRecoveryResult = PortableDemoLifecycleRecoveryResult & {
+  readonly portableAgent?: "hermes";
+};
 export type PortableAgentLifecycleStopResult = PortableDemoLifecycleStopResult & {
   readonly portableAgent?: "hermes";
 };
@@ -588,7 +591,7 @@ export function recoverPortableAgentSandboxLifecycle(
   sandboxName: string,
   context: PortableDemoLifecycleContext,
   deps: PortableAgentLifecycleDeps = {},
-): PortableDemoLifecycleRecoveryResult {
+): PortableAgentLifecycleRecoveryResult {
   const disposition = inspectPortableAgentReceiptDisposition(
     sandboxName,
     deps.env ?? process.env,
@@ -604,7 +607,10 @@ export function recoverPortableAgentSandboxLifecycle(
       `Hermes portable lifecycle receipt phase '${disposition.phase}' is incomplete; resume onboarding before running lifecycle commands`,
     );
   }
-  return recoverHermesPortableSandboxLifecycle(sandboxName, context, deps);
+  return {
+    ...recoverHermesPortableSandboxLifecycle(sandboxName, context, deps),
+    portableAgent: "hermes",
+  };
 }
 
 /** Requalify Hermes authority without permitting lifecycle recovery or fallback. */

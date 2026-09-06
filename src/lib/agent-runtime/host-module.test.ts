@@ -26,15 +26,18 @@ module.exports = {
   buildMcpRegistrationPlan(request) {
     return {
       execution: {
-        command: [
-          "future-register",
-          request.entry.server,
-          request.entry.headers.Authorization || "anonymous",
-          request.replaceExisting ? "replace" : "create",
-          String(request.managedEntries.length),
-          request.teardownRollback ? "rollback" : "active",
-          request.configDirectory || "default-directory",
-        ],
+        command: {
+          kind: "argv",
+          argv: [
+            "future-register",
+            request.entry.server,
+            request.entry.headers.Authorization || "anonymous",
+            request.replaceExisting ? "replace" : "create",
+            String(request.managedEntries.length),
+            request.teardownRollback ? "rollback" : "active",
+            request.configDirectory || "default-directory",
+          ],
+        },
         timeoutSeconds: 15,
         success: { kind: "exit-zero" },
         failureMessage: "Future registration failed",
@@ -46,13 +49,16 @@ module.exports = {
   buildMcpRemovalPlan(request) {
     return {
       execution: {
-        command: [
-          "future-remove",
-          request.entry.server,
-          request.force ? "force" : "owned",
-          request.adaptiveTeardown ? "adaptive" : "current",
-          request.configDirectory || "default-directory",
-        ],
+        command: {
+          kind: "argv",
+          argv: [
+            "future-remove",
+            request.entry.server,
+            request.force ? "force" : "owned",
+            request.adaptiveTeardown ? "adaptive" : "current",
+            request.configDirectory || "default-directory",
+          ],
+        },
         timeoutSeconds: 15,
         success: { kind: "exit-zero" },
         failureMessage: "Future removal failed",
@@ -61,17 +67,21 @@ module.exports = {
     };
   },
   buildMcpInspectionCommand(request) {
-    return [
-      "future-inspect",
-      request.entry.server,
-      request.failOnMismatch ? "strict" : "observe",
-      request.configDirectory || "default-directory",
-    ].join(":");
+    return {
+      kind: "shell",
+      script: [
+        "future-inspect",
+        request.entry.server,
+        request.failOnMismatch ? "strict" : "observe",
+        request.configDirectory || "default-directory",
+      ].join(":"),
+      shellTrust: "package-authored-code",
+    };
   },
   describeMcpMutationCapability(request) {
     return {
       kind: "command",
-      command: ["future-probe", request.sandboxName],
+      command: { kind: "argv", argv: ["future-probe", request.sandboxName] },
       success: { kind: "stdout-trimmed-equals", value: "FUTURE_MCP_READY" },
       timeoutSeconds: 30,
       failureMessage: "Future Harness MCP support is unavailable",
@@ -83,11 +93,14 @@ module.exports = {
   describeMcpRuntimeIntentVerification(request) {
     return {
       kind: "command",
-      command: [
-        "future-verify",
-        String(request.entries.length),
-        request.managedServerNames.join(","),
-      ],
+      command: {
+        kind: "argv",
+        argv: [
+          "future-verify",
+          String(request.entries.length),
+          request.managedServerNames.join(","),
+        ],
+      },
       success: { kind: "exit-zero" },
       timeoutSeconds: 10,
       failureMessage: "Future runtime intent mismatch",
@@ -127,6 +140,7 @@ function writeFuturePackage(moduleSource: string = VALID_MODULE): void {
       displayName: "Future Harness",
       packageVersion: "1.0.0",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: "packages/nemoclaw-future-harness/manifest.yaml",
     })}\n`,
   );
@@ -135,6 +149,31 @@ function writeFuturePackage(moduleSource: string = VALID_MODULE): void {
     [
       "name: future-harness",
       "display_name: Future Harness",
+      "runtime:",
+      "  kind: terminal",
+      "  headless_command: future-harness --prompt",
+      "  prompt_transport: stdin",
+      "config:",
+      "  dir: /sandbox/.future-harness",
+      "  config_file: config.json",
+      "  format: json",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: Synthetic fixture uses fixed inference.",
+      "messaging:",
+      "  support: disabled",
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    image_plugin_provenance: not-required",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: Synthetic fixture has no scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
       "mcp:",
       "  support: bridge",
       "  adapter: future-config",
@@ -171,6 +210,31 @@ function installFuturePackageWithoutMcpCapability(): InstalledHarnessPackage {
     [
       "name: future-harness",
       "display_name: Future Harness",
+      "runtime:",
+      "  kind: terminal",
+      "  headless_command: future-harness --prompt",
+      "  prompt_transport: stdin",
+      "config:",
+      "  dir: /sandbox/.future-harness",
+      "  config_file: config.json",
+      "  format: json",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: Synthetic fixture uses fixed inference.",
+      "messaging:",
+      "  support: disabled",
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    image_plugin_provenance: not-required",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: Synthetic fixture has no scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
       "mcp:",
       "  support: disabled",
       "",
@@ -216,15 +280,18 @@ describe("installed harness host module", () => {
       }),
     ).toMatchObject({
       execution: {
-        command: [
-          "future-register",
-          "docs",
-          "Bearer placeholder",
-          "replace",
-          "2",
-          "active",
-          "/sandbox/.future",
-        ],
+        command: {
+          kind: "argv",
+          argv: [
+            "future-register",
+            "docs",
+            "Bearer placeholder",
+            "replace",
+            "2",
+            "active",
+            "/sandbox/.future",
+          ],
+        },
       },
       verification: { kind: "inspection" },
       credentialConvergence: { kind: "none" },
@@ -238,7 +305,10 @@ describe("installed harness host module", () => {
       }),
     ).toMatchObject({
       execution: {
-        command: ["future-remove", "docs", "force", "adaptive", "default-directory"],
+        command: {
+          kind: "argv",
+          argv: ["future-remove", "docs", "force", "adaptive", "default-directory"],
+        },
       },
       outcome: { kind: "removed" },
     });
@@ -248,10 +318,14 @@ describe("installed harness host module", () => {
         failOnMismatch: true,
         configDirectory: "/sandbox/.future",
       }),
-    ).toBe("future-inspect:docs:strict:/sandbox/.future");
+    ).toEqual({
+      kind: "shell",
+      script: "future-inspect:docs:strict:/sandbox/.future",
+      shellTrust: "package-authored-code",
+    });
     expect(module.describeMcpMutationCapability({ sandboxName: "future-sandbox" })).toEqual({
       kind: "command",
-      command: ["future-probe", "future-sandbox"],
+      command: { kind: "argv", argv: ["future-probe", "future-sandbox"] },
       success: { kind: "stdout-trimmed-equals", value: "FUTURE_MCP_READY" },
       timeoutSeconds: 30,
       failureMessage: "Future Harness MCP support is unavailable",
@@ -266,7 +340,7 @@ describe("installed harness host module", () => {
       }),
     ).toEqual({
       kind: "command",
-      command: ["future-verify", "1", "docs,search"],
+      command: { kind: "argv", argv: ["future-verify", "1", "docs,search"] },
       success: { kind: "exit-zero" },
       timeoutSeconds: 10,
       failureMessage: "Future runtime intent mismatch",
@@ -355,6 +429,24 @@ module.exports = {
     ).toThrow(/returned an invalid registration plan/u);
   });
 
+  it.each([
+    ["raw shell text", '"future-inspect"'],
+    ["a shell plan without package trust", '{ kind: "shell", script: "future-inspect" }'],
+  ])("rejects %s from the inspection operation", (_label, inspectionResult) => {
+    const installed = installFuturePackage(
+      `${VALID_MODULE}\nmodule.exports.buildMcpInspectionCommand = () => (${inspectionResult});\n`,
+    );
+    const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
+
+    expect(() =>
+      module.buildMcpInspectionCommand({
+        entry: { server: "docs", url: "https://example.test/mcp", headers: {} },
+        failOnMismatch: false,
+        configDirectory: null,
+      }),
+    ).toThrow(/returned an invalid inspection command/u);
+  });
+
   it("validates requests before package code receives them", () => {
     const installed = installFuturePackage();
     const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
@@ -407,7 +499,7 @@ module.exports = {
     try { request.managedEntries.push(request.entry); } catch {}
     return {
       execution: {
-        command: [request.entry.server, String(request.managedEntries.length)],
+        command: { kind: "argv", argv: [request.entry.server, String(request.managedEntries.length)] },
         timeoutSeconds: 15,
         success: { kind: "exit-zero" },
         failureMessage: "Future registration failed",
@@ -441,9 +533,12 @@ module.exports = {
 
     const plan = module.buildMcpRegistrationPlan(request);
 
-    expect(plan.execution.command).toEqual(["docs", "0"]);
+    expect(plan.execution.command).toEqual({ kind: "argv", argv: ["docs", "0"] });
     expect(Object.isFrozen(plan)).toBe(true);
     expect(Object.isFrozen(plan.execution.command)).toBe(true);
+    expect(
+      Object.isFrozen(plan.execution.command.kind === "argv" && plan.execution.command.argv),
+    ).toBe(true);
     expect(request.entry.server).toBe("docs");
     expect(request.managedEntries).toEqual([]);
   });

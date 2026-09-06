@@ -17,8 +17,7 @@
 // this detection can be narrowed and the recovery settle window shortened or
 // defaulted off.
 
-import { shellQuote } from "../../runner";
-import { redactFull } from "../../security/redact";
+import { redactFull, shellQuote } from "../../runner";
 import type { SandboxCommandResult } from "./process-recovery";
 
 export type SandboxExec = (sandboxName: string, command: string) => SandboxCommandResult | null;

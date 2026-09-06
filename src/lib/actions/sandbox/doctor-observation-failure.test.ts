@@ -27,6 +27,7 @@ vi.mock("../../agent/defs", () => ({
 }));
 
 vi.mock("../../gateway-runtime-action", () => ({
+  captureOpenshell: () => ({ status: 0, output: "" }),
   getNamedGatewayLifecycleState: () => ({
     state: "healthy_named",
     status: "Status: Connected",

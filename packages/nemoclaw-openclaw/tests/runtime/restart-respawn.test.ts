@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 
 const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../../../..");
 const OPENCLAW_PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
-const HELPER = path.join(REPOSITORY_ROOT, "scripts", "managed-gateway-control.py");
+const HELPER = path.join(OPENCLAW_PACKAGE_ROOT, "runtime", "managed-gateway-control.py");
 const START_SCRIPT = path.join(OPENCLAW_PACKAGE_ROOT, "start.sh");
 const SUPERVISOR_LIB = path.join(REPOSITORY_ROOT, "scripts", "lib", "gateway-supervisor.sh");
 const NONCE = "a".repeat(64);
@@ -122,9 +122,24 @@ with tempfile.TemporaryDirectory() as root:
         + b"\0",
     )
 
-    # openclaw is the detected agent, and its preflight must not gate the lease.
-    control._detect_agent = lambda: "openclaw"
-    control._openclaw_preflight = lambda _recovery_deadline=None: None
+    # A future package can supply this fixed typed shape without teaching the
+    # shared controller its identity.
+    class SyntheticProfile:
+        @staticmethod
+        def agent_spec(environment):
+            return {"name": "synthetic", "port": 18789, "readiness_checks": ()}
+
+        @staticmethod
+        def gateway_matches(argv, port):
+            return argv[-2:] == (b"--port", str(port).encode("ascii"))
+
+        @staticmethod
+        def preflight(environment, timeout, system_root):
+            return None
+
+    profile = SyntheticProfile()
+    control._load_profile = lambda: profile
+    control._ACTIVE_PROFILE = profile
     control._sandbox_uid = lambda: 1000
     control._http_healthy_in_gateway_namespace = (
         lambda _reader, _identity, port, path, _recovery_deadline=None: True

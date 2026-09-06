@@ -75,6 +75,7 @@ function createManagedPackageIdentityFixture(): {
       displayName: "Hermes",
       packageVersion: "1.0.0",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: `packages/${packageDirectoryName}/manifest.yaml`,
     })}\n`,
   );

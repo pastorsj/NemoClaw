@@ -24,9 +24,8 @@ import {
 } from "./messaging/hooks/status-runner";
 import type { MessagingAgentId } from "./messaging/manifest";
 import { resolveGatewayName } from "./onboard/gateway-binding";
-import { classifyHermesPortableRegistry } from "./onboard/experimental/hermes-portable-onboarding";
-import { inspectPortableAgentReceiptAuthorityForClassification } from "./onboard/experimental/hermes-portable-receipt";
 import { defaultPortableDemoStateDir } from "./onboard/experimental/portable-runtime-receipt-readiness";
+import { getQualifiedHermesPortablePhase } from "./actions/sandbox/portable-status";
 import * as policy from "./policy";
 import { summarizeForDebug } from "./state/onboard-session";
 import * as registry from "./state/registry";
@@ -101,7 +100,8 @@ function findMessagingOverlaps() {
 }
 
 function normalizeMessagingAgentId(agent: string | null | undefined): MessagingAgentId {
-  return agent === "hermes" ? "hermes" : "openclaw";
+  const normalized = agent?.trim().toLowerCase();
+  return normalized || "openclaw";
 }
 
 function executeSandboxCommand(
@@ -314,23 +314,7 @@ export function buildStatusCommandDeps(rootDir: string): ShowStatusCommandDeps {
       checkMessagingBridgeHealth(rootDir, sandboxName, channels, agent),
     findMessagingOverlaps,
     readGatewayLog: (sandboxName) => readGatewayLog(rootDir, sandboxName),
-    getHermesPortablePhase: (sandboxName) => {
-      const authority = inspectPortableAgentReceiptAuthorityForClassification(
-        sandboxName,
-        defaultPortableDemoStateDir(process.env),
-      );
-      if (authority.kind !== "hermes") return null;
-      const disposition = classifyHermesPortableRegistry(
-        authority.snapshot.receipt,
-        registry.getSandbox(sandboxName),
-      );
-      if (disposition.kind !== "matching") {
-        throw new Error(
-          "Global status found a Hermes portable receipt that disagrees with its registry row.",
-        );
-      }
-      return authority.snapshot.receipt.phase;
-    },
+    getHermesPortablePhase: getQualifiedHermesPortablePhase,
     getHermesPortableHostAuthorityCount: () =>
       getHermesPortableHostAuthorityEntryCount(defaultPortableDemoStateDir(process.env)),
     log: console.log,

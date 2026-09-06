@@ -3,13 +3,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
 
-import { assertHarnessAdapterArtifactsCurrent } from "./build-adapters.mts";
+type ManifestValidatorModule = typeof import("./src/manifest-validator.ts");
+
+const require = createRequire(import.meta.url);
+const sourceModule = fileURLToPath(import.meta.url).endsWith(".mts");
+const manifestValidator = require(
+  fileURLToPath(
+    new URL(
+      sourceModule ? "./dist/src/manifest-validator.js" : "./src/manifest-validator.js",
+      import.meta.url,
+    ),
+  ),
+) as ManifestValidatorModule;
+const { HarnessManifestValidationError, validateHarnessManifest } = manifestValidator;
 
 const PACKAGE_JSON = "package.json";
 const REQUIRED_ROOT_FILES = Object.freeze([
@@ -26,7 +40,7 @@ const PACKAGE_SCOPE = /^[a-z0-9][a-z0-9._-]*$/u;
 const MAX_PACKAGE_JSON_BYTES = 128 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_MANIFEST_DEPTH = 16;
-const MAX_MANIFEST_NODES = 10_000;
+const MAX_MANIFEST_NODES = 8192;
 const MAX_MAPPING_ENTRIES = 512;
 const MAX_SEQUENCE_ENTRIES = 512;
 const MAX_KEY_LENGTH = 128;
@@ -37,12 +51,24 @@ const MAX_PACKED_BYTES = 1024 * 1024 * 1024;
 const MAX_RELATIVE_PATH_BYTES = 1024;
 const MAX_RELATIVE_PATH_DEPTH = 32;
 const PACK_TIMEOUT_MILLISECONDS = 90_000;
+const MAX_BUILD_PROJECTS = 8;
+const MAX_BUILD_PROJECT_PATH_BYTES = 128;
+const MAX_BUILD_CONFIG_BYTES = 128 * 1024;
+const MAX_EXTENDED_BUILD_CONFIGS = 16;
+const BUILD_PROJECT_PATH = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/u;
+const TYPESCRIPT_CONFIG_FILE = /^tsconfig(?:\.[a-z0-9_-]+)*\.json$/iu;
+const TEST_CONFIG_TERM =
+  /(?:^|[^a-z0-9])(?:__tests__|e2e|jest|spec|specs|test|tests|vitest)(?:[^a-z0-9]|$)/iu;
 
 const AUTHORING_DIRECTORY_NAMES = new Set([
+  ".cache",
   ".e2e",
   ".git",
   ".github",
+  ".turbo",
+  "__pycache__",
   "__tests__",
+  "cache",
   "coverage",
   "node_modules",
   "test",
@@ -75,6 +101,7 @@ export type HarnessPackageDiagnosticCode =
   | "manifest-identity"
   | "metadata"
   | "package-root"
+  | "provider-broker-artifact"
   | "start-mode";
 
 export interface HarnessPackageDiagnostic {
@@ -89,6 +116,7 @@ export interface HarnessPackageConformanceReport {
   readonly packageName: string;
   readonly packageVersion: string;
   readonly minimumNemoClawVersion: string;
+  readonly maximumNemoClawVersionExclusive: string;
   readonly manifestPath: string;
   readonly adapterArtifacts: readonly string[];
   readonly packedFiles: readonly string[];
@@ -99,6 +127,7 @@ export interface HarnessPackagePublishedFile {
   readonly path: string;
   readonly size: number;
   readonly executable: boolean;
+  readonly sha256: string;
 }
 
 export class HarnessPackageConformanceError extends Error {
@@ -117,6 +146,8 @@ interface PackageMetadata {
   readonly nemoclaw: {
     readonly harnessManifest: string;
     readonly minimumNemoClawVersion: string;
+    readonly maximumNemoClawVersionExclusive: string;
+    readonly buildProjects: readonly string[];
   };
 }
 
@@ -264,6 +295,87 @@ function isExactCoreVersion(version: string): boolean {
   return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(version);
 }
 
+function compareExactCoreVersions(left: string, right: string): number {
+  const leftParts = left.split(".").map(BigInt);
+  const rightParts = right.split(".").map(BigInt);
+  for (let index = 0; index < leftParts.length; index += 1) {
+    if (leftParts[index] === rightParts[index]) continue;
+    return leftParts[index] < rightParts[index] ? -1 : 1;
+  }
+  return 0;
+}
+
+function readBuildProjects(
+  packageRoot: string,
+  nemoclawMetadata: Readonly<Record<string, unknown>>,
+): readonly string[] {
+  if (Object.hasOwn(nemoclawMetadata, "authoringProjects")) {
+    throw diagnostic(
+      "metadata",
+      PACKAGE_JSON,
+      "nemoclaw.authoringProjects was renamed to nemoclaw.buildProjects",
+    );
+  }
+  const declared = nemoclawMetadata.buildProjects;
+  if (declared === undefined) return Object.freeze([]);
+  if (!Array.isArray(declared) || declared.length === 0 || declared.length > MAX_BUILD_PROJECTS) {
+    throw diagnostic(
+      "metadata",
+      PACKAGE_JSON,
+      `nemoclaw.buildProjects must contain between 1 and ${String(MAX_BUILD_PROJECTS)} paths`,
+    );
+  }
+
+  const projects = declared.map((value): string => {
+    if (
+      typeof value !== "string" ||
+      Buffer.byteLength(value, "utf8") > MAX_BUILD_PROJECT_PATH_BYTES ||
+      !BUILD_PROJECT_PATH.test(value)
+    ) {
+      throw diagnostic(
+        "metadata",
+        PACKAGE_JSON,
+        "nemoclaw.buildProjects entries must be bounded canonical relative paths",
+      );
+    }
+    const segments = value.toLowerCase().split("/");
+    if (segments.some((segment) => AUTHORING_DIRECTORY_NAMES.has(segment))) {
+      throw diagnostic(
+        "metadata",
+        PACKAGE_JSON,
+        "nemoclaw.buildProjects must not identify a test, cache, or dependency directory",
+      );
+    }
+
+    let cursor = packageRoot;
+    for (const segment of value.split("/")) {
+      cursor = path.join(cursor, segment);
+      let stats: fs.Stats;
+      try {
+        stats = fs.lstatSync(cursor);
+      } catch {
+        throw diagnostic(
+          "metadata",
+          PACKAGE_JSON,
+          `build project ${JSON.stringify(value)} is missing`,
+        );
+      }
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
+        throw diagnostic(
+          "metadata",
+          PACKAGE_JSON,
+          `build project ${JSON.stringify(value)} must be a regular directory`,
+        );
+      }
+    }
+    return value;
+  });
+  if (new Set(projects).size !== projects.length) {
+    throw diagnostic("metadata", PACKAGE_JSON, "nemoclaw.buildProjects entries must be unique");
+  }
+  return Object.freeze(projects);
+}
+
 function readPackageMetadata(
   packageRoot: string,
 ): PackageMetadata & { readonly harnessId: string } {
@@ -312,12 +424,37 @@ function readPackageMetadata(
       "nemoclaw.minimumNemoClawVersion must be one exact x.y.z version",
     );
   }
+  if (
+    typeof parsed.nemoclaw.maximumNemoClawVersionExclusive !== "string" ||
+    !isExactCoreVersion(parsed.nemoclaw.maximumNemoClawVersionExclusive)
+  ) {
+    throw diagnostic(
+      "metadata",
+      PACKAGE_JSON,
+      "nemoclaw.maximumNemoClawVersionExclusive must be one exact x.y.z version",
+    );
+  }
+  if (
+    compareExactCoreVersions(
+      parsed.nemoclaw.maximumNemoClawVersionExclusive,
+      parsed.nemoclaw.minimumNemoClawVersion,
+    ) <= 0
+  ) {
+    throw diagnostic(
+      "metadata",
+      PACKAGE_JSON,
+      "nemoclaw.maximumNemoClawVersionExclusive must be greater than minimumNemoClawVersion",
+    );
+  }
+  const buildProjects = readBuildProjects(packageRoot, parsed.nemoclaw);
   return Object.freeze({
     name: parsed.name,
     version: parsed.version,
     nemoclaw: Object.freeze({
       harnessManifest: "manifest.yaml",
       minimumNemoClawVersion: parsed.nemoclaw.minimumNemoClawVersion,
+      maximumNemoClawVersionExclusive: parsed.nemoclaw.maximumNemoClawVersionExclusive,
+      buildProjects,
     }),
     harnessId,
   });
@@ -409,19 +546,9 @@ function readManifest(packageRoot: string, expectedHarnessId: string): ParsedMan
       `name must exactly match package harness id ${JSON.stringify(expectedHarnessId)}`,
     );
   }
-  if (value.display_name === undefined) {
-    return Object.freeze({ displayName: expectedHarnessId, value: Object.freeze(value) });
-  }
-  if (
-    typeof value.display_name !== "string" ||
-    value.display_name.trim().length === 0 ||
-    value.display_name.length > 128 ||
-    Buffer.byteLength(value.display_name, "utf8") > 512 ||
-    /[\p{Cc}\p{Cf}\p{Cs}]/u.test(value.display_name)
-  ) {
-    throw diagnostic("manifest", "manifest.yaml", "display_name must be one bounded safe string");
-  }
-  return Object.freeze({ displayName: value.display_name, value: Object.freeze(value) });
+  const displayName =
+    typeof value.display_name === "string" ? value.display_name : expectedHarnessId;
+  return Object.freeze({ displayName, value: Object.freeze(value) });
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -439,6 +566,9 @@ function requiredAdapterArtifacts(manifest: Readonly<Record<string, unknown>>): 
   if (isRecord(manifest.sessions)) {
     required.push("host/session-adapter.cts");
   }
+  if (isRecord(manifest.provider_broker) && manifest.provider_broker.support === "managed") {
+    required.push("host/provider-broker-adapter.cts");
+  }
   if (
     Array.isArray(manifest.state_files) &&
     manifest.state_files.some(
@@ -449,48 +579,6 @@ function requiredAdapterArtifacts(manifest: Readonly<Record<string, unknown>>): 
     required.push("host/restore-adapter.cts");
   }
   return Object.freeze(required);
-}
-
-function assertMessagingDeclaration(manifest: Readonly<Record<string, unknown>>): void {
-  const messaging = manifest.messaging;
-  if (!isRecord(messaging)) {
-    throw diagnostic(
-      "manifest",
-      "manifest.yaml",
-      "messaging must explicitly declare channels or disabled support",
-    );
-  }
-  const keys = Object.keys(messaging).sort();
-  if (messaging.support === "disabled") {
-    if (keys.length !== 1 || keys[0] !== "support") {
-      throw diagnostic(
-        "manifest",
-        "manifest.yaml",
-        "disabled messaging support must not declare channel behavior",
-      );
-    }
-    return;
-  }
-  const channels = messaging.channels;
-  if (
-    messaging.support !== "channels" ||
-    keys.length !== 2 ||
-    keys[0] !== "channels" ||
-    keys[1] !== "support" ||
-    !Array.isArray(channels) ||
-    channels.length === 0 ||
-    channels.length > 32 ||
-    new Set(channels).size !== channels.length ||
-    channels.some(
-      (channel) => typeof channel !== "string" || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(channel),
-    )
-  ) {
-    throw diagnostic(
-      "manifest",
-      "manifest.yaml",
-      "messaging channels must be a unique bounded list of canonical identifiers",
-    );
-  }
 }
 
 function assertRequiredAdapterArtifacts(
@@ -504,6 +592,71 @@ function assertRequiredAdapterArtifacts(
         "adapter-artifact",
         relativePath,
         "manifest capabilities require this compiled adapter artifact",
+      );
+    }
+  }
+}
+
+function requiredProviderBrokerArtifacts(
+  packageRoot: string,
+  manifest: Readonly<Record<string, unknown>>,
+): readonly string[] {
+  if (!isRecord(manifest.provider_broker) || manifest.provider_broker.support !== "managed") {
+    return Object.freeze([]);
+  }
+  const relativePath = "host/provider-broker-control.cts";
+  const absolutePath = path.join(packageRoot, relativePath);
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(absolutePath);
+  } catch {
+    throw diagnostic(
+      "provider-broker-artifact",
+      relativePath,
+      "managed provider broker requires its conventional controller",
+    );
+  }
+  if (stats.isSymbolicLink() || !stats.isFile() || stats.size === 0) {
+    throw diagnostic(
+      "provider-broker-artifact",
+      relativePath,
+      "provider-broker controller must be one non-empty regular file",
+    );
+  }
+  return Object.freeze([relativePath]);
+}
+
+function requiredManagedImageArtifacts(
+  manifest: Readonly<Record<string, unknown>>,
+): readonly string[] {
+  const managedImage = isRecord(manifest.managed_image) ? manifest.managed_image : undefined;
+  const baseImage = isRecord(managedImage?.base_image) ? managedImage.base_image : undefined;
+  return baseImage?.package_probe === true
+    ? Object.freeze(["checks/image-probe.py"])
+    : Object.freeze([]);
+}
+
+function assertRequiredManagedImageArtifacts(
+  packageRoot: string,
+  artifacts: readonly string[],
+): void {
+  for (const relativePath of artifacts) {
+    const absolutePath = path.join(packageRoot, ...relativePath.split("/"));
+    let stats: fs.Stats;
+    try {
+      stats = fs.lstatSync(absolutePath);
+    } catch {
+      throw diagnostic(
+        "file-type",
+        relativePath,
+        "managed image declaration requires this conventional package probe",
+      );
+    }
+    if (stats.isSymbolicLink() || !stats.isFile() || stats.size === 0) {
+      throw diagnostic(
+        "file-type",
+        relativePath,
+        "managed image probe must be one non-empty regular file",
       );
     }
   }
@@ -572,7 +725,352 @@ function assertRegularPackedFile(packageRoot: string, relativePath: string): fs.
   return fs.statSync(cursor);
 }
 
-function isAuthoringPath(relativePath: string): boolean {
+function sameRegularFileSnapshot(left: fs.BigIntStats, right: fs.BigIntStats): boolean {
+  return (
+    left.isFile() &&
+    right.isFile() &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.nlink === right.nlink &&
+    left.uid === right.uid &&
+    left.gid === right.gid &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+function digestStablePackedFile(packageRoot: string, relativePath: string): string {
+  const absolutePath = path.join(packageRoot, ...relativePath.split("/"));
+  if (typeof fs.constants.O_NOFOLLOW !== "number") {
+    throw diagnostic("archive", relativePath, "secure archive inspection requires O_NOFOLLOW");
+  }
+  const before = fs.lstatSync(absolutePath, { bigint: true });
+  const descriptor = fs.openSync(absolutePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const opened = fs.fstatSync(descriptor, { bigint: true });
+    if (!sameRegularFileSnapshot(before, opened)) {
+      throw diagnostic("archive", relativePath, "archive member changed before hashing");
+    }
+    const bytes = fs.readFileSync(descriptor);
+    const after = fs.fstatSync(descriptor, { bigint: true });
+    const namedAfter = fs.lstatSync(absolutePath, { bigint: true });
+    if (!sameRegularFileSnapshot(opened, after) || !sameRegularFileSnapshot(opened, namedAfter)) {
+      throw diagnostic("archive", relativePath, "archive member changed while hashing");
+    }
+    return createHash("sha256").update(bytes).digest("hex");
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function isTypeScriptConfigPath(relativePath: string): boolean {
+  return TYPESCRIPT_CONFIG_FILE.test(relativePath.split("/").at(-1) ?? "");
+}
+
+function buildProjectForConfig(
+  relativePath: string,
+  buildProjects: readonly string[],
+): string | undefined {
+  return [...buildProjects]
+    .sort((left, right) => right.length - left.length)
+    .find((project) => relativePath.startsWith(`${project}/`));
+}
+
+function buildConfigFailure(relativePath: string, message: string): HarnessPackageConformanceError {
+  return diagnostic("archive-authoring-path", relativePath, message);
+}
+
+function readBuildConfig(
+  packageRoot: string,
+  relativePath: string,
+): Readonly<Record<string, unknown>> {
+  const absolutePath = path.join(packageRoot, ...relativePath.split("/"));
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(absolutePath);
+  } catch {
+    throw buildConfigFailure(relativePath, "Dockerfile-referenced build config is missing");
+  }
+  if (
+    stats.isSymbolicLink() ||
+    !stats.isFile() ||
+    stats.size === 0 ||
+    stats.size > MAX_BUILD_CONFIG_BYTES
+  ) {
+    throw buildConfigFailure(relativePath, "published build configs must be bounded regular files");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(absolutePath, "utf8")) as unknown;
+  } catch {
+    throw buildConfigFailure(relativePath, "published build configs must contain strict JSON");
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw buildConfigFailure(relativePath, "published build configs must contain one JSON object");
+  }
+  return parsed as Readonly<Record<string, unknown>>;
+}
+
+function isTestBuildConfig(
+  relativePath: string,
+  config: Readonly<Record<string, unknown>>,
+): boolean {
+  const fileName = relativePath.split("/").at(-1) ?? "";
+  if (TEST_CONFIG_TERM.test(fileName)) return true;
+  const containsTestInput = (value: unknown): boolean =>
+    typeof value === "string" && TEST_CONFIG_TERM.test(value);
+  for (const field of ["files", "include"] as const) {
+    const values = config[field];
+    if (Array.isArray(values) && values.some(containsTestInput)) return true;
+  }
+  const references = config.references;
+  if (
+    Array.isArray(references) &&
+    references.some(
+      (reference) =>
+        reference !== null &&
+        typeof reference === "object" &&
+        !Array.isArray(reference) &&
+        containsTestInput((reference as Readonly<Record<string, unknown>>).path),
+    )
+  ) {
+    return true;
+  }
+  const compilerOptions = config.compilerOptions;
+  if (
+    compilerOptions !== null &&
+    typeof compilerOptions === "object" &&
+    !Array.isArray(compilerOptions)
+  ) {
+    const types = (compilerOptions as Readonly<Record<string, unknown>>).types;
+    if (Array.isArray(types) && types.some(containsTestInput)) return true;
+  }
+  return false;
+}
+
+function logicalDockerfileLines(source: string): readonly string[] {
+  const lines: string[] = [];
+  let current = "";
+  for (const rawLine of source.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const continued = line.endsWith("\\");
+    current = `${current}${current ? " " : ""}${continued ? line.slice(0, -1).trimEnd() : line}`;
+    if (!continued) {
+      lines.push(current);
+      current = "";
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+interface DockerCopyInstruction {
+  readonly copiesFromStage: boolean;
+  readonly sources: readonly string[];
+}
+
+function parseShellCopyOperands(dockerfileName: string, source: string): readonly string[] {
+  const operands: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | undefined;
+  let hasCurrent = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote !== undefined) {
+      if (character === quote) {
+        quote = undefined;
+      } else if (character === "\\" && quote === '"') {
+        index += 1;
+        if (index >= source.length) {
+          throw buildConfigFailure(dockerfileName, "COPY instruction ends with an escape");
+        }
+        current += source[index];
+      } else {
+        current += character;
+      }
+      hasCurrent = true;
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      if (hasCurrent) {
+        operands.push(current);
+        current = "";
+        hasCurrent = false;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      hasCurrent = true;
+      continue;
+    }
+    if (character === "\\") {
+      index += 1;
+      if (index >= source.length) {
+        throw buildConfigFailure(dockerfileName, "COPY instruction ends with an escape");
+      }
+      current += source[index];
+      hasCurrent = true;
+      continue;
+    }
+    current += character;
+    hasCurrent = true;
+  }
+  if (quote !== undefined) {
+    throw buildConfigFailure(dockerfileName, "COPY instruction contains an unterminated quote");
+  }
+  if (hasCurrent) operands.push(current);
+  return operands;
+}
+
+function parseDockerCopyInstruction(
+  dockerfileName: string,
+  line: string,
+): DockerCopyInstruction | undefined {
+  const match = /^COPY\s+(.+)$/iu.exec(line);
+  if (!match) return undefined;
+  let remaining = match[1].trim();
+  let copiesFromStage = false;
+  while (remaining.startsWith("--")) {
+    const option = /^(--[a-z][a-z0-9-]*(?:=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s]+))?)(?:\s+|$)/iu.exec(
+      remaining,
+    );
+    if (!option) {
+      throw buildConfigFailure(dockerfileName, "COPY instruction contains an unsupported option");
+    }
+    if (/^--from(?:=|$)/iu.test(option[1])) copiesFromStage = true;
+    remaining = remaining.slice(option[0].length).trimStart();
+  }
+  if (copiesFromStage) return Object.freeze({ copiesFromStage: true, sources: [] });
+
+  let operands: readonly string[];
+  if (remaining.startsWith("[")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(remaining) as unknown;
+    } catch {
+      throw buildConfigFailure(
+        dockerfileName,
+        "JSON-array COPY instruction must contain valid JSON",
+      );
+    }
+    if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== "string")) {
+      throw buildConfigFailure(dockerfileName, "JSON-array COPY operands must all be strings");
+    }
+    operands = parsed;
+  } else {
+    operands = parseShellCopyOperands(dockerfileName, remaining);
+  }
+  if (operands.length < 2) {
+    throw buildConfigFailure(
+      dockerfileName,
+      "COPY instruction must contain at least one source and one destination",
+    );
+  }
+  return Object.freeze({ copiesFromStage: false, sources: Object.freeze(operands.slice(0, -1)) });
+}
+
+function directPackageBuildConfigs(packageRoot: string, harnessId: string): readonly string[] {
+  const packagePrefix = `packages/nemoclaw-${harnessId}/`;
+  const configs = new Set<string>();
+  for (const dockerfileName of ["Dockerfile", "Dockerfile.base"] as const) {
+    const source = readBoundedUtf8File(packageRoot, dockerfileName, MAX_BUILD_CONFIG_BYTES * 32);
+    for (const line of logicalDockerfileLines(source)) {
+      const copy = parseDockerCopyInstruction(dockerfileName, line);
+      if (!copy || copy.copiesFromStage) continue;
+      for (const sourcePath of copy.sources) {
+        const normalizedSourcePath = sourcePath.replace(/^(?:\.\/)+/u, "");
+        if (!normalizedSourcePath.startsWith(packagePrefix)) continue;
+        const relativePath = normalizedSourcePath.slice(packagePrefix.length);
+        if (isTypeScriptConfigPath(relativePath)) configs.add(relativePath);
+      }
+    }
+  }
+  return Object.freeze([...configs].sort((left, right) => left.localeCompare(right)));
+}
+
+function resolveExtendedBuildConfig(relativePath: string, extendedPath: string): string {
+  if (
+    (!extendedPath.startsWith("./") && !extendedPath.startsWith("../")) ||
+    extendedPath.includes("\\") ||
+    path.posix.isAbsolute(extendedPath)
+  ) {
+    throw buildConfigFailure(
+      relativePath,
+      "published build configs may extend only another local build-project config",
+    );
+  }
+  const withExtension = extendedPath.endsWith(".json") ? extendedPath : `${extendedPath}.json`;
+  const resolved = path.posix.normalize(
+    path.posix.join(path.posix.dirname(relativePath), withExtension),
+  );
+  if (resolved.startsWith("../") || path.posix.isAbsolute(resolved)) {
+    throw buildConfigFailure(relativePath, "published build config extends outside the package");
+  }
+  return resolved;
+}
+
+function allowedPublishedBuildConfigs(
+  packageRoot: string,
+  metadata: PackageMetadata & { readonly harnessId: string },
+): ReadonlySet<string> {
+  const allowed = new Set<string>();
+  const visiting = new Set<string>();
+  const visit = (relativePath: string, requiredProject?: string): void => {
+    const project = buildProjectForConfig(relativePath, metadata.nemoclaw.buildProjects);
+    if (!project || (requiredProject !== undefined && project !== requiredProject)) {
+      throw buildConfigFailure(
+        relativePath,
+        "published TypeScript configs must stay within one declared nemoclaw.buildProjects directory",
+      );
+    }
+    if (!isTypeScriptConfigPath(relativePath)) {
+      throw buildConfigFailure(relativePath, "build config must use a tsconfig*.json name");
+    }
+    if (allowed.has(relativePath)) return;
+    if (visiting.has(relativePath)) {
+      throw buildConfigFailure(
+        relativePath,
+        "published build config extends chain contains a cycle",
+      );
+    }
+    visiting.add(relativePath);
+    const config = readBuildConfig(packageRoot, relativePath);
+    if (isTestBuildConfig(relativePath, config)) {
+      throw buildConfigFailure(relativePath, "test TypeScript configs must not be published");
+    }
+    const extended = config.extends;
+    if (extended !== undefined) {
+      const extendedPaths = typeof extended === "string" ? [extended] : extended;
+      if (
+        !Array.isArray(extendedPaths) ||
+        extendedPaths.length === 0 ||
+        extendedPaths.length > MAX_EXTENDED_BUILD_CONFIGS ||
+        extendedPaths.some((value) => typeof value !== "string")
+      ) {
+        throw buildConfigFailure(
+          relativePath,
+          `published build config extends must be one string or between 1 and ${String(MAX_EXTENDED_BUILD_CONFIGS)} strings`,
+        );
+      }
+      for (const extendedPath of extendedPaths as readonly string[]) {
+        visit(resolveExtendedBuildConfig(relativePath, extendedPath), project);
+      }
+    }
+    visiting.delete(relativePath);
+    allowed.add(relativePath);
+  };
+
+  for (const relativePath of directPackageBuildConfigs(packageRoot, metadata.harnessId)) {
+    visit(relativePath);
+  }
+  return allowed;
+}
+
+function isAuthoringPath(relativePath: string, allowedBuildConfigs: ReadonlySet<string>): boolean {
   const segments = relativePath.toLowerCase().split("/");
   if (segments.some((segment) => AUTHORING_DIRECTORY_NAMES.has(segment))) return true;
   if (segments.length >= 2 && segments[0] === "host" && segments[1] === "source") return true;
@@ -580,7 +1078,7 @@ function isAuthoringPath(relativePath: string): boolean {
   return (
     relativePath === "nemoclaw-package.json" ||
     (segments.length === 1 && AUTHORING_ROOT_FILES.has(fileName)) ||
-    /^tsconfig(?:\.[^.]+)*\.json$/u.test(fileName) ||
+    (TYPESCRIPT_CONFIG_FILE.test(fileName) && !allowedBuildConfigs.has(relativePath)) ||
     /^(?:vitest|jest)(?:\.[^.]+)*\.(?:[cm]?[jt]s|json)$/u.test(fileName) ||
     /(?:^test_[^/]+\.py$|\.(?:test|spec)\.[cm]?[jt]sx?$)/u.test(fileName)
   );
@@ -639,7 +1137,7 @@ function parseNpmPackResult(stdout: string): NpmPackResult {
 
 function inspectPackedFiles(
   packageRoot: string,
-  metadata: PackageMetadata,
+  metadata: PackageMetadata & { readonly harnessId: string },
   expectedArtifacts: readonly string[],
 ): readonly HarnessPackagePublishedFile[] {
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -662,6 +1160,7 @@ function inspectPackedFiles(
   if (packed.name !== metadata.name || packed.version !== metadata.version) {
     throw diagnostic("archive", PACKAGE_JSON, "npm pack reported a different package identity");
   }
+  const allowedBuildConfigs = allowedPublishedBuildConfigs(packageRoot, metadata);
   const packedPaths = new Set<string>();
   let totalBytes = 0;
   for (const file of packed.files) {
@@ -687,7 +1186,7 @@ function inspectPackedFiles(
     if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_PACKED_BYTES) {
       throw diagnostic("archive", "<archive>", "packed package exceeds the size limit");
     }
-    if (isAuthoringPath(file.path)) {
+    if (isAuthoringPath(file.path, allowedBuildConfigs)) {
       throw diagnostic(
         "archive-authoring-path",
         file.path,
@@ -699,6 +1198,15 @@ function inspectPackedFiles(
         "archive-credential-path",
         file.path,
         "credential-shaped files must be excluded from the published package",
+      );
+    }
+  }
+  for (const requiredConfig of allowedBuildConfigs) {
+    if (!packedPaths.has(requiredConfig)) {
+      throw diagnostic(
+        "archive-membership",
+        requiredConfig,
+        "Dockerfile build config or its local extends dependency is missing from the npm archive",
       );
     }
   }
@@ -718,6 +1226,7 @@ function inspectPackedFiles(
           path: file.path,
           size: file.size,
           executable: (file.mode & 0o111) !== 0,
+          sha256: digestStablePackedFile(packageRoot, file.path),
         }),
       )
       .sort((left, right) => left.path.localeCompare(right.path)),
@@ -732,15 +1241,9 @@ function listAdapterArtifacts(packageRoot: string): readonly string[] {
     if (sourceStats.isSymbolicLink() || !sourceStats.isDirectory()) {
       throw diagnostic("file-type", "host/source", "must be a regular directory");
     }
-    try {
-      assertHarnessAdapterArtifactsCurrent(packageRoot);
-    } catch {
-      throw diagnostic(
-        "adapter-artifact",
-        "host",
-        "typed adapter artifacts are stale or invalid; run nemoclaw-build-adapters .",
-      );
-    }
+    // Validation is deliberately static. Adapter compilation/currentness is
+    // the separately invoked, explicitly trusted authoring build boundary;
+    // never execute a compiler or binary selected from the candidate tree.
   }
   if (!fs.existsSync(hostRoot)) return Object.freeze([]);
   const hostStats = fs.lstatSync(hostRoot);
@@ -789,16 +1292,32 @@ export function validateHarnessPackage(packageRootInput: string): HarnessPackage
   assertRequiredRootFiles(packageRoot);
   const metadata = readPackageMetadata(packageRoot);
   const manifest = readManifest(packageRoot, metadata.harnessId);
-  assertMessagingDeclaration(manifest.value);
+  try {
+    validateHarnessManifest(manifest.value, metadata.harnessId);
+  } catch (error) {
+    const message =
+      error instanceof HarnessManifestValidationError
+        ? error.message
+        : "manifest semantic validation failed";
+    throw diagnostic("manifest", "manifest.yaml", message);
+  }
   const adapterArtifacts = listAdapterArtifacts(packageRoot);
   assertRequiredAdapterArtifacts(adapterArtifacts, manifest.value);
-  const publishedFiles = inspectPackedFiles(packageRoot, metadata, adapterArtifacts);
+  const managedImageArtifacts = requiredManagedImageArtifacts(manifest.value);
+  const providerBrokerArtifacts = requiredProviderBrokerArtifacts(packageRoot, manifest.value);
+  assertRequiredManagedImageArtifacts(packageRoot, managedImageArtifacts);
+  const publishedFiles = inspectPackedFiles(packageRoot, metadata, [
+    ...adapterArtifacts,
+    ...managedImageArtifacts,
+    ...providerBrokerArtifacts,
+  ]);
   return Object.freeze({
     harnessId: metadata.harnessId,
     displayName: manifest.displayName,
     packageName: metadata.name,
     packageVersion: metadata.version,
     minimumNemoClawVersion: metadata.nemoclaw.minimumNemoClawVersion,
+    maximumNemoClawVersionExclusive: metadata.nemoclaw.maximumNemoClawVersionExclusive,
     manifestPath: metadata.nemoclaw.harnessManifest,
     adapterArtifacts,
     packedFiles: Object.freeze(publishedFiles.map((file) => file.path)),

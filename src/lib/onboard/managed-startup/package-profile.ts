@@ -6,6 +6,10 @@ import { createHash } from "node:crypto";
 import type { HarnessStartupSettings } from "@nvidia/nemoclaw-harness-contract";
 
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
+import {
+  loadHarnessStartupProfileAdapterHostModule,
+  type HarnessStartupProfileAdapterHostModule,
+} from "../../agent-runtime/startup-module";
 import { validateManagedStartupCorporateCaTransport } from "./application";
 import {
   encodeManagedStartupDurableProfile,
@@ -15,6 +19,10 @@ import {
   validateManagedStartupPackageProfile,
 } from "./profile";
 import type { ValidatedManagedStartupProfileTransport } from "./profile-builder";
+import {
+  buildManagedStartupPackagePreparationInput,
+  type ManagedStartupPackagePreparationSource,
+} from "./package-input";
 
 export interface BuiltManagedStartupPackageProfile {
   readonly profile: ManagedStartupPackageProfile;
@@ -27,11 +35,30 @@ export interface BuiltManagedStartupPackageProfile {
 
 export interface BuildManagedStartupPackageProfileInput {
   readonly harnessPackage: HarnessPackageIdentity;
-  readonly settings: HarnessStartupSettings;
+  readonly desiredState: HarnessStartupSettings;
+  readonly packageConfig: ManagedStartupJsonObject;
   readonly corporateCaB64?: string;
   readonly credentialProxyReplayRequired: boolean;
   readonly dashboardRemoteBindPrepared: boolean;
 }
+
+export type BuildInitialManagedStartupPackageProfileInput = Omit<
+  BuildManagedStartupPackageProfileInput,
+  "packageConfig"
+>;
+
+export interface PrepareInitialManagedStartupPackageProfileInput {
+  readonly harnessPackage: HarnessPackageIdentity;
+  readonly source: ManagedStartupPackagePreparationSource;
+}
+
+export class ManagedStartupPackageProfileError extends Error {
+  override readonly name = "ManagedStartupPackageProfileError";
+}
+
+export type LoadHarnessStartupProfileAdapter = (
+  identity: HarnessPackageIdentity,
+) => HarnessStartupProfileAdapterHostModule;
 
 /** Project the existing finite startup semantics into the public package request shape. */
 export function managedStartupSettingsFromProfile(
@@ -62,8 +89,9 @@ export function buildManagedStartupPackageProfile(
     profileKind: "package",
     agent: input.harnessPackage.id,
     harnessPackage: input.harnessPackage,
-    packageConfig: { settings: input.settings } as unknown as ManagedStartupJsonObject,
-    corporateCa: input.settings.corporateCa,
+    desiredState: input.desiredState,
+    packageConfig: input.packageConfig,
+    corporateCa: input.desiredState.corporateCa,
   });
   validateManagedStartupCorporateCaTransport(input.corporateCaB64, profile);
   const encodedProfile = encodeManagedStartupDurableProfile(
@@ -78,4 +106,64 @@ export function buildManagedStartupPackageProfile(
     dashboardRemoteBindPrepared: input.dashboardRemoteBindPrepared,
     ...(input.corporateCaB64 === undefined ? {} : { corporateCaB64: input.corporateCaB64 }),
   });
+}
+
+/**
+ * Ask the exact receipt-pinned package to construct its opaque startup config,
+ * then bind that config to core-owned normalized intent in one durable envelope.
+ */
+export function buildInitialManagedStartupPackageProfile(
+  input: BuildInitialManagedStartupPackageProfileInput,
+  loadAdapter: LoadHarnessStartupProfileAdapter = loadHarnessStartupProfileAdapterHostModule,
+): BuiltManagedStartupPackageProfile {
+  const result = loadAdapter(input.harnessPackage).buildInitialStartupProfile({
+    packageId: input.harnessPackage.id,
+    harnessPackage: input.harnessPackage,
+    desiredState: input.desiredState,
+  });
+  if (result.kind === "unsupported") {
+    throw new ManagedStartupPackageProfileError(
+      `Harness package '${input.harnessPackage.id}' does not support managed startup profiles: ${result.reason}`,
+    );
+  }
+  return buildManagedStartupPackageProfile({
+    ...input,
+    packageConfig: result.packageConfig as ManagedStartupJsonObject,
+  });
+}
+
+/** Ask the exact package to normalize raw operator input before it creates opaque durable state. */
+export function prepareInitialManagedStartupPackageProfile(
+  input: PrepareInitialManagedStartupPackageProfileInput,
+  loadAdapter: LoadHarnessStartupProfileAdapter = loadHarnessStartupProfileAdapterHostModule,
+): BuiltManagedStartupPackageProfile {
+  const adapter = loadAdapter(input.harnessPackage);
+  const preparedInput = buildManagedStartupPackagePreparationInput(
+    input.source,
+    adapter.startupProfileEnvironment,
+  );
+  const result = adapter.prepareStartupProfile({
+    packageId: input.harnessPackage.id,
+    harnessPackage: input.harnessPackage,
+    phase: "initial",
+    input: preparedInput.input,
+    previousDesiredState: null,
+  });
+  if (result.kind === "unsupported") {
+    throw new ManagedStartupPackageProfileError(
+      `Harness package '${input.harnessPackage.id}' does not support startup profile preparation: ${result.reason}`,
+    );
+  }
+  return buildInitialManagedStartupPackageProfile(
+    {
+      harnessPackage: input.harnessPackage,
+      desiredState: result.desiredState,
+      ...(preparedInput.corporateCaB64 === undefined
+        ? {}
+        : { corporateCaB64: preparedInput.corporateCaB64 }),
+      credentialProxyReplayRequired: result.credentialProxyReplayRequired,
+      dashboardRemoteBindPrepared: result.dashboardRemoteBindPrepared,
+    },
+    () => adapter,
+  );
 }

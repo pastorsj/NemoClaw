@@ -134,7 +134,10 @@ export function listMessagingCredentialEnvAssignments(
         ];
       });
     });
-    const runtimeAssignments = (["openclaw", "hermes"] as const).flatMap((agent) => {
+    const runtimeAgents: readonly MessagingAgentId[] = options.agent
+      ? [options.agent]
+      : manifest.supportedAgents;
+    const runtimeAssignments = runtimeAgents.flatMap((agent) => {
       if (options.agent && agent !== options.agent) return [];
       if (!manifest.supportedAgents.includes(agent)) return [];
       return (manifest.runtime?.[agent]?.envAliases ?? []).flatMap((alias) => {
@@ -374,7 +377,7 @@ export function listOpenClawPluginExtensionIds(
       const extensionId = manifest.runtime?.openclaw?.channelName;
       const installsPlugin = (manifest.agentPackages ?? []).some(
         (agentPackage) =>
-          agentPackage.agent === "openclaw" && agentPackage.manager === "openclaw-plugin",
+          agentPackage.agent === "openclaw" && agentPackage.manager === "node-package",
       );
       return extensionId && installsPlugin ? [extensionId] : [];
     }),

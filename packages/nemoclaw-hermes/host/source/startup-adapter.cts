@@ -224,6 +224,192 @@ function buildStartupPlan(adapterRequest: StartupAdapterRequest): HarnessStartup
   };
 }
 
-const startupAdapter: HarnessStartupAdapterModule<StartupAdapterRequest> = { buildStartupPlan };
+function requireStartupProfileAuthority(request: {
+  readonly packageId: string;
+  readonly harnessPackage: { readonly id: string };
+}): void {
+  if (request.packageId !== PACKAGE_ID || request.harnessPackage.id !== PACKAGE_ID) {
+    fail("startup profile identity is inconsistent");
+  }
+}
+
+function preparationValue(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+  name: string,
+): string | null {
+  const value = request.input.environment[name];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+function prepareContextWindow(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+): number | null {
+  const raw = preparationValue(request, "NEMOCLAW_CONTEXT_WINDOW");
+  if (raw === null) return request.previousDesiredState?.tuning.contextWindow ?? null;
+  if (!/^[1-9][0-9]*$/u.test(raw)) fail("NEMOCLAW_CONTEXT_WINDOW must be a positive integer");
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 64_000 || value > 4_194_304) {
+    fail("NEMOCLAW_CONTEXT_WINDOW must be between 64000 and 4194304");
+  }
+  return value;
+}
+
+function prepareStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["prepareStartupProfile"]> {
+  requireStartupProfileAuthority(request);
+  const input = request.input;
+  const candidate =
+    input.inference.selectedProvider === "compatible-anthropic-endpoint"
+      ? input.inference.candidates.find((entry) => entry.requestedApi === "openai-completions")
+      : input.inference.candidates[0];
+  if (!candidate) fail("a compatible inference candidate is required");
+  if (!input.dashboard.managed || input.dashboard.port < 1024) {
+    fail("managed dashboard state is required");
+  }
+  if (input.webSearch?.provider !== null && input.webSearch?.provider !== "tavily") {
+    fail("Hermes only supports Tavily web search");
+  }
+  const forwarding = input.dashboard.forwarding;
+  let dashboard: HarnessStartupSettings["dashboard"];
+  if (!forwarding.enabled) {
+    dashboard = {
+      agent: PACKAGE_ID,
+      mode: "disabled",
+      url: `http://127.0.0.1:${String(input.dashboard.port)}`,
+      browserUrl: input.dashboard.url,
+      publicPort: null,
+      internalPort: null,
+      tuiEnabled: false,
+    };
+  } else {
+    if (
+      request.phase === "rebuild" &&
+      request.previousDesiredState?.dashboard.browserUrl === undefined
+    ) {
+      fail("forwarded dashboard has no recorded browser URL; rerun onboarding before rebuilding");
+    }
+    if (
+      forwarding.publicPort === null ||
+      forwarding.internalPort === null ||
+      forwarding.publicPort !== input.dashboard.port ||
+      forwarding.publicPort < 1024 ||
+      forwarding.internalPort < 1024
+    ) {
+      fail("forwarded dashboard ports are missing or inconsistent");
+    }
+    dashboard = {
+      agent: PACKAGE_ID,
+      mode: "loopback-forwarded",
+      url: `http://127.0.0.1:${String(forwarding.publicPort)}`,
+      browserUrl: input.dashboard.url,
+      publicPort: forwarding.publicPort,
+      internalPort: forwarding.internalPort,
+      tuiEnabled: forwarding.tuiEnabled,
+    };
+  }
+  const previousProvider = request.previousDesiredState?.inference.upstreamProvider;
+  const desiredState: HarnessStartupSettings = {
+    configuration: {
+      agent: PACKAGE_ID,
+      webSearch: {
+        enabled: input.webSearch?.enabled ?? false,
+        provider: "tavily",
+      },
+    },
+    inference: {
+      routeProvider: candidate.routeProvider,
+      upstreamProvider:
+        input.inference.selectedProvider === "hermes-provider" && previousProvider
+          ? previousProvider
+          : (input.inference.selectedProvider ?? candidate.routeProvider),
+      model: input.inference.model,
+      routedBaseUrl: candidate.routedBaseUrl,
+      upstreamEndpointUrl: null,
+      api: candidate.api,
+      primaryModelRef: null,
+      compatibility: null,
+      inputModalities: null,
+    },
+    proxy: input.proxy,
+    dashboard,
+    tools: {
+      disclosure: input.tools.disclosure,
+      enabledGateways: input.tools.enabledGateways,
+    },
+    messaging: { plan: input.messagingPlan },
+    tuning: {
+      contextWindow: prepareContextWindow(request),
+      maxTokens: null,
+      reasoning: null,
+      reasoningEffort: null,
+    },
+    corporateCa: input.corporateCa,
+  };
+  buildStartupPlan({ packageId: PACKAGE_ID, settings: desiredState, applicationEnvironment: {} });
+  return {
+    kind: "prepared",
+    desiredState,
+    credentialProxyReplayRequired: input.credentialProxyPresent,
+    dashboardRemoteBindPrepared: false,
+  };
+}
+
+function packageConfigForDesiredState(
+  request: Parameters<HarnessStartupAdapterModule["buildInitialStartupProfile"]>[0],
+): StartupPackageConfig {
+  requireStartupProfileAuthority(request);
+  buildStartupPlan({
+    packageId: request.packageId,
+    settings: request.desiredState,
+    applicationEnvironment: {},
+  });
+  return { settings: request.desiredState } as unknown as StartupPackageConfig;
+}
+
+function canonicalStartupJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalStartupJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalStartupJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? fail("startup profile contains a non-JSON value");
+}
+
+function buildInitialStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["buildInitialStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["buildInitialStartupProfile"]> {
+  return { kind: "package-config", packageConfig: packageConfigForDesiredState(request) };
+}
+
+function reconcileStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["reconcileStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["reconcileStartupProfile"]> {
+  normalizeStartupRequest({
+    profileKind: "package",
+    packageId: request.packageId,
+    harnessPackage: request.harnessPackage,
+    packageConfig: request.currentPackageConfig as StartupPackageConfig,
+    corporateCa: request.desiredState.corporateCa,
+    applicationEnvironment: {},
+  });
+  const packageConfig = packageConfigForDesiredState(request);
+  return {
+    kind: "package-config",
+    packageConfig,
+    changed:
+      canonicalStartupJson(packageConfig) !== canonicalStartupJson(request.currentPackageConfig),
+  };
+}
+
+const startupAdapter: HarnessStartupAdapterModule<StartupAdapterRequest> = {
+  buildStartupPlan,
+  prepareStartupProfile,
+  buildInitialStartupProfile,
+  reconcileStartupProfile,
+};
 
 export = startupAdapter;

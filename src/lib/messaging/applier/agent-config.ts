@@ -27,6 +27,7 @@ import {
   staleCredentialEnvKeys,
 } from "./credential-env-cleanup";
 import { allowRenderedOpenClawPlugins } from "./openclaw-plugin-allow";
+import { resolveLegacyMessagingConfigRoot } from "./legacy-config";
 import { enabledPlanChannels, filterEnabledPlanEntries } from "./plan-filter";
 import type {
   MessagingHookApplyRequest,
@@ -87,7 +88,7 @@ export async function applyAgentConfigAtOpenShell(
     ),
   ];
   for (const [target, render] of targets) {
-    const resolvedTarget = resolveSandboxAgentConfigTarget(target, plan.agent);
+    const resolvedTarget = resolveSandboxAgentConfigTarget(target, plan);
     const kind = render[0]?.kind;
     if (kind && render.some((entry) => entry.kind !== kind)) {
       throw new Error(`Cannot apply mixed messaging render kinds to ${target}.`);
@@ -141,7 +142,7 @@ export function removeDisabledChannelAgentConfigAtOpenShell(
   const disabledRender = plan.agentRender.filter((entry) => entry.channelId === channelId);
   const appliedTargets: string[] = [];
   for (const [target, render] of groupRenderByTarget(disabledRender)) {
-    const resolvedTarget = resolveSandboxAgentConfigTarget(target, plan.agent);
+    const resolvedTarget = resolveSandboxAgentConfigTarget(target, plan);
     const kind = render[0]?.kind;
     if (!kind || render.some((entry) => entry.kind !== kind)) {
       throw new Error(`Cannot remove mixed messaging render kinds from ${target}.`);
@@ -188,7 +189,7 @@ export function reconcileCredentialEnvAtOpenShell(
   plan: SandboxMessagingPlan,
   options: { readonly runOpenshell: MessagingOpenShellRunner },
 ): { readonly changed: boolean; readonly target?: string } {
-  if (plan.agent !== "hermes" || ownedCredentialEnvKeys(plan).size === 0) {
+  if (ownedCredentialEnvKeys(plan).size === 0) {
     return { changed: false };
   }
 
@@ -196,7 +197,7 @@ export function reconcileCredentialEnvAtOpenShell(
     (entry): entry is SandboxMessagingEnvLinesRenderPlan =>
       entry.target === HERMES_ENV_RENDER_TARGET && isEnvLinesRender(entry),
   );
-  const target = resolveSandboxAgentConfigTarget(HERMES_ENV_RENDER_TARGET, plan.agent);
+  const target = resolveSandboxAgentConfigTarget(HERMES_ENV_RENDER_TARGET, plan);
   const existing = readSandboxFile(plan.sandboxName, target, options.runOpenshell);
   if (existing === undefined) return { changed: false };
 
@@ -255,7 +256,7 @@ function readHermesRuntimeAliasRender(
     if (!new RegExp(expectedPattern, "u").test(placeholder)) return [];
     return [
       {
-        agent: "hermes",
+        agent: plan.agent,
         channelId: alias.channelId,
         kind: "env-lines",
         lines: [`${targetKey}=${placeholder}`],
@@ -389,7 +390,10 @@ function applyJsonFragments(
       preserveCredentialPlaceholders(entry.value, getJsonPath(root, entry.path), rules),
     );
   }
-  if (plan.agent === "openclaw") allowRenderedOpenClawPlugins(root, render);
+  const finalizers = plan.packageBuild?.renderFinalizers ?? legacyRenderFinalizers(target);
+  if (finalizers.includes("allow-rendered-plugins")) {
+    allowRenderedOpenClawPlugins(root, render);
+  }
   return format === "yaml" ? YAML.stringify(root) : JSON.stringify(root, null, 2) + "\n";
 }
 
@@ -578,7 +582,7 @@ function applyHookBuildFileOutputs(
   for (const output of Object.values(outputs)) {
     if (output.kind !== "build-file") continue;
     const file = readHookBuildFile(output.value);
-    const target = resolveHookBuildFileTarget(file.path, plan.agent);
+    const target = resolveHookBuildFileTarget(file.path, plan);
     const contents =
       file.merge !== undefined
         ? applyStructuredMerge(
@@ -687,19 +691,10 @@ function serializeHookBuildFileContent(
 // serialized data that can outlive their producing manifest/hook code. Validate
 // every target here before invoking OpenShell so future channels cannot bypass
 // the agent-owned /sandbox config roots by returning raw paths.
-function resolveHookBuildFileTarget(filePath: string, agent: MessagingAgentId): string {
+function resolveHookBuildFileTarget(filePath: string, plan: SandboxMessagingPlan): string {
   const normalizedPath = normalizeRelativeAgentPath(filePath, "Messaging build-file path");
-  const root = sandboxAgentConfigRoot(agent);
-  let target: string;
-  if (normalizedPath === "openclaw.json") {
-    target = resolveSandboxAgentConfigTarget(normalizedPath, "openclaw");
-  } else if (normalizedPath === "config.yaml" && agent === "hermes") {
-    target = resolveSandboxAgentConfigTarget("~/.hermes/config.yaml", agent);
-  } else if (normalizedPath === ".env" && agent === "hermes") {
-    target = resolveSandboxAgentConfigTarget("~/.hermes/.env", agent);
-  } else {
-    target = `${root}/${normalizedPath}`;
-  }
+  const root = sandboxAgentConfigRoot(plan);
+  const target = `${root}/${normalizedPath}`;
   assertSandboxPathUnderRoot(target, root, filePath, "Messaging build-file path");
   return target;
 }
@@ -730,10 +725,21 @@ function normalizeRelativeAgentPath(filePath: string, context: string): string {
   return normalizedPath;
 }
 
-function sandboxAgentConfigRoot(agent: MessagingAgentId): string {
-  if (agent === "openclaw") return "/sandbox/.openclaw";
-  if (agent === "hermes") return "/sandbox/.hermes";
-  throw new Error(`Cannot resolve messaging build-file root for ${agent}.`);
+function packageConfigRoot(configRoot: string): string {
+  if (!/^~\/[A-Za-z0-9._-]+$/u.test(configRoot)) {
+    throw new Error("Messaging package config root must name one home directory.");
+  }
+  return `/sandbox/${configRoot.slice(2)}`;
+}
+
+function legacyConfigRoot(plan: SandboxMessagingPlan): string {
+  return resolveLegacyMessagingConfigRoot(plan.agent);
+}
+
+function sandboxAgentConfigRoot(plan: SandboxMessagingPlan): string {
+  return plan.packageBuild
+    ? packageConfigRoot(plan.packageBuild.configRoot)
+    : legacyConfigRoot(plan);
 }
 
 function assertSandboxPathUnderRoot(
@@ -761,41 +767,32 @@ function assertSafeFileMode(filePath: string, mode: string): void {
   }
 }
 
-function resolveSandboxAgentConfigTarget(target: string, agent: MessagingAgentId): string {
-  const root = sandboxAgentConfigRoot(agent);
+function resolveSandboxAgentConfigTarget(target: string, plan: SandboxMessagingPlan): string {
+  const root = sandboxAgentConfigRoot(plan);
   if (target.startsWith("/")) {
     const normalizedTarget = path.normalize(target);
     assertSandboxPathUnderRoot(normalizedTarget, root, target, "Messaging render target");
     return normalizedTarget;
   }
-  if (agent === "openclaw" && target === "openclaw.json") {
-    return "/sandbox/.openclaw/openclaw.json";
-  }
-  if (target.startsWith("~/.openclaw/")) {
-    if (agent !== "openclaw") {
-      throw new Error(`Cannot apply OpenClaw messaging target '${target}' for ${agent}.`);
-    }
-    const suffix = normalizeRelativeAgentPath(
-      target.slice("~/.openclaw/".length),
-      "Messaging render target",
+  const declaredPrefix = `${plan.packageBuild?.configRoot ?? `~/${path.basename(root)}`}/`;
+  const relativeTarget = target.startsWith(declaredPrefix)
+    ? target.slice(declaredPrefix.length)
+    : target.includes("/")
+      ? null
+      : target;
+  if (relativeTarget === null) {
+    throw new Error(
+      `Messaging target '${target}' must stay inside ${declaredPrefix.slice(0, -1)}.`,
     );
-    const resolved = `${root}/${suffix}`;
-    assertSandboxPathUnderRoot(resolved, root, target, "Messaging render target");
-    return resolved;
   }
-  if (target.startsWith("~/.hermes/")) {
-    if (agent !== "hermes") {
-      throw new Error(`Cannot apply Hermes messaging target '${target}' for ${agent}.`);
-    }
-    const suffix = normalizeRelativeAgentPath(
-      target.slice("~/.hermes/".length),
-      "Messaging render target",
-    );
-    const resolved = `${root}/${suffix}`;
-    assertSandboxPathUnderRoot(resolved, root, target, "Messaging render target");
-    return resolved;
-  }
-  throw new Error(`Cannot resolve messaging agent config target '${target}' for ${agent}.`);
+  const suffix = normalizeRelativeAgentPath(relativeTarget, "Messaging render target");
+  const resolved = `${root}/${suffix}`;
+  assertSandboxPathUnderRoot(resolved, root, target, "Messaging render target");
+  return resolved;
+}
+
+function legacyRenderFinalizers(target: string): readonly "allow-rendered-plugins"[] {
+  return target === "/sandbox/.openclaw/openclaw.json" ? ["allow-rendered-plugins"] : [];
 }
 
 function readSandboxFile(

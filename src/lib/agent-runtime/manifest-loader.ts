@@ -36,13 +36,16 @@ import {
 } from "./manifest-readers";
 import { readAgentRuntime } from "./runtime/manifest";
 import { readManagedImageDeclaration } from "./managed-image";
+import { readSandboxCreateDeclaration } from "./sandbox-create";
 import { readSkillCapability } from "./skill-capability";
+import { readStateLifecycle } from "./state/lifecycle";
 import {
   readStateDirectories,
   stateDirectoryPaths,
   stateDirectoryPrefixes,
 } from "./state/directories";
 import { type AgentWebAuth, readWebAuth } from "./web-auth";
+import { readWebSearchCapability } from "./web-search";
 
 export interface BuildAgentDefinitionInput {
   readonly manifest: ManifestRecord;
@@ -242,6 +245,7 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
   const versionScheme = readVersionScheme(raw);
   const gatewayCommand = readString(raw, "gateway_command");
   const runtime = readAgentRuntime(raw);
+  const sandboxCreate = readSandboxCreateDeclaration(raw);
   const forwardPorts = readPortArray(raw, "forward_ports");
   const dashboard = readDashboard(raw);
   const webAuth = readWebAuth(raw);
@@ -249,7 +253,9 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
   const config = readObject(raw, "config");
   const inference = readInference(raw);
   const mcp = readMcpCapability(raw);
+  const webSearch = readWebSearchCapability(raw);
   const skills = readSkillCapability(raw);
+  const stateLifecycle = readStateLifecycle(raw);
   const managedImage = readManagedImageDeclaration(raw);
   if (raw.runtime_auth_state_dirs !== undefined) {
     throw new Error(
@@ -313,6 +319,7 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
     version_scheme: versionScheme,
     gateway_command: gatewayCommand,
     runtime,
+    sandbox_create: sandboxCreate,
     device_pairing: readBoolean(raw, "device_pairing"),
     phone_home_hosts: phoneHomeHosts,
     forward_ports: forwardPorts,
@@ -320,7 +327,9 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
     config,
     inference,
     mcp,
+    web_search: webSearch,
     skills,
+    state_lifecycle: stateLifecycle,
     managed_image: managedImage ?? undefined,
     state_files: stateFiles,
     user_managed_files: userManagedFiles,
@@ -396,6 +405,10 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
 
     get skillCapability(): HarnessSkillCapability {
       return skills;
+    },
+
+    get stateLifecycle() {
+      return stateLifecycle;
     },
 
     get managedImage() {

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import YAML from "yaml";
-import { isPrivateIp } from "../../../packages/nemoclaw-openclaw/plugin/src/blueprint/private-networks.ts";
+import { isPrivateIp } from "../../../src/lib/private-networks.ts";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
 import { parseOpenShellPolicy } from "../../../src/lib/adapters/openshell/policy-boundary";
 import { setPolicyDocument } from "../../../src/lib/policy";

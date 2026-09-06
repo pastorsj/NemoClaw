@@ -72,6 +72,7 @@ export interface SandboxMessagingDeps<Agent> {
     credentialEnv: string,
   ): GatewayCredentialOnlyProviderInspection;
   providerMatchesGatewayCredential(name: string, type: string, credentialEnv: string): boolean;
+  selectedAgentResumesSandboxPrompts(agent: Agent, receiptBackedPackage: boolean): boolean;
 }
 
 export interface SandboxMessagingSelection {
@@ -827,8 +828,11 @@ async function selectionFromRegistryAuthority<Agent>(
   options: ReconcileSandboxMessagingOptions<Agent>,
 ): Promise<SandboxMessagingSelection | null> {
   if (authority.source !== "registry") return null;
-  const agentName = (options.agent as MessagingAgentLike | null)?.name;
-  if ((!agentName || agentName === "openclaw") && options.resume && messagingDecisionCompleted) {
+  const resumesSandboxPrompts = options.deps.selectedAgentResumesSandboxPrompts(
+    options.agent,
+    options.session?.harnessPackage != null || options.session?.harnessPackageMigration != null,
+  );
+  if (resumesSandboxPrompts && options.resume && messagingDecisionCompleted) {
     return selectionFromCompletedRegistryCheckpoint(authority.plan, envPlan, options);
   }
   if (authority.plan) return selectionFromRegistryPlan(authority.plan, options);
@@ -906,8 +910,11 @@ async function selectionFromCompletedMessagingAuthority<Agent>(
   messagingDecisionCompleted: boolean,
   options: ReconcileSandboxMessagingOptions<Agent>,
 ): Promise<SandboxMessagingSelection | null> {
-  const agentName = (options.agent as MessagingAgentLike | null)?.name;
-  if ((agentName && agentName !== "openclaw") || !options.resume || !messagingDecisionCompleted) {
+  const resumesSandboxPrompts = options.deps.selectedAgentResumesSandboxPrompts(
+    options.agent,
+    options.session?.harnessPackage != null || options.session?.harnessPackageMigration != null,
+  );
+  if (!resumesSandboxPrompts || !options.resume || !messagingDecisionCompleted) {
     return null;
   }
   const stagedPlan = stagedPlanFromAuthority(authority);

@@ -13,6 +13,7 @@ import type {
   HarnessMcpRuntimeIntentRequest,
   HarnessMcpRuntimePlan,
   HarnessMcpRuntimeRequest,
+  HarnessMcpShellCommandPlan,
   HarnessMcpSnapshotRestorePlan,
   HarnessMcpSnapshotRestoreRequest,
 } from "@nvidia/nemoclaw-harness-contract";
@@ -25,7 +26,10 @@ const MCP_ADAPTER_RESULT_MAX_BYTES = 1024 * 1024;
 
 export type {
   HarnessMcpAdapterCommand,
+  HarnessMcpAdapterCommandPlan,
+  HarnessMcpAdapterIdentifier,
   HarnessMcpAdapterEntry,
+  HarnessMcpArgvCommandPlan,
   HarnessMcpCapabilityProbe,
   HarnessMcpCapabilityRequest,
   HarnessMcpCredentialConvergence,
@@ -41,6 +45,7 @@ export type {
   HarnessMcpRuntimeIntentRequest,
   HarnessMcpRuntimePlan,
   HarnessMcpRuntimeRequest,
+  HarnessMcpShellCommandPlan,
   HarnessMcpSnapshotApplicability,
   HarnessMcpSnapshotRestorePlan,
   HarnessMcpSnapshotRestoreRequest,
@@ -181,29 +186,7 @@ const mcpSnapshotRestoreRequestSchema: AnySchemaObject = Object.freeze({
   },
 });
 
-const mcpCommandSchema: AnySchemaObject = Object.freeze({
-  anyOf: [
-    {
-      type: "string",
-      minLength: 1,
-      maxLength: MCP_ADAPTER_RESULT_MAX_BYTES,
-      pattern: "^[^\\u0000]+$",
-    },
-    {
-      type: "array",
-      minItems: 1,
-      maxItems: 512,
-      items: {
-        type: "string",
-        minLength: 1,
-        maxLength: 65_536,
-        pattern: "^[^\\u0000]+$",
-      },
-    },
-  ],
-});
-
-const mcpShellCommandSchema: AnySchemaObject = Object.freeze({
+const mcpShellScriptSchema: AnySchemaObject = Object.freeze({
   type: "string",
   minLength: 1,
   maxLength: MCP_ADAPTER_RESULT_MAX_BYTES,
@@ -220,6 +203,31 @@ const mcpArgumentVectorSchema: AnySchemaObject = Object.freeze({
     maxLength: 65_536,
     pattern: "^[^\\u0000]+$",
   },
+});
+
+const mcpArgvCommandPlanSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["kind", "argv"],
+  properties: {
+    kind: { const: "argv" },
+    argv: mcpArgumentVectorSchema,
+  },
+});
+
+const mcpShellCommandPlanSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["kind", "script", "shellTrust"],
+  properties: {
+    kind: { const: "shell" },
+    script: mcpShellScriptSchema,
+    shellTrust: { const: "package-authored-code" },
+  },
+});
+
+const mcpCommandPlanSchema: AnySchemaObject = Object.freeze({
+  oneOf: [mcpArgvCommandPlanSchema, mcpShellCommandPlanSchema],
 });
 
 const mcpRuntimePlanSchema: AnySchemaObject = Object.freeze({
@@ -275,7 +283,7 @@ const mcpExecutionPlanSchema: AnySchemaObject = Object.freeze({
   additionalProperties: false,
   required: ["command", "timeoutSeconds", "success", "failureMessage"],
   properties: {
-    command: mcpCommandSchema,
+    command: mcpCommandPlanSchema,
     timeoutSeconds: { type: "integer", minimum: 1, maximum: 3600 },
     success: mcpExecutionSuccessSchema,
     failureMessage: failureMessageSchema,
@@ -372,7 +380,7 @@ const mcpCapabilityProbeSchema: AnySchemaObject = Object.freeze({
       required: ["kind", "command", "success", "timeoutSeconds", "failureMessage"],
       properties: {
         kind: { const: "command" },
-        command: mcpCommandSchema,
+        command: mcpCommandPlanSchema,
         success: {
           oneOf: [
             {
@@ -450,7 +458,7 @@ const mcpSnapshotRestorePlanSchema: AnySchemaObject = Object.freeze({
             "failureMessage",
           ],
           properties: {
-            command: mcpCommandSchema,
+            command: mcpCommandPlanSchema,
             timeoutSeconds: { type: "integer", minimum: 1, maximum: 3600 },
             repairWhenOutput: { type: "string", minLength: 1, maxLength: 65_536 },
             skipWhenOutput: { type: "string", minLength: 1, maxLength: 65_536 },
@@ -463,7 +471,7 @@ const mcpSnapshotRestorePlanSchema: AnySchemaObject = Object.freeze({
           additionalProperties: false,
           required: ["command", "timeoutSeconds", "success", "failureMessage"],
           properties: {
-            command: mcpCommandSchema,
+            command: mcpCommandPlanSchema,
             timeoutSeconds: { type: "integer", minimum: 1, maximum: 3600 },
             success: {
               type: "object",
@@ -489,7 +497,12 @@ const mcpCapabilitySchema: AnySchemaObject = Object.freeze({
       required: ["support", "adapter"],
       properties: {
         support: { const: "bridge" },
-        adapter: { type: "string", minLength: 1, maxLength: 256 },
+        adapter: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+          pattern: "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+        },
       },
     },
   },
@@ -519,12 +532,14 @@ export const HARNESS_MCP_ADAPTER_CONTRACT = defineHarnessAdapterContract({
       resultSchema: mcpRemovalPlanSchema,
       resultDescription: "removal plan",
     }),
-    inspect: defineHarnessAdapterOperation<HarnessMcpInspectionRequest, string>({
-      exportName: "buildMcpInspectionCommand",
-      requestSchema: mcpInspectionRequestSchema,
-      resultSchema: mcpShellCommandSchema,
-      resultDescription: "inspection command",
-    }),
+    inspect: defineHarnessAdapterOperation<HarnessMcpInspectionRequest, HarnessMcpShellCommandPlan>(
+      {
+        exportName: "buildMcpInspectionCommand",
+        requestSchema: mcpInspectionRequestSchema,
+        resultSchema: mcpShellCommandPlanSchema,
+        resultDescription: "inspection command",
+      },
+    ),
     mutationCapability: defineHarnessAdapterOperation<
       HarnessMcpCapabilityRequest,
       HarnessMcpCapabilityProbe

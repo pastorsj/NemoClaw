@@ -6,10 +6,13 @@ import type {
   HarnessManifestScalar,
   HarnessManifestValue,
   HarnessManagedImageDeclaration,
-  HarnessMcpAdapter,
+  HarnessMcpAdapterIdentifier,
   HarnessMcpCapability,
   HarnessMcpSupport,
+  HarnessSandboxCreateDeclaration,
   HarnessSkillCapability,
+  HarnessStateLifecycleDeclaration,
+  HarnessWebSearchCapability,
 } from "@nvidia/nemoclaw-harness-contract";
 
 import type { AgentDashboardUi } from "./dashboard-ui";
@@ -18,17 +21,28 @@ import type { AgentWebAuth } from "./web-auth";
 
 export type {
   HarnessAgentManifest,
+  HarnessManagedBaseImageDeclaration,
+  HarnessManagedBaseImagePin,
   HarnessManifestRecord,
   HarnessManifestScalar,
   HarnessManifestValue,
   HarnessManagedImageDeclaration,
   HarnessManagedImagePlatform,
+  HarnessManagedImagePublicationDeclaration,
   HarnessManagedImageRuntimeIdentity,
   HarnessMcpAdapter,
+  HarnessMcpAdapterIdentifier,
   HarnessMcpCapability,
   HarnessMcpSupport,
+  HarnessSandboxCreateDeclaration,
+  HarnessSandboxDriver,
+  HarnessSandboxTmpfsMountDeclaration,
   HarnessSkillActivation,
   HarnessSkillCapability,
+  HarnessStateLifecycleDeclaration,
+  HarnessWebSearchCapability,
+  HarnessWebSearchProvider,
+  HarnessWebSearchToolGatewayConflict,
 } from "@nvidia/nemoclaw-harness-contract";
 
 export type ManifestScalar = HarnessManifestScalar;
@@ -126,16 +140,25 @@ export interface AgentDashboard {
   auth: "url_token" | "session" | "none";
   /** Config-object path containing the URL fragment token when auth is url_token. */
   tokenPath?: readonly string[] | null;
+  /** Config-object path that accepts public tunnel origins, or null when unsupported. */
+  tunnelAllowedOriginsPath?: readonly string[] | null;
 }
 
 export interface AgentInference {
   provider_type?: string;
   provider_options?: string[];
   default_model?: string;
+  refresh_route_for_messaging_providers?: readonly string[];
+  sandbox_smoke?: {
+    readonly kind: "compatible-endpoint";
+    readonly config_path: `/sandbox/${string}`;
+  };
 }
 
 export type AgentMcpSupport = HarnessMcpSupport;
-export type AgentMcpAdapter = HarnessMcpAdapter;
+export type AgentMcpAdapterIdentifier = HarnessMcpAdapterIdentifier;
+/** Compatibility name retained while callers adopt the descriptive identifier type. */
+export type AgentMcpAdapter = AgentMcpAdapterIdentifier;
 
 const AGENT_MCP_ADAPTER_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
@@ -168,6 +191,7 @@ export interface AgentDefinition {
   version_scheme?: AgentVersionScheme;
   gateway_command?: string;
   runtime?: AgentRuntime;
+  sandbox_create?: HarnessSandboxCreateDeclaration;
   device_pairing?: boolean;
   phone_home_hosts?: string[];
   forward_ports?: number[];
@@ -175,7 +199,9 @@ export interface AgentDefinition {
   config?: ManifestRecord;
   inference?: AgentInference;
   mcp?: AgentMcpCapability;
+  web_search?: HarnessWebSearchCapability;
   skills?: HarnessSkillCapability;
+  state_lifecycle?: HarnessStateLifecycleDeclaration;
   managed_image?: HarnessManagedImageDeclaration;
   state_files?: AgentStateFile[];
   user_managed_files?: string[];
@@ -198,6 +224,7 @@ export interface AgentDefinition {
   readonly inferenceProviderOptions: string[];
   readonly mcpCapability: AgentMcpCapability;
   readonly skillCapability: HarnessSkillCapability;
+  readonly stateLifecycle: HarnessStateLifecycleDeclaration;
   readonly managedImage: HarnessManagedImageDeclaration | null;
   readonly stateDirectories: AgentStateDirectory[];
   readonly stateDirs: string[];

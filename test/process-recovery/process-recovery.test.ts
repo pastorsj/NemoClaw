@@ -133,7 +133,13 @@ describe("checkAndRecoverSandboxProcesses", () => {
     const futureAgent = {
       name: harnessPackage.id,
       displayName: "Future Gateway",
-      runtime: { kind: "gateway" },
+      runtime: {
+        kind: "gateway",
+        process_lifecycle: {
+          support: "managed",
+          command: ["/opt/future/process-control"],
+        },
+      },
       forwardPort: 19_000,
       healthProbe: {
         url: "http://127.0.0.1:19000/health",
@@ -585,9 +591,7 @@ hermes-box  127.0.0.1  18789  12345  running`;
     expect(forwardListCalls).toBe(0);
     expect(captureOpenshell).not.toHaveBeenCalled();
     const errorOutput = errorSpy.mock.calls.map((call) => String(call[0] ?? "")).join("\n");
-    expect(errorOutput).toContain(
-      "Hermes agent definition could not be loaded for sandbox 'hermes-box'",
-    );
+    expect(errorOutput).toContain("Agent definition could not be loaded for sandbox 'hermes-box'");
   });
 
   it.each([

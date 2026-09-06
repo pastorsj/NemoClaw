@@ -160,7 +160,7 @@ export const wechatManifest = {
     {
       id: "openclawPluginPackage",
       agent: "openclaw",
-      manager: "openclaw-plugin",
+      manager: "node-package",
       spec: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
       pin: true,
       integrity:

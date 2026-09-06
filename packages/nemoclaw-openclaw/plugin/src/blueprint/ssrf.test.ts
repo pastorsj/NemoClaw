@@ -3,7 +3,13 @@
 
 // Tests for SSRF validation (PSIRT bug 6002763).
 
+import { fileURLToPath } from "node:url";
+
 import { describe, it, expect, vi } from "vitest";
+
+process.env.NEMOCLAW_BLUEPRINT_PATH = fileURLToPath(
+  new URL("../../test-fixtures/", import.meta.url),
+);
 
 type LookupResult = Array<{ address: string; family: number }>;
 const mockLookup = vi.fn<(hostname: string, options: { all: true }) => Promise<LookupResult>>();

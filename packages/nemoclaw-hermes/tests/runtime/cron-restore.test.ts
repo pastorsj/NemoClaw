@@ -25,8 +25,8 @@ const HOST_VALIDATOR = path.resolve(
   "../../../..",
   "src/lib/state/rebuild/hermes-cron-restore-backup.ts",
 );
-const RECEIPT_PREFIX = "NEMOCLAW_HERMES_CRON_RESTORE_V1:";
-const CONTROL_ERROR_PREFIX = "NEMOCLAW_HERMES_CRON_RESTORE_ERROR_V1:";
+const RECEIPT_PREFIX = "NEMOCLAW_SCHEDULED_WORK_RESTORE_V1:";
+const CONTROL_ERROR_PREFIX = "NEMOCLAW_SCHEDULED_WORK_RESTORE_ERROR_V1:";
 const LIFECYCLE_HARNESS = String.raw`
 import importlib.util
 import os

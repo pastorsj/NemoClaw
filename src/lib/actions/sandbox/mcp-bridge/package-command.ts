@@ -137,7 +137,7 @@ export function buildInstalledMcpInspectionCommand(
       entry: packageEntry(entry, options.credentialRevision),
       failOnMismatch: options.failOnMismatch === true,
       configDirectory: options.configDirectory ?? null,
-    });
+    }).script;
   } catch (error) {
     throw new McpBridgeError(
       `Installed MCP adapter '${adapter}' could not build its inspection command: ${error instanceof Error ? error.message : String(error)}`,

@@ -3,6 +3,7 @@
 
 import type { SandboxEntry } from "../state/registry";
 import * as sandboxState from "../state/sandbox";
+import { isLegacyOpenClawAgentName } from "./package/legacy-onboard";
 import * as sandboxAgent from "./sandbox-agent";
 import {
   assertSandboxRecreateSourceProof,
@@ -103,7 +104,10 @@ function assertNotReadyBackupRecoveryEligibility(
 ): sandboxState.RebuildManifest | null {
   const customOpenClaw =
     requireOpenClawImagePluginProvenance ||
-    (Boolean(entry?.fromDockerfile) && (!entry?.agent || entry.agent === "openclaw"));
+    (entry !== null &&
+      Boolean(entry.fromDockerfile) &&
+      entry.harnessPackage == null &&
+      isLegacyOpenClawAgentName(entry.agent));
   if (!backup) {
     if (customOpenClaw) throw new UnsafeCustomImagePluginBackupError(sandboxName, null);
     return null;

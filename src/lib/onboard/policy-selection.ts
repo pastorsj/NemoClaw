@@ -14,10 +14,7 @@ import {
   filterSetupPolicyPresetsForAgent,
   setupPolicyPresetAppliesToAgent,
 } from "./agent-policy-presets";
-import {
-  allHermesToolGatewayPolicyPresets,
-  HERMES_TOOL_GATEWAY_PRESET_NAMES,
-} from "./hermes-managed-tools";
+import { HERMES_TOOL_GATEWAY_PRESET_NAMES } from "./hermes-managed-tools";
 import {
   allMessagingChannelPolicyPresets,
   mergePolicyMessagingChannels,
@@ -99,6 +96,7 @@ export type SetupPresetSuggestionOptions = {
   knownPresetNames?: string[] | null;
   webSearchSupported?: boolean | null;
   hermesToolGateways?: string[] | null;
+  packagePolicyPresets?: readonly string[] | null;
   customPresetNames?: ReadonlySet<string> | null;
   customOwnsObservability?: boolean;
   env?: NodeJS.ProcessEnv;
@@ -117,6 +115,7 @@ export type SetupPolicySelectionOptions = {
   knownPresetNames?: string[];
   webSearchSupported?: boolean | null;
   hermesToolGateways?: string[] | null;
+  packagePolicyPresets?: readonly string[] | null;
   disabledChannels?: string[] | null;
   /** Process-local exclusions imposed by a narrower runtime route authority. */
   excludedPresets?: readonly string[];
@@ -311,8 +310,8 @@ export function computeSetupPresetSuggestions(
       add(preset);
     }
   }
-  if (tierName === "open" && typeof agent === "string" && agent.trim().toLowerCase() === "hermes") {
-    for (const preset of allHermesToolGatewayPolicyPresets()) add(preset);
+  if (tierName === "open") {
+    for (const preset of options.packagePolicyPresets ?? []) add(preset);
   }
   if (Array.isArray(enabledChannels)) {
     // Suggest every enabled channel's egress preset, matching the set
@@ -532,6 +531,7 @@ async function setupPoliciesWithSelectionInner(
         knownPresetNames: allPresets.map((preset) => preset.name),
         webSearchSupported: options.webSearchSupported,
         hermesToolGateways,
+        packagePolicyPresets: options.packagePolicyPresets,
         env: deps.env,
       }),
       { preserveExplicitWebSearch: personalTier },

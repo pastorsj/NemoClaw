@@ -11,7 +11,7 @@ import {
   normalizeRuntimeProviderIdentity,
   requireRuntimeProviderMutationAuthority,
 } from "../../runtime-provider/registry";
-import { readManagedWorkloadAuthority } from "../../workload/authority";
+import { readDurableManagedWorkloadAuthority } from "../../workload/authority";
 import {
   buildManagedWorkloadRebuildReceipt,
   type ManagedWorkloadRebuildHandoff,
@@ -24,9 +24,12 @@ const PROTECTED_REBUILD_METADATA_FIELDS = new Set<keyof SandboxEntry>([
   "pendingRouteReservation",
   "reservationSessionId",
   "openshellDriver",
+  "harnessPackage",
+  "harnessPackageMigration",
   "fromDockerfile",
   "imageTag",
   "workload",
+  "dashboardRemoteBindPrepared",
   "lifecycleGeneration",
   "lifecycleLiveIdentityFingerprint",
 ]);
@@ -70,9 +73,9 @@ export function createManagedWorkloadRebuildPlan(input: {
       "the managed profile handoff does not match durable provider and agent authority",
     );
   }
-  let durableAuthority: NonNullable<ReturnType<typeof readManagedWorkloadAuthority>>;
+  let durableAuthority: NonNullable<ReturnType<typeof readDurableManagedWorkloadAuthority>>;
   try {
-    const candidate = readManagedWorkloadAuthority(input.previousEntry, {
+    const candidate = readDurableManagedWorkloadAuthority(input.previousEntry, {
       name: handoff.agent,
       managedImage: handoff.managedImage,
     });
@@ -89,9 +92,12 @@ export function createManagedWorkloadRebuildPlan(input: {
   }
   if (
     durableAuthority.agent !== handoff.agent ||
+    !isDeepStrictEqual(durableAuthority.harnessPackage, handoff.harnessPackage ?? null) ||
     !isDeepStrictEqual(durableAuthority.receipt, handoff.previousReceipt) ||
     !isDeepStrictEqual(durableAuthority.contract, handoff.previousContract) ||
     !isDeepStrictEqual(durableAuthority.profile, handoff.previousProfile) ||
+    (input.previousEntry.dashboardRemoteBindPrepared === true) !==
+      handoff.previousDashboardRemoteBindPrepared ||
     !isDeepStrictEqual(durableAuthority.corporateCa, handoff.corporateCa)
   ) {
     throw new ManagedWorkloadRebuildTransactionError(

@@ -5,7 +5,10 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { validateHermesCronRestoreBackup } from "../../state/rebuild/hermes-cron-restore-backup";
+import {
+  validateHermesCronRestoreBackup,
+  validateScheduledWorkRestoreBackup,
+} from "../../state/rebuild/hermes-cron-restore-backup";
 
 const processMocks = vi.hoisted(() => ({
   executePrivilegedSandboxCommand: vi.fn(),
@@ -18,6 +21,7 @@ vi.mock("./process-recovery", async (importOriginal) => ({
 
 import {
   beginHermesCronRestore,
+  beginScheduledWorkRestore,
   completeHermesCronRestoreAfterGatewayReplacement,
   HERMES_CRON_RESTORE_DRAIN_MARKER_ROLLBACK_FAILED_CODE,
   isHermesCronRestoreDrainMarkerRollbackFailure,
@@ -28,8 +32,9 @@ import {
   validateHermesCronRestore,
 } from "./rebuild-hermes-post-restore";
 
-const RECEIPT_PREFIX = "NEMOCLAW_HERMES_CRON_RESTORE_V1:";
-const CONTROL_ERROR_PREFIX = "NEMOCLAW_HERMES_CRON_RESTORE_ERROR_V1:";
+const RECEIPT_PREFIX = "NEMOCLAW_SCHEDULED_WORK_RESTORE_V1:";
+const LEGACY_RECEIPT_PREFIX = "NEMOCLAW_HERMES_CRON_RESTORE_V1:";
+const CONTROL_ERROR_PREFIX = "NEMOCLAW_SCHEDULED_WORK_RESTORE_ERROR_V1:";
 
 function writeJson(target: string, payload: unknown): void {
   mkdirSync(path.dirname(target), { recursive: true });
@@ -228,6 +233,94 @@ describe("Hermes cron rebuild restore contract", () => {
       "902",
       "--drain-token=restore-token",
     ]);
+  });
+
+  it("uses an unknown receipt-backed package's fixed controller and declared state paths", () => {
+    const backupPath = mkdtempSync(path.join(os.tmpdir(), "future-scheduled-work-"));
+    writeJson(path.join(backupPath, "tasks", "schedule.json"), [
+      { script: "daily.py", enabled: true },
+    ]);
+    writeScript(path.join(backupPath, "task-scripts", "daily.py"));
+    const declaration = {
+      support: "managed" as const,
+      controller: {
+        command: ["/opt/future/bin/python", "-I", "/opt/future/restore-control.py"],
+        timeout_seconds: 47,
+      },
+      jobs_path: "tasks/schedule.json",
+      scripts_path: "task-scripts",
+      profiles_path: "worker-profiles",
+      runtime_root: "/sandbox/.future" as const,
+    };
+    processMocks.executePrivilegedSandboxCommand.mockReturnValue({
+      status: 0,
+      stdout: receipt("begin"),
+      stderr: "",
+    });
+
+    expect(validateScheduledWorkRestoreBackup(backupPath, declaration)).toEqual({
+      activeJobs: 1,
+      scriptJobs: 1,
+      requiresDispatchGate: true,
+    });
+    expect(beginScheduledWorkRestore("future-box", declaration)).toEqual({
+      pid: 41,
+      start_time: 902,
+      drain_token: "restore-token",
+    });
+    expect(processMocks.executePrivilegedSandboxCommand).toHaveBeenCalledWith(
+      "future-box",
+      ["/opt/future/bin/python", "-I", "/opt/future/restore-control.py", "begin"],
+      47_000,
+    );
+    rmSync(backupPath, { recursive: true, force: true });
+  });
+
+  it("accepts the historical receipt prefix only through the legacy Hermes wrapper", () => {
+    processMocks.executePrivilegedSandboxCommand.mockReturnValue({
+      status: 0,
+      stdout: receipt("begin").replace(RECEIPT_PREFIX, LEGACY_RECEIPT_PREFIX),
+      stderr: "",
+    });
+
+    expect(beginHermesCronRestore("alpha")).toEqual({
+      pid: 41,
+      start_time: 902,
+      drain_token: "restore-token",
+    });
+    expect(() =>
+      beginScheduledWorkRestore("future-box", {
+        support: "managed",
+        controller: { command: ["/opt/future/bin/restore-control"], timeout_seconds: 47 },
+        jobs_path: "tasks/schedule.json",
+        scripts_path: "task-scripts",
+        profiles_path: "worker-profiles",
+        runtime_root: "/sandbox/.future",
+      }),
+    ).toThrow("Scheduled-work controller begin returned an invalid receipt");
+  });
+
+  it("reports unknown package controller failures without assigning a Hermes identity", () => {
+    const declaration = {
+      support: "managed" as const,
+      controller: {
+        command: ["/opt/future/bin/restore-control"],
+        timeout_seconds: 47,
+      },
+      jobs_path: "tasks/schedule.json",
+      scripts_path: "task-scripts",
+      profiles_path: "worker-profiles",
+      runtime_root: "/sandbox/.future" as const,
+    };
+    processMocks.executePrivilegedSandboxCommand.mockReturnValue({
+      status: 0,
+      stdout: "not a receipt",
+      stderr: "",
+    });
+
+    expect(() => beginScheduledWorkRestore("future-box", declaration)).toThrow(
+      "Scheduled-work controller begin returned an invalid receipt",
+    );
   });
 
   it("passes an untrusted drain token as one argv value", () => {

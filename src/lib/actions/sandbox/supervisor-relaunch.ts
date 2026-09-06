@@ -180,17 +180,22 @@ function reconstructSupervisorLaunchCommand(
   const hermesDashboardEnabled = entry.hermesDashboardEnabled === true;
   const loopbackDashboardUrl = `http://127.0.0.1:${dashboardPort}`;
   let chatUiUrl = manageDashboard ? loopbackDashboardUrl : "";
-  if (selectedAgent.effectiveAgentId === "hermes" && manageDashboard && hermesDashboardEnabled) {
+  if (manageDashboard && hermesDashboardEnabled) {
     const readWorkloadAuthority = deps.readManagedWorkloadAuthority ?? readManagedWorkloadAuthority;
     const profile = readWorkloadAuthority(entry)?.profile;
-    if (profile?.dashboard.agent !== "hermes" || profile.dashboard.browserUrl === undefined) {
+    const browserUrl =
+      profile?.dashboard.agent === selectedAgent.effectiveAgentId &&
+      "browserUrl" in profile.dashboard
+        ? profile.dashboard.browserUrl
+        : undefined;
+    if (browserUrl === undefined) {
       if (!quiet) {
-        console.error("  Trusted container recovery stopped because the Hermes dashboard profile");
+        console.error("  Trusted container recovery stopped because the dashboard profile");
         console.error("  has no recorded browser URL. Rerun onboarding before retrying recovery.");
       }
       return null;
     }
-    chatUiUrl = profile.dashboard.browserUrl;
+    chatUiUrl = browserUrl;
   }
   const { envArgs } = buildSandboxRuntimeEnvArgs({
     agent,
@@ -208,6 +213,7 @@ function reconstructSupervisorLaunchCommand(
           }
         : null,
     },
+    hermesApiPort: entry.hermesApiPort,
     extraPlaceholderKeys: [],
     observabilityEnabled: entry.observabilityEnabled === true,
     sandboxName,

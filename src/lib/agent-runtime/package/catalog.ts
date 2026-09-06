@@ -77,6 +77,17 @@ export interface HarnessPackageInventory {
   readonly installed: readonly InstalledHarnessPackageRecord[];
 }
 
+/** Closed installer action derived from reviewed catalogue and receipt-backed store state. */
+export type HarnessPackageInstallPlan =
+  | {
+      readonly kind: "install-reviewed";
+      readonly packageRecord: AvailableHarnessPackageRecord;
+    }
+  | {
+      readonly kind: "keep-installed";
+      readonly packageRecord: HealthyInstalledHarnessPackageRecord;
+    };
+
 export class HarnessPackageCatalogIntegrityError extends Error {
   override readonly name = "HarnessPackageCatalogIntegrityError";
 
@@ -358,9 +369,9 @@ export function listHarnessPackageInventory(
   return Object.freeze({ available, installed });
 }
 
-function resolveExactAvailableId(
+function resolveExactPackageId(
   selector: string,
-  available: readonly AvailableHarnessPackageRecord[],
+  available: readonly Pick<AvailableHarnessPackageRecord, "id" | "aliases">[],
 ): string | null {
   const availableIds = new Set(available.map(({ id }) => id));
   if (availableIds.has(selector)) return selector;
@@ -370,6 +381,58 @@ function resolveExactAvailableId(
   return aliasTarget !== undefined && availableIds.has(aliasTarget) ? aliasTarget : null;
 }
 
+function installPlanTargets(inventory: HarnessPackageInventory): readonly {
+  readonly name: string;
+  readonly aliases: readonly string[];
+}[] {
+  const targets = new Map(
+    inventory.available.map(({ id, aliases }) => [id, { name: id, aliases }] as const),
+  );
+  for (const installed of inventory.installed) {
+    // A reviewed package owns the current aliases for an upgrade. An installed-only
+    // package owns its aliases through the manifest pinned by its verified receipt.
+    if (!targets.has(installed.id)) {
+      targets.set(installed.id, {
+        name: installed.id,
+        aliases: installed.state === "installed" ? installed.aliases : Object.freeze([]),
+      });
+    }
+  }
+  return Object.freeze([...targets.values()]);
+}
+
+/**
+ * Plan an explicit harness install without treating an already active external
+ * package as though it must exist in NemoClaw's reviewed bundle.
+ */
+export function planHarnessPackageInstall(
+  selector: string,
+  options: HarnessPackageCatalogOptions = {},
+): HarnessPackageInstallPlan {
+  const inventory = listHarnessPackageInventory(options);
+  const targets = installPlanTargets(inventory);
+  const selectedId = resolveExactPackageId(
+    selector,
+    targets.map(({ name, aliases }) => ({ id: name, aliases })),
+  );
+  if (selectedId === null) throw new HarnessPackageUnavailableError();
+
+  const installed = inventory.installed.find(({ id }) => id === selectedId);
+  if (installed?.state === "damaged") throw new DamagedInstalledHarnessPackageError();
+
+  const available = inventory.available.find(({ id }) => id === selectedId);
+  if (available) return Object.freeze({ kind: "install-reviewed", packageRecord: available });
+  if (installed?.state === "installed") {
+    return Object.freeze({ kind: "keep-installed", packageRecord: installed });
+  }
+
+  // The selector was built from exactly these two inventories. Reaching this
+  // branch means their immutable snapshot was internally inconsistent.
+  throw new HarnessPackageCatalogIntegrityError(
+    "Harness package disappeared from the install plan",
+  );
+}
+
 /** Resolve only an exact reviewed ID or exact currently published alias for installation. */
 export function resolveHarnessPackageInstallSelection(
   selector: string,
@@ -377,7 +440,7 @@ export function resolveHarnessPackageInstallSelection(
 ): AvailableHarnessPackageRecord {
   const inventory = listHarnessPackageInventory(options);
   const availableById = new Map(inventory.available.map((record) => [record.id, record]));
-  const selectedId = resolveExactAvailableId(selector, inventory.available);
+  const selectedId = resolveExactPackageId(selector, inventory.available);
   if (selectedId === null) throw new HarnessPackageUnavailableError();
   if (
     inventory.installed.some((record) => record.id === selectedId && record.state === "damaged")

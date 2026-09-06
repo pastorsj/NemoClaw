@@ -214,12 +214,12 @@ describe("prepareRebuildRecreateOptions", () => {
 });
 
 describe("stageRebuildHermesDashboardConfig", () => {
-  it("stages Hermes dashboard state from the matching pinned definition", () => {
+  it("leaves receipt-backed dashboard restoration to the package startup adapter", () => {
     expect(
       stageRebuildHermesDashboardConfig(HERMES_AGENT_AUTHORITY, HERMES_SANDBOX_ENTRY, 9_119, bail),
     ).toBe(true);
 
-    expect(process.env[HERMES_DASHBOARD_ENABLE_ENV]).toBe("1");
+    expect(process.env[HERMES_DASHBOARD_ENABLE_ENV]).toBeUndefined();
   });
 
   it("rejects a pinned definition whose name does not match the Hermes authority", () => {

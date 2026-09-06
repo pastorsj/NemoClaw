@@ -128,7 +128,6 @@ function writePrivateFile(root: string, relativePath: string, contents: string):
 
 function fixtureManifest(
   declaration: HarnessPackageFixtureDeclaration,
-  executionSentinel: string,
   agentExpectedVersion?: string,
 ): string {
   const terminalCommand =
@@ -140,6 +139,21 @@ function fixtureManifest(
   const terminalRuntime = terminalCommand
     ? ["runtime:", "  kind: terminal", `  interactive_command: ${terminalCommand}`]
     : ["runtime:", "  kind: gateway"];
+  const snapshotRestoreActions = declaration.id === "openclaw" ? ["repair-mutable-config"] : [];
+  const postRestore =
+    declaration.id === "hermes"
+      ? [
+          "      kind: managed",
+          "      command: null",
+          "      reapply_messaging: false",
+          "      restart_runtime: true",
+          "      mutable_config: not-required",
+          "      config_integrity:",
+          "        kind: not-required",
+          "      settle_device_pairing: false",
+          "      notify_gateway_token_change: true",
+        ]
+      : ["      kind: not-required"];
   return [
     `name: ${declaration.id}`,
     `display_name: ${JSON.stringify(declaration.displayName)}`,
@@ -153,7 +167,31 @@ function fixtureManifest(
     `binary_path: ${declaration.id}`,
     ...(agentExpectedVersion ? [`expected_version: ${JSON.stringify(agentExpectedVersion)}`] : []),
     ...terminalRuntime,
-    `fixture_execution_sentinel: ${JSON.stringify(executionSentinel)}`,
+    "config:",
+    `  dir: /sandbox/.${declaration.id}`,
+    "  config_file: config.json",
+    "  format: json",
+    "inference:",
+    "  config_update:",
+    "    support: unsupported",
+    "    reason: This synthetic package has fixed inference configuration.",
+    "mcp:",
+    "  support: disabled",
+    "messaging:",
+    "  support: disabled",
+    "state_lifecycle:",
+    "  backup_quiescence:",
+    "    kind: not-required",
+    ...(snapshotRestoreActions.length > 0
+      ? ["  snapshot_restore:", ...snapshotRestoreActions.map((action) => `    - ${action}`)]
+      : ["  snapshot_restore: []"]),
+    "  rebuild:",
+    "    image_plugin_provenance: not-required",
+    "    scheduled_work:",
+    "      support: disabled",
+    "      reason: This package does not run scheduled work.",
+    "    post_restore:",
+    ...postRestore,
     "",
   ].join("\n");
 }
@@ -178,13 +216,14 @@ function writePackageArtifact(input: {
       displayName: input.declaration.displayName,
       packageVersion: input.packageVersion,
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: input.declaration.manifestPath,
     })}\n`,
   );
   writePrivateFile(
     input.packageRoot,
     input.declaration.manifestPath,
-    fixtureManifest(input.declaration, input.executionSentinel, input.agentExpectedVersion),
+    fixtureManifest(input.declaration, input.agentExpectedVersion),
   );
   const baselineContent = input.agentPolicyAdditionsContent ?? "version: 1\nnetwork_policies: {}\n";
   if (input.declaration.id === "openclaw") {
@@ -411,6 +450,7 @@ function installMcpHarnessPackageFixture(
       displayName: declaration.displayName,
       packageVersion: declaration.packageVersion,
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: `${packageDirectory}/manifest.yaml`,
     })}\n`,
   );
@@ -503,6 +543,7 @@ export function installHomeOpenClawRestorePackageFixture(home: string): Installe
       displayName: "OpenClaw",
       packageVersion: "0.1.1",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: "packages/nemoclaw-openclaw/manifest.yaml",
     })}\n`,
   );

@@ -1,15 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { HarnessStartupSettings } from "@nvidia/nemoclaw-harness-contract";
+
 import type { AgentDefinition } from "../../agent/defs";
 import { webSearchProviderForConfig } from "../../inference/web-search";
 import type { DcodeAutoApprovalMode } from "../../onboard/dcode-auto-approval";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { Session } from "../../state/onboard-session";
 import * as onboardSession from "../../state/onboard-session";
+import { cloneSandboxWorkloadReceipt } from "../../state/registry/workload";
+import {
+  decodeManagedStartupDurableProfile,
+  isManagedStartupPackageProfile,
+} from "../../onboard/managed-startup/profile";
 import type { ToolDisclosure } from "../../tool-disclosure";
 import type { RebuildBail } from "./rebuild-credential-preflight";
-import { isDcodeRebuildAgent } from "./rebuild-dcode-orchestrator";
 import {
   type RebuildDurableConfig,
   resolveRebuildDockerfile,
@@ -18,6 +24,11 @@ import {
 import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
 import { printRebuildPreflightFailure } from "./rebuild-preflight-error";
 import { prepareRebuildResumeConfig, type RebuildResumeConfig } from "./rebuild-resume-config";
+import {
+  filterLegacyRebuildToolGatewaysForWebSearch,
+  legacyManagedRebuildRejectsCustomDockerfile,
+  resolveLegacyRebuildToolGateways,
+} from "./rebuild/legacy-state";
 
 const hermesProviderAuth = require("../../hermes-provider-auth") as {
   HERMES_PROVIDER_NAME: string;
@@ -38,26 +49,45 @@ export type RebuildTargetConfig = {
   fromDockerfile: string | null;
 };
 
-function stringListOrNull(value: unknown): string[] | null {
+function readRecordedStringList(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   return value.filter((item: unknown): item is string => typeof item === "string");
 }
 
-function resolveRebuildHermesToolGateways(
-  rebuildAgent: string | null,
+function resolveRecordedRebuildToolGateways(
   sb: RebuildSandboxEntry,
   session: Session | null,
   sessionMatchesSandbox: boolean,
 ): { gateways: string[]; recorded: boolean } {
-  if (rebuildAgent !== "hermes") return { gateways: [], recorded: false };
-  const registryGateways = stringListOrNull(sb.hermesToolGateways);
+  const registryGateways = readRecordedStringList(sb.hermesToolGateways);
   const sessionGateways = sessionMatchesSandbox
-    ? stringListOrNull(session?.hermesToolGateways)
+    ? readRecordedStringList(session?.hermesToolGateways)
     : null;
   return {
     gateways: registryGateways ?? sessionGateways ?? [],
     recorded: registryGateways !== null || sessionGateways !== null,
   };
+}
+
+export function resolveReceiptRebuildStartupSettings(
+  sb: RebuildSandboxEntry,
+  agentAuthority: ResolvedSandboxAgent,
+): HarnessStartupSettings | null {
+  const receipt = agentAuthority.harnessPackage;
+  if (!receipt) return null;
+  // Package receipts predate managed startup-profile receipts. Keep those
+  // rows on their already-validated registry/session state until rebuild
+  // writes a current workload receipt; never guess from a different profile.
+  if (sb.workload?.kind !== "managed-image") return null;
+  const workload = cloneSandboxWorkloadReceipt(sb.workload, { harnessPackage: receipt });
+  if (workload?.kind !== "managed-image") {
+    throw new Error("receipt-backed rebuild has no exact managed startup profile");
+  }
+  const profile = decodeManagedStartupDurableProfile(workload.encodedProfile);
+  if (!isManagedStartupPackageProfile(profile) || profile.agent !== receipt.id) {
+    throw new Error("receipt-backed rebuild startup profile does not match its package authority");
+  }
+  return profile.desiredState;
 }
 
 function validateRebuildDurableConfig(
@@ -137,10 +167,21 @@ export function prepareRebuildTargetConfig(
     bail("Pinned rebuild agent authority changed during target configuration");
     return null;
   }
-  const rebuildAgent = agentAuthority.recordedAgent;
+  let receiptStartupSettings: HarnessStartupSettings | null;
+  try {
+    receiptStartupSettings = resolveReceiptRebuildStartupSettings(sb, agentAuthority);
+  } catch (error) {
+    printRebuildPreflightFailure(
+      "the receipt-backed startup state is unavailable.",
+      error instanceof Error ? error.message : String(error),
+      "Cannot resolve package startup state for rebuild",
+      bail,
+    );
+    return null;
+  }
   const sessionSnapshot = onboardSession.loadSession();
   const sessionMatchesSandbox = sessionSnapshot?.sandboxName === sandboxName;
-  const durableConfig = resolveRebuildDurableConfig(
+  const legacyDurableConfig = resolveRebuildDurableConfig(
     sandboxName,
     sb,
     sessionSnapshot,
@@ -152,12 +193,33 @@ export function prepareRebuildTargetConfig(
     allowLegacyManagedImageRecovery,
     requestedDcodeAutoApprovalMode,
   );
+  const durableConfig = receiptStartupSettings
+    ? {
+        ...legacyDurableConfig,
+        dcodeAutoApprovalMode: receiptStartupSettings.configuration.autoApprovalMode ?? "disabled",
+        dcodeAutoApprovalModeError: null,
+        toolDisclosure: receiptStartupSettings.tools.disclosure,
+        toolDisclosureError: null,
+        webSearchConfig: receiptStartupSettings.configuration.webSearch?.enabled
+          ? {
+              fetchEnabled: true,
+              provider: receiptStartupSettings.configuration.webSearch.provider,
+            }
+          : null,
+        webSearchError: null,
+      }
+    : legacyDurableConfig;
   if (!validateRebuildDurableConfig(durableConfig, resumeConfig, bail)) return null;
-  if (isDcodeRebuildAgent(rebuildAgent) && durableConfig.fromDockerfile) {
+  const rejectsCustomDockerfile = agentAuthority.harnessPackage
+    ? (receiptStartupSettings?.configuration.autoApprovalMode !== undefined ||
+        sb.dcodeAutoApprovalMode !== undefined) &&
+      durableConfig.fromDockerfile !== null
+    : legacyManagedRebuildRejectsCustomDockerfile(sb, durableConfig.fromDockerfile);
+  if (rejectsCustomDockerfile) {
     printRebuildPreflightFailure(
-      "the managed DCode registry entry conflicts with a recorded custom Dockerfile.",
-      "Managed DCode rebuilds must use the verified managed image path.",
-      "Managed DCode rebuild cannot use a recorded custom Dockerfile",
+      "the managed package registry entry conflicts with a recorded custom Dockerfile.",
+      "Managed package rebuilds must use their verified managed image path.",
+      "Managed package rebuild cannot use a recorded custom Dockerfile",
       bail,
     );
     return null;
@@ -174,18 +236,25 @@ export function prepareRebuildTargetConfig(
     return null;
   }
 
-  const hermesGateways = resolveRebuildHermesToolGateways(
-    rebuildAgent,
-    sb,
-    sessionSnapshot,
-    sessionMatchesSandbox,
-  );
-  const hermesToolGateways =
-    rebuildAgent === "hermes" &&
-    durableConfig.webSearchConfig &&
-    webSearchProviderForConfig(durableConfig.webSearchConfig) === "tavily"
-      ? hermesGateways.gateways.filter((gateway) => gateway !== "nous-web")
-      : hermesGateways.gateways;
+  const toolGateways = receiptStartupSettings
+    ? { gateways: [...receiptStartupSettings.tools.enabledGateways], recorded: true }
+    : agentAuthority.harnessPackage
+      ? resolveRecordedRebuildToolGateways(sb, sessionSnapshot, sessionMatchesSandbox)
+      : resolveLegacyRebuildToolGateways(sb, sessionSnapshot, sessionMatchesSandbox);
+  const hermesToolGateways = receiptStartupSettings
+    ? toolGateways.gateways
+    : agentAuthority.harnessPackage
+      ? durableConfig.webSearchConfig &&
+        webSearchProviderForConfig(durableConfig.webSearchConfig) === "tavily"
+        ? toolGateways.gateways.filter((gateway) => gateway !== "nous-web")
+        : toolGateways.gateways
+      : filterLegacyRebuildToolGatewaysForWebSearch(
+          sb,
+          toolGateways.gateways,
+          durableConfig.webSearchConfig
+            ? webSearchProviderForConfig(durableConfig.webSearchConfig)
+            : null,
+        );
   const credentialEnv =
     resumeConfig.provider === hermesProviderAuth.HERMES_PROVIDER_NAME
       ? durableConfig.hermesAuthMethod === "api_key"
@@ -201,7 +270,7 @@ export function prepareRebuildTargetConfig(
     sessionMatchesSandbox,
     durableConfig,
     hermesToolGateways,
-    hasHermesToolGateways: hermesGateways.recorded,
+    hasHermesToolGateways: toolGateways.recorded,
     credentialEnv,
     fromDockerfile: dockerfile.path,
   };

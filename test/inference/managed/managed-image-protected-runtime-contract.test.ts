@@ -149,8 +149,6 @@ describe("protected managed-image runtime contract", () => {
             repository: "registry.example/nemoclaw/openclaw",
             architectures: ["linux/amd64"],
             runtime_identity: { uid: 4321, gid: 4322, workdir: "/sandbox" },
-            startup_profile_contract_version: 1,
-            capability_contract_version: 1,
           },
         },
         runtimeProvider: {

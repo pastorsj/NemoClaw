@@ -25,7 +25,11 @@ function commandProbe(
 ): Extract<HarnessMcpCapabilityProbe, { kind: "command" }> {
   return {
     kind: "command",
-    command: "future-probe",
+    command: {
+      kind: "shell",
+      script: "future-probe",
+      shellTrust: "package-authored-code",
+    },
     success: { kind: "exit-zero" },
     timeoutSeconds: 30,
     failureMessage: "Future runtime capability is unavailable.",
@@ -81,7 +85,7 @@ describe("installed MCP capability probe", () => {
     assertInstalledMcpCapability(
       "alpha",
       commandProbe({
-        command: ["future-probe", "--json"],
+        command: { kind: "argv", argv: ["future-probe", "--json"] },
         success: { kind: "last-json-line-ok" },
       }),
       runtimeSelection,
@@ -105,7 +109,7 @@ describe("installed MCP capability probe", () => {
     assertInstalledMcpCapability(
       "alpha",
       commandProbe({
-        command: ["future-probe"],
+        command: { kind: "argv", argv: ["future-probe"] },
         success: { kind: "last-json-line-ok" },
         retry: {
           outputExact: "gateway pending",

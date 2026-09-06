@@ -453,11 +453,7 @@ describe("handleProviderInferenceState", () => {
 
     expect(calls.setupNim).not.toHaveBeenCalled();
     expect(calls.setupInference).not.toHaveBeenCalled();
-    expect(calls.recoverProvider).toHaveBeenCalledWith(
-      "nemoclaw",
-      "ollama-local",
-      null,
-    );
+    expect(calls.recoverProvider).toHaveBeenCalledWith("nemoclaw", "ollama-local", null);
     expect(calls.skipped).toHaveBeenCalledWith("provider_selection", "ollama-local / llama3.1");
     expect(calls.recordSkip).toHaveBeenCalledWith("provider_selection", {
       reason: "resume",
@@ -1161,6 +1157,103 @@ describe("handleProviderInferenceState", () => {
     expect(calls.skipped).toHaveBeenCalledWith(
       "inference",
       "compatible-endpoint / nvidia/nemotron",
+    );
+  });
+
+  it("does not infer route refresh from a receipt-backed package ID", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "openclaw",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    };
+    const session = createSession({
+      agent: "openclaw",
+      harnessPackage,
+      provider: "compatible-endpoint",
+      model: "nvidia/nemotron",
+      endpointUrl: "https://integrate.api.nvidia.com/v1",
+      credentialEnv: "COMPATIBLE_API_KEY",
+    });
+    session.steps.provider_selection.status = "complete";
+    const { deps, calls } = createDeps({
+      revalidateHarnessPackageAuthority: vi.fn(() => ({
+        harnessPackage,
+        harnessPackageMigration: null,
+      })),
+      hydrateCredentialEnv: vi.fn(() => "host-key"),
+      isInferenceRouteReady: vi.fn(() => true),
+    });
+
+    await handleProviderInferenceState({
+      ...baseOptions(deps, session),
+      resume: true,
+      sandboxName: "my-assistant",
+      agent: { name: "openclaw" },
+      selectedMessagingChannels: ["telegram"],
+    });
+
+    expect(calls.setupInference).not.toHaveBeenCalled();
+    expect(calls.skipped).toHaveBeenCalledWith(
+      "inference",
+      "compatible-endpoint / nvidia/nemotron",
+    );
+  });
+
+  it("refreshes messaging inference when an unknown receipt-backed package declares it", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "b".repeat(64),
+    };
+    const session = createSession({
+      agent: "future-harness",
+      harnessPackage,
+      provider: "compatible-endpoint",
+      model: "nvidia/nemotron",
+      endpointUrl: "https://integrate.api.nvidia.com/v1",
+      credentialEnv: "COMPATIBLE_API_KEY",
+    });
+    session.steps.provider_selection.status = "complete";
+    const { deps, calls } = createDeps({
+      revalidateHarnessPackageAuthority: vi.fn(() => ({
+        harnessPackage,
+        harnessPackageMigration: null,
+      })),
+      hydrateCredentialEnv: vi.fn(() => "host-key"),
+      isInferenceRouteReady: vi.fn(() => true),
+    });
+    calls.complete.mockResolvedValue(session);
+
+    await handleProviderInferenceState({
+      ...baseOptions(deps, session),
+      resume: true,
+      sandboxName: "my-assistant",
+      agent: {
+        name: "future-harness",
+        inference: {
+          refresh_route_for_messaging_providers: ["compatible-endpoint"],
+        },
+      },
+      selectedMessagingChannels: ["telegram"],
+    });
+
+    expect(calls.setupInference).toHaveBeenCalledWith(
+      "my-assistant",
+      "nvidia/nemotron",
+      "compatible-endpoint",
+      "https://integrate.api.nvidia.com/v1",
+      "COMPATIBLE_API_KEY",
+      null,
+      [],
+      expect.objectContaining({
+        reservationSessionId: session.sessionId,
+        harnessPackageAuthority: {
+          harnessPackage,
+          harnessPackageMigration: null,
+        },
+      }),
     );
   });
 

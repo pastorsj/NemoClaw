@@ -61,22 +61,23 @@ export type HarnessSessionMutationPlanRequest =
   | HarnessSessionDeletePlanRequest
   | HarnessSessionResetPlanRequest;
 
-export interface HarnessSessionAdminRpcPlan {
-  readonly kind: "admin-rpc";
-  readonly method: "sessions.delete" | "sessions.reset";
-  readonly params: HarnessSessionJsonObject;
+export interface HarnessSessionMutationCapturePlan {
+  /** Capture a bounded native result for package-owned interpretation. */
+  readonly kind: "capture";
+  readonly command: readonly string[];
 }
 
 export type HarnessSessionMutationPlan =
   | { readonly kind: "unsupported"; readonly reason: string }
   | { readonly kind: "refused"; readonly reason: string }
   | { readonly kind: "stream"; readonly command: readonly string[] }
-  | HarnessSessionAdminRpcPlan;
+  | HarnessSessionMutationCapturePlan;
 
 export interface HarnessSessionMutationOutputRequest {
   readonly request: HarnessSessionMutationPlanRequest;
-  readonly plan: HarnessSessionAdminRpcPlan;
-  readonly payload: HarnessSessionJsonObject;
+  readonly plan: HarnessSessionMutationCapturePlan;
+  /** Captured stdout from the package-declared command. */
+  readonly output: string;
 }
 
 export type HarnessSessionMutationOutput =

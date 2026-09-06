@@ -17,12 +17,35 @@ export function makeRebuildAgentAuthority(
     effectiveAgentId === "langchain-deepagents-code" || effectiveAgentId === "pi"
       ? "terminal"
       : "gateway";
+  const stateLifecycle: AgentDefinition["stateLifecycle"] = {
+    backup_quiescence: { kind: "not-required" },
+    snapshot_restore: effectiveAgentId === "openclaw" ? ["repair-mutable-config"] : [],
+    // These fixtures exercise the explicit pre-contract compatibility path.
+    // Validated installed packages cannot produce an action-list rebuild value.
+    rebuild: (effectiveAgentId === "openclaw"
+      ? [
+          "require-image-plugin-provenance",
+          "repair-upgraded-state",
+          "verify-config-integrity",
+          "restore-device-pairing",
+        ]
+      : effectiveAgentId === "hermes"
+        ? [
+            "preserve-scheduled-work",
+            "reconcile-dashboard-profile",
+            "restart-runtime-after-restore",
+            "verify-mutable-config",
+            "notify-api-token-change",
+          ]
+        : []) as unknown as AgentDefinition["stateLifecycle"]["rebuild"],
+  };
   return Object.freeze({
     recordedAgent,
     effectiveAgentId,
     definition: Object.freeze({
       name: effectiveAgentId,
       runtime: { kind: runtimeKind },
+      stateLifecycle,
       packageRoot: usesRepositoryAuthority
         ? "/test/repository"
         : `/test/harnesses/${effectiveAgentId}`,

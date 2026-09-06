@@ -1,5 +1,5 @@
 {
-  "archiveCount": 85,
+  "archiveCount": 87,
   "archives": [
     {
       "archive": "assertion-error-2.0.1.tgz",
@@ -102,6 +102,12 @@
       "integrity": "sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA==",
       "resolved": "https://registry.npmjs.org/expect-type/-/expect-type-1.3.0.tgz",
       "size": 27558
+    },
+    {
+      "archive": "fast-check-4.9.0.tgz",
+      "integrity": "sha512-7ms6T7SybUev/PQITciI0yLM2pOSFy5zpG8Ty7tQofcVaQUvrMXp6CBwqF6fThLCLOrfBtuHAtwq6Yu4XPCllg==",
+      "resolved": "https://registry.npmjs.org/fast-check/-/fast-check-4.9.0.tgz",
+      "size": 316013
     },
     {
       "archive": "fdir-6.5.0.tgz",
@@ -314,6 +320,12 @@
       "size": 4280
     },
     {
+      "archive": "pure-rand-8.4.2.tgz",
+      "integrity": "sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==",
+      "resolved": "https://registry.npmjs.org/pure-rand/-/pure-rand-8.4.2.tgz",
+      "size": 15060
+    },
+    {
       "archive": "readable-stream-0.4.1.tgz",
       "integrity": "sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==",
       "resolved": "https://registry.npmjs.org/@sec-ant/readable-stream/-/readable-stream-0.4.1.tgz",
@@ -513,7 +525,7 @@
     }
   ],
   "kind": "nemoclaw-locked-npm-cache-seed-v1",
-  "lockSha256": "66bef669196bb1c61385871e369542d3c321c277adb0f0e2e9f0ad972106b163",
+  "lockSha256": "254262d0e4326ac62186ac528330e545dfaee20fd4bca6c4b1a5a8160bd284bd",
   "target": {
     "cpu": "x64",
     "libc": "glibc",

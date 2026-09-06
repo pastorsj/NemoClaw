@@ -6,6 +6,8 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { MessagingWorkflowPlanner } from "../messaging/compiler";
+import type { ChannelManifest } from "../messaging/manifest";
 import { ChannelManifestRegistry } from "../messaging/manifest/registry";
 import {
   HarnessMessagingSupportError,
@@ -31,6 +33,14 @@ module.exports = {
       kind: "channels",
       packageId: request.packageId,
       channelIds: ["future-channel"],
+      profilePath: "messaging/profile.json",
+      build: {
+        configRoot: "~/.future-harness",
+        packageManagers: ["node-package"],
+        postCreateCredentialReconciliation: "restart-runtime",
+        credentialPolicyReconciliation: "teams-outlook-shared-login",
+        degradedDiagnostics: "gateway-log-tail",
+      },
     };
   },
 };
@@ -52,6 +62,8 @@ function writeFixtureFile(relativePath: string, contents: string): void {
 function writeFuturePackage(
   moduleSource = VALID_MODULE,
   messagingDeclaration = "  support: channels\n  channels:\n    - future-channel",
+  hookIds: readonly string[] = [],
+  statePaths: readonly string[] = ["state/future-channel"],
 ): void {
   fs.mkdirSync(sourceRoot, { recursive: true, mode: 0o700 });
   fs.chmodSync(sourceRoot, 0o700);
@@ -64,15 +76,88 @@ function writeFuturePackage(
       displayName: "Future Harness",
       packageVersion: "1.0.0",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: "packages/nemoclaw-future-harness/manifest.yaml",
     })}\n`,
   );
   writeFixtureFile(
     "packages/nemoclaw-future-harness/manifest.yaml",
-    `name: future-harness\ndisplay_name: Future Harness\nmessaging:\n${messagingDeclaration}\n`,
+    [
+      "name: future-harness",
+      "display_name: Future Harness",
+      "runtime:",
+      "  kind: terminal",
+      "  interactive_command: future-harness",
+      "  headless_command: future-harness",
+      "  prompt_transport: argv",
+      "config:",
+      "  dir: /sandbox/.future-harness",
+      "  config_file: config.json",
+      "  format: json",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: Fixed test harness",
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    image_plugin_provenance: not-required",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: This package does not run scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
+      "messaging:",
+      messagingDeclaration,
+      "",
+    ].join("\n"),
   );
   writeFixtureFile("runtime/payload.txt", "future runtime\n");
   writeFixtureFile("packages/nemoclaw-future-harness/host/messaging-adapter.cts", moduleSource);
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/messaging/profile.json",
+    `${JSON.stringify([
+      {
+        channelId: "future-channel",
+        config: {
+          renders: [
+            {
+              id: "future-config",
+              kind: "json-fragment",
+              target: "~/.future-harness/config.json",
+              path: "channels.future",
+              value: { enabled: true },
+            },
+          ],
+          statePaths,
+        },
+        policy: [{ presetName: "future", policyKeys: ["future_bridge"] }],
+        lifecycle: {
+          runtime: {
+            envAliases: [
+              {
+                envKey: "FUTURE_SOURCE",
+                targetEnvKey: "FUTURE_TARGET",
+                match: "^source$",
+                value: "target",
+              },
+            ],
+          },
+          packageInstalls: [
+            {
+              id: "futurePlugin",
+              manager: "node-package",
+              spec: "future-channel@1.0.0",
+              required: true,
+            },
+          ],
+          hookIds,
+        },
+      },
+    ])}\n`,
+  );
 }
 
 function installFuturePackage(
@@ -95,7 +180,9 @@ function installFuturePackageWithoutAdapter(): InstalledHarnessPackage {
   );
 }
 
-function futureChannelService(supportedAgents: readonly string[] = ["future-harness"]) {
+function futureChannelService(
+  supportedAgents: readonly string[] = ["core-native-harness"],
+): ChannelManifest {
   return {
     schemaVersion: 1 as const,
     id: "future-channel",
@@ -128,7 +215,52 @@ describe("installed harness messaging module", () => {
     expect(loadHarnessMessagingIntegration(installed.identity, { storeRoot })).toEqual({
       kind: "channels",
       packageId: "future-harness",
-      channelIds: ["future-channel"],
+      build: {
+        configRoot: "~/.future-harness",
+        packageManagers: ["node-package"],
+        postCreateCredentialReconciliation: "restart-runtime",
+        credentialPolicyReconciliation: "teams-outlook-shared-login",
+        degradedDiagnostics: "gateway-log-tail",
+      },
+      channels: [
+        {
+          channelId: "future-channel",
+          config: {
+            renders: [
+              {
+                id: "future-config",
+                kind: "json-fragment",
+                target: "~/.future-harness/config.json",
+                path: "channels.future",
+                value: { enabled: true },
+              },
+            ],
+            statePaths: ["state/future-channel"],
+          },
+          policy: [{ presetName: "future", policyKeys: ["future_bridge"] }],
+          lifecycle: {
+            runtime: {
+              envAliases: [
+                {
+                  envKey: "FUTURE_SOURCE",
+                  targetEnvKey: "FUTURE_TARGET",
+                  match: "^source$",
+                  value: "target",
+                },
+              ],
+            },
+            packageInstalls: [
+              {
+                id: "futurePlugin",
+                manager: "node-package",
+                spec: "future-channel@1.0.0",
+                required: true,
+              },
+            ],
+            hookIds: [],
+          },
+        },
+      ],
     });
   });
 
@@ -138,12 +270,136 @@ describe("installed harness messaging module", () => {
       { agent: "future-harness", harnessPackage: installed.identity },
       { storeRoot },
     );
-    const registry = new ChannelManifestRegistry([futureChannelService() as never]);
+    const registry = new ChannelManifestRegistry([futureChannelService()]);
 
     expect(authority.agent.name).toBe("future-harness");
     expect(authority.packageAuthority.harnessPackage).toEqual(installed.identity);
-    expect(listMessagingChannelsForProfile(authority, registry).map(({ id }) => id)).toEqual([
-      "future-channel",
+    const [projected] = listMessagingChannelsForProfile(authority, registry);
+    expect(projected?.id).toBe("future-channel");
+    expect(projected?.supportedAgents).toEqual(["future-harness"]);
+    expect(projected?.packageBuild).toEqual({
+      configRoot: "~/.future-harness",
+      packageManagers: ["node-package"],
+      postCreateCredentialReconciliation: "restart-runtime",
+      credentialPolicyReconciliation: "teams-outlook-shared-login",
+      degradedDiagnostics: "gateway-log-tail",
+    });
+    expect(projected?.render).toEqual([
+      {
+        id: "future-config",
+        kind: "json-fragment",
+        agent: "future-harness",
+        target: "~/.future-harness/config.json",
+        fragment: { path: "channels.future", value: { enabled: true } },
+      },
+    ]);
+    expect(projected?.policyPresets).toEqual([{ name: "future", policyKeys: ["future_bridge"] }]);
+    expect(projected?.agentPackages).toEqual([
+      {
+        id: "futurePlugin",
+        agent: "future-harness",
+        manager: "node-package",
+        spec: "future-channel@1.0.0",
+        required: true,
+      },
+    ]);
+    expect(projected?.state).toEqual({
+      "future-harness": ["state/future-channel"],
+    });
+    expect(projected?.runtime).toEqual({
+      "future-harness": {
+        envAliases: [
+          {
+            envKey: "FUTURE_SOURCE",
+            targetEnvKey: "FUTURE_TARGET",
+            match: "^source$",
+            value: "target",
+          },
+        ],
+      },
+    });
+  });
+
+  it("projects an unknown receipt-backed package into shared build and runtime plans", async () => {
+    const installed = installFuturePackage();
+    const authority = resolveSandboxMessagingProfileAuthority(
+      { agent: "future-harness", harnessPackage: installed.identity },
+      { storeRoot },
+    );
+    const coreRegistry = new ChannelManifestRegistry([futureChannelService()]);
+    const manifests = listMessagingChannelsForProfile(authority, coreRegistry);
+    const planner = new MessagingWorkflowPlanner(new ChannelManifestRegistry(manifests));
+    const plan = await planner.buildPlan({
+      sandboxName: "future-sandbox",
+      agent: "future-harness",
+      workflow: "onboard",
+      isInteractive: false,
+      configuredChannels: ["future-channel"],
+    });
+
+    expect(plan.agent).toBe("future-harness");
+    expect(plan.packageBuild).toEqual({
+      configRoot: "~/.future-harness",
+      packageManagers: ["node-package"],
+      postCreateCredentialReconciliation: "restart-runtime",
+      credentialPolicyReconciliation: "teams-outlook-shared-login",
+      degradedDiagnostics: "gateway-log-tail",
+    });
+    expect(plan.agentRender).toEqual([
+      {
+        channelId: "future-channel",
+        renderId: "future-config",
+        hookId: "future-config",
+        handler: "common.staticOutputs",
+        kind: "json-fragment",
+        agent: "future-harness",
+        target: "~/.future-harness/config.json",
+        path: "channels.future",
+        value: { enabled: true },
+        templateRefs: [],
+      },
+    ]);
+    expect(plan.buildSteps).toEqual([
+      {
+        channelId: "future-channel",
+        kind: "package-install",
+        outputId: "futurePlugin",
+        required: true,
+        value: { manager: "node-package", spec: "future-channel@1.0.0" },
+      },
+    ]);
+    expect(plan.runtimeSetup).toEqual({
+      nodePreloads: [],
+      envAliases: [
+        {
+          channelId: "future-channel",
+          envKey: "FUTURE_SOURCE",
+          targetEnvKey: "FUTURE_TARGET",
+          match: "^source$",
+          value: "target",
+        },
+      ],
+      secretScans: [],
+    });
+
+    const removalPlan = await planner.buildChannelRemovalTombstonePlanFromSandboxEntry({
+      sandboxName: "future-sandbox",
+      agent: "future-harness",
+      channelId: "future-channel",
+      sandboxEntry: {
+        name: "future-sandbox",
+        agent: "future-harness",
+        messaging: { schemaVersion: 1, plan },
+      },
+      supportedChannelIds: ["future-channel"],
+    });
+    expect(removalPlan?.channels).toEqual([
+      expect.objectContaining({
+        channelId: "future-channel",
+        active: false,
+        disabled: true,
+        pendingRemoval: true,
+      }),
     ]);
   });
 
@@ -175,12 +431,39 @@ describe("installed harness messaging module", () => {
       { agent: "future-harness", harnessPackage: installed.identity },
       { storeRoot },
     );
-    const registry = new ChannelManifestRegistry([
-      futureChannelService(["other-harness"]) as never,
-    ]);
+    const registry = new ChannelManifestRegistry();
 
     expect(() => listMessagingChannelsForProfile(authority, registry)).toThrow(
       HarnessMessagingSupportError,
+    );
+  });
+
+  it("rejects package hook ids outside the core-owned channel workflow", () => {
+    writeFuturePackage(VALID_MODULE, undefined, ["untrusted-hook"]);
+    const installed = installHarnessPackage(
+      { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
+      { storeRoot },
+    );
+    const authority = resolveSandboxMessagingProfileAuthority(
+      { agent: "future-harness", harnessPackage: installed.identity },
+      { storeRoot },
+    );
+    const registry = new ChannelManifestRegistry([futureChannelService()]);
+
+    expect(() => listMessagingChannelsForProfile(authority, registry)).toThrow(
+      HarnessMessagingSupportError,
+    );
+  });
+
+  it("rejects unsafe package-owned channel state paths", () => {
+    writeFuturePackage(VALID_MODULE, undefined, [], ["../outside"]);
+    const installed = installHarnessPackage(
+      { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
+      { storeRoot },
+    );
+
+    expect(() => loadHarnessMessagingIntegration(installed.identity, { storeRoot })).toThrow(
+      /unsafe state path/u,
     );
   });
 
@@ -188,7 +471,13 @@ describe("installed harness messaging module", () => {
     const installed = installFuturePackage(
       `module.exports = {
         describeMessagingIntegration() {
-          return { kind: "channels", packageId: "other-harness", channelIds: ["future-channel"] };
+          return {
+            kind: "channels",
+            packageId: "other-harness",
+            channelIds: ["future-channel"],
+            profilePath: "messaging/profile.json",
+            build: { configRoot: "~/.future-harness", packageManagers: [] },
+          };
         },
       };`,
     );
@@ -202,7 +491,13 @@ describe("installed harness messaging module", () => {
     const installed = installFuturePackage(
       `module.exports = {
         describeMessagingIntegration(request) {
-          return { kind: "channels", packageId: request.packageId, channelIds: ["other-channel"] };
+          return {
+            kind: "channels",
+            packageId: request.packageId,
+            channelIds: ["other-channel"],
+            profilePath: "messaging/profile.json",
+            build: { configRoot: "~/.future-harness", packageManagers: [] },
+          };
         },
       };`,
     );
@@ -220,6 +515,7 @@ describe("installed harness messaging module", () => {
             kind: "channels",
             packageId: request.packageId,
             channelIds: ["future-channel"],
+            profilePath: "messaging/profile.json",
             token: "not-allowed",
           };
         },

@@ -169,6 +169,8 @@ function requireReceiptRegistryOwnership(
   gatewayPort: number,
   gatewayName: string,
 ): void {
+  // This decodes the retired schema-4 Portable-demo receipt, not an installed
+  // harness-package receipt. The complete receipt set is checked below.
   if (!entry) {
     throw new Error(
       `Portable lifecycle receipt for sandbox '${receipt.sandboxName}' has no current registry ownership`,

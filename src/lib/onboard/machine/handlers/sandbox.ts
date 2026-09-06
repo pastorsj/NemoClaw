@@ -249,12 +249,20 @@ export interface SandboxStateOptions<
       dockerfilePathOverride: string | null,
       rootDir: string,
     ): boolean;
-    agentSupportsWebSearchProvider?(
+    selectedAgentSupportsWebSearchProvider(
       agent: Agent,
+      receiptBackedPackage: boolean,
       provider: "brave" | "tavily",
       dockerfilePathOverride: string | null,
       rootDir: string,
     ): boolean;
+    filterSelectedAgentWebSearchToolGateways(
+      agent: Agent,
+      receiptBackedPackage: boolean,
+      provider: "brave" | "tavily" | null,
+      gateways: readonly string[],
+    ): string[];
+    selectedAgentResumesSandboxPrompts(agent: Agent, receiptBackedPackage: boolean): boolean;
     note(message: string): void;
     cliName(): string;
     loadSession(): Session | null;
@@ -463,24 +471,29 @@ function missingWebSearchFidelity(
   return fidelity;
 }
 
-function knownAgentSupportsWebSearchProvider(
-  agent: { name?: string } | null,
-  provider: "brave" | "tavily",
-): boolean {
-  return agent?.name?.trim().toLowerCase() !== "hermes" || provider === "tavily";
+function hasReceiptBackedPackage(session: Session | null): boolean {
+  return session?.harnessPackage != null;
 }
 
-function effectiveHermesToolGatewaysForWebSearch(
-  agent: { name?: string } | null,
+function effectiveToolGatewaysForWebSearch<Agent>(
+  agent: Agent,
+  session: Session | null,
   webSearchConfig: SharedWebSearchConfig | null,
-  gateways: string[],
+  gateways: readonly string[],
+  filterSelectedAgentWebSearchToolGateways: (
+    agent: Agent,
+    receiptBackedPackage: boolean,
+    provider: "brave" | "tavily" | null,
+    gateways: readonly string[],
+  ) => string[],
 ): string[] {
-  const isHermes = agent?.name?.trim().toLowerCase() === "hermes";
-  const tavilySelected =
-    webSearchConfig !== null && webSearchProviderForConfig(webSearchConfig) === "tavily";
-  return isHermes && tavilySelected
-    ? gateways.filter((gateway) => gateway !== "nous-web")
-    : [...gateways];
+  const provider = webSearchConfig === null ? null : webSearchProviderForConfig(webSearchConfig);
+  return filterSelectedAgentWebSearchToolGateways(
+    agent,
+    hasReceiptBackedPackage(session),
+    provider,
+    gateways,
+  );
 }
 
 function requiredWebSearchProviderBindings(
@@ -649,8 +662,10 @@ class SandboxStateFlow<
   }
 
   private get resumesSandboxPrompts(): boolean {
-    const agentName = (this.options.agent as { name?: string } | null)?.name;
-    return !agentName || agentName === "openclaw";
+    return this.deps.selectedAgentResumesSandboxPrompts(
+      this.options.agent,
+      hasReceiptBackedPackage(this.options.session),
+    );
   }
 
   private assertProviderlessApfInput(): void {
@@ -676,11 +691,12 @@ class SandboxStateFlow<
     const probePath = this.options.fromDockerfile
       ? this.deps.resolvePath(this.options.fromDockerfile)
       : null;
-    const supported = this.deps.agentSupportsWebSearch(
+    const imageSupportsWebSearch = this.deps.agentSupportsWebSearch(
       this.options.agent,
       probePath,
       this.options.rootDir,
     );
+    const packageBacked = hasReceiptBackedPackage(this.options.session);
     const requestedWebSearchConfig = resolveRequestedWebSearchConfig(
       this.options.webSearchConfig,
       this.options.env,
@@ -694,17 +710,15 @@ class SandboxStateFlow<
       ? webSearchProviderForConfig(requestedWebSearchConfig as unknown as SharedWebSearchConfig)
       : null;
     const providerSupported = provider
-      ? (this.deps.agentSupportsWebSearchProvider?.(
+      ? this.deps.selectedAgentSupportsWebSearchProvider(
           this.options.agent,
+          packageBacked,
           provider,
           probePath,
           this.options.rootDir,
-        ) ??
-        knownAgentSupportsWebSearchProvider(
-          this.options.agent as { name?: string } | null,
-          provider,
-        ))
+        )
       : true;
+    const supported = imageSupportsWebSearch && (!packageBacked || providerSupported);
     const dropped = Boolean(requestedWebSearchConfig) && (!supported || !providerSupported);
     if (!dropped) {
       return {
@@ -759,10 +773,12 @@ class SandboxStateFlow<
           this.deps.getSandboxHermesToolGateways(state.sandboxName),
         )
       : [];
-    const effectiveToolGateways = effectiveHermesToolGatewaysForWebSearch(
-      this.options.agent as { name?: string } | null,
+    const effectiveToolGateways = effectiveToolGatewaysForWebSearch(
+      this.options.agent,
+      state.session,
       state.webSearchConfig as unknown as SharedWebSearchConfig | null,
       this.options.hermesToolGateways,
+      this.deps.filterSelectedAgentWebSearchToolGateways,
     );
     const registryEntry = state.sandboxName
       ? this.deps.getSandboxRegistryEntry(state.sandboxName)
@@ -2201,10 +2217,12 @@ class SandboxStateFlow<
     const resourceSelection = await this.resolveResourceProfile(initialState);
     let state = resourceSelection.state;
     const resourceProfile = resourceSelection.resourceProfile;
-    const effectiveHermesToolGateways = effectiveHermesToolGatewaysForWebSearch(
-      this.options.agent as { name?: string } | null,
+    const effectiveHermesToolGateways = effectiveToolGatewaysForWebSearch(
+      this.options.agent,
+      state.session,
       state.webSearchConfig as unknown as SharedWebSearchConfig | null,
       this.options.hermesToolGateways,
+      this.deps.filterSelectedAgentWebSearchToolGateways,
     );
     const extraProviderPlan = this.deps.planRegisteredExtraProviders(this.options.gatewayName);
     const createAndRecord = async (): Promise<SandboxStepState<WebSearchConfig>> => {
@@ -2582,17 +2600,21 @@ class SandboxStateFlow<
       this.deps.error("  Onboarding state is incomplete after sandbox setup.");
       return this.deps.exitProcess(1);
     }
-    const hermesToolGateways = effectiveHermesToolGatewaysForWebSearch(
-      this.options.agent as { name?: string } | null,
+    const hermesToolGateways = effectiveToolGatewaysForWebSearch(
+      this.options.agent,
+      state.session,
       state.webSearchConfig as unknown as SharedWebSearchConfig | null,
       this.options.hermesToolGateways,
+      this.deps.filterSelectedAgentWebSearchToolGateways,
     );
     if (
       this.options.hermesToolGateways.includes("nous-web") &&
       !hermesToolGateways.includes("nous-web")
     ) {
       this.deps.note(
-        "  Tavily Search replaces Hermes managed Web search/extract and removes the conflicting nous-web selection.",
+        hasReceiptBackedPackage(state.session)
+          ? "  Tavily Search removes the package-declared conflicting nous-web tool gateway."
+          : "  Tavily Search replaces Hermes managed Web search/extract and removes the conflicting nous-web selection.",
       );
     }
     const metadata = {

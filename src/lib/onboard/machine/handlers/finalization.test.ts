@@ -12,6 +12,7 @@ import {
 
 type Agent = {
   name: string;
+  hasDevicePairing?: boolean;
   displayName?: string;
   forwardPort?: number | null;
   forward_ports?: number[] | null;
@@ -19,6 +20,13 @@ type Agent = {
     kind?: string;
     interactive_command?: string;
     headless_command?: string;
+    device_pairing_settlement?: {
+      command: readonly string[];
+      timeout_seconds: number;
+    };
+  };
+  managed_image?: {
+    runtime_identity: { uid: number; gid: number };
   };
 } | null;
 type VerifyChain = { port: number };
@@ -35,6 +43,10 @@ function createDeps(
     settleOrdinaryPairing: vi.fn(async () => ({ kind: "settled" as const })),
     ordinaryPairingIncompleteMessage: vi.fn(
       () => "OpenClaw onboarding is incomplete; resume onboarding.",
+    ),
+    settlePackagePairing: vi.fn(async () => ({ kind: "settled" as const })),
+    packagePairingIncompleteMessage: vi.fn(
+      () => "Harness onboarding is incomplete; resume onboarding.",
     ),
     readRegistryAgent: vi.fn(() => "openclaw"),
     settlePortablePairing: vi.fn(async () => ({ kind: "settled" as const })),
@@ -62,6 +74,8 @@ function createDeps(
       checkAndRecoverSandboxProcesses: calls.recoverProcesses,
       settleOrdinaryOpenClawPairing: calls.settleOrdinaryPairing,
       ordinaryOpenClawPairingIncompleteMessage: calls.ordinaryPairingIncompleteMessage,
+      settlePackageDevicePairing: calls.settlePackagePairing,
+      packageDevicePairingIncompleteMessage: calls.packagePairingIncompleteMessage,
       readRegistryAgent: calls.readRegistryAgent,
       settlePortablePairing: calls.settlePortablePairing,
       portablePairingIncompleteMessage: calls.portablePairingIncompleteMessage,
@@ -178,6 +192,7 @@ describe("finalization handlers", () => {
 
     expect(result.stateResult.type).toBe("complete");
     expect(calls.settleOrdinaryPairing).not.toHaveBeenCalled();
+    expect(calls.settlePackagePairing).not.toHaveBeenCalled();
     expect(calls.settlePortablePairing).toHaveBeenCalledExactlyOnceWith("my-assistant", {
       portableRequired: true,
     });
@@ -534,6 +549,46 @@ describe("finalization handlers", () => {
 
     await runFinalizationHandlers({ ...baseOptions(deps), agent });
 
+    expect(calls.settleOrdinaryPairing).not.toHaveBeenCalled();
+  });
+
+  it("does not infer device pairing from a receipt-backed package ID", async () => {
+    const { deps, calls } = createDeps();
+
+    await runFinalizationHandlers({
+      ...baseOptions(deps),
+      agent: { name: "openclaw", hasDevicePairing: false },
+      receiptBackedPackage: true,
+    });
+
+    expect(calls.settleOrdinaryPairing).not.toHaveBeenCalled();
+  });
+
+  it("settles device pairing when an unknown receipt-backed package declares it", async () => {
+    const { deps, calls } = createDeps();
+    const declaration = {
+      command: ["/usr/local/bin/future-pairing-settle"],
+      timeout_seconds: 45,
+    } as const;
+
+    await runFinalizationHandlers({
+      ...baseOptions(deps),
+      agent: {
+        name: "future-harness",
+        displayName: "Future Harness",
+        hasDevicePairing: true,
+        runtime: { device_pairing_settlement: declaration },
+        managed_image: { runtime_identity: { uid: 998, gid: 998 } },
+      },
+      receiptBackedPackage: true,
+    });
+
+    expect(calls.settlePackagePairing).toHaveBeenCalledExactlyOnceWith(
+      "my-assistant",
+      "future-harness",
+      declaration,
+      { uid: 998, gid: 998 },
+    );
     expect(calls.settleOrdinaryPairing).not.toHaveBeenCalled();
   });
 

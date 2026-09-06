@@ -3,12 +3,15 @@
 
 import type { RebuildSandboxOptions } from "../../domain/lifecycle/options";
 import type { SandboxMessagingPlan } from "../../messaging";
+import type { HarnessScheduledWorkDeclaration } from "@nvidia/nemoclaw-harness-contract";
 import { hydrateCredentialEnv } from "../../onboard/credential-env";
 import { DCODE_AUTO_APPROVAL_FEATURE } from "../../onboard/dcode-auto-approval";
 import { managedSandboxFeatureIssue } from "../../onboard/managed-sandbox-feature";
 import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import {
   type HermesCronRestorePlan,
+  type ScheduledWorkRestorePlan,
+  validateScheduledWorkRestoreBackup,
   validateHermesCronRestoreBackup,
 } from "../../state/rebuild/hermes-cron-restore-backup";
 import {
@@ -89,21 +92,60 @@ export interface RebuildPreflightPhaseResult {
 }
 
 interface HermesCronRestoreBackupPreflightInput {
-  rebuildAgent: string | null;
+  preserveScheduledWork: boolean;
   backupPath: string | null;
   backedUpDirs: readonly string[];
   log: RebuildLog;
   bail: RebuildBail;
 }
 
+interface ScheduledWorkRestoreBackupPreflightInput {
+  declaration: Extract<HarnessScheduledWorkDeclaration, { readonly support: "managed" }> | null;
+  backupPath: string | null;
+  backedUpDirs: readonly string[];
+  log: RebuildLog;
+  bail: RebuildBail;
+}
+
+/** Validate a receipt-backed package's scheduled-work backup before sandbox deletion. */
+export function runScheduledWorkRestoreBackupPreflight({
+  declaration,
+  backupPath,
+  backedUpDirs,
+  log,
+  bail,
+}: ScheduledWorkRestoreBackupPreflightInput): { plan: ScheduledWorkRestorePlan | null } | null {
+  const jobsRoot = declaration?.jobs_path.split("/", 1)[0];
+  if (!declaration || backupPath === null || !jobsRoot || !backedUpDirs.includes(jobsRoot)) {
+    return { plan: null };
+  }
+  try {
+    const plan = validateScheduledWorkRestoreBackup(backupPath, declaration);
+    log(
+      `Scheduled-work restore preflight: activeJobs=${String(plan.activeJobs)}, scriptJobs=${String(plan.scriptJobs)}, gate=${String(plan.requiresDispatchGate)}`,
+    );
+    return { plan };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    printRebuildPreflightFailure(
+      `the scheduled-work backup failed script-reference validation: ${detail}`,
+      `Repair or disable the affected job before rebuilding. Backup: ${backupPath}`,
+      "Scheduled-work restore preflight failed.",
+      bail,
+    );
+    return null;
+  }
+}
+
+/** Explicit no-receipt compatibility for historical Hermes cron state. */
 export function runHermesCronRestoreBackupPreflight({
-  rebuildAgent,
+  preserveScheduledWork,
   backupPath,
   backedUpDirs,
   log,
   bail,
 }: HermesCronRestoreBackupPreflightInput): { plan: HermesCronRestorePlan | null } | null {
-  if (rebuildAgent !== "hermes" || backupPath === null || !backedUpDirs.includes("cron")) {
+  if (!preserveScheduledWork || backupPath === null || !backedUpDirs.includes("cron")) {
     return { plan: null };
   }
   try {

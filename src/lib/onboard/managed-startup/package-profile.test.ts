@@ -34,6 +34,7 @@ import {
   validateManagedStartupPackageProfile,
 } from "./profile";
 import {
+  buildInitialManagedStartupPackageProfile,
   buildManagedStartupPackageProfile,
   managedStartupSettingsFromProfile,
 } from "./package-profile";
@@ -91,17 +92,28 @@ module.exports = {
 } as const;
 
 function packageProfile(): ManagedStartupPackageProfile {
+  const desiredState = futureDesiredState();
   return {
     schemaVersion: 1,
     profileKind: "package",
     agent: FUTURE_PACKAGE_ID,
     harnessPackage: FUTURE_PACKAGE_IDENTITY,
+    desiredState,
     packageConfig: {
       inferenceRoute: "inference",
       model: "nvidia/future-model",
       features: { tools: true },
     },
     corporateCa: { bundleSha256: null },
+  };
+}
+
+function futureDesiredState() {
+  const settings = managedStartupSettingsFromProfile(managedStartupE2eProfile("pi"));
+  return {
+    ...settings,
+    configuration: { agent: FUTURE_PACKAGE_ID },
+    dashboard: { agent: FUTURE_PACKAGE_ID, mode: "disabled" as const },
   };
 }
 
@@ -185,48 +197,59 @@ describe("managed startup package profile", () => {
     expect(mappedPlans).toHaveLength(1);
   });
 
-  it("builds a receipt-backed transport from finite startup settings", () => {
-    const legacyProfile = managedStartupE2eProfile("pi");
-    const settings = managedStartupSettingsFromProfile(legacyProfile);
-    const built = buildManagedStartupPackageProfile({
-      harnessPackage: FUTURE_PACKAGE_IDENTITY,
-      settings: {
-        ...settings,
-        configuration: { agent: FUTURE_PACKAGE_ID },
-        dashboard: { agent: FUTURE_PACKAGE_ID, mode: "disabled" },
+  it("asks an unknown receipt-backed package to build its opaque startup config", () => {
+    const desiredState = futureDesiredState();
+    const buildInitialStartupProfile = vi.fn(() => ({
+      kind: "package-config" as const,
+      packageConfig: { nativeRevision: 3, runtimeMode: "future" },
+    }));
+    const built = buildInitialManagedStartupPackageProfile(
+      {
+        harnessPackage: FUTURE_PACKAGE_IDENTITY,
+        desiredState,
+        credentialProxyReplayRequired: false,
+        dashboardRemoteBindPrepared: false,
       },
-      credentialProxyReplayRequired: false,
-      dashboardRemoteBindPrepared: false,
-    });
+      () => ({
+        startupProfileEnvironment: [],
+        prepareStartupProfile: vi.fn(),
+        buildInitialStartupProfile,
+        reconcileStartupProfile: vi.fn(),
+      }),
+    );
 
     expect(decodeManagedStartupDurableProfile(built.encodedProfile)).toEqual(built.profile);
+    expect(buildInitialStartupProfile).toHaveBeenCalledExactlyOnceWith({
+      packageId: FUTURE_PACKAGE_ID,
+      harnessPackage: FUTURE_PACKAGE_IDENTITY,
+      desiredState,
+    });
     expect(built.profile).toMatchObject({
       agent: FUTURE_PACKAGE_ID,
       harnessPackage: FUTURE_PACKAGE_IDENTITY,
-      packageConfig: {
-        settings: {
-          configuration: { agent: FUTURE_PACKAGE_ID },
-          dashboard: { agent: FUTURE_PACKAGE_ID, mode: "disabled" },
-        },
+      desiredState: {
+        configuration: { agent: FUTURE_PACKAGE_ID },
+        dashboard: { agent: FUTURE_PACKAGE_ID, mode: "disabled" },
       },
+      packageConfig: { nativeRevision: 3, runtimeMode: "future" },
     });
     expect(built.startupProfileSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(built.dashboardRemoteBindPrepared).toBe(false);
   });
 
   it("rejects credentials before a package startup transport is created", () => {
-    const settings = managedStartupSettingsFromProfile(managedStartupE2eProfile("pi"));
+    const desiredState = futureDesiredState();
     expect(() =>
       buildManagedStartupPackageProfile({
         harnessPackage: FUTURE_PACKAGE_IDENTITY,
-        settings: {
-          ...settings,
+        desiredState: {
+          ...desiredState,
           configuration: {
             agent: FUTURE_PACKAGE_ID,
             apiKey: "not-a-real-credential",
           } as never,
-          dashboard: { agent: FUTURE_PACKAGE_ID, mode: "disabled" },
         },
+        packageConfig: { nativeRevision: 3 },
         credentialProxyReplayRequired: false,
         dashboardRemoteBindPrepared: false,
       }),
@@ -262,6 +285,36 @@ describe("managed startup package profile", () => {
         },
       ),
     ).toThrow(/adapter source does not match the receipt-backed package identity/u);
+  });
+
+  it("fails closed when an older package profile has no persisted desired state", () => {
+    const { desiredState: _desiredState, ...oldProfile } = packageProfile();
+
+    expect(() => validateManagedStartupPackageProfile(oldProfile)).toThrow(
+      /rerun onboarding to create current package startup authority/u,
+    );
+  });
+
+  it("reports a package-owned unsupported initial profile explicitly", () => {
+    expect(() =>
+      buildInitialManagedStartupPackageProfile(
+        {
+          harnessPackage: FUTURE_PACKAGE_IDENTITY,
+          desiredState: futureDesiredState(),
+          credentialProxyReplayRequired: false,
+          dashboardRemoteBindPrepared: false,
+        },
+        () => ({
+          startupProfileEnvironment: [],
+          prepareStartupProfile: vi.fn(),
+          buildInitialStartupProfile: () => ({
+            kind: "unsupported",
+            reason: "future runtime requires an external bootstrap",
+          }),
+          reconcileStartupProfile: vi.fn(),
+        }),
+      ),
+    ).toThrow(/does not support managed startup profiles.*external bootstrap/u);
   });
 
   it("keeps the legacy stock transport byte-for-byte compatible", () => {

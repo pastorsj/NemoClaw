@@ -6,7 +6,14 @@ import type { HarnessConfigAdapterModule } from "@nvidia/nemoclaw-harness-contra
 const configAdapter: HarnessConfigAdapterModule = {
   describeInferenceConfig() {
     return {
-      kind: "immutable",
+      kind: "unsupported",
+      reason: "This configuration is materialized by the sandbox image. Re-onboard to change it.",
+    };
+  },
+
+  prepareInferenceConfig() {
+    return {
+      kind: "unsupported",
       reason: "This configuration is materialized by the sandbox image. Re-onboard to change it.",
     };
   },

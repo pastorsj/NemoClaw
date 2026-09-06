@@ -38,6 +38,7 @@ vi.mock("./adapters/openshell/resolve.js", () => ({
 }));
 
 vi.mock("./gateway-runtime-action.js", () => ({
+  captureOpenshell: vi.fn(),
   recoverNamedGatewayRuntime: vi.fn(),
   getNamedGatewayLifecycleState: vi.fn(() => ({ state: "missing_named" })),
 }));
@@ -60,8 +61,8 @@ vi.mock("./runner.js", () => ({
 }));
 
 import { resolveOpenshell } from "./adapters/openshell/resolve.js";
-import { captureOpenshell } from "./adapters/openshell/runtime.js";
 import {
+  captureOpenshell,
   getNamedGatewayLifecycleState,
   recoverNamedGatewayRuntime,
 } from "./gateway-runtime-action.js";

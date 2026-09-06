@@ -3,7 +3,7 @@
 
 import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 
-import { spawnExitCode } from "../../core/process-exit";
+import { spawnExitCode } from "../../core/process-status";
 import { assertNoOpenShellGatewayEndpointOverride } from "../../openshell-gateway-endpoint-guard";
 import { isValidName } from "../../sandbox-name-contract";
 import { resolveOpenshellBinaryOrNull } from "./resolve-shared";

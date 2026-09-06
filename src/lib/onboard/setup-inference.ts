@@ -161,7 +161,7 @@ type ProviderBranchDeps = Pick<
     HermesDeps,
     | "lookup"
     | "hermesProviderAuth"
-    | "getHermesToolGatewayBroker"
+    | "describeHarnessProviderBroker"
     | "normalizeHermesAuthMethod"
     | "resolveHermesNousApiKey"
     | "checkHermesProviderStoreReachable"
@@ -664,15 +664,14 @@ export function createSetupInference(
         "Inference setup route ownership requires both Session and harness package authority.",
       );
     }
-    const routeReservationAuthority = hasReservationSession && hasHarnessPackageAuthority
-      ? {
-          reservationSessionId: options.reservationSessionId,
-          ...options.harnessPackageAuthority,
-        }
-      : {};
-    const revalidateSandboxIdentity = sandboxName
-      ? options.revalidateSandboxIdentity
-      : undefined;
+    const routeReservationAuthority =
+      hasReservationSession && hasHarnessPackageAuthority
+        ? {
+            reservationSessionId: options.reservationSessionId,
+            ...options.harnessPackageAuthority,
+          }
+        : {};
+    const revalidateSandboxIdentity = sandboxName ? options.revalidateSandboxIdentity : undefined;
     const gatewayName = options.gatewayName ?? deps.getGatewayName();
     const endpointSource =
       options.endpointSource === undefined ? "onboard" : options.endpointSource;
@@ -931,11 +930,12 @@ export function createSetupInference(
                 credentialEnv,
                 hermesAuthMethod,
                 hermesToolGateways,
+                harnessPackage: options.harnessPackageAuthority?.harnessPackage ?? null,
               },
               {
                 ...commonDeps,
                 hermesProviderAuth: deps.hermesProviderAuth,
-                getHermesToolGatewayBroker: deps.getHermesToolGatewayBroker,
+                describeHarnessProviderBroker: deps.describeHarnessProviderBroker,
                 providerExistsInGateway: (name: string) =>
                   deps.providerExistsInGateway(name, gatewayName),
                 normalizeHermesAuthMethod: deps.normalizeHermesAuthMethod,

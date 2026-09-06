@@ -17,7 +17,7 @@ import {
   namedOpenShellGateway,
   selectedOpenShellGateway,
 } from "../../adapters/openshell/sandbox-observer";
-import { spawnExitCode } from "../../core/process-exit";
+import { spawnExitCode } from "../../core/process-status";
 import { assertNoOpenShellGatewayEndpointOverride } from "../../openshell-gateway-endpoint-guard";
 import type {
   MutableConfigPermsInspection,
@@ -26,6 +26,11 @@ import type {
 import type { SandboxEntry } from "../../state/registry";
 import { type ExecPolicyHintDeps, preparePolicyHint } from "./exec-policy-hint-integration";
 import type { GatewaySelectResult } from "./gateway-select";
+import {
+  isLegacyGoogleChatPairingApproval,
+  legacyAgentOwnsGoogleChatApproval,
+  resolveLegacyGoogleChatApprovalAgent,
+} from "./exec-legacy";
 import { wrapExecCommandWithRuntimeEnv } from "./runtime-env";
 
 export {
@@ -187,7 +192,9 @@ export function cleanupMutableConfigAfterExec(
     return `sandbox registry lookup failed: ${detail}`;
   }
   if (!entry) return null;
-  if (!entry.harnessPackage && (entry.agent ?? "openclaw") !== "openclaw") return null;
+  if (!entry.harnessPackage && !legacyAgentOwnsGoogleChatApproval(entry.agent ?? "openclaw")) {
+    return null;
+  }
 
   let inspection: MutableConfigPermsInspection;
   try {
@@ -379,17 +386,7 @@ async function runSandboxExecRequest(
   }
 }
 
-export function isGoogleChatPairingApproval(command: readonly string[]): boolean {
-  return (
-    command.length >= 5 &&
-    command[0] === "openclaw" &&
-    command[1] === "pairing" &&
-    command[2] === "approve" &&
-    command[3] === "googlechat" &&
-    Boolean(command[4]) &&
-    !command[4]!.startsWith("-")
-  );
-}
+export const isGoogleChatPairingApproval = isLegacyGoogleChatPairingApproval;
 
 function defaultRestartGateway(sandboxName: string): { ok: boolean } {
   const { defaultInferenceGatewayRestart } =
@@ -401,8 +398,7 @@ function defaultResolveSandboxAgent(sandboxName: string): string | null {
   const entry = (
     require("../../state/registry") as typeof import("../../state/registry")
   ).getSandbox(sandboxName);
-  if (!entry) return null;
-  return entry.agent ?? "openclaw";
+  return resolveLegacyGoogleChatApprovalAgent(entry);
 }
 
 function googleChatPairingActivationFailureMessage(cliName: string, sandboxName: string): string {
@@ -531,11 +527,14 @@ export async function execSandbox(
     let recordedAgent: string | null = null;
     try {
       recordedAgent = (deps.resolveSandboxAgent ?? defaultResolveSandboxAgent)(sandboxName);
-    } catch {
+    } catch (error) {
+      console.error(
+        `  Pairing activation authority is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      );
       console.error(googleChatPairingActivationFailureMessage(CLI_NAME, sandboxName));
       exit(1);
     }
-    if (recordedAgent === "openclaw") {
+    if (legacyAgentOwnsGoogleChatApproval(recordedAgent)) {
       let restartSucceeded = false;
       try {
         restartSucceeded = (deps.restartGateway ?? defaultRestartGateway)(sandboxName).ok;

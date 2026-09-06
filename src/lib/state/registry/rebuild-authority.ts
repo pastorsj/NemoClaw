@@ -3,6 +3,11 @@
 
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import {
+  harnessPackageIdentitiesEqual,
+  inspectHarnessPackageState,
+  type HarnessPackageIdentity,
+} from "../../agent-runtime/package/identity";
 import { cloneAndDeepFreeze } from "../../core/immutable";
 import {
   isManagedImageAgent,
@@ -32,7 +37,9 @@ export interface SandboxRebuildAuthority {
    * rather than overwriting them from the caller's stale snapshot.
    */
   readonly entryRevisionSha256: string;
-  /** Package identity used to validate both the old and replacement receipts. */
+  /** Exact package receipt bound to the managed image and startup profile. */
+  readonly harnessPackage: HarnessPackageIdentity | null;
+  /** Agent and image repository used to validate both old and replacement receipts. */
   readonly managedImage: SandboxRebuildManagedImageIdentity;
   readonly workload: ManagedWorkloadReceipt;
 }
@@ -68,14 +75,37 @@ function boundedIdentity(value: unknown): value is string {
   );
 }
 
-function clonedManagedReceipt(value: SandboxWorkloadReceipt | undefined): ManagedWorkloadReceipt {
-  const cloned = cloneSandboxWorkloadReceipt(value);
+function clonedManagedReceipt(
+  value: SandboxWorkloadReceipt | undefined,
+  harnessPackage: HarnessPackageIdentity | null,
+): ManagedWorkloadReceipt {
+  const cloned = cloneSandboxWorkloadReceipt(value, { harnessPackage });
   if (cloned?.kind !== "managed-image") {
     throw new SandboxRebuildAuthorityError(
       "a managed replacement requires a valid durable workload receipt",
     );
   }
   return cloneAndDeepFreeze(cloned);
+}
+
+function exactHarnessPackage(entry: SandboxEntry, label: string): HarnessPackageIdentity | null {
+  const state = inspectHarnessPackageState(entry.harnessPackage, entry.harnessPackageMigration);
+  if (state.status === "invalid") {
+    throw new SandboxRebuildAuthorityError(`${label} harness package authority is invalid`);
+  }
+  return state.status === "absent" ? null : state.harnessPackage;
+}
+
+function packageIdentitiesMatch(
+  left: HarnessPackageIdentity | null,
+  right: HarnessPackageIdentity | null,
+): boolean {
+  if (left === null || right === null) return left === right;
+  try {
+    return harnessPackageIdentitiesEqual(left, right);
+  } catch {
+    return false;
+  }
 }
 
 function requireReceiptAgent(
@@ -154,7 +184,8 @@ export function captureSandboxRebuildAuthority(
   if (!boundedIdentity(entry.lifecycleLiveIdentityFingerprint)) {
     throw new SandboxRebuildAuthorityError("live identity fingerprint is missing or invalid");
   }
-  const workload = clonedManagedReceipt(entry.workload);
+  const harnessPackage = exactHarnessPackage(entry, "authoritative");
+  const workload = clonedManagedReceipt(entry.workload, harnessPackage);
   const managedImageIdentity = requireReceiptAgent(
     entry.agent,
     workload,
@@ -174,6 +205,7 @@ export function captureSandboxRebuildAuthority(
     lifecycleGeneration: entry.lifecycleGeneration,
     liveIdentityFingerprint: entry.lifecycleLiveIdentityFingerprint,
     entryRevisionSha256: sandboxEntryRevision(entry),
+    harnessPackage,
     managedImage: managedImageIdentity,
     workload,
   });
@@ -191,18 +223,25 @@ export function sandboxRebuildReplacementMatchesEntry(
   entry: SandboxEntry | null | undefined,
 ): boolean {
   if (!entry) return false;
-  return (
-    entry.name === replacement.name &&
-    (entry.openshellDriver ?? null) === (replacement.openshellDriver ?? null) &&
-    entry.lifecycleGeneration === replacement.lifecycleGeneration &&
-    entry.lifecycleLiveIdentityFingerprint === replacement.lifecycleLiveIdentityFingerprint &&
-    entry.imageTag === replacement.imageTag &&
-    entry.agent === replacement.agent &&
-    isDeepStrictEqual(
-      cloneSandboxWorkloadReceipt(entry.workload),
-      cloneSandboxWorkloadReceipt(replacement.workload),
-    )
-  );
+  try {
+    const expectedPackage = exactHarnessPackage(replacement, "replacement");
+    const observedPackage = exactHarnessPackage(entry, "observed replacement");
+    return (
+      packageIdentitiesMatch(expectedPackage, observedPackage) &&
+      entry.name === replacement.name &&
+      (entry.openshellDriver ?? null) === (replacement.openshellDriver ?? null) &&
+      entry.lifecycleGeneration === replacement.lifecycleGeneration &&
+      entry.lifecycleLiveIdentityFingerprint === replacement.lifecycleLiveIdentityFingerprint &&
+      entry.imageTag === replacement.imageTag &&
+      entry.agent === replacement.agent &&
+      isDeepStrictEqual(
+        cloneSandboxWorkloadReceipt(entry.workload, { harnessPackage: observedPackage }),
+        cloneSandboxWorkloadReceipt(replacement.workload, { harnessPackage: expectedPackage }),
+      )
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function sandboxRebuildAuthorityMatchesEntry(
@@ -248,7 +287,13 @@ function validateReplacement(
       "replacement must have a distinct live identity fingerprint",
     );
   }
-  const workload = clonedManagedReceipt(replacement.workload);
+  const harnessPackage = exactHarnessPackage(replacement, "replacement");
+  if (!packageIdentitiesMatch(harnessPackage, expected.harnessPackage)) {
+    throw new SandboxRebuildAuthorityError(
+      "replacement changed the exact harness package authority",
+    );
+  }
+  const workload = clonedManagedReceipt(replacement.workload, harnessPackage);
   requireReceiptAgent(replacement.agent, workload, "replacement", expected.managedImage);
   if (replacement.imageTag !== workload.reference) {
     throw new SandboxRebuildAuthorityError(

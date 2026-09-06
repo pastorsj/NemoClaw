@@ -74,7 +74,6 @@ RUN set -eu; \
 FROM scratch AS hermes-npm-patch-payload
 
 COPY scripts/lib/reviewed-npm-archive.mts /scripts/lib/reviewed-npm-archive.mts
-COPY packages/nemoclaw-openclaw/compat/npm-remediation.mts /packages/nemoclaw-openclaw/compat/npm-remediation.mts
 COPY scripts/lib/bundled-npm-package.mts /scripts/lib/bundled-npm-package.mts
 COPY scripts/patch-bundled-npm-brace-expansion.mts /scripts/patch-bundled-npm-brace-expansion.mts
 COPY scripts/lib/patch-bundled-npm-ip-address.mts /scripts/lib/patch-bundled-npm-ip-address.mts
@@ -88,7 +87,7 @@ FROM scratch AS hermes-agent-payload
 COPY packages/nemoclaw-hermes/plugin/ /opt/nemoclaw-hermes-plugin/
 # Channel-owned Google Chat runtime asset, loaded by the plugin beside its own
 # __init__.py.
-COPY src/lib/messaging/channels/googlechat/runtime/hermes-adapter.py /opt/nemoclaw-hermes-plugin/googlechat_adapter.py
+COPY packages/nemoclaw-hermes/messaging/runtime/googlechat/hermes-adapter.py /opt/nemoclaw-hermes-plugin/googlechat_adapter.py
 COPY packages/nemoclaw-hermes/config/ /opt/nemoclaw-hermes-config/config/
 COPY packages/nemoclaw-hermes/checks/image-probes.py /opt/nemoclaw-hermes-config/image-build-probes.py
 COPY packages/nemoclaw-hermes/finalize-image-layout.sh /opt/nemoclaw-hermes-config/finalize-image-layout.sh
@@ -107,7 +106,7 @@ COPY packages/nemoclaw-hermes/runtime/managed_policy.py /opt/nemoclaw-hermes-con
 COPY packages/nemoclaw-hermes/host/managed-route.cts /opt/nemoclaw-hermes-config/host/managed-route.cts
 COPY packages/nemoclaw-hermes/host/tool-matrix.json /opt/nemoclaw-hermes-config/host/tool-matrix.json
 COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
-COPY src/lib/messaging/ /src/lib/messaging/
+COPY packages/nemoclaw-hermes/messaging/messaging-build.mts /usr/local/lib/nemoclaw/messaging-build.mts
 
 FROM scratch AS hermes-runtime-payload
 
@@ -130,13 +129,16 @@ COPY --from=managed-startup-runtime-builder /out/managed-startup-image-runtime.c
 COPY packages/nemoclaw-hermes/host/startup-adapter.cts /usr/local/lib/nemoclaw/startup-adapter.cjs
 COPY packages/nemoclaw-hermes/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
 COPY scripts/gateway-control.sh /usr/local/bin/nemoclaw-gateway-control
-COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
+COPY packages/nemoclaw-hermes/runtime/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
+COPY packages/nemoclaw-hermes/runtime/managed-gateway-profile.py /usr/local/lib/nemoclaw/managed-gateway-profile.py
 COPY packages/nemoclaw-hermes/runtime/env-boundary.py /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py
 COPY packages/nemoclaw-hermes/compat/sqlite-store.py /usr/local/lib/nemoclaw/patch-hermes-sqlite-temp-store.py
 COPY packages/nemoclaw-hermes/compat/discord-permissions.py /usr/local/lib/nemoclaw/patch-hermes-discord-recovery-permissions.py
 COPY packages/nemoclaw-hermes/runtime/managed_policy.py /usr/local/lib/nemoclaw/managed_policy.py
 COPY packages/nemoclaw-hermes/compat/langfuse-credentials.mts /usr/local/lib/nemoclaw/patch-hermes-langfuse-credentials.mts
 COPY packages/nemoclaw-hermes/runtime/dashboard-config.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py
+COPY packages/nemoclaw-hermes/runtime/state-restore.sh /usr/local/bin/nemoclaw-state-restore
+COPY packages/nemoclaw-hermes/runtime/inference-reconcile.py /usr/local/lib/nemoclaw/inference-reconcile.py
 COPY packages/nemoclaw-hermes/runtime/config-guard.py /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py
 COPY packages/nemoclaw-hermes/runtime/startup-seal.py /usr/local/lib/nemoclaw/seal-config
 COPY packages/nemoclaw-hermes/runtime/tirith-marker.py /usr/local/lib/nemoclaw/finalize-tirith-marker.py
@@ -482,10 +484,10 @@ RUN chmod -R a+rX /opt/nemoclaw-hermes-plugin/ \
 RUN find /opt/nemoclaw-hermes-config -type d -exec chmod 755 {} + \
     && find /opt/nemoclaw-hermes-config -type f -exec chmod 444 {} + \
     && chmod 444 /src/lib/tool-disclosure.ts \
+    && chmod 555 /usr/local/lib/nemoclaw/messaging-build.mts \
     && chmod 444 /scripts/lib/reviewed-npm-archive.mts /scripts/lib/bundled-npm-package.mts \
         /scripts/patch-bundled-npm-brace-expansion.mts /scripts/lib/patch-bundled-npm-ip-address.mts \
-        /scripts/patch-bundled-npm-tar.mts \
-    && chmod -R a+rX /src/lib/messaging
+        /scripts/patch-bundled-npm-tar.mts
 
 # Hermes 0.20.6 pins the Hindsight version but does not authenticate a
 # same-version wheel selected by its lazy installer. Bind that production
@@ -593,14 +595,19 @@ RUN chmod -R a+rX /opt/nemoclaw-blueprint/
 # preloads. Remove them so the completed Hermes image contains only Hermes code.
 RUN rm -rf /usr/local/lib/nemoclaw/preloads \
     && chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-managed-startup-hold /usr/local/bin/nemoclaw-managed-bootstrap /usr/local/lib/nemoclaw/sandbox-init.sh /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py /usr/local/lib/nemoclaw/patch-hermes-sqlite-temp-store.py /usr/local/lib/nemoclaw/patch-hermes-discord-recovery-permissions.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py /usr/local/lib/nemoclaw/finalize-tirith-marker.py /usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py \
-    && chown root:root /usr/local/lib/nemoclaw/hermes-startup /usr/local/lib/nemoclaw/hermes-startup/*.sh /usr/local/bin/nemoclaw-gateway-control /usr/local/lib/nemoclaw/gateway-supervisor.sh /usr/local/lib/nemoclaw/managed-gateway-control.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py /usr/local/lib/nemoclaw/hermes-cron-restore-control.py /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json \
+    && chown root:root /usr/local/lib/nemoclaw/hermes-startup /usr/local/lib/nemoclaw/hermes-startup/*.sh /usr/local/bin/nemoclaw-gateway-control /usr/local/bin/nemoclaw-state-restore /usr/local/lib/nemoclaw/gateway-supervisor.sh /usr/local/lib/nemoclaw/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-profile.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py /usr/local/lib/nemoclaw/hermes-cron-restore-control.py /usr/local/lib/nemoclaw/inference-reconcile.py /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json \
     && chmod 555 /usr/local/lib/nemoclaw/hermes-startup \
     && chmod 444 /usr/local/lib/nemoclaw/hermes-startup/*.sh \
     && for hermes_startup_script in /usr/local/bin/nemoclaw-start /usr/local/lib/nemoclaw/hermes-startup/*.sh; do bash -n "$hermes_startup_script"; done \
     && chmod 700 /usr/local/bin/nemoclaw-gateway-control /usr/local/lib/nemoclaw/hermes-cron-restore-control.py \
+    && chmod 555 /usr/local/bin/nemoclaw-state-restore \
     && chmod 500 /usr/local/lib/nemoclaw/managed-gateway-control.py \
+    && chmod 400 /usr/local/lib/nemoclaw/managed-gateway-profile.py \
     && chmod 444 /usr/local/lib/nemoclaw/corporate-ca-runtime.sh /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/gateway-supervisor.sh /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py /usr/local/lib/nemoclaw/managed_policy.py \
     && chmod 444 /usr/local/lib/nemoclaw/patch-hermes-langfuse-credentials.mts \
+    && chmod 444 /usr/local/lib/nemoclaw/inference-reconcile.py \
+    && test ! -L /usr/local/lib/nemoclaw/inference-reconcile.py \
+    && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/inference-reconcile.py)" = '0:0:444' \
     && chmod 444 /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json \
     && /opt/hermes/.venv/bin/python3 -I -c 'import runpy, yaml; assert yaml.safe_load("ready: true")["ready"] is True; runpy.run_path("/usr/local/lib/nemoclaw/hermes-runtime-config-guard.py", run_name="nemoclaw_runtime_config_guard_probe")' \
     && { \
@@ -948,7 +955,7 @@ RUN case "$NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION" in \
 # Bake reduced messaging runtime metadata for the entrypoint. Hermes runtime
 # config refresh consumes generic manifest-owned aliases from this artifact.
 # hadolint ignore=DL3059
-RUN node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent hermes --phase runtime-setup \
+RUN node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --agent hermes --phase runtime-setup \
     && runtime_plan=/usr/local/share/nemoclaw/messaging-runtime-plan.json \
     && { [ ! -f "$runtime_plan" ] || { test ! -L "$runtime_plan" \
     && node -e "const fs=require('fs'); const path=process.argv[1]; const st=fs.statSync(path); if (!st.isFile() || st.uid !== 0 || st.gid !== 0 || (st.mode & 0o022) !== 0) throw new Error('unsafe runtime plan file metadata'); const p=JSON.parse(fs.readFileSync(path,'utf8')); for (const k of ['agentRender','buildSteps','stateUpdates','healthChecks']) if (Object.hasOwn(p,k)) throw new Error('runtime plan contains unreduced key '+k); const runtimeSetup=p.runtimeSetup; const isObject=(v)=>v && typeof v === 'object' && !Array.isArray(v); if (!isObject(runtimeSetup) || !Array.isArray(runtimeSetup.nodePreloads) || !Array.isArray(runtimeSetup.envAliases) || !Array.isArray(runtimeSetup.secretScans) || !runtimeSetup.nodePreloads.every(isObject) || !runtimeSetup.envAliases.every(isObject) || !runtimeSetup.secretScans.every(isObject)) throw new Error('runtime plan missing reduced runtimeSetup shape');" "$runtime_plan"; }; }
@@ -964,7 +971,7 @@ RUN unset SSL_CERT_FILE REQUESTS_CA_BUNDLE; \
       export SSL_CERT_FILE=/usr/local/share/nemoclaw/corporate-ca.pem; \
       export REQUESTS_CA_BUNDLE=/usr/local/share/nemoclaw/corporate-ca.pem; \
     fi; \
-    node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent hermes --phase agent-install
+    node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --agent hermes --phase agent-install
 
 # Managed images have no serialized messaging plan. Install their complete
 # reviewed package union from the selected wheel stage. Portable Podman uses the
@@ -975,7 +982,7 @@ COPY --from=hermes-managed-teams-wheels / /opt/nemoclaw-hermes-teams-wheels/
 # hadolint ignore=DL3059
 RUN if [ "$NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION" = "1" ]; then \
         UV_OFFLINE=true UV_FIND_LINKS=/opt/nemoclaw-hermes-teams-wheels \
-        node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts \
+        node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts \
             --agent hermes --phase managed-image-capability-union; \
     fi \
     && /opt/hermes/.venv/bin/python -I -c \
@@ -1199,7 +1206,7 @@ USER sandbox
 
 # Apply messaging render and post-agent-install build-file hooks after agent/plugin installation.
 # hadolint ignore=DL3059
-RUN node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent hermes --phase post-agent-install
+RUN node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --agent hermes --phase post-agent-install
 
 # Write the default SOUL.md (agent identity) for the sandboxed agent.
 # This is the stock Hermes default soul (hermes_cli/default_soul.py,
@@ -1748,6 +1755,7 @@ RUN check_metadata() { \
     && test ! -L /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh \
     && check_metadata /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh 'root:root 444' \
     && check_metadata /usr/local/bin/nemoclaw-gateway-control 'root:root 700' \
+    && check_metadata /usr/local/bin/nemoclaw-state-restore 'root:root 555' \
     && check_metadata /usr/local/lib/nemoclaw/hermes-cron-restore-control.py 'root:root 700' \
     && check_metadata /usr/local/lib/nemoclaw/hermes-wrapper.py 'root:root 755' \
     && check_metadata /usr/local/lib/nemoclaw/validate-hermes-cli-adapter.py 'root:root 755' \

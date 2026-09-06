@@ -113,7 +113,7 @@ describe("OpenClaw session adapter", () => {
     expect(interpret(output, true)).toEqual({ kind: "output", output });
   });
 
-  it("builds canonical delete and reset gateway plans", () => {
+  it("builds canonical delete and reset capture commands", () => {
     const deletion = adapter.buildSessionMutationPlan({
       operation: "delete",
       key: "telegram:t-1",
@@ -123,9 +123,12 @@ describe("OpenClaw session adapter", () => {
       verboseOutput: false,
     });
     expect(deletion).toEqual({
-      kind: "admin-rpc",
-      method: "sessions.delete",
-      params: { key: "agent:work:telegram:t-1", deleteTranscript: false },
+      kind: "capture",
+      command: [
+        "/usr/local/bin/nemoclaw-openclaw-session-admin",
+        "sessions.delete",
+        JSON.stringify({ key: "agent:work:telegram:t-1", deleteTranscript: false }),
+      ],
     });
     expect(
       adapter.buildSessionMutationPlan({
@@ -137,9 +140,12 @@ describe("OpenClaw session adapter", () => {
         verboseOutput: false,
       }),
     ).toEqual({
-      kind: "admin-rpc",
-      method: "sessions.reset",
-      params: { key: "agent:main:main", reason: "new" },
+      kind: "capture",
+      command: [
+        "/usr/local/bin/nemoclaw-openclaw-session-admin",
+        "sessions.reset",
+        JSON.stringify({ key: "agent:main:main", reason: "new" }),
+      ],
     });
   });
 
@@ -166,13 +172,13 @@ describe("OpenClaw session adapter", () => {
       verboseOutput: false,
     };
     const plan = adapter.buildSessionMutationPlan(request);
-    expect(plan.kind).toBe("admin-rpc");
-    if (plan.kind !== "admin-rpc") return;
+    expect(plan.kind).toBe("capture");
+    if (plan.kind !== "capture") return;
     expect(
       adapter.interpretSessionMutationOutput({
         request,
         plan,
-        payload: { ok: true, key: "agent:main:slot", entry: { id: "sid-1" } },
+        output: JSON.stringify({ ok: true, key: "agent:main:slot", entry: { id: "sid-1" } }),
       }),
     ).toEqual({
       kind: "completed",

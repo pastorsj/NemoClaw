@@ -20,12 +20,28 @@ config:
   dir: /app/config
   config_file: config.toml
   format: toml
+state_lifecycle:
+  backup_quiescence:
+    kind: not-required
+  snapshot_restore: []
+  rebuild:
+    image_plugin_provenance: not-required
+    scheduled_work:
+      support: disabled
+      reason: NemoCUA does not run scheduled work.
+    post_restore:
+      kind: not-required
 state_dirs: []
 device_pairing: false
 inference:
+  config_update:
+    support: unsupported
+    reason: The scenario supplies the complete NemoCUA configuration.
   provider_type: openai_compatible
   default_model: nvidia/nemotron-3-super-120b-a12b
   proxy_support: implicit
 mcp:
   support: disabled
   reason: The experimental browser MVP does not use an MCP bridge
+messaging:
+  support: disabled

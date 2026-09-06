@@ -117,10 +117,7 @@ const profileDocument = [
   "",
 ].join("\n");
 const entraProfileDocument = readFileSync(
-  new URL(
-    "../../../../../nemoclaw-blueprint/provider-profiles/entra-runtime-v1.yaml",
-    import.meta.url,
-  ),
+  new URL("../../test-fixtures/entra-profile.yaml", import.meta.url),
   "utf8",
 );
 

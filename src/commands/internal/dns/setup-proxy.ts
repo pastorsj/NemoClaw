@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Args } from "@oclif/core";
-import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
+import { NemoClawInternalCommand } from "../../../lib/cli/internal-command";
 
 import { runSetupDnsProxy } from "../../../lib/actions/dns";
 
-export default class InternalDnsSetupProxyCommand extends NemoClawCommand {
-  static hidden = true;
+export default class InternalDnsSetupProxyCommand extends NemoClawInternalCommand {
   static strict = true;
   static summary = "Internal: configure sandbox DNS proxy";
   static description = "Configure the DNS forwarder bridge inside a sandbox pod.";

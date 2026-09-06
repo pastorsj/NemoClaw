@@ -181,7 +181,7 @@ export const slackManifest = {
     {
       id: "openclawPluginPackage",
       agent: "openclaw",
-      manager: "openclaw-plugin",
+      manager: "node-package",
       spec: "npm:@openclaw/slack@{{openclaw.version}}",
       pin: true,
       integrityByVersion: {

@@ -12,6 +12,7 @@ const CONFIG_GUARD = "/usr/local/lib/nemoclaw/hermes-runtime-config-guard.py";
 const CONFIG_HASH = "/etc/nemoclaw/hermes.config-hash";
 const RESTART_STATE = "/run/nemoclaw/hermes-restart-seal.json";
 const HEADER_VALUE_MAX_LENGTH = 128;
+const PROXY_REWRITE_SENTINEL = "sk-OPENSHELL-PROXY-REWRITE";
 
 function requireTarget(target: HarnessConfigTarget): void {
   if (
@@ -25,6 +26,93 @@ function requireTarget(target: HarnessConfigTarget): void {
 
 function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function cloneConfig(config: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
+}
+
+function inferenceApiMode(api: string): string | null {
+  switch (api) {
+    case "openai-completions":
+      return null;
+    case "anthropic-messages":
+      return "anthropic_messages";
+    case "openai-responses":
+      return "codex_responses";
+    default:
+      throw new Error("Hermes received an unsupported inference API");
+  }
+}
+
+function providerKey(provider: string): string {
+  const normalized = provider
+    .trim()
+    .toLowerCase()
+    .replaceAll(" ", "-")
+    .replace(/[()]/gu, "")
+    .replace(/-+/gu, "-")
+    .replace(/^-|-$/gu, "");
+  return normalized || "nemoclaw-inference";
+}
+
+function applyInferenceRoute(
+  config: Record<string, unknown>,
+  request: Parameters<HarnessConfigAdapterModule["prepareInferenceConfig"]>[0],
+): void {
+  const providerName = request.route.upstreamProvider || "nemoclaw-inference";
+  const nextProviderKey = providerKey(providerName);
+  const apiMode = inferenceApiMode(request.route.api);
+  const previousUpstream = isObject(config._nemoclaw_upstream) ? config._nemoclaw_upstream : {};
+  const previousProviderKey =
+    typeof previousUpstream.provider_key === "string" ? previousUpstream.provider_key : "";
+  const modelConfig: Record<string, unknown> = {
+    default: request.route.model,
+    provider: "custom",
+    base_url: request.route.baseUrl,
+    api_key: PROXY_REWRITE_SENTINEL,
+  };
+  if (apiMode) modelConfig.api_mode = apiMode;
+  if (request.contextWindow !== null) modelConfig.context_length = request.contextWindow;
+
+  const providerConfig: Record<string, unknown> = {
+    name: providerName,
+    api: request.route.baseUrl,
+    api_key: PROXY_REWRITE_SENTINEL,
+    default_model: request.route.model,
+    discover_models: true,
+  };
+  if (apiMode) providerConfig.transport = apiMode;
+  const customProvider: Record<string, unknown> = {
+    name: providerName,
+    base_url: request.route.baseUrl,
+    api_key: PROXY_REWRITE_SENTINEL,
+    discover_models: true,
+  };
+  if (apiMode) customProvider.api_mode = apiMode;
+
+  const providers = isObject(config.providers) ? { ...config.providers } : {};
+  if (previousProviderKey && previousProviderKey !== nextProviderKey) {
+    delete providers[previousProviderKey];
+  }
+  providers[nextProviderKey] = providerConfig;
+  const customProviders = Array.isArray(config.custom_providers)
+    ? config.custom_providers.filter(
+        (entry) =>
+          !isObject(entry) ||
+          (entry.name !== previousUpstream.provider && entry.name !== providerName),
+      )
+    : [];
+  customProviders.push(customProvider);
+
+  config._nemoclaw_upstream = {
+    provider: providerName,
+    provider_key: nextProviderKey,
+    model: request.route.model,
+  };
+  config.model = modelConfig;
+  config.providers = providers;
+  config.custom_providers = customProviders;
 }
 
 function sanitizeHeaderValue(value: string): string {
@@ -102,7 +190,34 @@ finally:
 const configAdapter: HarnessConfigAdapterModule = {
   describeInferenceConfig(request) {
     requireTarget(request.target);
-    return { kind: "mutable" };
+    return {
+      kind: "mutable",
+      providerApiOverrides: [
+        { provider: "compatible-anthropic-endpoint", api: "openai-completions" },
+      ],
+    };
+  },
+
+  prepareInferenceConfig(request) {
+    requireTarget(request.target);
+    const config = cloneConfig(request.config);
+    const before = JSON.stringify(config);
+    applyInferenceRoute(config, request);
+    return {
+      kind: "mutation",
+      config,
+      changed: before !== JSON.stringify(config),
+      postCommit: {
+        configSync: "required",
+        gatewayRestart: { kind: "not-required" },
+        sandboxReconcile: {
+          kind: "command",
+          trigger: "after-config-sync",
+          command: ["/usr/bin/python3", "-I", "/usr/local/lib/nemoclaw/inference-reconcile.py"],
+          timeoutSeconds: 30,
+        },
+      },
+    };
   },
 
   prepareConfigUpdate(request) {

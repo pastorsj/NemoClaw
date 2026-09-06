@@ -53,9 +53,11 @@ import {
   usesLegacyRuntimeLifecycleCompatibility,
 } from "./gateway-state";
 import * as snapshotBackup from "./snapshot/backup-authority";
+import { legacyRebuildPreservesScheduledWork } from "./rebuild/legacy-state";
 
 export { removeStaleRebuildDockerOrphan };
 export { replaceOpenShellRuntimeSelectionEnv, snapshotOpenShellEnv };
+export { legacyRebuildPreservesScheduledWork };
 
 export type RebuildSandboxEntry = SandboxEntry & { agents?: unknown[] };
 export { rebuildPackageAuthorityMatches, rebuildPackageIdentityMatches } from "./rebuild/authority";
@@ -291,15 +293,16 @@ export function ensureRebuildAgentBaseImage(
   bail: (msg: string, code?: number) => never,
   options: RebuildAgentBaseImageOptions = {},
 ): RebuildAgentBaseImagePreflight {
-  if (agentDefinition.name === "openclaw") {
+  const rebuildBaseImage = agentDefinition.managedImage?.rebuild_base_image ?? "resolve";
+  if (rebuildBaseImage === "not-required") {
     return { ok: true, imageRef: null, overrideEnvVar: null };
   }
   const agentDef = agentDefinition;
   const overrideEnvVar = getAgentSandboxBaseImageEnvVar(agentDef.name);
   const explicitOverride = process.env[overrideEnvVar]?.trim();
   const hasExplicitOverride = Boolean(explicitOverride);
-  const requirePinnedHermesBase =
-    agentDef.name === "hermes" && !hasExplicitOverride && !options.resolutionHint;
+  const requirePinnedRemoteBase =
+    rebuildBaseImage === "pinned-remote" && !hasExplicitOverride && !options.resolutionHint;
   try {
     // Prove that a retained local alias names the tracked official image before
     // the resolver sees it, and lease that proof only for this resolution call.
@@ -318,8 +321,8 @@ export function ensureRebuildAgentBaseImage(
     try {
       result = ensureAgentBaseImage(agentDef, {
         forceBaseImageRebuild:
-          !requirePinnedHermesBase && !hasExplicitOverride && !options.resolutionHint,
-        ...(requirePinnedHermesBase ? { allowLocalFallback: false } : {}),
+          !requirePinnedRemoteBase && !hasExplicitOverride && !options.resolutionHint,
+        ...(requirePinnedRemoteBase ? { allowLocalFallback: false } : {}),
         ...(options.resolutionHint !== undefined ? { resolutionHint: options.resolutionHint } : {}),
         ...(options.forceBaseImageRefresh !== undefined
           ? { forceBaseImageRefresh: options.forceBaseImageRefresh }
@@ -329,10 +332,12 @@ export function ensureRebuildAgentBaseImage(
       restoreExplicitOverrideTrust();
     }
     if (
-      requirePinnedHermesBase &&
+      requirePinnedRemoteBase &&
       (!result.imageTag || !isImmutableRemoteBaseImageRef(result.imageTag))
     ) {
-      throw new Error("Hermes rebuild requires the release-pinned immutable base image");
+      throw new Error(
+        `Agent '${agentDef.name}' rebuild requires the package-pinned immutable base image`,
+      );
     }
     if (agentDef.name === "nemocua") {
       if (!result.imageTag) throw new Error("NemoCUA caller image resolution returned no image");

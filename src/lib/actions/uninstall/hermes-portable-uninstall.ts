@@ -126,6 +126,8 @@ function compareCodeUnits(left: string, right: string): number {
 }
 
 function schema5SandboxNames(input: HermesPortableUninstallInput): string[] {
+  // The schema-5 Portable receipt directory and exact registry document jointly
+  // qualify this Hermes product identity; ordinary package receipts never enter.
   const root = path.join(input.stateDir, HERMES_PORTABLE_RECEIPT_DIRECTORY);
   const directory = readPortableAuthorityDirectory(root, false);
   if (directory.entries.length === 0) return [];
@@ -197,6 +199,7 @@ function gatewayRunner(
 }
 
 function requireSandboxRow(row: SandboxEntry, receipt: HermesPortableConfiguredReceipt): void {
+  // Revalidate the registry projection fixed by the qualified Portable receipt.
   if (
     row.name !== receipt.sandboxName ||
     row.agent !== "hermes" ||

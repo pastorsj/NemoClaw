@@ -7,6 +7,7 @@ import { advanceTo } from "./result";
 import type { OnboardMachineRunnerRuntime } from "./runner";
 import type { OnboardSequencePhase } from "./sequence-runner";
 import { runOnboardSequenceWithRunner } from "./sequence-runner";
+import { LEGACY_OPENCLAW_SETUP_STATE } from "./types";
 
 export function initialOnboardFlowPhases<Context extends OnboardFlowContext>(
   phases: readonly OnboardSequencePhase<Context>[],
@@ -32,7 +33,9 @@ export function finalOnboardFlowPhases<Context extends OnboardFlowContext>(
   phases: readonly OnboardSequencePhase<Context>[],
 ): OnboardSequencePhase<Context>[] {
   return phases.filter((phase) =>
-    ["openclaw", "agent_setup", "policies", "finalizing", "post_verify"].includes(phase.state),
+    [LEGACY_OPENCLAW_SETUP_STATE, "agent_setup", "policies", "finalizing", "post_verify"].includes(
+      phase.state,
+    ),
   );
 }
 

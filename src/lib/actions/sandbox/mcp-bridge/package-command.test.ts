@@ -58,7 +58,7 @@ beforeEach(() => {
   mocks.loadHostModule.mockReset();
   mocks.buildRegistration.mockReset().mockReturnValue({
     execution: {
-      command: ["future-register"],
+      command: { kind: "argv", argv: ["future-register"] },
       timeoutSeconds: 15,
       success: { kind: "exit-zero" },
       failureMessage: "future registration failed",
@@ -68,17 +68,25 @@ beforeEach(() => {
   });
   mocks.buildRemoval.mockReset().mockReturnValue({
     execution: {
-      command: "future-remove",
+      command: {
+        kind: "shell",
+        script: "future-remove",
+        shellTrust: "package-authored-code",
+      },
       timeoutSeconds: 15,
       success: { kind: "exit-zero" },
       failureMessage: "future removal failed",
     },
     outcome: { kind: "removed" },
   });
-  mocks.buildInspection.mockReset().mockReturnValue("future-inspect");
+  mocks.buildInspection.mockReset().mockReturnValue({
+    kind: "shell",
+    script: "future-inspect",
+    shellTrust: "package-authored-code",
+  });
   mocks.describeMutation.mockReset().mockReturnValue({
     kind: "command",
-    command: ["future-probe"],
+    command: { kind: "argv", argv: ["future-probe"] },
     success: { kind: "exit-zero" },
     timeoutSeconds: 10,
     failureMessage: "future runtime is unavailable",
@@ -120,7 +128,7 @@ describe("installed MCP package command boundary", () => {
         managedEntries: [ENTRY],
         configDirectory: "/sandbox/.future",
       }),
-    ).toMatchObject({ execution: { command: ["future-register"] } });
+    ).toMatchObject({ execution: { command: { kind: "argv", argv: ["future-register"] } } });
     expect(mocks.loadHostModule).toHaveBeenCalledWith(PACKAGE_IDENTITY, {
       expectedAdapter: "future-config",
     });
@@ -151,7 +159,15 @@ describe("installed MCP package command boundary", () => {
         force: true,
         adaptiveTeardown: true,
       }),
-    ).toMatchObject({ execution: { command: "future-remove" } });
+    ).toMatchObject({
+      execution: {
+        command: {
+          kind: "shell",
+          script: "future-remove",
+          shellTrust: "package-authored-code",
+        },
+      },
+    });
     expect(mocks.buildRemoval).toHaveBeenCalledWith({
       entry: {
         server: "docs",
@@ -190,7 +206,7 @@ describe("installed MCP package command boundary", () => {
 
     expect(describeInstalledMcpMutationCapability("alpha", "future-config", ENTRY.agent)).toEqual({
       kind: "command",
-      command: ["future-probe"],
+      command: { kind: "argv", argv: ["future-probe"] },
       success: { kind: "exit-zero" },
       timeoutSeconds: 10,
       failureMessage: "future runtime is unavailable",

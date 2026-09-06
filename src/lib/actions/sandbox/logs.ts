@@ -5,7 +5,7 @@ import { spawn, type StdioOptions } from "node:child_process";
 import type { Writable } from "node:stream";
 import { getOpenshellBinary, runOpenshell } from "../../adapters/openshell/runtime";
 import * as agentRuntime from "../../agent/runtime";
-import { spawnExitCode } from "../../core/process-exit";
+import { spawnExitCode } from "../../core/process-status";
 import type { SandboxLogsOptions } from "../../domain/sandbox/log-options";
 import {
   buildEnableSandboxAuditLogsArgs,

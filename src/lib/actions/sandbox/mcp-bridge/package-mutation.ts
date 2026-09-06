@@ -102,16 +102,16 @@ function executeMcpMutationPlan(
   let result: McpMutationCommandResult | null;
   try {
     result =
-      typeof execution.command === "string"
+      execution.command.kind === "shell"
         ? dependencies.executeShellCommand(
             sandboxName,
-            execution.command,
+            execution.command.script,
             execution.timeoutSeconds,
             runtimeSelection,
           )
         : dependencies.executeArgvCommand(
             sandboxName,
-            execution.command,
+            execution.command.argv,
             execution.timeoutSeconds,
             runtimeSelection,
           );

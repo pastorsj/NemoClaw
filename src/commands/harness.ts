@@ -11,9 +11,9 @@ export default class HarnessCommand extends NemoClawCommand {
   static usage = ["harness <activate|install|list|remove|validate>"];
   static examples = [
     "<%= config.bin %> harness list",
-    "<%= config.bin %> harness install openclaw",
-    "<%= config.bin %> harness activate openclaw --digest <sha256>",
-    "<%= config.bin %> harness remove openclaw --yes",
+    "<%= config.bin %> harness install <id>",
+    "<%= config.bin %> harness activate <id> --digest <sha256>",
+    "<%= config.bin %> harness remove <id> --yes",
     "<%= config.bin %> harness validate ./dist/nemoclaw-example",
   ];
   static flags = {};

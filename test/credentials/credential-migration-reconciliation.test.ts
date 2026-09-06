@@ -75,6 +75,9 @@ async function finalizeMigration(
       settleOrdinaryOpenClawPairing: async () => ({ kind: "settled" }),
       ordinaryOpenClawPairingIncompleteMessage: () =>
         "OpenClaw onboarding is incomplete; resume onboarding.",
+      settlePackageDevicePairing: async () => ({ kind: "settled" }),
+      packageDevicePairingIncompleteMessage: () =>
+        "Harness onboarding is incomplete; resume onboarding.",
       readRegistryAgent: () => "openclaw",
       settlePortablePairing: async () => ({ kind: "settled" }),
       portablePairingIncompleteMessage: () =>

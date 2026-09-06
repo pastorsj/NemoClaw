@@ -193,6 +193,132 @@ function buildStartupPlan(adapterRequest: StartupAdapterRequest): HarnessStartup
   };
 }
 
-const startupAdapter: HarnessStartupAdapterModule<StartupAdapterRequest> = { buildStartupPlan };
+function requireStartupProfileAuthority(request: {
+  readonly packageId: string;
+  readonly harnessPackage: { readonly id: string };
+}): void {
+  if (request.packageId !== PACKAGE_ID || request.harnessPackage.id !== PACKAGE_ID) {
+    fail("startup profile identity is inconsistent");
+  }
+}
+
+function prepareReasoningEffort(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+): "default" | "low" | "medium" | "high" {
+  const raw = request.input.environment.NEMOCLAW_REASONING_EFFORT?.trim().toLowerCase();
+  const value = raw || request.previousDesiredState?.tuning.reasoningEffort || "default";
+  if (value === "default" || value === "low" || value === "medium" || value === "high") {
+    return value;
+  }
+  return fail("NEMOCLAW_REASONING_EFFORT is invalid");
+}
+
+function prepareStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["prepareStartupProfile"]> {
+  requireStartupProfileAuthority(request);
+  const input = request.input;
+  const candidate = input.inference.candidates.find(
+    (entry) => entry.requestedApi === "openai-completions" && entry.api === "openai-completions",
+  );
+  if (!candidate) fail("an OpenAI Completions inference candidate is required");
+  if (input.dashboard.managed || input.messagingPlan !== null || input.webSearch !== null) {
+    fail("DCode does not support dashboard, messaging, or web-search startup intent");
+  }
+  if (input.tools.enabledGateways.length > 0) fail("DCode does not support tool gateways");
+  const desiredState: HarnessStartupSettings = {
+    configuration: {
+      agent: PACKAGE_ID,
+      autoApprovalMode: input.approvalMode,
+      observabilityEnabled: input.observabilityEnabled,
+    },
+    inference: {
+      routeProvider: candidate.routeProvider,
+      upstreamProvider: input.inference.selectedProvider ?? candidate.routeProvider,
+      model: input.inference.model,
+      routedBaseUrl: candidate.routedBaseUrl,
+      upstreamEndpointUrl: input.inference.endpointUrl,
+      api: candidate.api,
+      primaryModelRef: null,
+      compatibility: null,
+      inputModalities: null,
+    },
+    proxy: input.proxy,
+    dashboard: { agent: PACKAGE_ID, mode: "disabled" },
+    tools: { disclosure: input.tools.disclosure, enabledGateways: [] },
+    messaging: { plan: null },
+    tuning: {
+      contextWindow: null,
+      maxTokens: null,
+      reasoning: null,
+      reasoningEffort: prepareReasoningEffort(request),
+    },
+    corporateCa: input.corporateCa,
+  };
+  buildStartupPlan({ packageId: PACKAGE_ID, settings: desiredState, applicationEnvironment: {} });
+  return {
+    kind: "prepared",
+    desiredState,
+    credentialProxyReplayRequired: false,
+    dashboardRemoteBindPrepared: false,
+  };
+}
+
+function packageConfigForDesiredState(
+  request: Parameters<HarnessStartupAdapterModule["buildInitialStartupProfile"]>[0],
+): StartupPackageConfig {
+  requireStartupProfileAuthority(request);
+  buildStartupPlan({
+    packageId: request.packageId,
+    settings: request.desiredState,
+    applicationEnvironment: {},
+  });
+  return { settings: request.desiredState } as unknown as StartupPackageConfig;
+}
+
+function canonicalStartupJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalStartupJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalStartupJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? fail("startup profile contains a non-JSON value");
+}
+
+function buildInitialStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["buildInitialStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["buildInitialStartupProfile"]> {
+  return { kind: "package-config", packageConfig: packageConfigForDesiredState(request) };
+}
+
+function reconcileStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["reconcileStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["reconcileStartupProfile"]> {
+  normalizeStartupRequest({
+    profileKind: "package",
+    packageId: request.packageId,
+    harnessPackage: request.harnessPackage,
+    packageConfig: request.currentPackageConfig as StartupPackageConfig,
+    corporateCa: request.desiredState.corporateCa,
+    applicationEnvironment: {},
+  });
+  const packageConfig = packageConfigForDesiredState(request);
+  return {
+    kind: "package-config",
+    packageConfig,
+    changed:
+      canonicalStartupJson(packageConfig) !== canonicalStartupJson(request.currentPackageConfig),
+  };
+}
+
+const startupAdapter: HarnessStartupAdapterModule<StartupAdapterRequest> = {
+  buildStartupPlan,
+  prepareStartupProfile,
+  buildInitialStartupProfile,
+  reconcileStartupProfile,
+};
 
 export = startupAdapter;

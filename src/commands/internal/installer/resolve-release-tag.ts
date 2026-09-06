@@ -3,12 +3,11 @@
 
 import { Flags } from "@oclif/core";
 import { jsonFlag } from "../../../lib/cli/common-flags";
-import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
+import { NemoClawInternalCommand } from "../../../lib/cli/internal-command";
 
 import { resolveInstallRef } from "../../../lib/domain/installer/ref";
 
-export default class InternalInstallerResolveReleaseTagCommand extends NemoClawCommand {
-  static hidden = true;
+export default class InternalInstallerResolveReleaseTagCommand extends NemoClawInternalCommand {
   static strict = true;
   static summary = "Internal: resolve the installer release ref";
   static description = "Resolve the installer ref using the same precedence as install.sh.";

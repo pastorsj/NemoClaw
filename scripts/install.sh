@@ -2879,14 +2879,15 @@ reconcile_and_select_installer_harness() {
     nemocua) return 0 ;;
   esac
 
-  # Automation and an explicit standard selection preserve the established
-  # requested/default harness result even when another package is installed.
+  # Automation and an explicit selection preserve the requested/default
+  # harness result even when another package is installed. The typed command
+  # installs reviewed packages and keeps verified installed-only packages.
   if installer_non_interactive || [[ -n "${NEMOCLAW_AGENT:-}" ]]; then
-    info "Installing reviewed harness package '${selector}' before onboarding…"
+    info "Reconciling harness package '${selector}' before onboarding…"
     "$cli_runner" harness install "$selector"
     run_installer_harness_reconciliation "$cli_runner"
     [[ "${_INSTALLER_HARNESS_RECONCILE_OUTCOME:-}" == "ready" ]] \
-      || error "The reviewed harness install did not produce a verified package-store result."
+      || error "The harness package selection did not produce a verified package-store result."
     return 0
   fi
 
@@ -2903,7 +2904,7 @@ reconcile_and_select_installer_harness() {
     return 0
   fi
   [[ "${_INSTALLER_HARNESS_RECONCILE_OUTCOME:-}" == "ready" ]] \
-    || error "The reviewed harness install did not produce a verified package-store result."
+    || error "The harness package selection did not produce a verified package-store result."
 }
 
 run_preupgrade_backup() {

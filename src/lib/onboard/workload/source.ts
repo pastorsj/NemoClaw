@@ -5,7 +5,9 @@ import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-co
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 
 import {
+  bindPackageDeclaredManagedImageContract,
   bindPackageManagedImageContract,
+  hasPackageManagedImagePublication,
   isCandidateManagedImageAgent,
   isManagedImageAgent,
   isManagedImagePlatform,
@@ -190,8 +192,12 @@ export function resolveSandboxWorkloadSource(
 
   const agentName = options.agentName;
   const stockManagedAgent = isManagedImageAgent(agentName);
-  const receiptBackedPackage =
-    options.harnessPackage != null && options.managedImage != null;
+  const receiptBackedPackage = options.harnessPackage != null && options.managedImage != null;
+  if (receiptBackedPackage && options.harnessPackage!.id !== agentName) {
+    throw new SandboxWorkloadSourceError(
+      `Managed image package receipt '${options.harnessPackage!.id}' does not match selected agent '${agentName}'.`,
+    );
+  }
   if (!stockManagedAgent && !receiptBackedPackage) {
     return unavailableSource(
       options,
@@ -228,19 +234,39 @@ export function resolveSandboxWorkloadSource(
     return unavailableSource(options, "runtime-unsupported", runtimeSupportError);
   }
 
+  const expectedPlatform = managedImageRuntimePlatform(options.runtime);
+  if (expectedPlatform === null) {
+    throw new SandboxWorkloadSourceError(
+      `Driver '${options.runtime.driverName}' has no unambiguous managed-image host platform.`,
+    );
+  }
+
+  if (receiptBackedPackage && hasPackageManagedImagePublication(managedImage)) {
+    try {
+      const contract = bindPackageDeclaredManagedImageContract(
+        options.harnessPackage!,
+        managedImage,
+        expectedPlatform,
+      );
+      return {
+        kind: "managed-image",
+        reference: contract.reference,
+        contract,
+      };
+    } catch (error) {
+      throw new SandboxWorkloadSourceError(
+        `Package-declared managed image publication for '${agentName}' failed closed validation.`,
+        { cause: error },
+      );
+    }
+  }
+
   const candidate = options.catalog[agentName];
   if (candidate === undefined) {
     return unavailableSource(
       options,
       "contract-unavailable",
       "the catalog has no exact contract for that agent",
-    );
-  }
-
-  const expectedPlatform = managedImageRuntimePlatform(options.runtime);
-  if (expectedPlatform === null) {
-    throw new SandboxWorkloadSourceError(
-      `Driver '${options.runtime.driverName}' has no unambiguous managed-image host platform.`,
     );
   }
 

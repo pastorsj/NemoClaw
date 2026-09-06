@@ -88,13 +88,16 @@ vi.mock("./mcp-bridge-runtime-capabilities", () => ({
 vi.mock("./mcp-bridge-state", () => ({
   assertMcpDestroyNotPending: mocks.assertMcpDestroyNotPending,
   bridgeState: mocks.bridgeState,
-  ensureSandboxGatewaySelected: mocks.ensureSandboxGatewaySelected,
   getBridgeAdapter: mocks.getBridgeAdapter,
   getSandboxAgent: mocks.getSandboxAgent,
   getSandboxOrThrow: mocks.getSandboxOrThrow,
   nowIso: vi.fn(() => new Date(0).toISOString()),
   requireSandboxHarnessPackage: mocks.requireSandboxHarnessPackage,
   setBridgeState: vi.fn(),
+}));
+
+vi.mock("./mcp-bridge/gateway-selection", () => ({
+  ensureSandboxGatewaySelected: mocks.ensureSandboxGatewaySelected,
 }));
 
 vi.mock("./mcp-bridge-validation", () => ({

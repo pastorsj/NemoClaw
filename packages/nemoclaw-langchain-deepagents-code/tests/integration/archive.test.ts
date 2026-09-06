@@ -152,6 +152,12 @@ describe("published LangChain Deep Agents Code package", () => {
     expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
   });
 
+  it("ships the package-owned state backup readiness command as executable", () => {
+    const artifact = "runtime/backup-ready.sh";
+    expect((packedFiles.get(artifact)?.mode ?? 0) & 0o111).not.toBe(0);
+    expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
+  });
+
   it("loads package-owned runtime modules from a normal node_modules installation", () => {
     const configAdapter = loadInstalledModule<{
       describeInferenceConfig(request: Record<string, unknown>): {
@@ -174,13 +180,21 @@ describe("published LangChain Deep Agents Code package", () => {
         replaceExisting: boolean;
         teardownRollback: boolean;
         configDirectory: string | null;
-      }): { execution: { command: string } };
+      }): {
+        execution: {
+          command: { kind: "shell"; script: string; shellTrust: "package-authored-code" };
+        };
+      };
       buildMcpRemovalPlan(request: {
         entry: { server: string; url: string; headers: Record<string, string> };
         force: boolean;
         adaptiveTeardown: boolean;
         configDirectory: string | null;
-      }): { execution: { command: string } };
+      }): {
+        execution: {
+          command: { kind: "shell"; script: string; shellTrust: "package-authored-code" };
+        };
+      };
       buildStatusCommand(entry: {
         server: string;
         url: string;
@@ -190,14 +204,14 @@ describe("published LangChain Deep Agents Code package", () => {
         entry: { server: string; url: string; headers: Record<string, string> };
         failOnMismatch: boolean;
         configDirectory: string | null;
-      }): string;
+      }): { kind: "shell"; script: string; shellTrust: "package-authored-code" };
       buildMcpRuntimePlan(request: { command: string[] }): {
         command: string[];
         environmentVariablesToRemove: string[];
       };
       describeMcpMutationCapability(request: { sandboxName: string }): {
         kind: string;
-        command: string;
+        command: { kind: "shell"; script: string; shellTrust: "package-authored-code" };
         success: { kind: string; value: string };
       };
       describeMcpTeardownCapability(request: { sandboxName: string }): { kind: string };
@@ -209,7 +223,7 @@ describe("published LangChain Deep Agents Code package", () => {
     }>("host/mcp-adapter.cts");
 
     expect(configAdapter.describeInferenceConfig({})).toMatchObject({
-      kind: "immutable",
+      kind: "unsupported",
       reason: expect.stringContaining("Re-onboard"),
     });
     expect(configAdapter.prepareConfigUpdate({})).toMatchObject({
@@ -233,10 +247,18 @@ describe("published LangChain Deep Agents Code package", () => {
         failOnMismatch: false,
         configDirectory: null,
       }),
-    ).toContain("example");
+    ).toMatchObject({
+      kind: "shell",
+      script: expect.stringContaining("example"),
+      shellTrust: "package-authored-code",
+    });
     expect(mcp.describeMcpMutationCapability({ sandboxName: "sandbox" })).toMatchObject({
       kind: "command",
-      command: "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability",
+      command: {
+        kind: "shell",
+        script: "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability",
+        shellTrust: "package-authored-code",
+      },
       success: {
         kind: "stdout-trimmed-equals",
         value: "NEMOCLAW_DEEPAGENTS_MCP_CAPABILITY=2",
@@ -267,7 +289,15 @@ describe("published LangChain Deep Agents Code package", () => {
         teardownRollback: false,
         configDirectory: null,
       }),
-    ).toMatchObject({ execution: { command: expect.stringContaining("expectedServers") } });
+    ).toMatchObject({
+      execution: {
+        command: {
+          kind: "shell",
+          script: expect.stringContaining("expectedServers"),
+          shellTrust: "package-authored-code",
+        },
+      },
+    });
     expect(
       mcp.buildMcpRemovalPlan({
         entry: mcpEntry,
@@ -276,7 +306,13 @@ describe("published LangChain Deep Agents Code package", () => {
         configDirectory: null,
       }),
     ).toMatchObject({
-      execution: { command: expect.stringContaining("NEMOCLAW_DEEPAGENTS_MCP_REMOVAL") },
+      execution: {
+        command: {
+          kind: "shell",
+          script: expect.stringContaining("NEMOCLAW_DEEPAGENTS_MCP_REMOVAL"),
+          shellTrust: "package-authored-code",
+        },
+      },
     });
   });
 

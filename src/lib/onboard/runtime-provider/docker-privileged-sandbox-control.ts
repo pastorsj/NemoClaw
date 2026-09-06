@@ -160,7 +160,11 @@ function buildLegacyDockerArgv(
     ...(input.input ? ["-i"] : []),
     ...environment,
     "--user",
-    portable ? "0" : "root",
+    input.executionUser
+      ? `${String(input.executionUser.uid)}:${String(input.executionUser.gid)}`
+      : portable
+        ? "0"
+        : "root",
     target,
     ...input.command,
   ];

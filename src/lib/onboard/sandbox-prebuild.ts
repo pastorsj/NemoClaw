@@ -39,6 +39,8 @@ export interface SandboxPrebuildInput {
   origin: SandboxBuildContextOrigin;
   /** The selected generated Dockerfile cannot be built by OpenShell's classic Docker builder. */
   requiresLocalBuildKit?: boolean;
+  /** Re-hash package-owned bytes before selecting either host or gateway Docker. */
+  verifyBuildCtx?: () => boolean;
   env?: NodeJS.ProcessEnv;
   buildImage?: (
     args: readonly string[],
@@ -60,6 +62,22 @@ export interface SandboxPrebuildResult {
   imageRef: string | null;
   /** Immutable local image identity; mutable tags never authorize fallback. */
   imageId: string | null;
+  /** Retained only while a gateway builder still consumes the staged context. */
+  verifyBuildCtx?: () => boolean;
+}
+
+function sandboxPrebuildResult(
+  input: SandboxPrebuildInput,
+  createArgs: string[],
+  imageRef: string | null,
+  imageId: string | null,
+): SandboxPrebuildResult {
+  return {
+    createArgs,
+    imageRef,
+    imageId,
+    ...(input.verifyBuildCtx ? { verifyBuildCtx: input.verifyBuildCtx } : {}),
+  };
 }
 
 interface TrustedStagedBuildContext {
@@ -172,6 +190,9 @@ export function sandboxLocalImageRef(
 export async function prebuildSandboxImageIfEligible(
   input: SandboxPrebuildInput,
 ): Promise<SandboxPrebuildResult> {
+  if (input.verifyBuildCtx && !input.verifyBuildCtx()) {
+    throw new Error("Staged harness package bytes changed before the Docker build");
+  }
   const createArgs = [...input.createArgs];
   const env = input.env ?? process.env;
   const log = input.log ?? console.log;
@@ -185,13 +206,13 @@ export async function prebuildSandboxImageIfEligible(
     if (requiresLocalBuildKit) {
       throw new Error("Local BuildKit is required for this generated sandbox image");
     }
-    return { createArgs, imageRef: null, imageId: null };
+    return sandboxPrebuildResult(input, createArgs, null, null);
   }
   if (input.origin !== "generated") {
     log(
       "  Local BuildKit build skipped for a custom Dockerfile; using the gateway builder instead.",
     );
-    return { createArgs, imageRef: null, imageId: null };
+    return sandboxPrebuildResult(input, createArgs, null, null);
   }
   const fromIndex = createArgs.indexOf("--from");
   const fromDockerfile = createArgs[fromIndex + 1];
@@ -203,7 +224,7 @@ export async function prebuildSandboxImageIfEligible(
     if (requiresLocalBuildKit) {
       throw new Error("Local BuildKit requires the generated staged Dockerfile");
     }
-    return { createArgs, imageRef: null, imageId: null };
+    return sandboxPrebuildResult(input, createArgs, null, null);
   }
   let trustedContext: TrustedStagedBuildContext | null;
   try {
@@ -218,7 +239,7 @@ export async function prebuildSandboxImageIfEligible(
     log(
       `  Local BuildKit build skipped: staged build context could not be inspected (${detail}); using the gateway builder instead.`,
     );
-    return { createArgs, imageRef: null, imageId: null };
+    return sandboxPrebuildResult(input, createArgs, null, null);
   }
   if (!trustedContext) {
     if (requiresLocalBuildKit) {
@@ -227,13 +248,16 @@ export async function prebuildSandboxImageIfEligible(
     log(
       "  Local BuildKit build skipped: staged build context failed trust validation; using the gateway builder instead.",
     );
-    return { createArgs, imageRef: null, imageId: null };
+    return sandboxPrebuildResult(input, createArgs, null, null);
   }
 
   const imageRef = sandboxLocalImageRef(input.sandboxName, input.buildId, env);
   const builderName = portable ? "rootless Podman" : "BuildKit";
   const buildImage = input.buildImage ?? createHostImageCommand(portable ? "podman" : "docker");
   log(`  Building sandbox image with ${builderName} (skips the slower in-gateway builder)...`);
+  if (input.verifyBuildCtx && !input.verifyBuildCtx()) {
+    throw new Error("Staged harness package bytes changed before the Docker build");
+  }
 
   let status: number | null;
   let preparedDockerEnvironment: PreparedDockerBuildEnvironment | null = null;
@@ -267,7 +291,7 @@ export async function prebuildSandboxImageIfEligible(
     log(
       `  Local ${builderName} build could not start (${detail}); using the gateway builder instead.`,
     );
-    return { createArgs, imageRef: null, imageId: null };
+    return sandboxPrebuildResult(input, createArgs, null, null);
   } finally {
     if (preparedDockerEnvironment) {
       warnIfDockerBuildEnvironmentCleanupFailed(
@@ -283,7 +307,7 @@ export async function prebuildSandboxImageIfEligible(
       throw new Error(`Local BuildKit build failed${detail}`);
     }
     log(`  Local ${builderName} build failed${detail}; using the gateway builder instead.`);
-    return { createArgs, imageRef: null, imageId: null };
+    return sandboxPrebuildResult(input, createArgs, null, null);
   }
 
   if (portable) {
@@ -334,9 +358,5 @@ export async function prebuildSandboxImageIfEligible(
       "  Local image identity could not be proven; an operator-authorized GPU compatibility fallback may fail closed if no exact native container identity becomes available.",
     );
   }
-  return {
-    createArgs,
-    imageRef,
-    imageId,
-  };
+  return sandboxPrebuildResult(input, createArgs, imageRef, imageId);
 }

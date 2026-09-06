@@ -4,6 +4,10 @@
 import { isNonInteractiveEnv } from "../core/non-interactive";
 import { getNameValidationGuidance } from "../name-validation";
 export { enforceRemovedImmutabilityMigrationBoundary } from "../state/migrations/removed-immutability";
+export {
+  isLegacyOpenClawAgentName,
+  selectLegacyDockerfilePatchAgent,
+} from "./package/legacy-onboard";
 import { beginAuthoritativeRebuildRuntimeSelectionScope } from "./authoritative-rebuild-target";
 import { cliDisplayName } from "./branding";
 import {
@@ -363,9 +367,7 @@ export function resolveOnboardEntryOptions(
       deps.error(
         "  Onboarding cannot continue while a retained sandbox recovery record is unresolved without an explicit different sandbox name.",
       );
-      deps.error(
-        "  Use --name <new-name>; the retained sandbox recovery record stays unresolved.",
-      );
+      deps.error("  Use --name <new-name>; the retained sandbox recovery record stays unresolved.");
       deps.exitProcess(1);
     }
     if (retainedRecoverySandboxNames.has(recoveryEntryName)) {

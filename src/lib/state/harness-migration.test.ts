@@ -79,6 +79,7 @@ function writeReviewedBundle(): void {
         displayName: declaration.displayName,
         packageVersion: declaration.packageVersion,
         minimumNemoClawVersion: "0.0.113",
+        maximumNemoClawVersionExclusive: "0.0.121",
         manifest: manifestPath,
       })}\n`,
     );

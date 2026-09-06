@@ -3,15 +3,15 @@
 "use strict";
 const PACKAGE_ID = "langchain-deepagents-code";
 const messagingAdapter = {
-    describeMessagingIntegration(request) {
-        if (request.packageId !== PACKAGE_ID) {
-            throw new Error("Deep Agents messaging request does not match this package");
-        }
-        return {
-            kind: "disabled",
-            packageId: PACKAGE_ID,
-            reason: "Deep Agents Code does not provide a long-running messaging bridge.",
-        };
-    },
+  describeMessagingIntegration(request) {
+    if (request.packageId !== PACKAGE_ID) {
+      throw new Error("Deep Agents messaging request does not match this package");
+    }
+    return {
+      kind: "disabled",
+      packageId: PACKAGE_ID,
+      reason: "Deep Agents Code does not provide a long-running messaging bridge.",
+    };
+  },
 };
 module.exports = messagingAdapter;

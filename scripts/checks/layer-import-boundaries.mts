@@ -31,14 +31,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const SRC_ROOT = path.join(REPO_ROOT, "src");
 const PACKAGES_ROOT = path.join(REPO_ROOT, "packages");
 const SKIP_DIRS = new Set([".git", "coverage", "dist", "node_modules"]);
-// This build-time import predates the package contract. Remove the exception when messaging loads
-// agent runtime build support through that contract.
-const LEGACY_AGENT_RUNTIME_PACKAGE_IMPORTS = new Map([
-  [
-    "src/lib/messaging/applier/build/messaging-build-applier.mts\0../../../../../packages/nemoclaw-openclaw/compat/npm-remediation.mts",
-    1,
-  ],
-]);
+const LEGACY_AGENT_RUNTIME_PACKAGE_IMPORTS = new Map<string, number>();
 const PROVIDER_NEUTRAL_MANAGED_RUNTIME_MODULES = [
   "src/lib/actions/sandbox/connect.ts",
   "src/lib/actions/sandbox/destroy-presence.ts",
@@ -73,7 +66,6 @@ const MANAGED_STATE_ROOT_PROVIDER_MODULES = [
   "src/lib/onboard/managed-bootstrap/docker.ts",
   "src/lib/onboard/managed-bootstrap/podman-runtime.ts",
 ] as const;
-const MANAGED_AGENT_IDS = new Set(["openclaw", "hermes", "langchain-deepagents-code", "pi"]);
 const HARNESS_AGNOSTIC_RUNTIME_PREFIXES = [
   "src/lib/agent-runtime/adapter/",
   "src/lib/agent-runtime/package/",
@@ -85,11 +77,31 @@ const PACKAGE_AUTHORITY_MODULES = new Set([
   "src/lib/onboard/package/package-authority.ts",
   "src/lib/sandbox/command-agent.ts",
 ]);
+// Package authority also crosses a few typed callback boundaries. Those leaf
+// modules do not import the receipt resolver themselves, so an import-only
+// reverse graph cannot discover them. Keep the dataflow endpoints explicit and
+// scan their decisions directly without classifying every unrelated importer.
+const RECEIPT_BACKED_CALLBACK_MODULES = new Set([
+  "src/lib/agent/base-image.ts",
+  "src/lib/agent/onboard.ts",
+  "src/lib/onboard/docker-startup-command-env.ts",
+]);
+const PACKAGE_RECEIPT_SELECTOR_FUNCTIONS = new Set([
+  "activateHarnessPackage",
+  "deactivateHarnessPackage",
+  "readInstalledHarnessPackage",
+  "removeHarnessPackage",
+  "resolvePinnedHarnessPackage",
+  "buildHarnessProviderBrokerPlan",
+  "describeHarnessProviderBroker",
+  "runHarnessProviderBrokerController",
+]);
 
 type ReceiptHarnessDecisionKind = "equality" | "membership" | "switch-case";
 
 type LayerImportBoundaryOptions = {
   receiptHarnessDecisionBaseline?: ReadonlyMap<string, number>;
+  receiptBackedCallbackModules?: ReadonlySet<string>;
   verifyReceiptHarnessDecisionBaseline?: boolean;
 };
 
@@ -341,7 +353,10 @@ function resolveInternalImport(fromAbsPath: string, specifier: string): string |
 }
 
 /** Return every internal module that directly or transitively consumes package authority. */
-function collectPackageAuthorityConsumers(entryPaths: readonly string[]): ReadonlySet<string> {
+function collectPackageAuthorityConsumers(
+  entryPaths: readonly string[],
+  receiptBackedCallbackModules: ReadonlySet<string>,
+): ReadonlySet<string> {
   const importsByModule = new Map<string, readonly string[]>();
   const pending = [...entryPaths];
   const queued = new Set(entryPaths.map(toRepoPath));
@@ -384,6 +399,9 @@ function collectPackageAuthorityConsumers(entryPaths: readonly string[]): Readon
     for (const importer of importersByModule.get(target) ?? []) {
       pendingConsumers.push(importer);
     }
+  }
+  for (const callbackModule of receiptBackedCallbackModules) {
+    if (queued.has(callbackModule)) consumers.add(callbackModule);
   }
   return consumers;
 }
@@ -459,6 +477,43 @@ function checkHarnessAgnosticRuntimeModule(
   visit(sourceFile);
 }
 
+/** Reject exact package IDs passed directly to receipt-store operations. */
+function checkExactPackageReceiptSelector(
+  repoPath: string,
+  sourceFile: ts.SourceFile,
+  packageIds: ReadonlySet<string>,
+  violations: Violation[],
+): void {
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && node.arguments.length > 0) {
+      const selector = node.arguments[0];
+      const functionName = ts.isIdentifier(node.expression)
+        ? node.expression.text
+        : ts.isPropertyAccessExpression(node.expression)
+          ? node.expression.name.text
+          : null;
+      if (
+        functionName !== null &&
+        PACKAGE_RECEIPT_SELECTOR_FUNCTIONS.has(functionName) &&
+        ts.isStringLiteralLike(selector) &&
+        packageIds.has(selector.text)
+      ) {
+        const pos = position(sourceFile, selector);
+        addViolation(
+          violations,
+          repoPath,
+          pos.line,
+          pos.column,
+          "receipt-backed-package-selector",
+          `receipt-backed operation '${functionName}' must receive package authority instead of exact package ID '${selector.text}'`,
+        );
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+}
+
 function checkReceiptBackedHarnessBranch(
   repoPath: string,
   sourceFile: ts.SourceFile,
@@ -475,7 +530,6 @@ function checkReceiptBackedHarnessBranch(
   ) {
     return;
   }
-
   const isEqualityOperator = (kind: ts.SyntaxKind): boolean =>
     kind === ts.SyntaxKind.EqualsEqualsToken ||
     kind === ts.SyntaxKind.ExclamationEqualsToken ||
@@ -864,13 +918,15 @@ function checkCommandFile(
     }
 
     const moduleSpecifier = statement.moduleSpecifier.text;
+    const resolvedModule = resolveInternalImport(absPath, moduleSpecifier);
     const exportedBases =
       moduleSpecifier === "@oclif/core"
         ? new Set(["Command"])
-        : resolveInternalImport(absPath, moduleSpecifier) ===
-            "src/lib/cli/nemoclaw-oclif-command.ts"
+        : resolvedModule === "src/lib/cli/nemoclaw-oclif-command.ts"
           ? new Set(["NemoClawCommand"])
-          : null;
+          : resolvedModule === "src/lib/cli/internal-command.ts"
+            ? new Set(["NemoClawInternalCommand"])
+            : null;
     if (!exportedBases) continue;
 
     const bindings = statement.importClause.namedBindings;
@@ -929,7 +985,10 @@ export function findLayerImportBoundaryViolations(
   );
   const usedLegacyAgentRuntimeImports = new Map<string, number>();
   const productionFiles = [...walk(root)];
-  const packageAuthorityConsumers = collectPackageAuthorityConsumers(productionFiles);
+  const packageAuthorityConsumers = collectPackageAuthorityConsumers(
+    productionFiles,
+    options.receiptBackedCallbackModules ?? RECEIPT_BACKED_CALLBACK_MODULES,
+  );
   const receiptHarnessDecisionBaseline =
     options.receiptHarnessDecisionBaseline ?? RECEIPT_HARNESS_DECISION_BASELINE;
   const usedReceiptHarnessDecisionAllowances = new Map<string, number>();
@@ -952,6 +1011,7 @@ export function findLayerImportBoundaryViolations(
       violations,
     );
     checkHarnessAgnosticRuntimeModule(repoPath, sourceFile, packageIds, violations);
+    checkExactPackageReceiptSelector(repoPath, sourceFile, packageIds, violations);
     checkReceiptBackedHarnessBranch(
       repoPath,
       sourceFile,
@@ -988,8 +1048,13 @@ export function findLayerImportBoundaryViolations(
   return violations;
 }
 
-export function findManagedRuntimeBoundaryViolations(): Violation[] {
+export function findManagedRuntimeBoundaryViolations(packagesRoot = PACKAGES_ROOT): Violation[] {
   const violations: Violation[] = [];
+  const managedAgentIds = new Set(
+    readAgentRuntimePackageDependencies(packagesRoot)
+      .map(({ packageId }) => packageId)
+      .filter((packageId): packageId is string => packageId !== undefined),
+  );
   const isProviderImplementationImport = (specifier: string): boolean =>
     /(?:^|\/)runtime-provider\/(?:docker|podman)(?:[-/.]|$)/.test(specifier);
   const isProviderName = (node: ts.Node): boolean =>
@@ -1106,7 +1171,7 @@ export function findManagedRuntimeBoundaryViolations(): Violation[] {
       }
     }
     const visit = (node: ts.Node): void => {
-      if (ts.isStringLiteralLike(node) && MANAGED_AGENT_IDS.has(node.text)) {
+      if (ts.isStringLiteralLike(node) && managedAgentIds.has(node.text)) {
         report(node, "managed bootstrap and Podman provider code must not encode agent IDs");
       }
       ts.forEachChild(node, visit);
@@ -1136,10 +1201,149 @@ export function findManagedRuntimeBoundaryViolations(): Violation[] {
   return violations;
 }
 
+/**
+ * Keep publishable harness images from reaching back into core for native
+ * harness behavior. Generic build infrastructure may still be composed by the
+ * host, but gateway control and messaging application must ship with the
+ * package whose Dockerfile executes them.
+ */
+export function findPackageImageBoundaryViolations(packagesRoot = PACKAGES_ROOT): Violation[] {
+  const violations: Violation[] = [];
+  if (!existsSync(packagesRoot)) return violations;
+  const packageDependencies = readAgentRuntimePackageDependencies(packagesRoot);
+  const packageIds = packageDependencies
+    .map(({ packageId }) => packageId)
+    .filter((packageId): packageId is string => packageId !== undefined);
+
+  for (const entry of readdirSync(packagesRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const dockerfile = path.join(packagesRoot, entry.name, "Dockerfile");
+    if (!existsSync(dockerfile) || !lstatSync(dockerfile).isFile()) continue;
+    const source = readFileSync(dockerfile, "utf8");
+    source.split(/\r?\n/u).forEach((line, index) => {
+      const copy = /^\s*COPY(?:\s+--[^\s]+)*\s+(.+)$/iu.exec(line);
+      if (!copy) return;
+      const sources = copy[1].trim().split(/\s+/u).slice(0, -1);
+      for (const copiedSource of sources) {
+        if (
+          copiedSource === "scripts/managed-gateway-control.py" ||
+          copiedSource === "src/lib/messaging" ||
+          copiedSource.startsWith("src/lib/messaging/")
+        ) {
+          addViolation(
+            violations,
+            toRepoPath(dockerfile),
+            index + 1,
+            Math.max(1, line.indexOf(copiedSource) + 1),
+            "package-image-native-ownership",
+            `publishable harness image must use a package-owned native artifact instead of ${copiedSource}`,
+          );
+        }
+      }
+    });
+
+    const packageRoot = path.join(packagesRoot, entry.name);
+    const packageJsonPath = path.join(packageRoot, "package.json");
+    const sharedRuntimeArtifacts = [
+      {
+        artifact: "managed-gateway",
+        path: "runtime/managed-gateway-control.py",
+      },
+      {
+        artifact: "messaging-build",
+        path: "messaging/messaging-build.mts",
+      },
+    ].filter(({ path: artifactPath }) => existsSync(path.join(packageRoot, artifactPath)));
+    if (sharedRuntimeArtifacts.length > 0 && existsSync(packageJsonPath)) {
+      const packageJsonSource = readFileSync(packageJsonPath, "utf8");
+      const packageJson = JSON.parse(packageJsonSource) as {
+        readonly dependencies?: Readonly<Record<string, unknown>>;
+        readonly devDependencies?: Readonly<Record<string, unknown>>;
+        readonly scripts?: Readonly<Record<string, unknown>>;
+      };
+      const scripts = packageJson.scripts ?? {};
+      const buildRuntime =
+        typeof scripts["build:runtime"] === "string" ? scripts["build:runtime"] : "";
+      const checkRuntime =
+        typeof scripts["check:runtime"] === "string" ? scripts["check:runtime"] : "";
+      const allScripts = Object.values(scripts)
+        .filter((value): value is string => typeof value === "string")
+        .join("\n");
+      for (const forbiddenSource of [
+        "scripts/packages/build-managed-gateway-runtime",
+        "scripts/packages/build-messaging-runtime",
+        "scripts/runtime/managed-gateway-runtime",
+        "src/lib/messaging/applier/build/messaging-build-applier",
+      ]) {
+        if (!allScripts.includes(forbiddenSource)) continue;
+        addViolation(
+          violations,
+          toRepoPath(packageJsonPath),
+          1,
+          1,
+          "package-image-runtime-materializer",
+          `package runtime scripts must not reach into NemoClaw core source ${forbiddenSource}`,
+        );
+      }
+      const contractDependency =
+        packageJson.dependencies?.["@nvidia/nemoclaw-harness-contract"] ??
+        packageJson.devDependencies?.["@nvidia/nemoclaw-harness-contract"];
+      if (typeof contractDependency !== "string" || contractDependency.length === 0) {
+        addViolation(
+          violations,
+          toRepoPath(packageJsonPath),
+          1,
+          1,
+          "package-image-runtime-materializer",
+          "shared runtime artifacts require @nvidia/nemoclaw-harness-contract",
+        );
+      }
+      for (const { artifact, path: artifactPath } of sharedRuntimeArtifacts) {
+        const command = `nemoclaw-materialize-runtime ${artifact} ${artifactPath}`;
+        if (!buildRuntime.includes(command) || !checkRuntime.includes(`${command} --check`)) {
+          addViolation(
+            violations,
+            toRepoPath(packageJsonPath),
+            1,
+            1,
+            "package-image-runtime-materializer",
+            `shared runtime artifact ${artifactPath} must be built and checked with ${command}`,
+          );
+        }
+      }
+    }
+
+    const packageId = packageDependencies.find(
+      ({ packageRoot }) => path.basename(packageRoot) === entry.name,
+    )?.packageId;
+    const profilePath = path.join(packagesRoot, entry.name, "runtime/managed-gateway-profile.py");
+    if (packageId && existsSync(profilePath) && lstatSync(profilePath).isFile()) {
+      const profile = readFileSync(profilePath, "utf8");
+      for (const otherPackageId of packageIds) {
+        if (otherPackageId === packageId) continue;
+        const escapedId = otherPackageId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+        const match = new RegExp(`(^|[^a-z0-9-])${escapedId}([^a-z0-9-]|$)`, "iu").exec(profile);
+        if (!match) continue;
+        const prefix = profile.slice(0, match.index + match[1].length);
+        addViolation(
+          violations,
+          toRepoPath(profilePath),
+          prefix.split(/\r?\n/u).length,
+          1,
+          "package-image-native-ownership",
+          `managed gateway profile for ${packageId} must not encode package ${otherPackageId}`,
+        );
+      }
+    }
+  }
+  return violations;
+}
+
 function main(): void {
   const violations = [
     ...findLayerImportBoundaryViolations(),
     ...findManagedRuntimeBoundaryViolations(),
+    ...findPackageImageBoundaryViolations(),
   ];
   if (violations.length > 0) {
     const formatted = violations

@@ -4,7 +4,7 @@
 import type { McpBridgeEntry } from "../../state/registry";
 import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
 import type { McpProviderInspectionRuntimeSelection } from "./mcp-bridge-provider-inspection";
-import { executeSandboxCommand, type SandboxCommandResult } from "./process-recovery";
+import { executeSandboxCommand, type SandboxCommandResult } from "./transport/command-execution";
 
 export type AdapterRegistrationInspection =
   | { state: "absent" | "registered" | "mismatch" }

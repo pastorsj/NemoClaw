@@ -1338,7 +1338,7 @@ describe("MessagingSetupApplier", () => {
   it.each([
     { target: "/tmp/openclaw.json", error: "must stay inside /sandbox/.openclaw" },
     { target: "~/.openclaw/../openclaw.json", error: "must not traverse directories" },
-    { target: "~/.hermes/config.yaml", error: "Cannot apply Hermes messaging target" },
+    { target: "~/.hermes/config.yaml", error: "must stay inside ~/.openclaw" },
   ])(
     "rejects render target $target outside the selected agent config root",
     async ({ target, error }) => {

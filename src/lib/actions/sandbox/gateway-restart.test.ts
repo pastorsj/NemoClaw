@@ -673,11 +673,21 @@ describe("restartSandboxGateway — host-mediated gateway restart", () => {
   it("uses a receipt-backed gateway runtime without dispatching on its package id", () => {
     const restore = silenceConsole();
     try {
+      const portableFence = vi.spyOn(
+        portableAgentLifecycle,
+        "assertHermesPortableCommandUnavailable",
+      );
       const deps = baseDeps({
         getSessionAgent: () => ({
           name: "future-gateway",
           displayName: "Future Gateway",
-          runtime: { kind: "gateway" },
+          runtime: {
+            kind: "gateway",
+            process_lifecycle: {
+              support: "managed",
+              command: ["/opt/future/process-control"],
+            },
+          },
         }),
         getSandbox: () => ({
           name: "future-box",
@@ -702,6 +712,124 @@ describe("restartSandboxGateway — host-mediated gateway restart", () => {
         "restart",
         210000,
       );
+      expect(deps.ensureHermesDashboardPortForwardIfEnabled).not.toHaveBeenCalled();
+      expect(deps.printGatewayWedgeDiagnostics).not.toHaveBeenCalled();
+      expect(deps.executeSandboxExecCommand).not.toHaveBeenCalled();
+      expect(portableFence).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("uses the receipt ID as authority when the legacy agent field is absent", () => {
+    const restore = silenceConsole();
+    try {
+      const deps = baseDeps({
+        getSessionAgent: () => ({
+          name: "future-gateway",
+          displayName: "Future Gateway",
+          runtime: {
+            kind: "gateway",
+            process_lifecycle: {
+              support: "managed",
+              command: ["/opt/future/process-control"],
+            },
+          },
+        }),
+        getSandbox: () => ({
+          name: "future-box",
+          agent: null,
+          harnessPackage: {
+            kind: "agent-runtime",
+            id: "future-gateway",
+            packageVersion: "1.2.3",
+            contentDigest: "a".repeat(64),
+          },
+        }),
+      });
+
+      expect(restartSandboxGateway("future-box", { quiet: true, deps })).toMatchObject({
+        ok: true,
+      });
+      expect(deps.requestGatewaySupervisorAction).toHaveBeenCalledOnce();
+    } finally {
+      restore();
+    }
+  });
+
+  it("returns typed unsupported state before dispatch for a receipt-backed package refusal", () => {
+    const restore = silenceConsole();
+    try {
+      const requestGatewaySupervisorAction = vi.fn(() => ({
+        status: 0,
+        stdout: "GATEWAY_PID=123",
+        stderr: "",
+      }));
+      const deps = baseDeps({
+        getSessionAgent: () => ({
+          name: "future-gateway",
+          displayName: "Future Gateway",
+          runtime: {
+            kind: "gateway",
+            process_lifecycle: {
+              support: "unsupported",
+              reason: "Future Gateway uses an external process manager.",
+            },
+          },
+        }),
+        getSandbox: () => ({
+          name: "future-box",
+          agent: "future-gateway",
+          harnessPackage: {
+            kind: "agent-runtime",
+            id: "future-gateway",
+            packageVersion: "1.2.3",
+            contentDigest: "a".repeat(64),
+          },
+        }),
+        requestGatewaySupervisorAction,
+      });
+
+      expect(restartSandboxGateway("future-box", { quiet: true, deps })).toMatchObject({
+        ok: false,
+        failureLayer: "unsupported agent",
+        detail: expect.stringContaining("Future Gateway uses an external process manager."),
+      });
+      expect(requestGatewaySupervisorAction).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("fails closed when an exact receipt-backed definition cannot be loaded", () => {
+    const restore = silenceConsole();
+    try {
+      const requestGatewaySupervisorAction = vi.fn();
+      const deps = baseDeps({
+        getSessionAgent: () => {
+          throw new Error("package object missing");
+        },
+        getSandbox: () => ({
+          name: "future-box",
+          agent: "future-gateway",
+          harnessPackage: {
+            kind: "agent-runtime",
+            id: "future-gateway",
+            packageVersion: "1.2.3",
+            contentDigest: "a".repeat(64),
+          },
+        }),
+        requestGatewaySupervisorAction,
+      });
+
+      expect(restartSandboxGateway("future-box", { quiet: true, deps })).toMatchObject({
+        ok: false,
+        failureLayer: "unsupported agent",
+        detail: expect.stringContaining(
+          "The package receipt's agent definition could not be resolved exactly.",
+        ),
+      });
+      expect(requestGatewaySupervisorAction).not.toHaveBeenCalled();
     } finally {
       restore();
     }
@@ -792,7 +920,7 @@ describe("restartSandboxGateway — host-mediated gateway restart", () => {
       expect(result.ok).toBe(false);
       const detail = (result as Extract<typeof result, { ok: false }>).detail;
       expect(detail).toContain(
-        "Receipt-backed packages support gateway restart when their manifest declares runtime.kind 'gateway'.",
+        "Receipt-backed packages support gateway restart when their manifest declares runtime.kind 'gateway' and managed process lifecycle support.",
       );
       expect(detail).toContain(
         "Future Terminal declares runtime.kind 'terminal'; gateway restart requires runtime.kind 'gateway'.",

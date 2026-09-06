@@ -29,10 +29,7 @@ import {
   probeProviderHealth,
 } from "../../inference/health";
 import type { ServingProfileProvenance } from "../../inference/serving/types";
-import {
-  type DcodeAutoApprovalMode,
-  normalizeDcodeAutoApprovalMode,
-} from "../../onboard/dcode-auto-approval";
+import type { DcodeAutoApprovalMode } from "../../onboard/dcode-auto-approval";
 import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import { getGatewayPresets } from "../../policy";
 import { redact } from "../../security/redact";
@@ -56,6 +53,11 @@ import {
   usesManagedProviderGateway,
   withoutTerminalPhasePreflight,
 } from "./status-preflight";
+import {
+  needsLegacyManagedGatewayDeliveryProof,
+  resolveLegacyDcodeAutoApprovalMode,
+  resolveLegacyInferenceProbeAgentName,
+} from "./status-legacy";
 import {
   probeTerminalRuntimeCgroupOom,
   type TerminalRuntimeOomProbeResult,
@@ -156,6 +158,7 @@ export interface SandboxStatusReport {
   agent: string;
   agentDisplayName: string;
   agentRuntime: "gateway" | "terminal" | "unknown";
+  /** @deprecated Pre-receipt DCode compatibility field; always null for package authority. */
   dcodeAutoApprovalMode: DcodeAutoApprovalMode | null;
   agentLoadError?: string;
   packageAuthorityInvalid?: true;
@@ -225,13 +228,6 @@ export interface SandboxStatusSnapshot {
   postRecoveryPreflight?: SandboxStatusPreflightResult;
 }
 
-export function resolveSandboxStatusDcodeAutoApprovalMode(
-  sandbox: registry.SandboxEntry | null,
-): DcodeAutoApprovalMode | null {
-  if (sandbox?.agent !== "langchain-deepagents-code") return null;
-  return normalizeDcodeAutoApprovalMode(sandbox.dcodeAutoApprovalMode);
-}
-
 type ReconcileSandboxGatewayState = (sandboxName: string) => Promise<SandboxGatewayState>;
 type ProbeTerminalRuntimeHealth = (sandboxName: string) => TerminalRuntimeOomProbeResult;
 type RecoverSandboxProcesses =
@@ -241,6 +237,7 @@ type SandboxProcessRecoveryResult = ReturnType<RecoverSandboxProcesses>;
 type SandboxProcessRecoveryFailure = {
   layer:
     | "inspection"
+    | "unsupported"
     | "secret-boundary"
     | "mcp-reconciliation"
     | "gateway-recovery"
@@ -316,6 +313,12 @@ function processRecoveryFailure(
           ? result.mcpReconciliationReason
           : "MCP reconciliation refused recovery",
       ),
+    };
+  }
+  if ("recoveryUnsupportedReason" in result && result.recoveryUnsupportedReason) {
+    return {
+      layer: "unsupported",
+      detail: sanitizedStatusDetail(result.recoveryUnsupportedReason),
     };
   }
   if ("forwardRecoveryFailed" in result && result.forwardRecoveryFailed) {
@@ -433,9 +436,7 @@ export async function collectSandboxStatusSnapshot(
     : (sb?.agent ?? null);
   const inferenceProbeAgentName = receiptBackedAgent
     ? observedAgentName
-    : sb?.agent === "langchain-deepagents-code"
-      ? sb.agent
-      : null;
+    : resolveLegacyInferenceProbeAgentName(sb);
   let lookup: SandboxGatewayState;
   try {
     lookup = await reconcile(sandboxName);
@@ -452,7 +453,7 @@ export async function collectSandboxStatusSnapshot(
     sb !== null &&
     usesManagedProviderGateway(sb) &&
     statusAgent.agentRuntime === "gateway" &&
-    (receiptBackedAgent || (sb.agent ?? "openclaw") === "openclaw") &&
+    (receiptBackedAgent || needsLegacyManagedGatewayDeliveryProof(sb)) &&
     lookup.phase === "Ready" &&
     !opts.preflight?.failure;
   let recoveredManagedGateway = false;
@@ -783,7 +784,7 @@ async function buildSandboxStatusReport(
     agent: agent.agentName,
     agentDisplayName: agent.agentDisplayName,
     agentRuntime: agent.agentRuntime,
-    dcodeAutoApprovalMode: resolveSandboxStatusDcodeAutoApprovalMode(sb),
+    dcodeAutoApprovalMode: resolveLegacyDcodeAutoApprovalMode(sb),
     ...(agent.agentLoadError ? { agentLoadError: agent.agentLoadError } : {}),
     ...(agent.packageAuthorityInvalid ? { packageAuthorityInvalid: true as const } : {}),
     // Keep schema v1's established live-first fields for existing consumers.

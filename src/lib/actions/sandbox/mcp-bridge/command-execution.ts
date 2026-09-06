@@ -4,7 +4,7 @@
 import { runOpenshellProviderCommand } from "../../../adapters/openshell/provider-command";
 import type { OpenShellCommandResult } from "../mcp-bridge-output";
 import type { McpProviderInspectionRuntimeSelection } from "../mcp-bridge-provider-inspection";
-import { executeSandboxCommand } from "../status/process-recovery";
+import { executeSandboxCommand } from "../transport/command-execution";
 
 /** Run package-owned shell source through the established sandbox transport. */
 export function executeMcpShellCommand(

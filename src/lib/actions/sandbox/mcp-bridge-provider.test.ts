@@ -33,7 +33,7 @@ import {
   waitForAttachedMcpCredential,
   waitForDetachedMcpCredential,
 } from "./mcp-bridge-provider";
-import * as processRecovery from "./process-recovery";
+import * as processRecovery from "./transport/command-execution";
 
 const runtimeSelection = {
   gatewayName: "nemoclaw-8091",
@@ -636,17 +636,21 @@ alpha-mcp-slack   generic  1                 0
     });
 
     expect(
-      observeMcpCredentialRevision("alpha", {
-        server: "github",
-        agent: "openclaw",
-        adapter: "mcporter",
-        url: "https://mcp.example.test/mcp",
-        env: ["GITHUB_TOKEN"],
-        providerName: "alpha-mcp-github-0123456789abcdef",
-        providerId: "11111111-2222-4333-8444-555555555555",
-        policyName: "mcp-bridge-github",
-        addedAt: "2026-06-01T00:00:00.000Z",
-      }, runtimeSelection),
+      observeMcpCredentialRevision(
+        "alpha",
+        {
+          server: "github",
+          agent: "openclaw",
+          adapter: "mcporter",
+          url: "https://mcp.example.test/mcp",
+          env: ["GITHUB_TOKEN"],
+          providerName: "alpha-mcp-github-0123456789abcdef",
+          providerId: "11111111-2222-4333-8444-555555555555",
+          policyName: "mcp-bridge-github",
+          addedAt: "2026-06-01T00:00:00.000Z",
+        },
+        runtimeSelection,
+      ),
     ).toBe("v11");
     const proofCommand = exec.mock.calls[0]?.[1] ?? "";
     expect(proofCommand).toContain("\n");
@@ -660,17 +664,21 @@ alpha-mcp-slack   generic  1                 0
 
     exec.mockReturnValue({ status: 0, stdout: "raw-secret", stderr: "" });
     expect(() =>
-      observeMcpCredentialRevision("alpha", {
-        server: "github",
-        agent: "openclaw",
-        adapter: "mcporter",
-        url: "https://mcp.example.test/mcp",
-        env: ["GITHUB_TOKEN"],
-        providerName: "alpha-mcp-github-0123456789abcdef",
-        providerId: "11111111-2222-4333-8444-555555555555",
-        policyName: "mcp-bridge-github",
-        addedAt: "2026-06-01T00:00:00.000Z",
-      }, runtimeSelection),
+      observeMcpCredentialRevision(
+        "alpha",
+        {
+          server: "github",
+          agent: "openclaw",
+          adapter: "mcporter",
+          url: "https://mcp.example.test/mcp",
+          env: ["GITHUB_TOKEN"],
+          providerName: "alpha-mcp-github-0123456789abcdef",
+          providerId: "11111111-2222-4333-8444-555555555555",
+          policyName: "mcp-bridge-github",
+          addedAt: "2026-06-01T00:00:00.000Z",
+        },
+        runtimeSelection,
+      ),
     ).toThrow(/Could not observe the current OpenShell credential revision/);
   });
 
@@ -766,17 +774,21 @@ alpha-mcp-slack   generic  1                 0
     vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValue(1_000);
 
     expect(() =>
-      waitForAttachedMcpCredential("alpha", {
-        server: "github",
-        agent: "deepagents-code",
-        adapter: "deepagents-config",
-        url: "https://mcp.example.test/mcp",
-        env: ["GITHUB_TOKEN"],
-        providerName: "alpha-mcp-github-0123456789abcdef",
-        providerId: "11111111-2222-4333-8444-555555555555",
-        policyName: "mcp-bridge-github",
-        addedAt: "2026-06-01T00:00:00.000Z",
-      }, runtimeSelection),
+      waitForAttachedMcpCredential(
+        "alpha",
+        {
+          server: "github",
+          agent: "deepagents-code",
+          adapter: "deepagents-config",
+          url: "https://mcp.example.test/mcp",
+          env: ["GITHUB_TOKEN"],
+          providerName: "alpha-mcp-github-0123456789abcdef",
+          providerId: "11111111-2222-4333-8444-555555555555",
+          policyName: "mcp-bridge-github",
+          addedAt: "2026-06-01T00:00:00.000Z",
+        },
+        runtimeSelection,
+      ),
     ).toThrow(/last bounded observation: canonical/);
   });
 
@@ -790,17 +802,21 @@ alpha-mcp-slack   generic  1                 0
     vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValue(1_000);
 
     expect(() =>
-      waitForAttachedMcpCredential("alpha", {
-        server: "github",
-        agent: "openclaw",
-        adapter: "mcporter",
-        url: "https://mcp.example.test/mcp",
-        env: ["GITHUB_TOKEN"],
-        providerName: "alpha-mcp-github-0123456789abcdef",
-        providerId: "11111111-2222-4333-8444-555555555555",
-        policyName: "mcp-bridge-github",
-        addedAt: "2026-06-01T00:00:00.000Z",
-      }, runtimeSelection),
+      waitForAttachedMcpCredential(
+        "alpha",
+        {
+          server: "github",
+          agent: "openclaw",
+          adapter: "mcporter",
+          url: "https://mcp.example.test/mcp",
+          env: ["GITHUB_TOKEN"],
+          providerName: "alpha-mcp-github-0123456789abcdef",
+          providerId: "11111111-2222-4333-8444-555555555555",
+          policyName: "mcp-bridge-github",
+          addedAt: "2026-06-01T00:00:00.000Z",
+        },
+        runtimeSelection,
+      ),
     ).toThrow(/last bounded observation: absent/);
     expect(exec).toHaveBeenCalledOnce();
   });
@@ -969,17 +985,21 @@ alpha-mcp-slack   generic  1                 0
     vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValue(1_000);
 
     expect(() =>
-      waitForDetachedMcpCredential("alpha", {
-        server: "github",
-        agent: "openclaw",
-        adapter: "mcporter",
-        url: "https://mcp.example.test/mcp",
-        env: ["GITHUB_TOKEN"],
-        providerName: "alpha-mcp-github-0123456789abcdef",
-        providerId: "11111111-2222-4333-8444-555555555555",
-        policyName: "mcp-bridge-github",
-        addedAt: "2026-06-01T00:00:00.000Z",
-      }, runtimeSelection),
+      waitForDetachedMcpCredential(
+        "alpha",
+        {
+          server: "github",
+          agent: "openclaw",
+          adapter: "mcporter",
+          url: "https://mcp.example.test/mcp",
+          env: ["GITHUB_TOKEN"],
+          providerName: "alpha-mcp-github-0123456789abcdef",
+          providerId: "11111111-2222-4333-8444-555555555555",
+          policyName: "mcp-bridge-github",
+          addedAt: "2026-06-01T00:00:00.000Z",
+        },
+        runtimeSelection,
+      ),
     ).toThrow(/did not confirm credential 'GITHUB_TOKEN' was revoked/);
 
     const proofCommand = exec.mock.calls[0]?.[1] ?? "";

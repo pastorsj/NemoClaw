@@ -23,6 +23,7 @@ const { computeSetupPresetSuggestions, filterSetupPolicyPresets, getSuggestedPol
         webSearchConfig?: { fetchEnabled?: boolean; provider?: string | null } | null;
         webSearchSupported?: boolean | null;
         hermesToolGateways?: string[] | null;
+        packagePolicyPresets?: readonly string[] | null;
         customPresetNames?: ReadonlySet<string> | null;
         env?: NodeJS.ProcessEnv;
       },
@@ -480,6 +481,7 @@ describe("onboard policy preset suggestions", () => {
       enabledChannels: [],
       knownPresetNames: known,
       agent: "hermes",
+      packagePolicyPresets: ["nous-web", "nous-image", "nous-audio", "nous-browser", "nous-code"],
       hermesToolGateways: ["nous-web", "nous-audio"],
       webSearchConfig: { fetchEnabled: true, provider: "tavily" },
       webSearchSupported: true,
@@ -534,6 +536,7 @@ describe("onboard policy preset suggestions", () => {
       enabledChannels: [],
       knownPresetNames: knownWithPricing,
       agent: "hermes",
+      packagePolicyPresets: ["nous-web", "nous-image", "nous-audio", "nous-browser", "nous-code"],
     });
     expect(
       ["nous-web", "nous-image", "nous-audio", "nous-browser", "nous-code"].every((preset) =>
@@ -557,6 +560,14 @@ describe("onboard policy preset suggestions", () => {
     expect(openclawOpen).toContain("openclaw-pricing");
     expect(openclawOpen).toContain("weather");
     expect(openclawOpen).toContain("public-reference");
+
+    const futureHarnessOpen = computeSetupPresetSuggestions("open", {
+      enabledChannels: [],
+      knownPresetNames: knownWithPricing,
+      agent: "future-harness",
+      packagePolicyPresets: ["local-inference"],
+    });
+    expect(futureHarnessOpen).toContain("local-inference");
   });
 
   it("keeps agent-specific policy presets out of the opposite agent selector", () => {

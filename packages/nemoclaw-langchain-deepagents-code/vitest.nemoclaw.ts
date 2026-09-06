@@ -22,6 +22,10 @@ const sourceNodeOptions = [
 
 export const deepAgentsNemoclawTestMoves = [
   {
+    source: "test/channels/channels-add-deepagents-rejection.test.ts",
+    destination: "tests/integration/channel-rejection.test.ts",
+  },
+  {
     source: "test/agents/deepagents/dcode-start-keepalive.test.ts",
     destination: "tests/runtime/keepalive.test.ts",
   },

@@ -80,7 +80,7 @@ export function resolveRebuildHermesDashboardEnv(
   ) {
     return { ok: false, reason: "recorded hermesDashboardEnabled value is not boolean" };
   }
-  if (rebuildAgent !== "hermes" || entry.hermesDashboardEnabled !== true) {
+  if (entry.hermesDashboardEnabled !== true) {
     return { ok: true, env: { [HERMES_DASHBOARD_ENABLE_ENV]: "0" } };
   }
   if (!validDashboardPort(entry.hermesDashboardPort)) {

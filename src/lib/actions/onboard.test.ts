@@ -6,12 +6,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(() => ["openclaw"]),
   onboard: vi.fn().mockResolvedValue(undefined),
+  readSelectableAgentRegistryEntries: vi.fn(() => [
+    {
+      name: "future-harness",
+      displayName: "Future Harness",
+      aliases: ["future"],
+      aliasSummary: null,
+      isDefaultOnboardingChoice: false,
+      defaultSandboxName: "future-sandbox",
+    },
+  ]),
   runOnboardCommand: vi.fn(),
 }));
 
 vi.mock("../agent/defs", () => ({ listAgents: mocks.listAgents }));
 vi.mock("../onboard", () => ({ onboard: mocks.onboard }));
 vi.mock("../onboard/command", () => ({ runOnboardCommand: mocks.runOnboardCommand }));
+vi.mock("../onboard/command-support", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../onboard/command-support")>()),
+  readSelectableAgentRegistryEntries: mocks.readSelectableAgentRegistryEntries,
+}));
 
 import { runOnboardAction } from "./onboard";
 
@@ -38,5 +52,21 @@ describe("onboard action runtime composition", () => {
       resume: false,
       googlechatTunnelRuntime,
     });
+  });
+
+  it("validates onboarding selectors against installed-only package metadata", async () => {
+    mocks.runOnboardCommand.mockImplementation(
+      async (deps: {
+        listAgents(): readonly string[];
+        listAgentAliasTargets(): readonly { readonly name: string }[];
+      }) => {
+        expect(deps.listAgents()).toEqual(["future-harness"]);
+        expect(deps.listAgentAliasTargets().map(({ name }) => name)).toEqual(["future-harness"]);
+      },
+    );
+
+    await runOnboardAction({ agent: "future" });
+
+    expect(mocks.readSelectableAgentRegistryEntries).toHaveBeenCalledOnce();
   });
 });

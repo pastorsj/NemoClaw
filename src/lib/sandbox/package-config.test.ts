@@ -72,12 +72,12 @@ describe("installed configuration adapter selection", () => {
   it("gets inference mutability from the exact receipt-backed adapter", () => {
     mocks.getSandbox.mockReturnValue({ harnessPackage: IDENTITY });
     ADAPTER.describeInferenceConfig.mockReturnValue({
-      kind: "immutable",
+      kind: "unsupported",
       reason: "Re-onboard to change this image-owned configuration.",
     });
 
     expect(inspectInstalledInferenceConfigSupport("future", TARGET)).toEqual({
-      kind: "immutable",
+      kind: "unsupported",
       reason: "Re-onboard to change this image-owned configuration.",
     });
     expect(ADAPTER.describeInferenceConfig).toHaveBeenCalledExactlyOnceWith({

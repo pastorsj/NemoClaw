@@ -66,7 +66,7 @@ import {
   createManagedWorkloadOnboardRuntime,
   prepareHermesPortableSandboxWorkloadForLifecycle,
   prepareOnboardSandboxWorkloadLaunch,
-  shouldActivateStockManagedRuntime,
+  shouldActivateManagedRuntime,
 } from "./onboard-orchestration";
 
 function mapManagedStartupProfileToAgentEnvironment(
@@ -89,11 +89,16 @@ function mapManagedStartupProfileToAgentEnvironment(
 function createFreshOnboardingRuntime(
   environment: Readonly<Record<string, string>>,
   options: {
-    readonly stockManagedRuntime?: boolean;
+    readonly agentName?: string;
+    readonly managedRuntimeEnabled?: boolean;
     readonly tempManagedRuntime?: boolean;
     readonly tempManagedRuntimeCatalog?: string | null;
     readonly unavailableCatalog?: boolean;
     readonly harnessPackage?: HarnessPackageIdentity;
+    readonly agentDefinition?: {
+      readonly name: string;
+      readonly managedImage: ReturnType<typeof qualifiedManagedImageDeclaration> | null;
+    };
   } = {},
 ) {
   const prepared = {
@@ -114,9 +119,10 @@ function createFreshOnboardingRuntime(
       computePlan: { driverName: "docker" },
       managedWorkloadRebuild: null,
       tempManagedRuntime: options.tempManagedRuntime ?? false,
-      stockManagedRuntime: options.stockManagedRuntime ?? false,
+      managedRuntimeEnabled: options.managedRuntimeEnabled ?? false,
       tempManagedRuntimeCatalog: options.tempManagedRuntimeCatalog ?? null,
-      agentName: "openclaw",
+      agentName: options.agentName ?? "openclaw",
+      ...(options.agentDefinition ? { agentDefinition: options.agentDefinition } : {}),
       harnessPackage: options.harnessPackage ?? null,
       legacyDockerfilePath: "packages/nemoclaw-openclaw/Dockerfile",
       customDockerfilePath: null,
@@ -171,54 +177,95 @@ describe("managed workload onboard orchestration", () => {
     fs.rmSync(releaseRoot, { force: true, recursive: true });
   });
 
-  it("activates stock managed images only for shipped agents outside Portable", () => {
+  it("activates managed images from legacy shipped authority or an exact package receipt", () => {
     expect(
-      shouldActivateStockManagedRuntime({
+      shouldActivateManagedRuntime({
         portableLifecycle: false,
         hermesPortableLifecycle: false,
         agentName: "openclaw",
       }),
     ).toBe(true);
     expect(
-      shouldActivateStockManagedRuntime({
+      shouldActivateManagedRuntime({
         portableLifecycle: false,
         hermesPortableLifecycle: false,
         agentName: "hermes",
       }),
     ).toBe(true);
     expect(
-      shouldActivateStockManagedRuntime({
+      shouldActivateManagedRuntime({
         portableLifecycle: false,
         hermesPortableLifecycle: false,
         agentName: "langchain-deepagents-code",
       }),
     ).toBe(true);
     expect(
-      shouldActivateStockManagedRuntime({
+      shouldActivateManagedRuntime({
         portableLifecycle: true,
         hermesPortableLifecycle: false,
         agentName: "openclaw",
       }),
     ).toBe(false);
     expect(
-      shouldActivateStockManagedRuntime({
+      shouldActivateManagedRuntime({
         portableLifecycle: false,
         hermesPortableLifecycle: false,
         agentName: "nemocua",
       }),
     ).toBe(false);
     expect(
-      shouldActivateStockManagedRuntime({
+      shouldActivateManagedRuntime({
         portableLifecycle: false,
         hermesPortableLifecycle: false,
         agentName: "pi",
+      }),
+    ).toBe(false);
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.2.3",
+      contentDigest: "f".repeat(64),
+    };
+    const agentDefinition = {
+      name: harnessPackage.id,
+      managedImage: {
+        repository: "registry.example/team/future-harness",
+        architectures: ["linux/amd64" as const],
+        runtime_identity: { uid: 999, gid: 999, workdir: "/sandbox" as const },
+      },
+    };
+    expect(
+      shouldActivateManagedRuntime({
+        portableLifecycle: false,
+        hermesPortableLifecycle: false,
+        agentName: harnessPackage.id,
+        agentDefinition,
+        harnessPackage,
+      }),
+    ).toBe(true);
+    expect(
+      shouldActivateManagedRuntime({
+        portableLifecycle: false,
+        hermesPortableLifecycle: false,
+        agentName: harnessPackage.id,
+        agentDefinition: { ...agentDefinition, managedImage: null },
+        harnessPackage,
+      }),
+    ).toBe(false);
+    expect(
+      shouldActivateManagedRuntime({
+        portableLifecycle: false,
+        hermesPortableLifecycle: false,
+        agentName: harnessPackage.id,
+        agentDefinition,
+        harnessPackage: { ...harnessPackage, id: "different-harness" },
       }),
     ).toBe(false);
   });
 
   it("does not activate stock managed images for Hermes Portable (#9634)", () => {
     expect(
-      shouldActivateStockManagedRuntime({
+      shouldActivateManagedRuntime({
         portableLifecycle: false,
         hermesPortableLifecycle: true,
         agentName: "hermes",
@@ -233,14 +280,66 @@ describe("managed workload onboard orchestration", () => {
       packageVersion: "1.0.0",
       contentDigest: "a".repeat(64),
     };
+    const buildInitialStartupProfile = vi.fn((request) => ({
+      kind: "package-config" as const,
+      packageConfig: { settings: request.desiredState },
+    }));
+    const prepareStartupProfile = vi.fn((request) => {
+      const candidate = request.input.inference.candidates[0];
+      return {
+        kind: "prepared" as const,
+        desiredState: {
+          configuration: {
+            agent: "hermes",
+            webSearch: { enabled: false, provider: "tavily" as const },
+          },
+          inference: {
+            routeProvider: candidate.providerKey ?? candidate.routeProvider,
+            upstreamProvider: request.input.inference.selectedProvider,
+            model: request.input.inference.model,
+            routedBaseUrl: candidate.inferenceBaseUrl ?? candidate.routedBaseUrl,
+            upstreamEndpointUrl: null,
+            api: candidate.inferenceApi ?? candidate.api,
+            primaryModelRef: null,
+            compatibility: null,
+            inputModalities: null,
+          },
+          proxy: request.input.proxy,
+          dashboard: {
+            agent: "hermes",
+            mode: "loopback-forwarded" as const,
+            url: "http://127.0.0.1:19189",
+            browserUrl: request.input.dashboard.url,
+            publicPort: 19_189,
+            internalPort: 29_189,
+            tuiEnabled: false,
+          },
+          tools: request.input.tools,
+          messaging: { plan: request.input.messagingPlan },
+          tuning: {
+            contextWindow: null,
+            maxTokens: null,
+            reasoning: null,
+            reasoningEffort: null,
+          },
+          corporateCa: request.input.corporateCa,
+        },
+        credentialProxyReplayRequired: false,
+        dashboardRemoteBindPrepared: false,
+      };
+    });
     const runtime = createManagedWorkloadOnboardRuntime(
       {
         computePlan: { driverName: "docker" },
         managedWorkloadRebuild: null,
         tempManagedRuntime: false,
-        stockManagedRuntime: true,
+        managedRuntimeEnabled: true,
         tempManagedRuntimeCatalog: null,
         agentName: "hermes",
+        agentDefinition: {
+          name: "hermes",
+          managedImage: qualifiedManagedImageDeclaration("hermes"),
+        },
         harnessPackage,
         legacyDockerfilePath: "packages/nemoclaw-hermes/Dockerfile",
         customDockerfilePath: null,
@@ -284,6 +383,12 @@ describe("managed workload onboard orchestration", () => {
           primaryModelRef: "inference/moonshotai/kimi-k2.6",
           inferenceCompat: {},
         })),
+        loadHarnessStartupProfileAdapter: vi.fn(() => ({
+          startupProfileEnvironment: [],
+          prepareStartupProfile,
+          buildInitialStartupProfile,
+          reconcileStartupProfile: vi.fn(),
+        })),
       },
     );
 
@@ -297,6 +402,17 @@ describe("managed workload onboard orchestration", () => {
     expect(built.profile).toMatchObject({
       agent: "hermes",
       harnessPackage,
+      desiredState: {
+        dashboard: {
+          agent: "hermes",
+          mode: "loopback-forwarded",
+          url: "http://127.0.0.1:19189",
+          browserUrl: "https://hermes.example.test:19189",
+          publicPort: 19_189,
+          internalPort: 29_189,
+          tuiEnabled: false,
+        },
+      },
       packageConfig: {
         settings: {
           dashboard: {
@@ -311,15 +427,148 @@ describe("managed workload onboard orchestration", () => {
         },
       },
     });
+    expect(buildInitialStartupProfile).toHaveBeenCalledExactlyOnceWith({
+      packageId: "hermes",
+      harnessPackage,
+      desiredState: built.profile.desiredState,
+    });
     expect(
       mapManagedStartupProfileToAgentEnvironment(built.profile).runtimeEnvironment.CHAT_UI_URL,
     ).toBe("https://hermes.example.test:19189");
   });
 
+  it("prepares a synthetic future package through the public receipt-backed onboarding seam", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "f".repeat(64),
+    };
+    const prepareStartupProfile = vi.fn((request) => {
+      const candidate = request.input.inference.candidates[0];
+      return {
+        kind: "prepared" as const,
+        desiredState: {
+          configuration: {
+            agent: harnessPackage.id,
+            mode: request.input.environment.FUTURE_PUBLIC_MODE,
+          },
+          inference: {
+            routeProvider: candidate.routeProvider,
+            upstreamProvider: request.input.inference.selectedProvider ?? candidate.routeProvider,
+            model: request.input.inference.model,
+            routedBaseUrl: candidate.routedBaseUrl,
+            upstreamEndpointUrl: request.input.inference.endpointUrl,
+            api: candidate.api,
+            primaryModelRef: null,
+            compatibility: null,
+            inputModalities: null,
+          },
+          proxy: request.input.proxy,
+          dashboard: { agent: harnessPackage.id, mode: "disabled" as const },
+          tools: request.input.tools,
+          messaging: { plan: request.input.messagingPlan },
+          tuning: {
+            contextWindow: null,
+            maxTokens: null,
+            reasoning: null,
+            reasoningEffort: null,
+          },
+          corporateCa: request.input.corporateCa,
+        },
+        credentialProxyReplayRequired: false,
+        dashboardRemoteBindPrepared: false,
+      };
+    });
+    const buildInitialStartupProfile = vi.fn((request) => ({
+      kind: "package-config" as const,
+      packageConfig: { native: request.desiredState.configuration },
+    }));
+    const resolveAgentInferenceApi = vi.fn(() => {
+      throw new Error("legacy normalization must not run");
+    });
+    const runtime = createManagedWorkloadOnboardRuntime(
+      {
+        computePlan: { driverName: "docker" },
+        managedWorkloadRebuild: null,
+        tempManagedRuntime: false,
+        managedRuntimeEnabled: true,
+        tempManagedRuntimeCatalog: null,
+        agentName: harnessPackage.id,
+        agentDefinition: {
+          name: harnessPackage.id,
+          managedImage: {
+            repository: "registry.example/team/future-harness",
+            architectures: ["linux/amd64"],
+            runtime_identity: { uid: 999, gid: 999, workdir: "/sandbox" },
+            startup_profile_environment: [
+              { name: "FUTURE_PUBLIC_MODE", value_type: "string", max_bytes: 32 },
+            ],
+          },
+        },
+        harnessPackage,
+        legacyDockerfilePath: "unused",
+        customDockerfilePath: null,
+        rootDir: releaseRoot,
+        model: "future/model",
+        provider: "future-provider",
+        preferredInferenceApi: null,
+        endpointUrl: "https://future.example/v1",
+        startupProfile: {
+          chatUiUrl: "",
+          effectiveDashboardPort: 0,
+          manageDashboard: false,
+          dashboardBindAddress: undefined,
+          wslExposure: false,
+          hermesDashboardState: { config: null, enabled: false },
+          webSearch: null,
+          toolDisclosure: "progressive",
+          hermesToolGateways: [],
+          messagingPlan: null,
+          dcodeAutoApprovalMode: "disabled",
+          observabilityEnabled: false,
+          environment: { FUTURE_PUBLIC_MODE: "strict" },
+        },
+        note: vi.fn(),
+        fallbackBuildEstimate: () => null,
+      } as unknown as Parameters<typeof createManagedWorkloadOnboardRuntime>[0],
+      {
+        resolveAgentInferenceApi,
+        getSandboxInferenceConfig: vi.fn((_model, _provider, api) => ({
+          providerKey: "future-route",
+          inferenceBaseUrl: "https://inference.local/v1",
+          inferenceApi: api ?? "openai-completions",
+          primaryModelRef: "future-route/future-model",
+          inferenceCompat: null,
+        })),
+        loadHarnessStartupProfileAdapter: vi.fn(() => ({
+          startupProfileEnvironment: [
+            { name: "FUTURE_PUBLIC_MODE", value_type: "string" as const, max_bytes: 32 },
+          ],
+          prepareStartupProfile,
+          buildInitialStartupProfile,
+          reconcileStartupProfile: vi.fn(),
+        })),
+      },
+    );
+
+    const built = runtime.ensurePreparedProfile({ source: { kind: "managed-image" } } as never);
+    if (!built || !("profileKind" in built.profile)) throw new Error("expected package profile");
+
+    expect(resolveAgentInferenceApi).not.toHaveBeenCalled();
+    expect(prepareStartupProfile).toHaveBeenCalledOnce();
+    expect(buildInitialStartupProfile).toHaveBeenCalledOnce();
+    expect(built.profile).toMatchObject({
+      agent: "future-harness",
+      desiredState: { configuration: { agent: "future-harness", mode: "strict" } },
+      packageConfig: { native: { agent: "future-harness", mode: "strict" } },
+    });
+  });
+
   it("uses the Dockerfile when the stock managed-image catalog is unavailable", async () => {
     const { runtime } = createFreshOnboardingRuntime(
       {},
-      { stockManagedRuntime: true, unavailableCatalog: true },
+      { managedRuntimeEnabled: true, unavailableCatalog: true },
     );
 
     await expect(runtime.ensurePreparedWorkload()).resolves.toMatchObject({
@@ -336,7 +585,14 @@ describe("managed workload onboard orchestration", () => {
     } as const satisfies HarnessPackageIdentity;
     const { prepared, runtime } = createFreshOnboardingRuntime(
       {},
-      { stockManagedRuntime: true, harnessPackage },
+      {
+        managedRuntimeEnabled: true,
+        harnessPackage,
+        agentDefinition: {
+          name: "openclaw",
+          managedImage: qualifiedManagedImageDeclaration("openclaw"),
+        },
+      },
     );
 
     await expect(runtime.ensurePreparedWorkload()).resolves.toBe(prepared);
@@ -345,10 +601,49 @@ describe("managed workload onboard orchestration", () => {
     );
   });
 
+  it("bypasses legacy candidate qualification for a receipt-backed package", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "pi",
+      packageVersion: "1.2.3",
+      contentDigest: "9e".repeat(32),
+    } as const satisfies HarnessPackageIdentity;
+    const { prepared, runtime } = createFreshOnboardingRuntime(
+      {},
+      {
+        agentName: "pi",
+        managedRuntimeEnabled: true,
+        harnessPackage,
+        agentDefinition: {
+          name: "pi",
+          managedImage: qualifiedManagedImageDeclaration("pi"),
+        },
+      },
+    );
+
+    await expect(runtime.ensurePreparedWorkload()).resolves.toBe(prepared);
+    expect(prepareSandboxWorkloadSource).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ acceptedCandidateContract: null, harnessPackage }),
+    );
+  });
+
+  it("requires receipt-pinned manifest authority before package startup", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.2.3",
+      contentDigest: "8e".repeat(32),
+    } as const satisfies HarnessPackageIdentity;
+
+    expect(() =>
+      createFreshOnboardingRuntime({}, { managedRuntimeEnabled: true, harnessPackage }),
+    ).toThrow(/receipt-pinned agent definition/u);
+  });
+
   it("rejects an unavailable catalog for explicit temporary managed-image onboarding", async () => {
     const { runtime } = createFreshOnboardingRuntime(
       {},
-      { stockManagedRuntime: true, tempManagedRuntime: true, unavailableCatalog: true },
+      { managedRuntimeEnabled: true, tempManagedRuntime: true, unavailableCatalog: true },
     );
 
     await expect(runtime.ensurePreparedWorkload()).rejects.toThrow("registry offline");
@@ -454,7 +749,7 @@ describe("managed workload onboard orchestration", () => {
         GITHUB_ACTIONS: "true",
         E2E_MANAGED_IMAGE_REVISION: catalogRevision,
       },
-      { stockManagedRuntime: true },
+      { managedRuntimeEnabled: true },
     );
 
     await expect(runtime.ensurePreparedWorkload()).resolves.toBe(prepared);
@@ -561,6 +856,7 @@ describe("managed workload onboard orchestration", () => {
       dockerfilePath: trustedDockerfile,
     } as AgentDefinition;
     let staged = false;
+    const verifyBuildCtx = vi.fn(() => true);
     const resolvePatchInput = vi.fn(() => {
       expect(staged).toBe(true);
       return {
@@ -621,6 +917,7 @@ describe("managed workload onboard orchestration", () => {
             buildCtx: "/tmp/nemoclaw-staged-context",
             stagedDockerfile: "/tmp/nemoclaw-staged-context/Dockerfile",
             baseImageResolutionMetadata: resolutionMetadata,
+            verifyBuildCtx,
           };
         },
         resolvePatchInput,
@@ -669,5 +966,6 @@ describe("managed workload onboard orchestration", () => {
 
     expect(resolvePatchInput).toHaveBeenCalledOnce();
     expect(resolveSandboxBuildPatch).toHaveBeenCalledOnce();
+    expect(verifyBuildCtx).toHaveBeenCalledOnce();
   });
 });

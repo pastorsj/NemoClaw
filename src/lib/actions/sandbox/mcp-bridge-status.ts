@@ -29,12 +29,12 @@ import {
 } from "./mcp-bridge-resolution-probe";
 import {
   bridgeState,
-  ensureSandboxGatewaySelected,
   getAgentConfigDir,
   getSandboxAgent,
   getSandboxOrThrow,
   requireSandboxHarnessPackage,
 } from "./mcp-bridge-state";
+import { ensureSandboxGatewaySelected } from "./mcp-bridge/gateway-selection";
 import { discoverMcpTools } from "./mcp-bridge-tool-discovery";
 import {
   inspectMcpRecordedTargetPins,

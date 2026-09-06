@@ -218,7 +218,7 @@ export const teamsManifest = {
     {
       id: "openclawPluginPackage",
       agent: "openclaw",
-      manager: "openclaw-plugin",
+      manager: "node-package",
       spec: "npm:@openclaw/msteams@{{openclaw.version}}",
       pin: true,
       integrityByVersion: {
@@ -233,7 +233,7 @@ export const teamsManifest = {
     {
       id: "hermesTeamsAppsPackage",
       agent: "hermes",
-      manager: "hermes-uv-pip",
+      manager: "python-package",
       spec: "microsoft-teams-apps==2.0.13.4",
       required: true,
     },

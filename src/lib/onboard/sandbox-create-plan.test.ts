@@ -335,9 +335,7 @@ describe("resolveSandboxCreatePolicyTier", () => {
       [],
       expect.objectContaining({ policyTier: "balanced" }),
     );
-    expect(plan.initialSandboxPolicy.appliedPresets).toContain(
-      "openclaw-diagnostics-otel-local",
-    );
+    expect(plan.initialSandboxPolicy.appliedPresets).toContain("openclaw-diagnostics-otel-local");
     expect(plan).not.toHaveProperty("policyTier");
   });
 });
@@ -898,7 +896,7 @@ describe("resolveSandboxCreateIntent", () => {
     ).toThrow("Sandbox GPU device selection requires the OpenShell GPU request.");
   });
 
-  it("materializes a read-only Docker bind beside the DCode tmpfs mount", () => {
+  it("materializes a package-declared tmpfs mount beside a read-only Docker bind", () => {
     const intent = resolveSandboxCreateIntent({
       basePolicyPath: "/repo/policy.yaml",
       sandboxName: "sandbox",
@@ -913,9 +911,19 @@ describe("resolveSandboxCreateIntent", () => {
       sandboxGpuConfig,
       gpuCreateArgs: [],
       hostMounts: [{ source: "/srv/project", target: "/sandbox/project", readOnly: true }],
+      sandboxDriverMounts: [
+        {
+          type: "tmpfs",
+          drivers: ["docker", "podman"],
+          target: "/run/nemoclaw-dcode-mcp",
+          options: ["noexec"],
+          size_bytes: 1_048_576,
+          mode: 0o1777,
+        },
+      ],
       gpuRoutePlan: "native-only",
       sandboxGpuLogMessage: null,
-      agentName: "langchain-deepagents-code",
+      agentName: "future-terminal",
     });
     const plan = materializeSandboxCreatePlan({
       intent,

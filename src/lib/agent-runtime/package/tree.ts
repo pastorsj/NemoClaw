@@ -6,8 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { TextDecoder } from "node:util";
 
-import { openRegularFileNoFollow } from "../../adapters/fs/regular-file";
-import { isInsideIgnoredCustomBuildContextPath } from "../../onboard/custom-build-context";
+import { openRegularFileNoFollow } from "../../adapters/fs/regular-file.ts";
+import { isInsideIgnoredCustomBuildContextPath } from "../../onboard/custom-build-context.ts";
 
 export interface HarnessPackageTreeLimits {
   readonly maxEntries: number;

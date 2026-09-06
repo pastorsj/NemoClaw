@@ -3,15 +3,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { runOpenshell } from "../../adapters/openshell/runtime";
 import { type AgentDefinition, loadAgent } from "../../agent/defs";
 import { CLI_DISPLAY_NAME, CLI_NAME } from "../../cli/branding";
 import { isNonInteractiveEnv, isNonInteractiveSession } from "../../core/non-interactive";
-import {
-  prompt as askPrompt,
-  getCredential,
-  normalizeCredentialValue,
-} from "../../credentials/store";
 import {
   type PolicyAddOptions,
   type PolicyBaselineOptions,
@@ -23,11 +17,11 @@ import { gatewayStartGuidance } from "../../gateway-start-guidance";
 import {
   type ChannelManifest,
   createBuiltInChannelManifestRegistry,
+  createChannelManifestRegistry,
   createBuiltInMessagingHookRegistry,
   createBuiltInRenderTemplateResolver,
   createMessagingPreEnableHookInputs,
   getMessagingManifestAvailabilityContext,
-  isMessagingChannelSupportedByAgent,
   isMessagingHookConflictError,
   listMessagingChannelsForProfile,
   markPlanChannelPendingRemoval,
@@ -40,8 +34,6 @@ import {
   type MessagingOpenShellRunner,
   type SandboxMessagingChannelPlan,
   type SandboxMessagingPlan,
-  toMessagingAgentId,
-  tryGetMessagingAgentId,
 } from "../../messaging";
 import { findChannelConflicts } from "../../messaging/applier/conflict-detection/registry";
 import type { GooglechatNonInteractiveAudienceCapability } from "../../messaging/channels/googlechat/hooks/tunnel-audience-gate";
@@ -56,7 +48,7 @@ import {
   collectMessagingBridgeTokenDefs,
   staticMessagingProviderTypeForChannel,
 } from "../../onboard/messaging-bridge-provider";
-import { normalizeSandboxAgentName } from "../../onboard/sandbox-agent";
+import { normalizeSandboxAgentName } from "../../onboard/sandbox-agent/naming";
 import {
   getMessagingChannelConfigFromPlan,
   getStoredMessagingChannelConfig,
@@ -95,13 +87,24 @@ import * as registry from "../../state/registry";
 import { isDockerRuntimeDown, printDockerRuntimeDownGuidance } from "./gateway-failure-classifier";
 import { getSandboxTargetGatewayName } from "./gateway-target";
 import { ensureMessagingHostForwardAfterRebuild } from "./messaging-host-forward-lifecycle";
-import { policyChannelDependencies } from "./policy-channel-dependencies";
+import {
+  legacyMessagingPolicyWarningAgent,
+  listLegacyChannelStatePaths,
+  policyChannelDependencies,
+} from "./policy-channel-dependencies";
 import { refreshSandboxPolicyContextFile } from "./policy-context-refresh";
 import { executeSandboxCommand, executeSandboxExecCommand } from "./process-recovery";
 
 const isNonInteractive = () => isNonInteractiveSession();
+const askPrompt: typeof policyChannelDependencies.prompt = (...args) =>
+  policyChannelDependencies.prompt(...args);
+const getCredential: typeof policyChannelDependencies.getCredential = (...args) =>
+  policyChannelDependencies.getCredential(...args);
+const normalizeCredentialValue: typeof policyChannelDependencies.normalizeCredentialValue = (
+  ...args
+) => policyChannelDependencies.normalizeCredentialValue(...args);
 const runMessagingOpenshell: MessagingOpenShellRunner = (args, options = {}) =>
-  runOpenshell([...args], {
+  policyChannelDependencies.runOpenshell([...args], {
     env: options.env as NodeJS.ProcessEnv | undefined,
     ignoreError: options.ignoreError,
     input: options.input,
@@ -329,7 +332,10 @@ async function addSandboxPolicyUnlocked(
     return;
   }
 
-  const sandboxAgent = registry.getSandbox(sandboxName)?.agent ?? null;
+  const sandboxEntry = registry.getSandbox(sandboxName);
+  const sandboxAgent = sandboxEntry?.harnessPackage
+    ? captureSandboxCommandAgentAuthority(sandboxEntry).definition.name
+    : (sandboxEntry?.agent ?? null);
   const storedMessagingConfig = getStoredMessagingChannelConfig(
     sandboxName,
     safeLoadOnboardSession(),
@@ -382,11 +388,8 @@ async function addSandboxPolicyUnlocked(
       }
       const appliedState = policies.getPresetContentGatewayState(sandboxName, appliedContent);
       if (appliedState === "match") {
-        const needsOpenClawNpmCheck =
-          preset.name === "npm" && (sandboxAgent === null || sandboxAgent === "openclaw");
-        const npmCompatibilityState = needsOpenClawNpmCheck
-          ? policies.getOpenClawNpmCompatibilityState(sandboxName)
-          : "match";
+        const npmCompatibilityState =
+          preset.name === "npm" ? policies.getNpmCompatibilityState(sandboxName) : "match";
         if (npmCompatibilityState === "repair") {
           reapplyState = "drift";
           console.log(
@@ -456,14 +459,15 @@ async function addSandboxPolicyUnlocked(
     policies.logPresetScope(presetContent);
   }
   const needsOpenClawNpmDisclosure =
-    answer === "npm" && (sandboxAgent === null || sandboxAgent === "openclaw");
+    answer === "npm" && policies.sandboxUsesNpmCompatibility(sandboxName);
   const npmBaselineExcluded = false;
   if (needsOpenClawNpmDisclosure && !npmBaselineExcluded) {
-    policies.logOpenClawNpmCompatibilityDisclosure();
+    policies.logNpmCompatibilityDisclosure();
   }
 
-  const messagingAgent =
-    sandboxAgent === "openclaw" || sandboxAgent === "hermes" ? sandboxAgent : undefined;
+  const messagingAgent = sandboxEntry?.harnessPackage
+    ? undefined
+    : legacyMessagingPolicyWarningAgent(sandboxAgent);
   const presetWarning = policies.getPresetValidationWarning(answer, { agent: messagingAgent });
   if (presetWarning) {
     console.log("");
@@ -947,7 +951,7 @@ async function applyChannelAddToGatewayAndRegistry(
     });
     for (const providerName of providerNames) {
       revalidateMessagingProviderAttachmentTarget(sandboxName, gatewayName, expectedAgentAuthority);
-      const attached = runOpenshell(
+      const attached = policyChannelDependencies.runOpenshell(
         ["sandbox", "provider", "attach", "-g", gatewayName, sandboxName, providerName],
         { ignoreError: true, stdio: ["ignore", "pipe", "pipe"] },
       );
@@ -1271,8 +1275,9 @@ async function planSandboxChannelAdd(
   availableChannels: readonly ChannelManifest[],
   dependencies: AddSandboxChannelDependencies,
 ): Promise<SandboxMessagingPlan> {
+  const profileRegistry = createChannelManifestRegistry(availableChannels);
   const planner = new MessagingWorkflowPlanner(
-    messagingManifestRegistry,
+    profileRegistry,
     createBuiltInMessagingHookRegistry({
       googlechat: {
         tunnelAudienceGate: {
@@ -1290,12 +1295,12 @@ async function planSandboxChannelAdd(
   try {
     const plan = await planner.buildChannelAddPlanFromSandboxEntry({
       sandboxName,
-      agent: toMessagingAgentId(agent, messagingManifestRegistry.list()),
+      agent: agent.name,
       isInteractive: !isNonInteractive(),
       channelId,
       sandboxEntry: registry.getSandbox(sandboxName),
       supportedChannelIds,
-      credentialAvailability: buildCredentialAvailability([channelId]),
+      credentialAvailability: buildCredentialAvailability([channelId], availableChannels),
     });
     MessagingSetupApplier.writePlanToEnv(plan);
     return plan;
@@ -1315,16 +1320,17 @@ export async function persistManifestChannelDisabledPlan(
   if (!entry?.messaging?.plan) return null;
   const profile = resolveMessagingProfileForSandbox(sandboxName);
   const { agent, availableChannels } = profile;
-  const agentId = tryGetMessagingAgentId(agent, messagingManifestRegistry.list());
-  if (agentId === null) return null;
+  if (!availableChannels.some((manifest) => manifest.supportedAgents.includes(agent.name))) {
+    return null;
+  }
   const planner = new MessagingWorkflowPlanner(
-    messagingManifestRegistry,
+    createChannelManifestRegistry(availableChannels),
     undefined,
     createBuiltInRenderTemplateResolver(),
   );
   const context = {
     sandboxName,
-    agent: agentId,
+    agent: agent.name,
     channelId,
     sandboxEntry: entry,
     supportedChannelIds: availableChannels.map((manifest) => manifest.id),
@@ -1345,8 +1351,7 @@ export async function persistManifestChannelRemovePlan(
   if (!entry) return false;
   const profile = resolveMessagingProfileForSandbox(sandboxName);
   const { agent, availableChannels } = profile;
-  const agentId = tryGetMessagingAgentId(agent, messagingManifestRegistry.list());
-  if (agentId === null) {
+  if (!availableChannels.some((manifest) => manifest.supportedAgents.includes(agent.name))) {
     if (entry.messaging?.plan) {
       requireCurrentMessagingProfileAuthority(sandboxName, profile.receiptAuthority);
       return registry.updateSandbox(sandboxName, { messaging: undefined });
@@ -1354,13 +1359,13 @@ export async function persistManifestChannelRemovePlan(
     return true;
   }
   const planner = new MessagingWorkflowPlanner(
-    messagingManifestRegistry,
+    createChannelManifestRegistry(availableChannels),
     undefined,
     createBuiltInRenderTemplateResolver(),
   );
   const plan = await planner.buildChannelRemovalTombstonePlanFromSandboxEntry({
     sandboxName,
-    agent: agentId,
+    agent: agent.name,
     channelId,
     sandboxEntry: entry,
     supportedChannelIds: availableChannels.map((manifest) => manifest.id),
@@ -1370,10 +1375,13 @@ export async function persistManifestChannelRemovePlan(
   return MessagingHostStateApplier.applyPlanToRegistry(sandboxName, plan);
 }
 
-function buildCredentialAvailability(channelIds: readonly string[]): Record<string, boolean> {
+function buildCredentialAvailability(
+  channelIds: readonly string[],
+  manifests: readonly ChannelManifest[] = messagingManifestRegistry.list(),
+): Record<string, boolean> {
   const availability: Record<string, boolean> = {};
   for (const channelId of channelIds) {
-    const manifest = messagingManifestRegistry.get(channelId);
+    const manifest = manifests.find((candidate) => candidate.id === channelId);
     if (!manifest) continue;
     for (const input of manifest.inputs) {
       if (input.kind !== "secret" || !input.envKey) continue;
@@ -1504,17 +1512,18 @@ async function addSandboxChannelUnlocked(
     process.exit(1);
   }
 
-  const manifest = resolveChannelManifest(rawChannelArg);
-  if (!manifest) {
+  const service = resolveChannelManifest(rawChannelArg);
+  if (!service) {
     console.error(`  Unknown channel '${rawChannelArg}'.`);
     console.error(`  Valid channels: ${knownManifestChannelNames().join(", ")}`);
     process.exit(1);
   }
-  const canonical = manifest.id;
+  const canonical = service.id;
 
   const messagingProfile = resolveMessagingProfileForSandbox(sandboxName);
   const { agent, availableChannels } = messagingProfile;
-  if (!availableChannels.some((candidate) => candidate.id === canonical)) {
+  const manifest = availableChannels.find((candidate) => candidate.id === canonical);
+  if (!manifest) {
     console.error("  This channel does not support the configured agent.");
     process.exit(1);
   }
@@ -1808,38 +1817,30 @@ export function applyChannelPresetIfAvailable(
 }
 
 function getSandboxChannelStatePaths(
-  agent: AgentDefinition,
+  profile: SandboxMessagingProfile,
   channelName: string,
 ): readonly string[] {
-  const configDir = agent.configPaths.dir;
-  const manifest = messagingManifestRegistry.get(channelName);
-  if (manifest && !isMessagingChannelSupportedByAgent(manifest, agent)) {
-    return [];
-  }
-  const messagingAgentId = tryGetMessagingAgentId(agent, messagingManifestRegistry.list());
-  const manifestStateDirs = messagingAgentId ? manifest?.state?.[messagingAgentId] : undefined;
+  const { agent } = profile;
+  const manifest = profile.availableChannels.find((candidate) => candidate.id === channelName);
+  const manifestStateDirs = manifest?.state?.[agent.name];
   if (manifestStateDirs !== undefined) {
-    return manifestStateDirs.map((stateDir) => `${configDir}/${stateDir}`);
+    return resolvePackageChannelStatePaths(agent, profile.availableChannels, channelName);
   }
-  const stateDirs = new Set(agent.stateDirs);
-  const paths: string[] = [];
-  const isHermesWhatsapp = agent.name === "hermes" && channelName === "whatsapp";
-  if (stateDirs.has("platforms")) {
-    paths.push(`${configDir}/platforms/${channelName}`);
-  }
-  if (isHermesWhatsapp && stateDirs.has("profiles")) {
-    paths.push(`${configDir}/profiles/dashboard-home/platforms/whatsapp/session`);
-  }
-  // Retain cleanup for the pre-profile Dashboard home while Hermes startup
-  // still treats it as migration input. This prevents legacy credentials from
-  // being migrated back into the canonical profile during a later rebuild.
-  if (isHermesWhatsapp && stateDirs.has("dashboard-home")) {
-    paths.push(`${configDir}/dashboard-home/platforms/whatsapp/session`);
-  }
-  if (paths.length === 0 && stateDirs.has(channelName)) {
-    paths.push(`${configDir}/${channelName}`);
-  }
-  return paths;
+  if (profile.receiptAuthority) return [];
+
+  return listLegacyChannelStatePaths(agent, channelName);
+}
+
+/** Resolve receipt-validated package state declarations under the selected harness config root. */
+export function resolvePackageChannelStatePaths(
+  agent: Pick<AgentDefinition, "name" | "configPaths">,
+  manifests: readonly ChannelManifest[],
+  channelName: string,
+): readonly string[] {
+  const stateDirs = manifests.find((candidate) => candidate.id === channelName)?.state?.[
+    agent.name
+  ];
+  return (stateDirs ?? []).map((stateDir) => `${agent.configPaths.dir}/${stateDir}`);
 }
 
 function isSafeChannelStatePath(p: string): boolean {
@@ -1900,10 +1901,10 @@ function stoppedWechatCleanupFailureGuidance(
 function clearSandboxChannelDurableState(
   sandboxName: string,
   channelName: string,
+  profile: SandboxMessagingProfile,
   options: { readonly allowAbsentStoppedState?: boolean } = {},
 ): boolean {
-  const agent = resolveAgentForSandbox(sandboxName);
-  const paths = getSandboxChannelStatePaths(agent, channelName);
+  const paths = getSandboxChannelStatePaths(profile, channelName);
   if (!paths.every(isSafeChannelStatePath)) {
     console.error(`  ${YW}⚠${R} Refusing unsafe '${channelName}' channel state cleanup path.`);
     return false;
@@ -1919,7 +1920,9 @@ function clearSandboxChannelDurableState(
   if (!sentinelSeen(result)) {
     result = executeSandboxCommand(sandboxName, cmd);
   }
-  if (!sentinelSeen(result) && agent.name === "openclaw" && channelName === "wechat") {
+  const legacyStoppedCleanup =
+    !profile.receiptAuthority && profile.agent.name === "openclaw" && channelName === "wechat";
+  if (!sentinelSeen(result) && (profile.receiptAuthority !== undefined || legacyStoppedCleanup)) {
     const stoppedCleanup = policyChannelDependencies.clearStoppedSandboxStateRoots(
       sandboxName,
       paths,
@@ -2029,8 +2032,10 @@ async function removeSandboxChannelUnlocked(
   const hasChannelResidue =
     registry.getConfiguredMessagingChannelsFromEntry(registryEntry).includes(canonical) ||
     policies.getAppliedPresets(sandboxName).includes(canonical);
-  const recoverPhysicalWechatResidue =
-    canonical === "wechat" && messagingProfile.agent.name === "openclaw";
+  const recoverPhysicalChannelResidue =
+    getSandboxChannelStatePaths(messagingProfile, canonical).length > 0 &&
+    (messagingProfile.receiptAuthority !== undefined ||
+      (canonical === "wechat" && messagingProfile.agent.name === "openclaw"));
 
   requireCurrentMessagingProfileAuthority(sandboxName, messagingProfile.receiptAuthority);
 
@@ -2064,8 +2069,8 @@ async function removeSandboxChannelUnlocked(
   // no-op only when no logical residue exists (#4001 review).
   if (
     requiresStateCleanupBeforeTeardown &&
-    (hasChannelResidue || recoverPhysicalWechatResidue) &&
-    !clearSandboxChannelDurableState(sandboxName, canonical, {
+    (hasChannelResidue || recoverPhysicalChannelResidue) &&
+    !clearSandboxChannelDurableState(sandboxName, canonical, messagingProfile, {
       allowAbsentStoppedState: !hasChannelResidue,
     })
   ) {
@@ -2147,7 +2152,7 @@ async function removeSandboxChannelUnlocked(
   // revocation already prevents the bot from authenticating, so a
   // failure here is a warning, not a bail.
   if (!requiresStateCleanupBeforeTeardown) {
-    clearSandboxChannelDurableState(sandboxName, canonical);
+    clearSandboxChannelDurableState(sandboxName, canonical, messagingProfile);
   }
 
   const rebuilt = await promptAndRebuild(sandboxName, `remove '${canonical}'`);
@@ -2170,8 +2175,8 @@ async function sandboxChannelsSetEnabled(
     process.exit(1);
   }
 
-  const manifest = resolveChannelManifest(channelArg);
-  if (!manifest) {
+  const service = resolveChannelManifest(channelArg);
+  if (!service) {
     console.error(`  Unknown channel '${channelArg}'.`);
     console.error(`  Valid channels: ${knownManifestChannelNames().join(", ")}`);
     process.exit(1);
@@ -2183,7 +2188,7 @@ async function sandboxChannelsSetEnabled(
     process.exit(1);
   }
 
-  const canonical = manifest.id;
+  const canonical = service.id;
   const messagingProfile = resolveMessagingProfileForSandbox(sandboxName);
   const { availableChannels } = messagingProfile;
   if (!availableChannels.some((candidate) => candidate.id === canonical)) {

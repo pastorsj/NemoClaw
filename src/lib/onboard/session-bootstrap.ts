@@ -4,7 +4,7 @@
 import path from "node:path";
 
 import { inspectHarnessPackageState } from "../agent-runtime/package/identity";
-import { normalizeProcessExitCode } from "../core/process-exit";
+import { normalizeProcessExitCode } from "../core/process-status";
 import type { ServingProfileProvenance } from "../inference/serving/types";
 import { NEMOCLAW_VLLM_GPU_DEVICE_ENV, parseVllmGpuDevice } from "../inference/vllm-models";
 import { PERSONAL_POLICY_TIER_NAME } from "../policy/tiers";
@@ -188,7 +188,8 @@ export class OnboardDeferredExitError extends Error {
 
 export function isOnboardDeferredExitError(error: unknown): error is OnboardDeferredExitError {
   const candidate = error as
-    (Error & { code?: unknown; [ONBOARD_DEFERRED_EXIT_ERROR]?: unknown }) | null;
+    | (Error & { code?: unknown; [ONBOARD_DEFERRED_EXIT_ERROR]?: unknown })
+    | null;
   return (
     candidate instanceof Error &&
     candidate[ONBOARD_DEFERRED_EXIT_ERROR] === true &&

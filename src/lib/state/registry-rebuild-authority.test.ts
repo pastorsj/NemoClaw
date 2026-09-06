@@ -5,8 +5,13 @@ import { createHash } from "node:crypto";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { managedStartupE2eProfile } from "../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import { MANAGED_IMAGE_REPOSITORIES } from "../onboard/managed-image/contract";
-import { encodeManagedStartupProfile } from "../onboard/managed-startup/profile";
+import {
+  encodeManagedStartupDurableProfile,
+  encodeManagedStartupProfile,
+} from "../onboard/managed-startup/profile";
+import { managedStartupSettingsFromProfile } from "../onboard/managed-startup/package-profile";
 import {
   captureSandboxRebuildAuthority,
   compareAndSwapSandboxRebuildAuthority,
@@ -29,6 +34,12 @@ vi.mock("./registry/lock", () => ({
 
 const ENCODED_PROFILE = encodeManagedStartupProfile(managedStartupE2eProfile("openclaw"));
 const PROFILE_SHA256 = createHash("sha256").update(ENCODED_PROFILE, "utf8").digest("hex");
+const FUTURE_PACKAGE = {
+  kind: "agent-runtime",
+  id: "future-harness",
+  packageVersion: "1.2.3",
+  contentDigest: "9".repeat(64),
+} as const satisfies HarnessPackageIdentity;
 
 function receipt(digest: string): Extract<SandboxWorkloadReceipt, { kind: "managed-image" }> {
   return {
@@ -88,15 +99,37 @@ function replacement(): SandboxEntry {
   };
 }
 
-function packageEntry(digest: string, generation: string, fingerprint: string): SandboxEntry {
+function packageEntry(
+  digest: string,
+  generation: string,
+  fingerprint: string,
+  harnessPackage: HarnessPackageIdentity = FUTURE_PACKAGE,
+): SandboxEntry {
   const repository = "registry.example/team/future-harness";
+  const piSettings = managedStartupSettingsFromProfile(managedStartupE2eProfile("pi"));
+  const encodedProfile = encodeManagedStartupDurableProfile({
+    schemaVersion: 1,
+    profileKind: "package",
+    agent: harnessPackage.id,
+    harnessPackage,
+    desiredState: {
+      ...piSettings,
+      configuration: { agent: harnessPackage.id },
+      dashboard: { agent: harnessPackage.id, mode: "disabled" },
+    },
+    packageConfig: { settings: { mode: "future" } },
+    corporateCa: { bundleSha256: null },
+  });
   const workload = {
     ...receipt(digest),
     reference: `${repository}@sha256:${digest.repeat(64)}`,
+    encodedProfile,
+    startupProfileSha256: createHash("sha256").update(encodedProfile, "utf8").digest("hex"),
   };
   return {
     ...entry(generation, fingerprint),
     agent: "future-harness",
+    harnessPackage,
     imageTag: workload.reference,
     workload,
   };
@@ -139,9 +172,29 @@ describe("sandbox rebuild authority", () => {
 
     const swapped = swapSandboxRebuildAuthorityInRegistry(registry(source), authority, next);
 
+    expect(authority.harnessPackage).toEqual(FUTURE_PACKAGE);
     expect(authority.managedImage).toEqual({ agent: "future-harness", repository });
     expect(swapped.result.status).toBe("committed");
     expect(swapped.registry.sandboxes.alpha).toEqual(next);
+  });
+
+  it("rejects exact package identity drift before rebuilding the registry row", () => {
+    const repository = "registry.example/team/future-harness";
+    const source = packageEntry("a", "generation-old", "fingerprint-old");
+    const next = packageEntry("b", "generation-new", "fingerprint-new");
+    const authority = captureSandboxRebuildAuthority(source, "docker", {
+      agent: "future-harness",
+      repository,
+    });
+    const driftedPackage = { ...FUTURE_PACKAGE, contentDigest: "8".repeat(64) };
+    const drifted = packageEntry("b", "generation-new", "fingerprint-new", driftedPackage);
+    const before = registry(source);
+
+    expect(() => swapSandboxRebuildAuthorityInRegistry(before, authority, drifted)).toThrow(
+      /changed the exact harness package authority/u,
+    );
+    expect(before.sandboxes.alpha).toEqual(source);
+    expect(sandboxRebuildReplacementMatchesEntry(next, drifted)).toBe(false);
   });
 
   it.each([

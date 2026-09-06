@@ -6,6 +6,7 @@ import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  captureOpenshell: vi.fn(() => ({ status: 0, output: "" })),
   dockerInspectGateway: vi.fn(),
   gatewayDoctorStartHint: vi.fn(),
   getNamedGatewayLifecycleState: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("../adapters/openshell/resolve", () => ({
 }));
 
 vi.mock("../gateway-runtime-action", () => ({
+  captureOpenshell: mocks.captureOpenshell,
   getNamedGatewayLifecycleState: mocks.getNamedGatewayLifecycleState,
   recoverNamedGatewayRuntime: mocks.recoverNamedGatewayRuntime,
 }));

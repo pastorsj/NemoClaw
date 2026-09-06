@@ -174,7 +174,8 @@ export function resolveTrustedLaunchAgent(
   agentName = normalizedString(entry.agent) ?? "openclaw",
 ): AgentDefinition {
   let agent: AgentDefinition;
-  if (entry.harnessPackage != null || entry.harnessPackageMigration != null) {
+  const receiptBacked = entry.harnessPackage != null || entry.harnessPackageMigration != null;
+  if (receiptBacked) {
     let registeredAgent: AgentDefinition | null;
     try {
       registeredAgent = (deps.getRegisteredAgent ?? agentRuntime.getRegisteredAgent)(entry);
@@ -192,8 +193,14 @@ export function resolveTrustedLaunchAgent(
       throw new LaunchReadinessEvidenceError();
     }
   }
-  const interactive = resolveLaunchInteractiveCommand(agent, agentName);
-  if (!interactive) throw new LaunchReadinessObservationError("session");
+  if (receiptBacked) {
+    if (agentRuntime.planAgentInteractiveCommand(agent).kind === "unsupported") {
+      throw new LaunchReadinessObservationError("session");
+    }
+  } else {
+    const interactive = resolveLaunchInteractiveCommand(agent, agentName);
+    if (!interactive) throw new LaunchReadinessObservationError("session");
+  }
   return agent;
 }
 

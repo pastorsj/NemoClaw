@@ -12,13 +12,13 @@ import {
   type OpenShellSandboxError,
 } from "../../adapters/openshell/sandbox-observer";
 import { resolveOpenshell } from "../../adapters/openshell/resolve";
-import { captureOpenshell } from "../../adapters/openshell/runtime";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
 import { getAgentRuntimeKind, loadAgent } from "../../agent/defs";
 import * as agentRuntime from "../../agent/runtime";
 import { CLI_NAME } from "../../cli/branding";
 import { GATEWAY_PORT } from "../../core/ports";
 import {
+  captureOpenshell,
   getNamedGatewayLifecycleState,
   recoverNamedGatewayRuntime,
 } from "../../gateway-runtime-action";
@@ -31,7 +31,6 @@ import {
   requireRuntimeProviderBundle,
   resolveCurrentRuntimeProviderBundle,
 } from "../../onboard/runtime-provider/access";
-import { executeSandboxCommandForVerification } from "../../onboard/sandbox-verification-exec";
 import { ROOT } from "../../runner";
 import * as sandboxVersion from "../../sandbox/version";
 import {
@@ -40,7 +39,11 @@ import {
 } from "../../sandbox/mutable-config-perms";
 import type { SandboxEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
-import { runSandboxAutoPairApprovalPass } from "./auto-pair-approval";
+import {
+  hasHarnessPackageAuthority,
+  resolveDoctorAgentAuthority,
+  type DoctorAgentAuthority,
+} from "./doctor-agent";
 import { buildConfigPermsCheck } from "./doctor-config-perms";
 import {
   collectInferenceChecks,
@@ -71,7 +74,11 @@ import {
   shouldInspectLegacyGatewayContainer,
   withSandboxDoctorLifecycleLock,
 } from "./doctor-system-checks";
-import { buildToolScopeChecks } from "./doctor-tool-scope";
+import {
+  collectLegacyOpenClawToolScopeChecks,
+  legacyDoctorDefaultRuntimeIsGateway,
+} from "./legacy-doctor";
+import { isHermesPortableDisposition } from "./hermes-portable-launch";
 
 export type { DoctorCheck, DoctorReport } from "./doctor-report";
 export { redactDoctorReport } from "./doctor-report";
@@ -459,14 +466,35 @@ function collectRegisteredSandboxChecks(
   sb: SandboxEntry | null | undefined,
   wantsFix: boolean,
   sandboxReachable: boolean,
+  agentAuthority: DoctorAgentAuthority,
 ): DoctorCheck[] {
   if (!sb) return [];
   const checks = [agentVersionDoctorCheck(sandboxName)];
+  if (agentAuthority.kind === "resolved") {
+    checks.push({
+      group: "Sandbox",
+      label: "Harness package authority",
+      status: "ok",
+      detail: `exact installed package resolved as a ${agentAuthority.runtimeKind} runtime`,
+    });
+  } else if (agentAuthority.kind === "unsupported") {
+    checks.push({
+      group: "Sandbox",
+      label: "Harness package authority",
+      status: "fail",
+      detail: agentAuthority.reason,
+      hint: "reinstall the recorded harness package or re-onboard this sandbox, then retry",
+    });
+  }
   let dashboardPortRequired = true;
-  try {
-    dashboardPortRequired = shouldManageDashboardForAgent(loadAgent(sb.agent || "openclaw"));
-  } catch {
-    // Require dashboard metadata when the agent definition cannot be loaded.
+  if (agentAuthority.kind === "resolved") {
+    dashboardPortRequired = shouldManageDashboardForAgent(agentAuthority.definition);
+  } else if (agentAuthority.kind === "legacy") {
+    try {
+      dashboardPortRequired = shouldManageDashboardForAgent(loadAgent(sb.agent || "openclaw"));
+    } catch {
+      // Require dashboard metadata when the legacy definition cannot be loaded.
+    }
   }
   checks.push(
     buildLifecycleRegistrationCheck(sandboxName, sb, CLI_NAME, { dashboardPortRequired }),
@@ -487,24 +515,23 @@ function collectToolScopeChecks(
   sandboxReachable: boolean,
   wantsFix: boolean,
 ): DoctorCheck[] {
-  if (!sb || !sandboxReachable || (sb.agent ?? "openclaw") !== "openclaw") return [];
-  return buildToolScopeChecks(sandboxName, CLI_NAME, wantsFix, {
-    exec: (name, script) => executeSandboxCommandForVerification(name, script),
-    runApprovalPass: (name) => {
-      const result = runSandboxAutoPairApprovalPass(name, { capture: true });
-      return { reported: result.reported, approved: result.approved };
-    },
-  });
+  if (!sb || hasHarnessPackageAuthority(sb) || !sandboxReachable) return [];
+  return collectLegacyOpenClawToolScopeChecks(sandboxName, sb, CLI_NAME, wantsFix);
 }
 
-function shouldReportServingProcessHealth(agentName: string | null | undefined): boolean {
+function shouldReportServingProcessHealth(
+  agentName: string | null | undefined,
+  agentAuthority: DoctorAgentAuthority,
+): boolean {
+  if (agentAuthority.kind === "resolved") return agentAuthority.runtimeKind === "gateway";
+  if (agentAuthority.kind === "unsupported") return false;
   const resolvedName = agentName || "openclaw";
   try {
     return getAgentRuntimeKind(loadAgent(resolvedName)) === "gateway";
   } catch {
     // Status preserves OpenClaw's gateway default if its manifest cannot be
     // loaded, while unknown non-default agents are classified as unknown.
-    return resolvedName === "openclaw";
+    return legacyDoctorDefaultRuntimeIsGateway(resolvedName);
   }
 }
 
@@ -514,6 +541,7 @@ async function collectDoctorChecks(
   gatewayName: string | null,
   intent: DoctorIntent,
 ): Promise<DoctorCheck[]> {
+  const agentAuthority = resolveDoctorAgentAuthority(sb);
   const host = collectDoctorHostChecks(sb);
   const gateway: DoctorGatewayProbe = gatewayName
     ? await collectDoctorGatewayChecks(gatewayName, sb, host.openshellBin, {
@@ -545,9 +573,15 @@ async function collectDoctorChecks(
     ...sandbox.checks,
     ...(await collectInferenceChecks(sandboxName, route, sandbox.reachable, {
       gatewayName,
-      includeServingProcessCheck: shouldReportServingProcessHealth(sb?.agent),
+      includeServingProcessCheck: shouldReportServingProcessHealth(sb?.agent, agentAuthority),
     })),
-    ...collectRegisteredSandboxChecks(sandboxName, sb, intent.wantsFix, sandbox.reachable),
+    ...collectRegisteredSandboxChecks(
+      sandboxName,
+      sb,
+      intent.wantsFix,
+      sandbox.reachable,
+      agentAuthority,
+    ),
     ...collectToolScopeChecks(sandboxName, sb, sandbox.reachable, intent.wantsFix),
     ...collectManagedLlamaCppDoctorChecks(sandboxName, sb?.gatewayPort),
     ollamaDoctorCheck(route.provider),
@@ -601,8 +635,7 @@ function globalGatewayGuidance(gatewayName: string): {
   try {
     return { checks: [], unavailableHint: gatewayDoctorStartHint(gatewayName) };
   } catch {
-    const hint =
-      "check the gateway-management declaration file permissions and JSON, then retry";
+    const hint = "check the gateway-management declaration file permissions and JSON, then retry";
     return {
       checks: [
         {
@@ -659,7 +692,7 @@ export async function runSandboxDoctor(
 
   const outcome = await withSandboxDoctorLifecycleLock(sandboxName, async () => {
     const portable = inspectSandboxDoctorPortableAuthority(sandboxName, registry.getSandbox);
-    if (portable.kind === "hermes") {
+    if (isHermesPortableDisposition(portable)) {
       const report = hermesPortableDoctorReport(sandboxName, portable.phase);
       if (intent.asJson && options.quietJson) return { report };
       const exitCode = renderDoctorReport(report, intent.asJson);

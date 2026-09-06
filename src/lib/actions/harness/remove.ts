@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseHarnessPackageId } from "../../agent-runtime/package/receipt";
-import { deactivateHarnessPackage } from "../../agent-runtime/package/store";
+import {
+  deactivateHarnessPackage,
+  readInstalledHarnessPackage,
+  type HarnessPackageStoreOptions,
+  type InstalledHarnessPackage,
+} from "../../agent-runtime/package/store";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 
 export interface InactiveHarnessPackageRemovalResult {
@@ -34,6 +39,14 @@ export interface RemoveHarnessPackageDependencies {
 const DEFAULT_DEPENDENCIES: RemoveHarnessPackageDependencies = Object.freeze({
   deactivateHarnessPackage,
 });
+
+/** Read the current package through the same action boundary that performs removal. */
+export function readHarnessPackageForRemoval(
+  id: string,
+  options: HarnessPackageStoreOptions = {},
+): InstalledHarnessPackage | null {
+  return readInstalledHarnessPackage(id, options);
+}
 
 /**
  * Deactivate a package for future selection. Immutable history is deliberately

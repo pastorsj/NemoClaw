@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Data-only capabilities consumed by the NemoClaw agent runtime package contract.
 name: pi
+provider_broker:
+  support: disabled
+  reason: This package does not require a host provider broker.
 display_name: "Pi"
 description: "Terminal coding agent with read, bash, edit, and write tools, plus session management"
 version_constraint: ">=0.84.1"
@@ -15,6 +18,9 @@ expected_version: "0.84.1"
 version_scheme: semver
 managed_image:
   repository: ghcr.io/nvidia/nemoclaw/pi-sandbox
+  base_image:
+    corporate_ca: true
+    security_inventory: true
   architectures:
     - linux/amd64
     - linux/arm64
@@ -25,8 +31,10 @@ managed_image:
   workspace:
     owner: runtime
     mode: "0755"
-  startup_profile_contract_version: 1
-  capability_contract_version: 1
+  startup_profile_environment:
+    - { name: NEMOCLAW_CONTEXT_WINDOW, value_type: string, max_bytes: 32 }
+    - { name: NEMOCLAW_MAX_TOKENS, value_type: positive-integer, max_bytes: 32 }
+    - { name: NEMOCLAW_REASONING, value_type: string, max_bytes: 8 }
 runtime:
   kind: terminal
   # Pi's login profile verifies nproc as well as nofile. Ubuntu /bin/sh cannot
@@ -52,6 +60,17 @@ config:
   shields_files:
     - fabric.json
   format: json
+state_lifecycle:
+  backup_quiescence:
+    kind: not-required
+  snapshot_restore: []
+  rebuild:
+    image_plugin_provenance: not-required
+    scheduled_work:
+      support: disabled
+      reason: Pi does not run scheduled work.
+    post_restore:
+      kind: not-required
 state_dirs:
   - path: sessions
   - path: prompts
@@ -96,6 +115,9 @@ state_files:
             - xhigh
 device_pairing: false
 inference:
+  config_update:
+    support: unsupported
+    reason: The sandbox image generates the Pi model catalog. Re-onboard to change it.
   provider_type: openai_compatible
   default_model: nvidia/nemotron-3-super-120b-a12b
   base_url_config_key: "providers.openshell.baseUrl"

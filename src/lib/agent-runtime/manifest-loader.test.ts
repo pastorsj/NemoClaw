@@ -8,12 +8,31 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ROOT } from "../runner";
 import { buildAgentDefinition } from "./manifest-loader";
-import { loadManifestRecord, parseManifestRecord, readDashboard } from "./manifest-readers";
+import {
+  loadLegacyRepositoryManifest,
+  loadValidatedHarnessManifest,
+  parseManifestRecord,
+  readDashboard,
+} from "./manifest-readers";
 
 const TEST_PARENT = path.join(process.cwd(), "node_modules/.cache/nemoclaw-agent-definition-tests");
 fs.mkdirSync(TEST_PARENT, { recursive: true, mode: 0o700 });
 
 let fixtureRoot = path.join(TEST_PARENT, "unused");
+
+const VALID_STATE_LIFECYCLE = [
+  "state_lifecycle:",
+  "  backup_quiescence:",
+  "    kind: not-required",
+  "  snapshot_restore: []",
+  "  rebuild:",
+  "    image_plugin_provenance: not-required",
+  "    scheduled_work:",
+  "      support: disabled",
+  "      reason: Test package has no scheduled work.",
+  "    post_restore:",
+  "      kind: not-required",
+] as const;
 
 function writeFile(root: string, relativePath: string, contents = "fixture\n"): string {
   const target = path.join(root, ...relativePath.split("/"));
@@ -32,13 +51,14 @@ function writeAgentRoot(
     `display_name: ${options.displayName ?? "OpenClaw"}`,
     "binary_path: /usr/local/bin/openclaw",
     ...(options.legacyPath ? ["_legacy_paths:", `  dockerfile: ${options.legacyPath}`] : []),
+    ...VALID_STATE_LIFECYCLE,
   ];
   return writeFile(root, "packages/nemoclaw-openclaw/manifest.yaml", `${lines.join("\n")}\n`);
 }
 
 function buildFromRoot(root: string, manifestPath = writeAgentRoot(root)) {
   return buildAgentDefinition({
-    manifest: loadManifestRecord(manifestPath),
+    manifest: loadLegacyRepositoryManifest(manifestPath),
     manifestPath,
     packageRoot: root,
   });
@@ -75,6 +95,28 @@ describe("dashboard manifest metadata", () => {
       ),
     ).toThrow(/safe dotted config path/);
   });
+
+  it("parses a package-declared tunnel origins path without harness identity", () => {
+    expect(
+      readDashboard(
+        parseManifestRecord(
+          "dashboard:\n  tunnel_allowed_origins_path: ui.security.browserOrigins\n",
+          "test manifest",
+        ),
+      ).tunnelAllowedOriginsPath,
+    ).toEqual(["ui", "security", "browserOrigins"]);
+  });
+
+  it("rejects an unsafe tunnel origins path", () => {
+    expect(() =>
+      readDashboard(
+        parseManifestRecord(
+          "dashboard:\n  tunnel_allowed_origins_path: ui.$prototype.origins\n",
+          "test manifest",
+        ),
+      ),
+    ).toThrow(/safe dotted config path/);
+  });
 });
 
 describe("buildAgentDefinition", () => {
@@ -82,7 +124,7 @@ describe("buildAgentDefinition", () => {
     const packageRoot = path.join(ROOT, "packages/nemoclaw-openclaw");
     const manifestPath = path.join(packageRoot, "manifest.yaml");
     const definition = buildAgentDefinition({
-      manifest: loadManifestRecord(manifestPath),
+      manifest: loadValidatedHarnessManifest(manifestPath, "openclaw"),
       manifestPath,
       packageRoot,
     });
@@ -97,8 +139,17 @@ describe("buildAgentDefinition", () => {
         repository: "ghcr.io/nvidia/nemoclaw/openclaw-sandbox",
         architectures: ["linux/amd64", "linux/arm64"],
         runtime_identity: { uid: 998, gid: 998, workdir: "/sandbox" },
-        startup_profile_contract_version: 1,
-        capability_contract_version: 1,
+      },
+      sandbox_create: { generated_image_build: "local-buildkit-required" },
+      runtime: {
+        device_pairing_settlement: {
+          command: ["/usr/local/bin/nemoclaw-device-pairing-settle"],
+          timeout_seconds: 130,
+        },
+      },
+      web_search: { support: "providers", providers: ["brave", "tavily"] },
+      inference: {
+        refresh_route_for_messaging_providers: ["compatible-endpoint"],
       },
     });
     expect(definition).toMatchObject({
@@ -123,7 +174,7 @@ describe("buildAgentDefinition", () => {
     const legacyDockerfile = writeFile(fixtureRoot, "runtime/legacy.Dockerfile", "FROM scratch\n");
 
     const definition = buildAgentDefinition({
-      manifest: loadManifestRecord(manifestPath),
+      manifest: loadLegacyRepositoryManifest(manifestPath),
       manifestPath,
       packageRoot: fixtureRoot,
     });
@@ -165,7 +216,13 @@ describe("buildAgentDefinition", () => {
     const manifestPath = writeFile(
       fixtureRoot,
       "packages/nemoclaw-openclaw/manifest.yaml",
-      "name: openclaw\n_legacy_paths:\n  policy: runtime/openclaw-policy.yaml\n",
+      [
+        "name: openclaw",
+        "_legacy_paths:",
+        "  policy: runtime/openclaw-policy.yaml",
+        ...VALID_STATE_LIFECYCLE,
+        "",
+      ].join("\n"),
     );
     const legacyPolicy = writeFile(fixtureRoot, "runtime/openclaw-policy.yaml", "version: 1\n");
 
@@ -181,7 +238,7 @@ describe("buildAgentDefinition", () => {
     try {
       expect(() =>
         buildAgentDefinition({
-          manifest: loadManifestRecord(outsideManifest),
+          manifest: loadLegacyRepositoryManifest(outsideManifest),
           manifestPath: outsideManifest,
           packageRoot: fixtureRoot,
         }),
@@ -190,7 +247,7 @@ describe("buildAgentDefinition", () => {
       const aliasedManifest = `${path.dirname(manifestPath)}/../openclaw/manifest.yaml`;
       expect(() =>
         buildAgentDefinition({
-          manifest: loadManifestRecord(manifestPath),
+          manifest: loadLegacyRepositoryManifest(manifestPath),
           manifestPath: aliasedManifest,
           packageRoot: fixtureRoot,
         }),
@@ -205,7 +262,13 @@ describe("buildAgentDefinition", () => {
     (legacyPath) => {
       const manifestPath = writeAgentRoot(fixtureRoot);
       const manifest = parseManifestRecord(
-        `name: openclaw\n_legacy_paths:\n  dockerfile: ${JSON.stringify(legacyPath)}\n`,
+        [
+          "name: openclaw",
+          "_legacy_paths:",
+          `  dockerfile: ${JSON.stringify(legacyPath)}`,
+          ...VALID_STATE_LIFECYCLE,
+          "",
+        ].join("\n"),
         manifestPath,
       );
 
@@ -224,7 +287,7 @@ describe("buildAgentDefinition", () => {
 
     expect(() =>
       buildAgentDefinition({
-        manifest: loadManifestRecord(manifestPath),
+        manifest: loadLegacyRepositoryManifest(manifestPath),
         manifestPath,
         packageRoot: fixtureRoot,
       }),
@@ -238,7 +301,7 @@ describe("buildAgentDefinition", () => {
     const legacyDockerfile = writeFile(fixtureRoot, "runtime/legacy.Dockerfile", "FROM scratch\n");
     const replacement = writeFile(fixtureRoot, "replacement/Dockerfile", "FROM scratch\n");
     const definition = buildAgentDefinition({
-      manifest: loadManifestRecord(manifestPath),
+      manifest: loadLegacyRepositoryManifest(manifestPath),
       manifestPath,
       packageRoot: fixtureRoot,
     });

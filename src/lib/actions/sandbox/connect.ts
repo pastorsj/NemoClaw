@@ -24,11 +24,12 @@ import {
 } from "../../adapters/openshell/timeouts";
 import type { AgentDefinition } from "../../agent/defs";
 import * as agentRuntime from "../../agent/runtime";
+import { hasHarnessPackageAuthority } from "../../agent-runtime/status-agent";
 import { CLI_NAME } from "../../cli/branding";
 import { D, G, R, YW } from "../../cli/terminal-style";
 import { retryUntil, retryUntilAsync } from "../../core/retry";
 
-import { spawnExitCode } from "../../core/process-exit";
+import { spawnExitCode } from "../../core/process-status";
 import { shellQuote } from "../../core/shell-quote";
 import { gatewayStartGuidance } from "../../gateway-start-guidance";
 import {
@@ -51,9 +52,8 @@ import {
   assertNoOpenShellGatewayEndpointOverride,
   OpenShellGatewayEndpointOverrideError,
 } from "../../openshell-gateway-endpoint-guard";
-import { ROOT } from "../../runner";
+import { ROOT, redact, redactFull } from "../../runner";
 import * as sandboxVersion from "../../sandbox/version";
-import { redact, redactFull } from "../../security/redact";
 import type { SandboxEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
 import {
@@ -68,7 +68,6 @@ import {
   exitOnSecretBoundaryRefusal,
   printGatewayIntegrityRepairGuidance,
 } from "./connect-boundary-refusal";
-import { prepareHermesLightTerminalSkin } from "./connect-hermes-light-skin";
 import {
   assertSandboxGatewayRouteCompatible,
   buildGatewayInferenceSetArgs,
@@ -101,6 +100,11 @@ import {
 } from "./gateway-state";
 import { getSandboxTargetGatewayName } from "./gateway-target";
 import { printGatewayWedgeDiagnostics } from "./gateway-wedge-diagnostics";
+import {
+  ensureLegacyHermesToolBroker,
+  isHermesPortableDisposition,
+  prepareLegacyHermesLightSkin,
+} from "./connect/compatibility";
 import {
   createProbeTimingRecorder,
   createBoundLaunchReadinessDeps,
@@ -1629,23 +1633,6 @@ async function ensureSandboxInferenceRouteOrExit(
   return result.sandbox;
 }
 
-function maybeEnsureHermesToolGatewayBroker(sb: SandboxEntry | null): void {
-  if (
-    !sb ||
-    sb.agent !== "hermes" ||
-    !Array.isArray(sb.hermesToolGateways) ||
-    sb.hermesToolGateways.length === 0
-  ) {
-    return;
-  }
-  try {
-    const hermesToolGatewayBroker = require("../../hermes-tool-gateway-broker");
-    hermesToolGatewayBroker.ensureHermesToolGatewayBrokerForSandboxEntry(sb);
-  } catch {
-    /* non-fatal — managed-tool calls will surface broker guidance if needed */
-  }
-}
-
 export function restoreSandboxStartupState(sandboxName: string): SandboxStartupRecoveryResult {
   let reportedRecoveryFailureDetail: string | null = null;
   let reportedRecoveryFailureLayer: GatewayRestartFailureLayer | null = null;
@@ -1892,7 +1879,7 @@ async function runConnectEntryPreflight(
       const authority = measure("authority", () =>
         qualifyPortableAgentLifecycleAuthority(sandboxName, portableAgentLifecycleAuthorityDeps()),
       );
-      hermesPortable = authority.kind === "hermes";
+      hermesPortable = isHermesPortableDisposition(authority);
       if (hermesPortableCommandAuthority && !hermesPortable) {
         throw new Error("Hermes portable command authority disagrees with lifecycle authority");
       }
@@ -2132,7 +2119,8 @@ export function completeInteractiveSessionSetup(
   sb: SandboxEntry | null,
   runApprovalPass = runConnectAutoPairApprovalPass,
 ): void {
-  maybeEnsureHermesToolGatewayBroker(sb);
+  if (hasHarnessPackageAuthority(sb)) return;
+  ensureLegacyHermesToolBroker(sb);
   const gatewayName = sb ? resolveSandboxGatewayName(sb) : getSandboxTargetGatewayName(sandboxName);
   runApprovalPass(sandboxName, gatewayName);
 }
@@ -2145,8 +2133,9 @@ export function completeReadinessQualifiedInteractiveSessionSetup(
   runApprovalPass = runConnectAutoPairApprovalPass,
   resolveFallbackGateway = getSandboxTargetGatewayName,
 ): void {
-  maybeEnsureHermesToolGatewayBroker(sb);
-  if (sb && agent.name === "openclaw") return;
+  if (hasHarnessPackageAuthority(sb)) return;
+  ensureLegacyHermesToolBroker(sb);
+  if (sb && agent.hasDevicePairing) return;
   const gatewayName = sb ? resolveSandboxGatewayName(sb) : resolveFallbackGateway(sandboxName);
   runApprovalPass(sandboxName, gatewayName);
 }
@@ -2308,7 +2297,7 @@ async function prepareConnectSandboxWithinLifecycleFence(
       probeTiming!.markFailureStage("authority");
       failHermesPortableReadinessAuthority(sandboxName);
     }
-    if (initialPortableAuthority.kind === "hermes") {
+    if (isHermesPortableDisposition(initialPortableAuthority)) {
       try {
         let active = probeTiming!.measure("authority", () =>
           requireHermesPortableActiveLifecycleAuthority(
@@ -2485,7 +2474,7 @@ async function prepareConnectSandboxWithinLifecycleFence(
           ),
         );
         probeTiming!.setLifecycleAction("reused");
-        if (authority.kind === "hermes") {
+        if (isHermesPortableDisposition(authority)) {
           const acceptedHermesAuthority = hermesReadinessAuthority;
           if (!acceptedHermesAuthority) {
             probeTiming!.markFailureStage("authority");
@@ -2714,9 +2703,7 @@ async function prepareConnectSandboxWithinLifecycleFence(
           probeTiming!.measure("authority", retainedCommand.assertCurrent);
         }
         const published = await probeTiming!.measureAsync("publication", () =>
-          (retainedCommand
-            ? publishHermesLaunchReadinessWithSettlement
-            : publishLaunchReadiness)(
+          (retainedCommand ? publishHermesLaunchReadinessWithSettlement : publishLaunchReadiness)(
             publicationRequest,
             retainedCommand
               ? hermesPortableLaunchReadinessDeps(retainedCommand, probeTiming)
@@ -2824,14 +2811,24 @@ async function prepareConnectSandboxWithinLifecycleFence(
     !["1", "true"].includes(String(process.env.NEMOCLAW_NO_CONNECT_HINT || ""))
   ) {
     console.log("");
-    // Same resolver `launch` uses, so the hint cannot drift from the command
-    // that `nemoclaw launch <name>` actually runs (#6006).
-    void agentRuntime.getInteractiveAgentCommand(agent, sb?.agent);
     console.log(`  ${G}✓${R} Connecting to sandbox '${sandboxName}'`);
-    console.log(`  ${D}Inside the sandbox, run the configured command to start chatting.${R}`);
-    console.log(
-      `  ${D}Type \`/exit\` to leave the chat, then \`exit\` to return to the host shell.${R}`,
-    );
+    const receiptBacked = sb?.harnessPackage != null || sb?.harnessPackageMigration != null;
+    const packageCommandPlan =
+      receiptBacked && agent ? agentRuntime.planAgentInteractiveCommand(agent) : null;
+    if (packageCommandPlan?.kind === "unsupported") {
+      console.log(
+        `  ${D}This harness package does not declare an interactive command; this connection provides shell access only.${R}`,
+      );
+      console.log(`  ${D}Type \`exit\` to return to the host shell.${R}`);
+    } else {
+      // Legacy rows retain the same trusted resolver that `launch` uses. An
+      // exact package was already planned above without package-ID fallback.
+      if (!receiptBacked) void agentRuntime.getInteractiveAgentCommand(agent, sb?.agent);
+      console.log(`  ${D}Inside the sandbox, run the configured command to start chatting.${R}`);
+      console.log(
+        `  ${D}Type \`/exit\` to leave the chat, then \`exit\` to return to the host shell.${R}`,
+      );
+    }
     // The policy-denial breadcrumb (#5978) is emitted once by the in-sandbox
     // `nemoclaw-policy-denial-hint` stanza when this connect shell sources
     // /tmp/nemoclaw-proxy-env.sh. We deliberately do NOT also print it here:
@@ -2857,8 +2854,9 @@ async function prepareConnectSandboxWithinLifecycleFence(
       return;
     }
     if (
-      qualifyPortableAgentLifecycleAuthority(sandboxName, portableAgentLifecycleAuthorityDeps())
-        .kind === "hermes"
+      isHermesPortableDisposition(
+        qualifyPortableAgentLifecycleAuthority(sandboxName, portableAgentLifecycleAuthorityDeps()),
+      )
     ) {
       throw new Error("Hermes portable lifecycle authority appeared during interactive connect");
     }
@@ -2890,7 +2888,9 @@ async function prepareConnectSandboxWithinLifecycleFence(
     return { ...buildHermesPortableCommandAuthority(sandboxName), gatewayName };
   };
   requalifyPortableDisposition();
-  if (!hermesPortable) prepareHermesLightTerminalSkin(sandboxName, agent, process.env);
+  if (!hermesPortable && !hasHarnessPackageAuthority(sb)) {
+    prepareLegacyHermesLightSkin(sandboxName, sb, agent, process.env);
+  }
   requalifyPortableDisposition();
   const portableAuthority = hermesPortable ? requalifyHermesPortableForConnect() : null;
   const connectArgs = portableAuthority

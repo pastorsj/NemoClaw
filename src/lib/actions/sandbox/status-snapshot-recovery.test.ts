@@ -341,6 +341,16 @@ describe("collectSandboxStatusSnapshot Docker recovery", () => {
       },
     ],
     [
+      "unsupported",
+      {
+        checked: true,
+        wasRunning: false,
+        recovered: false,
+        forwardRecovered: false,
+        recoveryUnsupportedReason: "the package uses an external process manager",
+      },
+    ],
+    [
       "gateway-recovery",
       {
         checked: true,

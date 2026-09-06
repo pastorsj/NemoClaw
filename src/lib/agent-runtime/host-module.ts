@@ -4,6 +4,7 @@
 import { loadHarnessAdapter, HarnessAdapterError } from "./adapter/loader";
 import {
   HARNESS_MCP_ADAPTER_CONTRACT,
+  type HarnessMcpAdapterIdentifier,
   type HarnessMcpCapabilityProbe,
   type HarnessMcpCapabilityRequest,
   type HarnessMcpInspectionRequest,
@@ -14,6 +15,7 @@ import {
   type HarnessMcpRuntimeIntentRequest,
   type HarnessMcpRuntimePlan,
   type HarnessMcpRuntimeRequest,
+  type HarnessMcpShellCommandPlan,
   type HarnessMcpSnapshotRestorePlan,
   type HarnessMcpSnapshotRestoreRequest,
 } from "./adapter/mcp";
@@ -23,7 +25,10 @@ import type { HarnessPackageIdentity } from "./package/types";
 
 export type {
   HarnessMcpAdapterCommand,
+  HarnessMcpAdapterCommandPlan,
+  HarnessMcpAdapterIdentifier,
   HarnessMcpAdapterEntry,
+  HarnessMcpArgvCommandPlan,
   HarnessMcpCapabilityProbe,
   HarnessMcpCapabilityRequest,
   HarnessMcpCredentialConvergence,
@@ -39,6 +44,7 @@ export type {
   HarnessMcpRuntimeIntentRequest,
   HarnessMcpRuntimePlan,
   HarnessMcpRuntimeRequest,
+  HarnessMcpShellCommandPlan,
   HarnessMcpSnapshotApplicability,
   HarnessMcpSnapshotRestorePlan,
   HarnessMcpSnapshotRestoreRequest,
@@ -47,7 +53,7 @@ export type {
 export interface HarnessMcpAdapterHostModule {
   buildMcpRegistrationPlan(request: HarnessMcpRegistrationRequest): HarnessMcpRegistrationPlan;
   buildMcpRemovalPlan(request: HarnessMcpRemovalRequest): HarnessMcpRemovalPlan;
-  buildMcpInspectionCommand(request: HarnessMcpInspectionRequest): string;
+  buildMcpInspectionCommand(request: HarnessMcpInspectionRequest): HarnessMcpShellCommandPlan;
   describeMcpMutationCapability(request: HarnessMcpCapabilityRequest): HarnessMcpCapabilityProbe;
   describeMcpTeardownCapability(request: HarnessMcpCapabilityRequest): HarnessMcpCapabilityProbe;
   describeMcpRuntimeIntentVerification(
@@ -60,7 +66,7 @@ export interface HarnessMcpAdapterHostModule {
 }
 
 export interface LoadHarnessMcpAdapterHostModuleOptions extends HarnessPackageStoreOptions {
-  readonly expectedAdapter?: string;
+  readonly expectedAdapter?: HarnessMcpAdapterIdentifier;
 }
 
 /** Compatibility error for callers of the original MCP-specific host-module API. */
@@ -129,7 +135,7 @@ export function loadHarnessMcpAdapterHostModule(
     buildMcpRemovalPlan(request: HarnessMcpRemovalRequest): HarnessMcpRemovalPlan {
       return callMcpAdapter(() => adapter.remove(request));
     },
-    buildMcpInspectionCommand(request: HarnessMcpInspectionRequest): string {
+    buildMcpInspectionCommand(request: HarnessMcpInspectionRequest): HarnessMcpShellCommandPlan {
       return callMcpAdapter(() => adapter.inspect(request));
     },
     describeMcpMutationCapability(request: HarnessMcpCapabilityRequest): HarnessMcpCapabilityProbe {

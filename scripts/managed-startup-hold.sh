@@ -36,10 +36,12 @@ _nemoclaw_bootstrap_identity="$6"
 [ "$7" = "--" ] || fail "startup argument delimiter is missing"
 shift 7
 
+# Exact package authority is checked by the profile runtime. Keep this image
+# gate limited to the public package-ID grammar so it cannot become a catalogue.
 case "$_nemoclaw_agent" in
-  openclaw | hermes | langchain-deepagents-code | pi) ;;
-  *) fail "agent is unsupported" ;;
+  "" | [!a-z]* | *[!a-z0-9-]* | *--* | *-) fail "package id is invalid" ;;
 esac
+[ "${#_nemoclaw_agent}" -le 64 ] || fail "package id is invalid"
 case "$_nemoclaw_fingerprint" in
   *[!0-9a-f]* | "") fail "profile fingerprint must be lowercase SHA-256" ;;
 esac

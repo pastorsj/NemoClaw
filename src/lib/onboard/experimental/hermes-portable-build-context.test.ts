@@ -189,17 +189,23 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
     expect(fs.existsSync(path.join(first.buildContextPath, "node_modules"))).toBe(false);
     expect(
       fs.existsSync(
-        path.join(first.buildContextPath, "src/lib/messaging/channels/wechat/contract.ts"),
+        path.join(first.buildContextPath, "packages/nemoclaw-hermes/messaging/messaging-build.mts"),
       ),
     ).toBe(true);
     expect(
       fs.existsSync(
-        path.join(first.buildContextPath, "src/lib/messaging/channels/teams/contract.ts"),
+        path.join(
+          first.buildContextPath,
+          "packages/nemoclaw-hermes/messaging/runtime/googlechat/hermes-adapter.py",
+        ),
       ),
     ).toBe(true);
     expect(
       fs.existsSync(
-        path.join(first.buildContextPath, "src/lib/messaging/managed-startup-placeholders.ts"),
+        path.join(
+          first.buildContextPath,
+          "packages/nemoclaw-hermes/runtime/managed-gateway-control.py",
+        ),
       ),
     ).toBe(true);
     expect(
@@ -208,9 +214,7 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
       ),
     ).toBe(false);
     expect(
-      fs.existsSync(
-        path.join(first.buildContextPath, "agents/hermes/security-dependencies.patch"),
-      ),
+      fs.existsSync(path.join(first.buildContextPath, "agents/hermes/security-dependencies.patch")),
     ).toBe(false);
 
     const reused = plan.materialize(contextInput());

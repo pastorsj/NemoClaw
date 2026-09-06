@@ -16,6 +16,18 @@ const TOOL_SOURCES = Object.freeze([
   "build-adapters.mts",
   "validate-package.mts",
   "build-package.mts",
+  "materialize-runtime.mts",
+]);
+const RUNTIME_SOURCES = Object.freeze([
+  "src/manifest-validator.ts",
+  "src/validation/capabilities.ts",
+  "src/validation/config.ts",
+  "src/validation/identity.ts",
+  "src/validation/managed-image.ts",
+  "src/validation/runtime.ts",
+  "src/validation/sandbox-create.ts",
+  "src/validation/shared.ts",
+  "src/validation/state.ts",
 ]);
 const JAVASCRIPT_SHEBANG = "#!/usr/bin/env node";
 
@@ -47,12 +59,27 @@ function normalizeCompiledTool(contents: string): string {
   return normalized.replace(/^#![^\n]*/u, JAVASCRIPT_SHEBANG);
 }
 
+function compiledRuntimeName(sourceName: string): string {
+  return sourceName.replace(/\.ts$/u, ".js");
+}
+
 function writeTool(outputPath: string, contents: string): void {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   const temporaryPath = `${outputPath}.tmp-${String(process.pid)}`;
   try {
     fs.writeFileSync(temporaryPath, contents, { encoding: "utf8", flag: "wx", mode: 0o755 });
     fs.chmodSync(temporaryPath, 0o755);
+    fs.renameSync(temporaryPath, outputPath);
+  } finally {
+    fs.rmSync(temporaryPath, { force: true });
+  }
+}
+
+function writeRuntime(outputPath: string, contents: string): void {
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const temporaryPath = `${outputPath}.tmp-${String(process.pid)}`;
+  try {
+    fs.writeFileSync(temporaryPath, contents, { encoding: "utf8", flag: "wx", mode: 0o644 });
     fs.renameSync(temporaryPath, outputPath);
   } finally {
     fs.rmSync(temporaryPath, { force: true });
@@ -68,6 +95,7 @@ export function buildHarnessContractTools(check = false): void {
         resolveTypeScriptCompiler(),
         "--ignoreConfig",
         ...TOOL_SOURCES,
+        ...RUNTIME_SOURCES,
         "--module",
         "Node16",
         "--moduleResolution",
@@ -113,6 +141,21 @@ export function buildHarnessContractTools(check = false): void {
         }
       } else {
         writeTool(outputPath, expected);
+      }
+    }
+
+    for (const sourceName of RUNTIME_SOURCES) {
+      const outputName = compiledRuntimeName(sourceName);
+      const temporaryPath = path.join(temporaryRoot, outputName);
+      if (!fs.existsSync(temporaryPath)) fail(`${sourceName} did not produce ${outputName}`);
+      const expected = fs.readFileSync(temporaryPath, "utf8").replace(/\r\n/gu, "\n");
+      const outputPath = path.join(OUTPUT_ROOT, outputName);
+      if (check) {
+        if (!fs.existsSync(outputPath) || fs.readFileSync(outputPath, "utf8") !== expected) {
+          fail(`${path.relative(CONTRACT_ROOT, outputPath)} is stale; rebuild contract tools`);
+        }
+      } else {
+        writeRuntime(outputPath, expected);
       }
     }
   } finally {

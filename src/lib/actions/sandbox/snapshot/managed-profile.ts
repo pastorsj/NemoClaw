@@ -1,14 +1,23 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { fingerprintManagedStartupProfile } from "../../../onboard/managed-startup/profile";
+import {
+  decodeManagedStartupDurableProfile,
+  fingerprintManagedStartupDurableProfile,
+  isManagedStartupPackageProfile,
+} from "../../../onboard/managed-startup/profile";
+import { harnessPackageIdentitiesEqual } from "../../../agent-runtime/package/identity-validation";
+import type { HarnessPackageIdentity } from "../../../agent-runtime/package/types";
 import type {
   RuntimeProviderBundle,
   RuntimeProviderManagedProfileRestoreAuthority,
 } from "../../../onboard/runtime-provider/contract";
 import { normalizeRuntimeProviderIdentity } from "../../../onboard/runtime-provider/registry";
 import {
+  type DurableManagedWorkloadAuthority,
   type ManagedWorkloadAuthority,
+  type PackageManagedWorkloadAuthority,
+  readDurableManagedWorkloadAuthority,
   readManagedWorkloadAuthority,
 } from "../../../onboard/workload/authority";
 import type { SandboxEntry, SandboxWorkloadReceipt } from "../../../state/registry/types";
@@ -18,6 +27,8 @@ export interface ManagedSnapshotProfileSource {
   readonly agentType: string;
   readonly imageTag?: string | null;
   readonly fromDockerfile?: string | null;
+  /** Exact package identity recorded by a schema-v2 snapshot or current registry row. */
+  readonly harnessPackage?: HarnessPackageIdentity | null;
   readonly workload?: SandboxWorkloadReceipt;
 }
 
@@ -26,9 +37,26 @@ export interface ManagedSnapshotProfileRestorePlan {
   readonly providerId: string;
   readonly sourceSandboxName: string;
   readonly targetSandboxName: string;
-  readonly authority: ManagedWorkloadAuthority;
+  readonly authority: DurableManagedWorkloadAuthority;
   readonly providerRestoreAuthority: RuntimeProviderManagedProfileRestoreAuthority;
 }
+
+/**
+ * Managed clone activation remains unavailable, but package snapshots must
+ * still cross their exact durable authority boundary before NemoClaw refuses
+ * the operation. Legacy profiles retain their separately quarantined rebinder.
+ */
+export type ManagedSnapshotCloneSupport =
+  | { readonly kind: "not-managed" }
+  | {
+      readonly kind: "legacy-rebind-required";
+      readonly authority: ManagedWorkloadAuthority;
+    }
+  | {
+      readonly kind: "unsupported";
+      readonly authority: PackageManagedWorkloadAuthority;
+      readonly reason: "receipt-backed package clone rebind is not implemented";
+    };
 
 export class ManagedSnapshotProfileRestoreError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -43,15 +71,27 @@ export class ManagedSnapshotProfileRestoreError extends Error {
  */
 export function readManagedSnapshotProfileAuthority(
   source: ManagedSnapshotProfileSource,
-): ManagedWorkloadAuthority | null {
+): DurableManagedWorkloadAuthority | null {
   try {
-    return readManagedWorkloadAuthority({
+    const common = {
       agent: source.agentType,
       fromDockerfile: source.fromDockerfile ?? null,
       imageTag:
         source.imageTag ??
         (source.workload?.kind === "managed-image" ? source.workload.reference : null),
       workload: source.workload,
+    };
+    const packageProfile =
+      source.workload?.kind === "managed-image" &&
+      isManagedStartupPackageProfile(
+        decodeManagedStartupDurableProfile(source.workload.encodedProfile),
+      );
+    if (!packageProfile) return readManagedWorkloadAuthority(common);
+    return readDurableManagedWorkloadAuthority({
+      ...common,
+      ...(source.harnessPackage === undefined || source.harnessPackage === null
+        ? {}
+        : { harnessPackage: source.harnessPackage }),
     });
   } catch (error) {
     throw new ManagedSnapshotProfileRestoreError(
@@ -59,6 +99,15 @@ export function readManagedSnapshotProfileAuthority(
       { cause: error },
     );
   }
+}
+
+function hasSamePackageAuthority(
+  left: DurableManagedWorkloadAuthority["harnessPackage"],
+  right: DurableManagedWorkloadAuthority["harnessPackage"],
+): boolean {
+  return left === null
+    ? right === null
+    : right !== null && harnessPackageIdentitiesEqual(left, right);
 }
 
 /**
@@ -99,9 +148,16 @@ export function prepareManagedSnapshotProfileRestore(
     );
   }
 
-  let targetAuthority: ManagedWorkloadAuthority | null;
+  let targetAuthority: DurableManagedWorkloadAuthority | null;
   try {
-    targetAuthority = readManagedWorkloadAuthority(target);
+    targetAuthority = readManagedSnapshotProfileAuthority({
+      sandboxName: target.name,
+      agentType: target.agent ?? "",
+      imageTag: target.imageTag,
+      fromDockerfile: target.fromDockerfile,
+      ...(target.harnessPackage ? { harnessPackage: target.harnessPackage } : {}),
+      workload: target.workload,
+    });
   } catch (error) {
     throw new ManagedSnapshotProfileRestoreError(
       `target '${target.name}' has invalid managed workload authority`,
@@ -113,7 +169,11 @@ export function prepareManagedSnapshotProfileRestore(
       `target '${target.name}' is not the snapshot's managed workload`,
     );
   }
-  if (target.name !== source.sandboxName || targetAuthority.agent !== sourceAuthority.agent) {
+  if (
+    target.name !== source.sandboxName ||
+    targetAuthority.agent !== sourceAuthority.agent ||
+    !hasSamePackageAuthority(targetAuthority.harnessPackage, sourceAuthority.harnessPackage)
+  ) {
     throw new ManagedSnapshotProfileRestoreError(
       `target '${target.name}' requires a managed image or startup-profile rebind`,
     );
@@ -132,8 +192,24 @@ export function prepareManagedSnapshotProfileRestore(
     authority: sourceAuthority,
     providerRestoreAuthority: {
       agent: targetAuthority.agent,
-      profileFingerprint: fingerprintManagedStartupProfile(targetAuthority.profile),
+      profileFingerprint: fingerprintManagedStartupDurableProfile(targetAuthority.profile),
     },
+  });
+}
+
+/** Classify clone support only after validating exact durable snapshot authority. */
+export function inspectManagedSnapshotCloneSupport(
+  source: ManagedSnapshotProfileSource,
+): ManagedSnapshotCloneSupport {
+  const authority = readManagedSnapshotProfileAuthority(source);
+  if (!authority) return Object.freeze({ kind: "not-managed" as const });
+  if (authority.harnessPackage === null) {
+    return Object.freeze({ kind: "legacy-rebind-required" as const, authority });
+  }
+  return Object.freeze({
+    kind: "unsupported" as const,
+    authority,
+    reason: "receipt-backed package clone rebind is not implemented" as const,
   });
 }
 
@@ -146,8 +222,8 @@ export function rejectManagedSnapshotCloneUntilRebind(
   source: ManagedSnapshotProfileSource,
   targetSandboxName: string,
 ): void {
-  const authority = readManagedSnapshotProfileAuthority(source);
-  if (!authority) return;
+  const support = inspectManagedSnapshotCloneSupport(source);
+  if (support.kind === "not-managed") return;
   throw new ManagedSnapshotProfileRestoreError(
     `restoring '${source.sandboxName}' as '${targetSandboxName}' requires managed-profile clone rebind`,
   );

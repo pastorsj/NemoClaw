@@ -5,26 +5,24 @@ import fs from "node:fs";
 import path from "node:path";
 import { TextDecoder } from "node:util";
 import { parseDocument } from "yaml";
-import { openRegularFileNoFollow } from "../../adapters/fs/regular-file";
-import type { ManifestRecord, ManifestValue } from "../manifest-types";
-import { readString } from "../manifest-readers";
+import { validateHarnessManifest } from "@nvidia/nemoclaw-harness-contract/manifest-validator";
+import { openRegularFileNoFollow } from "../../adapters/fs/regular-file.ts";
+import { HARNESS_MANIFEST_MAX_BYTES, parseHarnessManifestDocument } from "../manifest-document.ts";
+import type { ManifestRecord } from "../manifest-types";
+import { readString } from "../manifest-readers.ts";
 import type { HarnessPackageEnvelope } from "./types";
 
 export const HARNESS_PACKAGE_METADATA_FILE = "nemoclaw-package.json";
 export const HARNESS_PACKAGE_METADATA_MAX_BYTES = 64 * 1024;
-export const HARNESS_PACKAGE_MANIFEST_MAX_BYTES = 256 * 1024;
+export const HARNESS_PACKAGE_MANIFEST_MAX_BYTES = HARNESS_MANIFEST_MAX_BYTES;
 
 const HARNESS_ID_MAX_LENGTH = 63;
 const DISPLAY_NAME_MAX_LENGTH = 128;
 const DISPLAY_NAME_MAX_BYTES = 512;
-const DESCRIPTION_MAX_LENGTH = 2048;
-const DESCRIPTION_MAX_BYTES = 8192;
 const PACKAGE_VERSION_MAX_LENGTH = 128;
 const NEMOCLAW_VERSION_MAX_LENGTH = 128;
 const MANIFEST_PATH_MAX_BYTES = 512;
 const MANIFEST_PATH_MAX_DEPTH = 32;
-const MANIFEST_DATA_MAX_DEPTH = 64;
-const MANIFEST_DATA_MAX_VALUES = 8192;
 const HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const SEMVER_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
@@ -39,6 +37,7 @@ const ENVELOPE_FIELDS = new Set([
   "displayName",
   "packageVersion",
   "minimumNemoClawVersion",
+  "maximumNemoClawVersionExclusive",
   "manifest",
 ]);
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
@@ -223,6 +222,29 @@ function requireMinimumNemoClawVersion(value: unknown): string {
   return value;
 }
 
+function requireMaximumNemoClawVersionExclusive(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length > NEMOCLAW_VERSION_MAX_LENGTH ||
+    !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(value)
+  ) {
+    throw new Error(
+      "Harness package maximumNemoClawVersionExclusive must be one exact x.y.z version",
+    );
+  }
+  return value;
+}
+
+function compareExactCoreVersions(left: string, right: string): number {
+  const leftParts = left.split(".").map(BigInt);
+  const rightParts = right.split(".").map(BigInt);
+  for (let index = 0; index < leftParts.length; index += 1) {
+    if (leftParts[index] === rightParts[index]) continue;
+    return leftParts[index] < rightParts[index] ? -1 : 1;
+  }
+  return 0;
+}
+
 function requireManifestPath(value: unknown): string {
   if (
     typeof value !== "string" ||
@@ -276,98 +298,25 @@ function parseEnvelope(source: string): HarnessPackageEnvelope {
   if (value.kind !== "agent-runtime") {
     throw new Error("Harness package kind must be agent-runtime");
   }
+  const minimumNemoClawVersion = requireMinimumNemoClawVersion(value.minimumNemoClawVersion);
+  const maximumNemoClawVersionExclusive = requireMaximumNemoClawVersionExclusive(
+    value.maximumNemoClawVersionExclusive,
+  );
+  if (compareExactCoreVersions(maximumNemoClawVersionExclusive, minimumNemoClawVersion) <= 0) {
+    throw new Error(
+      "Harness package maximumNemoClawVersionExclusive must be greater than minimumNemoClawVersion",
+    );
+  }
   return {
     schemaVersion: 1,
     kind: "agent-runtime",
     id: requireHarnessId(value.id),
     displayName: requireDisplayName(value.displayName),
     packageVersion: requirePackageVersion(value.packageVersion),
-    minimumNemoClawVersion: requireMinimumNemoClawVersion(value.minimumNemoClawVersion),
+    minimumNemoClawVersion,
+    maximumNemoClawVersionExclusive,
     manifest: requireManifestPath(value.manifest),
   };
-}
-
-function isManifestScalar(value: unknown): value is ManifestValue {
-  return (
-    value === null ||
-    value instanceof Date ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  );
-}
-
-function requireManifestRecord(value: unknown): ManifestRecord {
-  if (!isPlainRecord(value)) {
-    throw new Error("Harness agent manifest must contain one YAML mapping");
-  }
-  let valueCount = 0;
-  const pending: Array<{ depth: number; value: unknown }> = [{ depth: 0, value }];
-  while (pending.length > 0) {
-    const current = pending.pop();
-    if (!current) break;
-    valueCount += 1;
-    if (valueCount > MANIFEST_DATA_MAX_VALUES || current.depth > MANIFEST_DATA_MAX_DEPTH) {
-      throw new Error("Harness agent manifest exceeds its data boundary");
-    }
-    if (isManifestScalar(current.value)) continue;
-    if (Array.isArray(current.value)) {
-      for (const entry of current.value) {
-        pending.push({ depth: current.depth + 1, value: entry });
-      }
-      continue;
-    }
-    if (!isPlainRecord(current.value)) {
-      throw new Error("Harness agent manifest contains an unsupported YAML value");
-    }
-    for (const [key, entry] of Object.entries(current.value)) {
-      if (UNSAFE_METADATA_TEXT_PATTERN.test(key)) {
-        throw new Error("Harness agent manifest contains an invalid field name");
-      }
-      pending.push({ depth: current.depth + 1, value: entry });
-    }
-  }
-  return value as ManifestRecord;
-}
-
-function parseAgentManifest(source: string): ManifestRecord {
-  let document;
-  try {
-    document = parseDocument(source, { strict: true, uniqueKeys: true });
-  } catch {
-    throw new Error("Harness agent manifest must contain valid YAML");
-  }
-  if (document.errors.length > 0 || document.warnings.length > 0) {
-    throw new Error("Harness agent manifest must contain valid YAML");
-  }
-
-  let value: unknown;
-  try {
-    value = document.toJS({ maxAliasCount: 0 });
-  } catch {
-    throw new Error("Harness agent manifest cannot use YAML aliases");
-  }
-  return requireManifestRecord(value);
-}
-
-function requireManifestDisplayText(
-  manifest: ManifestRecord,
-  field: "description" | "display_name",
-  maxLength: number,
-  maxBytes: number,
-): void {
-  if (manifest[field] === undefined) return;
-  const value = readString(manifest, field);
-  if (
-    value === undefined ||
-    value.length === 0 ||
-    value !== value.trim() ||
-    Array.from(value).length > maxLength ||
-    Buffer.byteLength(value, "utf8") > maxBytes ||
-    UNSAFE_METADATA_TEXT_PATTERN.test(value)
-  ) {
-    throw new Error(`Harness agent manifest ${field} must be bounded terminal-safe text`);
-  }
 }
 
 export function parseHarnessPackageManifest(packageRoot: string): ParsedHarnessPackageManifest {
@@ -380,7 +329,7 @@ export function parseHarnessPackageManifest(packageRoot: string): ParsedHarnessP
   assertDirectoryAuthority(rootAuthority, "Harness package root authority");
   const directoryAuthorities = captureManifestDirectoryChain(rootAuthority, envelope.manifest);
   const manifestPath = path.join(resolvedRoot, ...envelope.manifest.split("/"));
-  const manifest = parseAgentManifest(
+  const manifest = parseHarnessManifestDocument(
     readBoundedUtf8(manifestPath, "Harness agent manifest", HARNESS_PACKAGE_MANIFEST_MAX_BYTES),
   );
   assertDirectoryChain(directoryAuthorities);
@@ -388,18 +337,7 @@ export function parseHarnessPackageManifest(packageRoot: string): ParsedHarnessP
   if (manifestId !== envelope.id) {
     throw new Error("Harness agent manifest name must match the package id");
   }
-  requireManifestDisplayText(
-    manifest,
-    "display_name",
-    DISPLAY_NAME_MAX_LENGTH,
-    DISPLAY_NAME_MAX_BYTES,
-  );
-  requireManifestDisplayText(
-    manifest,
-    "description",
-    DESCRIPTION_MAX_LENGTH,
-    DESCRIPTION_MAX_BYTES,
-  );
+  validateHarnessManifest(manifest, envelope.id);
   assertDirectoryChain(directoryAuthorities);
   return { packageRoot: resolvedRoot, metadataPath, manifestPath, envelope, manifest };
 }

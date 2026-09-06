@@ -8,6 +8,10 @@ import type { HarnessMcpAdapterModule } from "@nvidia/nemoclaw-harness-contract"
 const MCPORTER_VERSION = "0.7.3";
 const DEFAULT_OPENCLAW_CONFIG_DIR = "/sandbox/.openclaw";
 
+function packageShellCommand(script: any): any {
+  return { kind: "shell", script, shellTrust: "package-authored-code" };
+}
+
 function mcporterAvailabilityProbe(sandboxName: any): any {
   return {
     command: "command -v mcporter",
@@ -194,7 +198,7 @@ function buildMcpRegistrationPlan(
 ): ReturnType<HarnessMcpAdapterModule["buildMcpRegistrationPlan"]> {
   return {
     execution: {
-      command: buildMcpRegistrationCommand(request),
+      command: packageShellCommand(buildMcpRegistrationCommand(request)),
       timeoutSeconds: 15,
       success: { kind: "exit-zero" },
       failureMessage: `mcporter config add failed for '${request.entry.server}'.`,
@@ -220,7 +224,7 @@ function buildMcpRemovalPlan(
 ): ReturnType<HarnessMcpAdapterModule["buildMcpRemovalPlan"]> {
   return {
     execution: {
-      command: buildMcpRemovalCommand(request),
+      command: packageShellCommand(buildMcpRemovalCommand(request)),
       timeoutSeconds: 15,
       success: { kind: "exit-zero" },
       failureMessage: `mcporter config remove failed for '${request.entry.server}'.`,
@@ -232,10 +236,12 @@ function buildMcpRemovalPlan(
 function buildMcpInspectionCommand(
   request: Parameters<HarnessMcpAdapterModule["buildMcpInspectionCommand"]>[0],
 ): ReturnType<HarnessMcpAdapterModule["buildMcpInspectionCommand"]> {
-  return buildInspectCommand(
-    request.entry,
-    request.failOnMismatch,
-    openClawMcporterRoot(request.configDirectory || DEFAULT_OPENCLAW_CONFIG_DIR),
+  return packageShellCommand(
+    buildInspectCommand(
+      request.entry,
+      request.failOnMismatch,
+      openClawMcporterRoot(request.configDirectory || DEFAULT_OPENCLAW_CONFIG_DIR),
+    ),
   );
 }
 
@@ -245,7 +251,7 @@ function describeMcpMutationCapability(
   const probe = mcporterAvailabilityProbe(request.sandboxName);
   return {
     kind: "command",
-    command: probe.command,
+    command: packageShellCommand(probe.command),
     success: { kind: "exit-zero" },
     timeoutSeconds: 30,
     failureMessage: probe.failureMessage,

@@ -20,6 +20,15 @@ type RunCaptureOpenshell = (args: string[], options?: { ignoreError?: boolean })
 /** A gateway that cannot answer is distinct from one that answers with another route. */
 export type InferenceRouteState = "matched" | "mismatched" | "unanswered";
 
+/** Resolve one candidate route for managed startup and rebuild profile construction. */
+export function resolveManagedStartupSandboxInferenceConfig(
+  model: string,
+  provider: string | null = null,
+  preferredInferenceApi: string | null = null,
+): ReturnType<typeof getSandboxInferenceConfig> {
+  return getSandboxInferenceConfig(model, provider, preferredInferenceApi);
+}
+
 /** Resolve the exact portable inference route used by managed clone preparation. */
 export function resolveManagedStartupInferenceRoute(
   agentName: string,

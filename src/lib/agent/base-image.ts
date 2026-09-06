@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,7 +15,18 @@ import {
   dockerRmi,
   dockerTag,
 } from "../adapters/docker";
+import { fingerprintBuildContext } from "../adapters/fs/build-context-fingerprint";
+import { copyVerifiedPackageTree } from "../agent-runtime/package/copy";
+import { resolvePinnedHarnessPackage } from "../agent-runtime/package/store";
+import {
+  assertTreeAuthority,
+  getPackageTreeAuthority,
+  validateHarnessPackageTree,
+  type ValidatedHarnessPackageTree,
+} from "../agent-runtime/package/tree";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import { CUA_SANDBOX_IMAGE_ENV, requireCuaSandboxImageRef } from "../cua/feature";
+import { REPOSITORY_ROOT } from "../core/repository-root";
 import { encodeCorporateCaArg, resolveCorporateCa } from "../onboard/corporate-ca";
 import { createCustomBuildContextFilter } from "../onboard/custom-build-context";
 import {
@@ -45,7 +57,6 @@ import {
   versionGte,
 } from "../sandbox-base-image";
 import { sandboxBaseImageHasSecurityInventory } from "../sandbox-base-image/security-inventory";
-import { createDeepAgentsCodeBaseImageResolutionOptions } from "./deep-agents-code-base-image";
 import type { AgentDefinition } from "./defs";
 
 function corporateCaBuildArgs(
@@ -58,15 +69,10 @@ function corporateCaBuildArgs(
 }
 
 function agentBaseImageBuildArgs(agent: AgentDefinition): Record<string, string> | undefined {
-  // Only these base Dockerfiles declare ARG NEMOCLAW_CORPORATE_CA_B64 and anchor
-  // the decoded certificates before their HTTPS package fetches (#8119).
-  return agent.name === "langchain-deepagents-code" || agent.name === "pi"
-    ? corporateCaBuildArgs()
-    : undefined;
+  return agent.managedImage?.base_image?.corporate_ca === true ? corporateCaBuildArgs() : undefined;
 }
 
-const HERMES_MCP_RUNTIME_PROBE_OK = "nemoclaw-hermes-mcp-runtime-ok";
-const HERMES_BASE_IMAGE_PROBE_GUARDS = [
+const BASE_IMAGE_PROBE_GUARDS = [
   "--network",
   "none",
   "--cap-drop",
@@ -74,24 +80,306 @@ const HERMES_BASE_IMAGE_PROBE_GUARDS = [
   "--security-opt",
   "no-new-privileges",
   "--read-only",
-  "--user",
-  "sandbox",
 ] as const;
-// Matches the official Hermes base repository for both Dockerfile manifest-list
-// pins and Docker-normalized platform manifest digests.
-const HERMES_OFFICIAL_BASE_DIGEST_REF =
-  /^ghcr\.io\/nvidia\/nemoclaw\/hermes-sandbox-base@sha256:[0-9a-f]{64}$/;
+const PACKAGE_IMAGE_PROBE_SOURCE = "checks/image-probe.py";
+const PACKAGE_IMAGE_PROBE_ENTRYPOINT = "/usr/local/lib/nemoclaw/checks/image-probe.py";
+const PACKAGE_IMAGE_PROBE_OK = "nemoclaw-image-probe-ok";
+const OCI_DIGEST_REF_PATTERN =
+  /^(?<repository>[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9][0-9]{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+)@sha256:[0-9a-f]{64}$/u;
 
 export interface EnsureAgentBaseImageOptions {
   forceBaseImageRebuild?: boolean;
   resolutionHint?: SandboxBaseImageResolutionMetadata | null;
   forceBaseImageRefresh?: boolean;
   allowLocalFallback?: boolean;
+  /** Exact receipt that owns package bytes used for a managed local build. */
+  harnessPackage?: HarnessPackageIdentity | null;
+  /** Test and isolated-runtime override for the receipt store. */
+  harnessPackageStoreRoot?: string;
 }
 
 export interface CreateAgentSandboxOptions extends EnsureAgentBaseImageOptions {
   /** @deprecated The selected definition owns its build-context root. */
   rootDir?: string;
+}
+
+function requirePackageIntegrationRoot(agent: AgentDefinition, packageRoot: string): string {
+  const integrationRoot = path.dirname(agent.manifestPath);
+  requireAgentPackageAsset(agent, packageRoot, agent.manifestPath, "manifest");
+  const relative = path.relative(packageRoot, integrationRoot);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`${agent.displayName} integration root escapes its package root`);
+  }
+  return integrationRoot;
+}
+
+function runBuildContextArchiveCommand(
+  executable: string,
+  args: readonly string[],
+  options: Parameters<typeof spawnSync>[2],
+  label: string,
+): void {
+  const result = spawnSync(executable, args, options);
+  if (result.error || result.status !== 0) {
+    const detail = result.error?.message ?? String(result.stderr ?? "").trim();
+    throw new Error(`Failed to ${label}${detail ? `: ${detail}` : ""}`);
+  }
+}
+
+let trackedCoreTemplate: string | null = null;
+
+function requireTrackedCoreTemplate(): string {
+  if (trackedCoreTemplate && fs.existsSync(trackedCoreTemplate)) return trackedCoreTemplate;
+  const cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-core-template-"));
+  const archivePath = path.join(cacheRoot, "repository.tar");
+  const templateRoot = path.join(cacheRoot, "repository");
+  fs.mkdirSync(templateRoot);
+  try {
+    runBuildContextArchiveCommand(
+      "git",
+      ["archive", "--format=tar", `--output=${archivePath}`, "HEAD"],
+      { cwd: REPOSITORY_ROOT, stdio: ["ignore", "ignore", "pipe"] },
+      "archive the tracked NemoClaw revision",
+    );
+    runBuildContextArchiveCommand(
+      "tar",
+      ["-xf", archivePath, "-C", templateRoot],
+      { stdio: ["ignore", "ignore", "pipe"] },
+      "extract the tracked NemoClaw revision",
+    );
+    fs.rmSync(archivePath, { force: true });
+    removeTrackedDeveloperSymlinks(templateRoot);
+    removeSiblingHarnessPackages(templateRoot, "");
+    assertBuildContextHasNoSymlinks(templateRoot);
+  } catch (error) {
+    fs.rmSync(cacheRoot, { recursive: true, force: true });
+    throw error;
+  }
+  trackedCoreTemplate = templateRoot;
+  process.once("exit", () => {
+    try {
+      fs.rmSync(cacheRoot, { recursive: true, force: true });
+    } catch {
+      // Process-exit cleanup is best effort.
+    }
+  });
+  return templateRoot;
+}
+
+function stageTrackedCoreBuildInput(buildCtx: string): void {
+  const templateRoot = requireTrackedCoreTemplate();
+  for (const entry of fs.readdirSync(templateRoot)) {
+    fs.cpSync(path.join(templateRoot, entry), path.join(buildCtx, entry), { recursive: true });
+  }
+}
+
+function removeSiblingHarnessPackages(buildCtx: string, selectedDirectoryName: string): void {
+  const packagesRoot = path.join(buildCtx, "packages");
+  for (const entry of fs.readdirSync(packagesRoot, { withFileTypes: true })) {
+    if (
+      !entry.name.startsWith("nemoclaw-") ||
+      entry.name === "nemoclaw-fabric" ||
+      entry.name === selectedDirectoryName
+    ) {
+      continue;
+    }
+    fs.rmSync(path.join(packagesRoot, entry.name), { recursive: true, force: true });
+  }
+}
+
+function removeTrackedDeveloperSymlinks(buildCtx: string): void {
+  for (const relativePath of [".claude", "CLAUDE.md"]) {
+    fs.rmSync(path.join(buildCtx, relativePath), { recursive: true, force: true });
+  }
+}
+
+function assertBuildContextHasNoSymlinks(directory: string): void {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`Tracked core build input contains a symbolic link: ${target}`);
+    }
+    if (entry.isDirectory()) assertBuildContextHasNoSymlinks(target);
+  }
+}
+
+function copyComposedBuildContextTree(
+  sourceRoot: string,
+  destinationRoot: string,
+  label: string,
+): void {
+  let metadata: fs.Stats;
+  try {
+    metadata = fs.lstatSync(sourceRoot);
+  } catch {
+    throw new Error(`${label} is unavailable: ${sourceRoot}`);
+  }
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error(`${label} must be a regular directory: ${sourceRoot}`);
+  }
+  const shouldInclude = createCustomBuildContextFilter(sourceRoot);
+  fs.cpSync(sourceRoot, destinationRoot, {
+    recursive: true,
+    filter: (source) => path.basename(source) !== ".claude" && shouldInclude(source),
+  });
+}
+
+function packageIdentitiesMatch(
+  left: HarnessPackageIdentity,
+  right: HarnessPackageIdentity,
+): boolean {
+  return (
+    left.kind === right.kind &&
+    left.id === right.id &&
+    left.packageVersion === right.packageVersion &&
+    left.contentDigest === right.contentDigest
+  );
+}
+
+function resolveReceiptBoundPackageTree(
+  agent: AgentDefinition,
+  packageRoot: string,
+  options: Pick<EnsureAgentBaseImageOptions, "harnessPackage" | "harnessPackageStoreRoot">,
+): ValidatedHarnessPackageTree | null {
+  const identity = options.harnessPackage;
+  if (!identity) return null;
+
+  const installed = resolvePinnedHarnessPackage(
+    identity,
+    options.harnessPackageStoreRoot === undefined
+      ? {}
+      : { storeRoot: options.harnessPackageStoreRoot },
+  );
+  if (
+    identity.id !== agent.name ||
+    !packageIdentitiesMatch(installed.identity, identity) ||
+    installed.packageRoot !== packageRoot ||
+    installed.packageManifest.manifestPath !== agent.manifestPath
+  ) {
+    throw new Error("Selected harness definition does not match its package receipt");
+  }
+
+  const tree = validateHarnessPackageTree(installed.packageRoot, { sourceTrust: "mutable" });
+  if (tree.contentDigest !== identity.contentDigest) {
+    throw new Error("Selected harness package tree does not match its package receipt");
+  }
+  assertTreeAuthority(getPackageTreeAuthority(tree));
+  return tree;
+}
+
+export interface StagedAgentComposedBuildContext {
+  readonly buildCtx: string;
+  readonly stagedDockerfile: string;
+  /** Re-hash the exact package subtree immediately before external consumption. */
+  verifyBuildCtx(): boolean;
+}
+
+/** Stage one receipt-selected package over an exact tracked core build input. */
+export function stageAgentComposedBuildContext(
+  agent: AgentDefinition,
+  dockerfilePath: string,
+  stagedDockerfileName: "Dockerfile" | "Dockerfile.base",
+  options: Pick<EnsureAgentBaseImageOptions, "harnessPackage" | "harnessPackageStoreRoot"> = {},
+): StagedAgentComposedBuildContext {
+  const packageRoot = requireAgentPackageRoot(agent);
+  requireAgentPackageAsset(agent, packageRoot, dockerfilePath, "Dockerfile");
+  const integrationRoot = requirePackageIntegrationRoot(agent, packageRoot);
+  const receiptBoundTree = resolveReceiptBoundPackageTree(agent, packageRoot, options);
+  const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), SANDBOX_BUILD_CONTEXT_PREFIX));
+  const stagedDockerfile = path.join(buildCtx, stagedDockerfileName);
+  const packageDirectoryName = `nemoclaw-${agent.name}`;
+  const stagedPackageRoot = path.join(buildCtx, "packages", packageDirectoryName);
+  let verifiedPackageCopy: ReturnType<typeof copyVerifiedPackageTree> | null = null;
+  let verifiedPackageParent: string | null = null;
+  try {
+    try {
+      let copyIntegrationRoot = integrationRoot;
+      let copyDockerfilePath = dockerfilePath;
+      if (receiptBoundTree) {
+        verifiedPackageParent = fs.mkdtempSync(
+          path.join(fs.realpathSync(os.tmpdir()), ".nemoclaw-package-build-"),
+        );
+        fs.chmodSync(verifiedPackageParent, 0o700);
+        verifiedPackageCopy = copyVerifiedPackageTree(receiptBoundTree, {
+          stagingParent: verifiedPackageParent,
+        });
+        copyIntegrationRoot = path.join(
+          verifiedPackageCopy.packageRoot,
+          path.relative(packageRoot, integrationRoot),
+        );
+        copyDockerfilePath = path.join(
+          verifiedPackageCopy.packageRoot,
+          path.relative(packageRoot, dockerfilePath),
+        );
+      }
+
+      stageTrackedCoreBuildInput(buildCtx);
+      removeTrackedDeveloperSymlinks(buildCtx);
+      removeSiblingHarnessPackages(buildCtx, packageDirectoryName);
+      fs.rmSync(stagedPackageRoot, { recursive: true, force: true });
+      copyComposedBuildContextTree(
+        copyIntegrationRoot,
+        stagedPackageRoot,
+        `${agent.displayName} package integration`,
+      );
+      assertBuildContextHasNoSymlinks(buildCtx);
+      fs.copyFileSync(copyDockerfilePath, stagedDockerfile);
+
+      if (verifiedPackageCopy) {
+        const copiedTree = validateHarnessPackageTree(verifiedPackageCopy.packageRoot, {
+          sourceTrust: "mutable",
+        });
+        if (copiedTree.contentDigest !== verifiedPackageCopy.contentDigest) {
+          throw new Error("Verified harness package copy changed during build-context staging");
+        }
+        assertTreeAuthority(getPackageTreeAuthority(copiedTree));
+      }
+
+      normalizeAgentBuildContextModes(buildCtx);
+      const stagedPackageDigest = fingerprintBuildContext(stagedPackageRoot);
+      return {
+        buildCtx,
+        stagedDockerfile,
+        verifyBuildCtx: () => {
+          try {
+            return fingerprintBuildContext(stagedPackageRoot) === stagedPackageDigest;
+          } catch {
+            return false;
+          }
+        },
+      };
+    } finally {
+      verifiedPackageCopy?.removeStagingRoot();
+      if (verifiedPackageParent) fs.rmdirSync(verifiedPackageParent);
+    }
+  } catch (error) {
+    removeAgentBuildContext(buildCtx);
+    throw error;
+  }
+}
+
+function restoreBuildContextDirectoryWrites(directory: string): void {
+  const metadata = fs.lstatSync(directory);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) return;
+  fs.chmodSync(directory, (metadata.mode & 0o777) | 0o700);
+  for (const entry of fs.readdirSync(directory)) {
+    restoreBuildContextDirectoryWrites(path.join(directory, entry));
+  }
+}
+
+/** Remove a private context after Docker has consumed its read-only payload. */
+function removeAgentBuildContext(buildCtx: string): void {
+  const relative = path.relative(path.resolve(os.tmpdir()), path.resolve(buildCtx));
+  if (
+    !relative.startsWith(SANDBOX_BUILD_CONTEXT_PREFIX) ||
+    relative.includes(path.sep) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(`Refusing to remove an unrecognized agent build context: ${buildCtx}`);
+  }
+  if (!fs.existsSync(buildCtx)) return;
+  restoreBuildContextDirectoryWrites(buildCtx);
+  fs.rmSync(buildCtx, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 }
 
 function normalizeAgentBuildContextModes(buildCtx: string): void {
@@ -169,6 +457,8 @@ export interface CreateAgentSandboxResult {
   buildCtx: string;
   stagedDockerfile: string;
   baseImageResolutionMetadata: SandboxBaseImageResolutionMetadata | null;
+  /** Re-hash receipt-selected package bytes immediately before Docker consumes them. */
+  verifyBuildCtx?: () => boolean;
 }
 
 const trustedLocalOverrideLeases = new Map<string, TrustedLocalBaseImageOverride>();
@@ -305,27 +595,27 @@ export function pinAgentSandboxBaseImageRef(
   return pinnedRef;
 }
 
-function getHermesPinnedRemoteBaseRef(agent: AgentDefinition): string | null {
-  if (agent.name !== "hermes") return null;
+function getPinnedRemoteBaseRef(agent: AgentDefinition): string | null {
+  const pin = agent.managedImage?.base_image?.pinned_remote;
+  if (!pin) return null;
   const finalDockerfile = agent.dockerfilePath;
   if (!finalDockerfile) {
-    throw new Error("Hermes is missing its final sandbox Dockerfile");
+    throw new Error(`${agent.displayName} is missing its final sandbox Dockerfile`);
   }
   let dockerfile: string;
   try {
     dockerfile = fs.readFileSync(finalDockerfile, "utf8");
   } catch (error) {
-    throw new Error(`Failed to read Hermes final Dockerfile: ${finalDockerfile}`, {
+    throw new Error(`Failed to read ${agent.displayName} final Dockerfile: ${finalDockerfile}`, {
       cause: error,
     });
   }
-  const declarations = [...dockerfile.matchAll(/^ARG BASE_IMAGE=(\S+)$/gm)].map(
-    (match) => match[1],
-  );
+  const declarationPattern = new RegExp(`^ARG ${pin.argument}=(\\S+)$`, "gm");
+  const declarations = [...dockerfile.matchAll(declarationPattern)].map((match) => match[1]);
   const pinnedRef = declarations.length === 1 ? declarations[0] : null;
-  if (!pinnedRef || !HERMES_OFFICIAL_BASE_DIGEST_REF.test(pinnedRef)) {
+  if (!pinnedRef || pinnedRef !== pin.ref) {
     throw new Error(
-      "Hermes final Dockerfile must declare exactly one immutable official sandbox base image",
+      `${agent.displayName} final Dockerfile must declare exactly one '${pin.argument}' matching managed_image.base_image.pinned_remote.ref`,
     );
   }
   return pinnedRef;
@@ -336,53 +626,97 @@ function getHermesPinnedRemoteBaseRef(agent: AgentDefinition): string | null {
  * only when the resolver records the current Dockerfile-pinned ref as their
  * provenance; string callers and explicit overrides stay exact-match only.
  */
-function hermesFinalDockerfileAcceptsBase(
+function finalDockerfileAcceptsBase(
   agent: AgentDefinition,
   image: string | SandboxBaseImageResolution,
 ): boolean {
-  if (agent.name !== "hermes") return true;
+  const pinnedRemoteRef = getPinnedRemoteBaseRef(agent);
+  if (!pinnedRemoteRef) return true;
   const imageRef = typeof image === "string" ? image : image.ref;
+  const escapedAgentName = agent.name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   if (
-    imageRef === "nemoclaw-hermes-base-local" ||
-    /^nemoclaw-hermes-(?:root-entrypoint-base|sandbox-base-local|secret-boundary-base|stale-openclaw-dir-base|stale-openclaw-link-base):[^\s]+$/.test(
-      imageRef,
-    )
+    imageRef === `nemoclaw-${agent.name}-base-local` ||
+    new RegExp(`^nemoclaw-${escapedAgentName}-[a-z0-9-]+:[^\\s]+$`, "u").test(imageRef)
   ) {
     return true;
   }
+  const pinnedRepository = pinnedRemoteRef.match(OCI_DIGEST_REF_PATTERN)?.groups?.repository;
+  const imageRepository = imageRef.match(OCI_DIGEST_REF_PATTERN)?.groups?.repository;
   if (
     typeof image !== "string" &&
     image.source === "pinned" &&
-    image.pinnedRemoteRef === getHermesPinnedRemoteBaseRef(agent) &&
-    HERMES_OFFICIAL_BASE_DIGEST_REF.test(imageRef)
+    image.pinnedRemoteRef === pinnedRemoteRef &&
+    pinnedRepository !== undefined &&
+    imageRepository === pinnedRepository
   ) {
     return true;
   }
-  return imageRef === getHermesPinnedRemoteBaseRef(agent);
+  return imageRef === pinnedRemoteRef;
+}
+
+function packageImageProbePath(agent: AgentDefinition): string {
+  return path.join(path.dirname(agent.manifestPath), ...PACKAGE_IMAGE_PROBE_SOURCE.split("/"));
 }
 
 /**
- * Verify that a Hermes base contains the native MCP Streamable HTTP runtime,
- * the pinned ACP SDK, and Hermes' ACP adapter. Version output alone is
- * insufficient because these dependencies are installed through optional
- * upstream extras.
+ * Run one conventional package-owned probe and bind its success marker to the
+ * exact source bytes selected by the package definition.
  */
-export function hermesBaseImageSupportsMcp(imageRef: string): boolean {
+export function packageBaseImagePassesProbe(agent: AgentDefinition, imageRef: string): boolean {
+  const packageRoot = requireAgentPackageRoot(agent);
+  const probePath = packageImageProbePath(agent);
+  requireAgentPackageAsset(agent, packageRoot, probePath, "base image probe");
+  let probeDigest: string;
+  try {
+    probeDigest = crypto.createHash("sha256").update(fs.readFileSync(probePath)).digest("hex");
+  } catch {
+    return false;
+  }
+  const identity = agent.managedImage?.runtime_identity;
+  if (!identity) return false;
   const output = dockerCapture(
     [
       "run",
       "--rm",
-      ...HERMES_BASE_IMAGE_PROBE_GUARDS,
+      ...BASE_IMAGE_PROBE_GUARDS,
+      "--user",
+      `${String(identity.uid)}:${String(identity.gid)}`,
       "--entrypoint",
-      "/opt/hermes/.venv/bin/python",
+      PACKAGE_IMAGE_PROBE_ENTRYPOINT,
       imageRef,
-      "-I",
-      "-c",
-      `import importlib.metadata as metadata; import sys; import acp; import mcp; from acp_adapter.server import HermesACPAgent; from tools import mcp_tool; metadata.version("agent-client-protocol") == "0.9.0" or sys.exit(1); mcp_tool._ensure_mcp_sdk() or sys.exit(1); getattr(mcp_tool, "_MCP_AVAILABLE", False) or sys.exit(1); getattr(mcp_tool, "_MCP_HTTP_AVAILABLE", False) or sys.exit(1); print("${HERMES_MCP_RUNTIME_PROBE_OK}")`,
     ],
     { ignoreError: true, timeout: 20_000 },
   );
-  return output.trim() === HERMES_MCP_RUNTIME_PROBE_OK;
+  return output.trim() === `${PACKAGE_IMAGE_PROBE_OK} ${probeDigest}`;
+}
+
+function packageBaseImageInputPaths(agent: AgentDefinition): string[] | undefined {
+  if (agent.managedImage?.base_image?.package_probe !== true) return undefined;
+  const agentRoot = path.dirname(agent.manifestPath);
+  return [
+    agent.manifestPath,
+    path.join(agentRoot, "runtime", "requirements.lock"),
+    path.join(agentRoot, "fabric", "requirements.lock"),
+    packageImageProbePath(agent),
+  ];
+}
+
+function createPackageBaseImageValidationOptions(
+  agent: AgentDefinition,
+): Pick<ResolveBaseImageOptions, "validateImage" | "validationDescription"> {
+  const declaration = agent.managedImage?.base_image;
+  const packageProbe = declaration?.package_probe === true;
+  const securityInventory = declaration?.security_inventory === true;
+  if (!packageProbe && !securityInventory) return {};
+  const validateImage = (imageRef: string): boolean =>
+    (!packageProbe || packageBaseImagePassesProbe(agent, imageRef)) &&
+    (!securityInventory || sandboxBaseImageHasSecurityInventory(imageRef));
+  const validationDescription = packageProbe
+    ? securityInventory
+      ? "the package-bound image probe and the immutable security package inventory"
+      : "the package-bound image probe"
+    : "the immutable security package inventory";
+  return { validateImage, validationDescription };
 }
 
 function createAgentBaseImageResolutionOptions(
@@ -392,25 +726,18 @@ function createAgentBaseImageResolutionOptions(
 ): ResolveBaseImageOptions {
   const packageRoot = requireAgentPackageRoot(agent);
   requireAgentPackageAsset(agent, packageRoot, dockerfilePath, "base Dockerfile");
-  const imageName = `ghcr.io/nvidia/nemoclaw/${agent.name}-sandbox-base`;
-  const validationOptions =
-    agent.name === "hermes"
-      ? {
-          validateImage: (imageRef: string) =>
-            hermesBaseImageSupportsMcp(imageRef) && sandboxBaseImageHasSecurityInventory(imageRef),
-          validationDescription:
-            "the required MCP Streamable HTTP and ACP runtimes and the immutable security package inventory",
-        }
-      : agent.name === "pi"
-        ? {
-            validateImage: sandboxBaseImageHasSecurityInventory,
-            validationDescription: "the immutable security package inventory",
-          }
-        : createDeepAgentsCodeBaseImageResolutionOptions(agent, dockerfilePath);
-  const pinnedRemoteRef = getHermesPinnedRemoteBaseRef(agent) ?? undefined;
+  const validationOptions = createPackageBaseImageValidationOptions(agent);
+  const pinnedRemoteRef = getPinnedRemoteBaseRef(agent) ?? undefined;
+  const pinnedRepository = pinnedRemoteRef?.match(OCI_DIGEST_REF_PATTERN)?.groups?.repository;
+  const imageName =
+    pinnedRepository ??
+    (agent.managedImage
+      ? `${agent.managedImage.repository}-base`
+      : `ghcr.io/nvidia/nemoclaw/${agent.name}-sandbox-base`);
   return {
     imageName,
     dockerfilePath,
+    inputPaths: packageBaseImageInputPaths(agent),
     buildArgs: agentBaseImageBuildArgs(agent),
     localTag: buildLocalBaseTag(`nemoclaw-${agent.name}-sandbox-base-local`, packageRoot),
     envVar: getAgentSandboxBaseImageEnvVar(agent.name),
@@ -420,14 +747,14 @@ function createAgentBaseImageResolutionOptions(
     forceRefresh: options.forceBaseImageRefresh,
     rootDir: packageRoot,
     pinnedRemoteRef,
-    requirePinnedRemoteRef: agent.name === "hermes" && pinnedRemoteRef !== undefined,
+    requirePinnedRemoteRef: pinnedRemoteRef !== undefined,
     allowLocalFallback: options.allowLocalFallback,
     ...validationOptions,
   };
 }
 
 /**
- * Bind a local Hermes alias to the tracked official base only when Docker
+ * Bind a local package alias to its declared pinned base only when Docker
  * proves both refs name the same immutable image. This narrow rebuild helper
  * does not change the resolver's rule that arbitrary local overrides have no
  * inherited remote provenance.
@@ -437,7 +764,7 @@ export function bindLocalAgentBaseImageToPinnedProvenance(
   imageRef: string,
 ): SandboxBaseImageResolutionMetadata | null {
   const dockerfilePath = agent.dockerfileBasePath;
-  const pinnedRemoteRef = getHermesPinnedRemoteBaseRef(agent);
+  const pinnedRemoteRef = getPinnedRemoteBaseRef(agent);
   if (!dockerfilePath || !pinnedRemoteRef) return null;
 
   const local = inspectLocalImageMetadata(imageRef);
@@ -452,8 +779,9 @@ export function bindLocalAgentBaseImageToPinnedProvenance(
   const pinnedRepoDigests = Array.isArray(pinned?.RepoDigests)
     ? pinned.RepoDigests.map(String)
     : [];
-  const resolvedRemoteRef = pinnedRepoDigests.find((ref) =>
-    HERMES_OFFICIAL_BASE_DIGEST_REF.test(ref),
+  const pinnedRepository = pinnedRemoteRef.match(OCI_DIGEST_REF_PATTERN)?.groups?.repository;
+  const resolvedRemoteRef = pinnedRepoDigests.find(
+    (ref) => ref.match(OCI_DIGEST_REF_PATTERN)?.groups?.repository === pinnedRepository,
   );
   if (
     !localId ||
@@ -653,13 +981,26 @@ export function ensureAgentBaseImage(
     const forceBuildTag = `nemoclaw-${agent.name}-sandbox-base-local:build-${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
     const buildProvenance = localBaseImageBuildProvenance(resolutionOptions);
     console.log(`  Rebuilding ${agent.displayName} base image...`);
-    const buildResult = dockerBuild(baseDockerfile, forceBuildTag, agent.packageRoot, {
-      buildArgs: resolutionOptions.buildArgs,
-
-      ignoreError: true,
-      labels: buildProvenance.labels,
-      stdio: ["ignore", "inherit", "inherit"],
-    });
+    const staged = stageAgentComposedBuildContext(
+      agent,
+      baseDockerfile,
+      "Dockerfile.base",
+      options,
+    );
+    let buildResult: ReturnType<typeof dockerBuild>;
+    try {
+      if (!staged.verifyBuildCtx()) {
+        throw new Error("Staged harness package bytes changed before the Docker build");
+      }
+      buildResult = dockerBuild(staged.stagedDockerfile, forceBuildTag, staged.buildCtx, {
+        buildArgs: resolutionOptions.buildArgs,
+        ignoreError: true,
+        labels: buildProvenance.labels,
+        stdio: ["ignore", "inherit", "inherit"],
+      });
+    } finally {
+      removeAgentBuildContext(staged.buildCtx);
+    }
     if (buildResult.error || buildResult.status !== 0) {
       dockerRmi(forceBuildTag, { ignoreError: true, suppressOutput: true });
       const detail = buildResult.error
@@ -683,9 +1024,9 @@ export function ensureAgentBaseImage(
           `Built ${agent.displayName} base image failed the required runtime compatibility checks`,
         );
       }
-      if (!hermesFinalDockerfileAcceptsBase(agent, pinnedBaseImageTag)) {
+      if (!finalDockerfileAcceptsBase(agent, pinnedBaseImageTag)) {
         throw new Error(
-          `Hermes final image does not accept base image ref '${pinnedBaseImageTag}'; use the tracked official digest or a repository-built local base`,
+          `${agent.displayName} final image does not accept base image ref '${pinnedBaseImageTag}'; use the package-declared digest or a repository-built local base`,
         );
       }
       console.log("  \u2713 Base image built.");
@@ -723,9 +1064,9 @@ export function ensureAgentBaseImage(
       : resolveExactImage(explicitOverride, trustedLocalOverride)
     : resolveSandboxBaseImage(resolutionOptions);
   if (resolved) {
-    if (!hermesFinalDockerfileAcceptsBase(agent, resolved)) {
+    if (!finalDockerfileAcceptsBase(agent, resolved)) {
       throw new Error(
-        `Hermes final image does not accept base image ref '${resolved.ref}'; use the tracked official digest or a repository-built local base`,
+        `${agent.displayName} final image does not accept base image ref '${resolved.ref}'; use the package-declared digest or a repository-built local base`,
       );
     }
     console.log(`  Using ${agent.displayName} base image: ${resolved.ref}`);
@@ -762,13 +1103,26 @@ export function ensureAgentBaseImage(
   if (inspectResult?.status !== 0) {
     console.log(`  Building ${agent.displayName} base image (first time only)...`);
     const buildProvenance = localBaseImageBuildProvenance(resolutionOptions);
-    const buildResult = dockerBuild(baseDockerfile, baseImageTag, agent.packageRoot, {
-      buildArgs: resolutionOptions.buildArgs,
-
-      ignoreError: true,
-      labels: buildProvenance.labels,
-      stdio: ["ignore", "inherit", "inherit"],
-    });
+    const staged = stageAgentComposedBuildContext(
+      agent,
+      baseDockerfile,
+      "Dockerfile.base",
+      options,
+    );
+    let buildResult: ReturnType<typeof dockerBuild>;
+    try {
+      if (!staged.verifyBuildCtx()) {
+        throw new Error("Staged harness package bytes changed before the Docker build");
+      }
+      buildResult = dockerBuild(staged.stagedDockerfile, baseImageTag, staged.buildCtx, {
+        buildArgs: resolutionOptions.buildArgs,
+        ignoreError: true,
+        labels: buildProvenance.labels,
+        stdio: ["ignore", "inherit", "inherit"],
+      });
+    } finally {
+      removeAgentBuildContext(staged.buildCtx);
+    }
     if (buildResult.error || buildResult.status !== 0) {
       const detail = buildResult.error
         ? `: ${buildResult.error.message}`
@@ -814,17 +1168,15 @@ export function createAgentSandbox(
     agent,
     baseImageOptions,
   );
-  const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), SANDBOX_BUILD_CONTEXT_PREFIX));
+  const staged =
+    agent.name === "nemocua"
+      ? null
+      : stageAgentComposedBuildContext(agent, agentDockerfile, "Dockerfile", baseImageOptions);
+  const buildCtx =
+    staged?.buildCtx ?? fs.mkdtempSync(path.join(os.tmpdir(), SANDBOX_BUILD_CONTEXT_PREFIX));
   const stagedDockerfile = path.join(buildCtx, "Dockerfile");
   try {
-    if (agent.name !== "nemocua") {
-      const shouldIncludeBuildContextPath = createCustomBuildContextFilter(packageRoot);
-      fs.cpSync(packageRoot, buildCtx, {
-        recursive: true,
-        filter: (src) => path.basename(src) !== ".claude" && shouldIncludeBuildContextPath(src),
-      });
-    }
-    fs.copyFileSync(agentDockerfile, stagedDockerfile);
+    if (agent.name === "nemocua") fs.copyFileSync(agentDockerfile, stagedDockerfile);
     if (baseImageRef) {
       const dockerfile = fs.readFileSync(stagedDockerfile, "utf8");
       fs.writeFileSync(
@@ -832,10 +1184,12 @@ export function createAgentSandbox(
         dockerfile.replace(/^ARG BASE_IMAGE(?:=.*)?$/m, `ARG BASE_IMAGE=${baseImageRef}`),
       );
     }
-    normalizeAgentBuildContextModes(buildCtx);
+    // Receipt-backed package staging already normalized and fingerprinted its
+    // package subtree. NemoCUA is the only caller that still needs normalization here.
+    if (agent.name === "nemocua") normalizeAgentBuildContextModes(buildCtx);
   } catch (error) {
     try {
-      fs.rmSync(buildCtx, { recursive: true, force: true });
+      removeAgentBuildContext(buildCtx);
     } catch {
       // Preserve the manifest or staging authority failure.
     }
@@ -847,5 +1201,6 @@ export function createAgentSandbox(
     buildCtx,
     stagedDockerfile,
     baseImageResolutionMetadata: resolutionMetadata ?? null,
+    ...(staged ? { verifyBuildCtx: staged.verifyBuildCtx } : {}),
   };
 }

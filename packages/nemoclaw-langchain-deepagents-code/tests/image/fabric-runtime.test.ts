@@ -8,13 +8,14 @@ import { describe, expect, it } from "vitest";
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 const FABRIC_RUNNER_SOURCE = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run";
 const FABRIC_RUNNER_COMMAND = "/usr/local/bin/nemoclaw-fabric-run";
-const FABRIC_BASE_CHECK = "/usr/local/lib/nemoclaw/checks/fabric-runtime.py";
+const FABRIC_BASE_CHECK = "/usr/local/lib/nemoclaw/checks/image-probe.py";
 
 describe("Deep Agents Code Fabric runtime entrypoint", () => {
   it("exposes and probes the command declared by the package manifest", () => {
     const dockerfile = fs.readFileSync(path.join(PACKAGE_ROOT, "Dockerfile"), "utf8");
     const manifest = fs.readFileSync(path.join(PACKAGE_ROOT, "manifest.yaml"), "utf8");
 
+    expect(manifest).toContain('interactive_command: "dcode"');
     expect(manifest).toMatch(/headless_command: "nemoclaw-fabric-run\b/);
     expect(manifest).toMatch(/prompt_transport: stdin/);
     expect(dockerfile).toContain(`ln -s ${FABRIC_RUNNER_SOURCE} ${FABRIC_RUNNER_COMMAND}`);
@@ -30,10 +31,16 @@ describe("Deep Agents Code Fabric runtime entrypoint", () => {
 
   it("installs the package-owned Fabric base-image check", () => {
     const dockerfile = fs.readFileSync(path.join(PACKAGE_ROOT, "Dockerfile.base"), "utf8");
+    const manifest = fs.readFileSync(path.join(PACKAGE_ROOT, "manifest.yaml"), "utf8");
+    const probe = fs.readFileSync(path.join(PACKAGE_ROOT, "checks/image-probe.py"), "utf8");
 
+    expect(manifest).toMatch(/base_image:\n(?: {4}.+\n)* {4}package_probe: true/mu);
     expect(dockerfile).toContain(
-      `COPY --chmod=0555 packages/nemoclaw-langchain-deepagents-code/checks/fabric-runtime.py ${FABRIC_BASE_CHECK}`,
+      `COPY --chmod=0555 packages/nemoclaw-langchain-deepagents-code/checks/image-probe.py ${FABRIC_BASE_CHECK}`,
     );
     expect(dockerfile).toContain(`&& ${FABRIC_BASE_CHECK} >/dev/null`);
+    expect(probe).toContain('EXPECTED_DCODE_VERSION = "0.1.55"');
+    expect(probe).toContain('PROBE_OK = "nemoclaw-image-probe-ok"');
+    expect(probe).toContain("hashlib.sha256(Path(__file__).read_bytes()).hexdigest()");
   });
 });

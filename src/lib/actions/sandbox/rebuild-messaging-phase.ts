@@ -91,9 +91,7 @@ export function finalizePendingMessagingRemovalsAfterRestore(
 ): SandboxMessagingPlan | null {
   if (!plan) return null;
   const runMessagingOpenshell = createRunMessagingOpenshell(runtimeSelection);
-  const pendingRemovals = plan.channels.filter(
-    (channel) => channel.pendingRemoval === true,
-  );
+  const pendingRemovals = plan.channels.filter((channel) => channel.pendingRemoval === true);
   for (const channel of pendingRemovals) {
     const result = MessagingSetupApplier.removeDisabledChannelAgentConfigAtOpenShell(
       plan,
@@ -125,19 +123,19 @@ function hookOutputsFromBuildSteps(
   return { outputs };
 }
 
-/** Reapply OpenClaw messaging files that doctor may have rewritten. */
-export async function reapplyMessagingManifestAfterOpenClawDoctor(
+/** Reapply package messaging files after a declared post-restore command may have rewritten them. */
+export async function reapplyMessagingManifestAfterPackageRepair(
   sandboxName: string,
   plan: SandboxMessagingPlan | null,
   log: (message: string) => void,
   runtimeSelection?: OpenShellRuntimeSelection,
 ): Promise<void> {
-  if (!plan || plan.agent !== "openclaw") {
-    log("Messaging manifest reapply skipped: no OpenClaw messaging plan");
+  if (!plan) {
+    log("Messaging manifest reapply skipped: no package messaging plan");
     return;
   }
 
-  log("Reapplying messaging manifest render and post-agent-install hooks after doctor");
+  log("Reapplying package messaging manifest after post-restore repair");
   const runMessagingOpenshell = createRunMessagingOpenshell(runtimeSelection);
   const result = await MessagingSetupApplier.applyAgentConfigAtOpenShell(plan, {
     runOpenshell: runMessagingOpenshell,
@@ -149,4 +147,18 @@ export async function reapplyMessagingManifestAfterOpenClawDoctor(
   if (result.appliedTargets.length > 0 || result.appliedHooks.length > 0) {
     console.log(`  ${G}\u2713${R} Messaging manifest config reapplied`);
   }
+}
+
+/** Pre-contract OpenClaw compatibility retained for old rebuild action lists. */
+export async function reapplyMessagingManifestAfterOpenClawDoctor(
+  sandboxName: string,
+  plan: SandboxMessagingPlan | null,
+  log: (message: string) => void,
+  runtimeSelection?: OpenShellRuntimeSelection,
+): Promise<void> {
+  if (!plan || plan.agent !== "openclaw") {
+    log("Messaging manifest reapply skipped: no OpenClaw messaging plan");
+    return;
+  }
+  return reapplyMessagingManifestAfterPackageRepair(sandboxName, plan, log, runtimeSelection);
 }

@@ -80,19 +80,22 @@ function executeCapabilityCommand(
   runtimeSelection: McpProviderInspectionRuntimeSelection,
   dependencies: McpCapabilityProbeDependencies,
 ): OpenShellCommandResult | null {
-  return typeof probe.command === "string"
-    ? dependencies.executeShellCommand(
+  switch (probe.command.kind) {
+    case "shell":
+      return dependencies.executeShellCommand(
         sandboxName,
-        probe.command,
-        probe.timeoutSeconds,
-        runtimeSelection,
-      )
-    : dependencies.executeArgvCommand(
-        sandboxName,
-        probe.command,
+        probe.command.script,
         probe.timeoutSeconds,
         runtimeSelection,
       );
+    case "argv":
+      return dependencies.executeArgvCommand(
+        sandboxName,
+        probe.command.argv,
+        probe.timeoutSeconds,
+        runtimeSelection,
+      );
+  }
 }
 
 function runProbeAttempts(

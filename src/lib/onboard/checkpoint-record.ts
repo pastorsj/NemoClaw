@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WebSearchConfig } from "../inference/web-search";
-import { harnessPackageIdentitiesEqual } from "../agent-runtime/package/identity";
+import { harnessPackageIdentitiesEqual } from "../agent-runtime/package/identity-validation";
 import type { SandboxMessagingPlan } from "../messaging/manifest";
 import {
   getActiveChannelIdsFromPlan,

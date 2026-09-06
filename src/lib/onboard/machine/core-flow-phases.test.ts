@@ -240,6 +240,12 @@ function createPhases(
     deps: {
       resolvePath: (value) => value,
       agentSupportsWebSearch: () => true,
+      filterSelectedAgentWebSearchToolGateways: (_agent, _receiptBacked, _provider, gateways) => [
+        ...gateways,
+      ],
+      selectedAgentResumesSandboxPrompts: (agent, receiptBackedPackage) =>
+        !receiptBackedPackage && agent?.name === "openclaw",
+      selectedAgentSupportsWebSearchProvider: () => true,
       note: vi.fn(),
 
       cliName: () => "nemoclaw",

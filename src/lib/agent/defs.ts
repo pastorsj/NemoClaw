@@ -22,7 +22,10 @@ import {
 } from "./candidate";
 import type { AgentChoice, AgentDefinition } from "../agent-runtime/manifest-types";
 import { buildAgentDefinition } from "../agent-runtime/manifest-loader";
-import { loadManifestRecord } from "../agent-runtime/manifest-readers";
+import {
+  loadLegacyRepositoryManifest,
+  loadValidatedHarnessManifest,
+} from "../agent-runtime/manifest-readers";
 import {
   AGENT_MANIFESTS_DIR,
   AGENT_REPOSITORY_ROOT,
@@ -42,6 +45,7 @@ export type {
   AgentInference,
   AgentLegacyPaths,
   AgentMcpAdapter,
+  AgentMcpAdapterIdentifier,
   AgentMcpCapability,
   AgentMcpSupport,
   HarnessSkillActivation,
@@ -170,9 +174,14 @@ export function loadAgentFresh(
   if (!fs.existsSync(manifestPath)) {
     throw new Error(`Agent '${name}' not found: ${manifestPath}`);
   }
+  // Repository-owned definitions (currently NemoCUA) remain outside the installable package
+  // contract. Every discovered source package uses the strict receipt-compatible validator.
+  const manifest = packaged
+    ? loadValidatedHarnessManifest(manifestPath, packaged.name)
+    : loadLegacyRepositoryManifest(manifestPath);
   return createImmutableAgentDefinition(
     buildAgentDefinition({
-      manifest: loadManifestRecord(manifestPath),
+      manifest,
       manifestPath,
       packageRoot,
     }),

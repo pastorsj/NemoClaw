@@ -47,7 +47,8 @@ vi.mock("../../onboard/docker-gpu-sandbox-create", () => ({
   isDockerDesktopWslRuntime: mocks.isDockerDesktopWslRuntime,
 }));
 
-vi.mock("./rebuild-credential-preflight", () => ({
+vi.mock("./rebuild-credential-preflight", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./rebuild-credential-preflight")>()),
   preflightRebuildCredentials: mocks.preflightRebuildCredentials,
 }));
 
@@ -329,6 +330,46 @@ describe("preflightRebuildTargetRuntime web search credential", () => {
     );
     expect(mocks.ensureValidatedWebSearchCredential).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining("my-assistant-brave-search"));
+    expect(bail).not.toHaveBeenCalled();
+  });
+
+  it("uses the same gateway credential reuse path for an unknown receipt-backed gateway package", async () => {
+    const packageId = "example-gateway";
+    const packageTarget = {
+      ...WEB_SEARCH_TARGET,
+      agentAuthority: {
+        recordedAgent: packageId,
+        effectiveAgentId: packageId,
+        definition: {
+          ...OPENCLAW_DEFINITION,
+          name: packageId,
+          displayName: "Example Gateway",
+        },
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: packageId,
+          packageVersion: "1.0.0",
+          contentDigest: "a".repeat(64),
+        },
+        harnessPackageMigration: null,
+      },
+      agentDefinition: {
+        ...OPENCLAW_DEFINITION,
+        name: packageId,
+        displayName: "Example Gateway",
+      },
+    } as unknown as RebuildTargetConfig;
+    mocks.readGatewayProviderMetadata.mockReturnValue(GATEWAY_BINDING_METADATA);
+
+    const { result, bail } = await runPreflight(packageTarget);
+
+    expect(result).toEqual({
+      ok: true,
+      preparedImage: null,
+      requiresGatewayProviderReconfigure: false,
+    });
+    expect(mocks.readGatewayProviderMetadata).toHaveBeenCalledOnce();
+    expect(mocks.ensureValidatedWebSearchCredential).not.toHaveBeenCalled();
     expect(bail).not.toHaveBeenCalled();
   });
 

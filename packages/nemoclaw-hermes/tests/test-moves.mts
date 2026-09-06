@@ -57,6 +57,8 @@ export const hermesPackageTestMoves = createTestMoveRecords({
 });
 
 export const hermesNemoclawTestMoves = createTestMoveRecords({
+  "test/runtime/policy/hermes-slack-policy-reconciliation.test.ts":
+    "tests/integration/slack-policy.test.ts",
   "test/agents/hermes/hermes-config-transaction-wiring.test.ts":
     "tests/integration/config-transaction.test.ts",
   "test/agents/hermes/hermes-discord-credential-binding.test.ts":
@@ -117,7 +119,7 @@ export const hermesPackageTestSplits: readonly PackageTestMove[] = [
   },
   { source: "test/sandbox-provisioning.test.ts", destination: "tests/image/base-tools.test.ts" },
   {
-    source: "test/inference-provider-id-rename.test.ts",
+    source: "test/inference/inference-provider-id-rename.test.ts",
     destination: "tests/image/provider-id.test.ts",
   },
   { source: "test/runner.test.ts", destination: "tests/image/runtime-hardening.test.ts" },
@@ -139,7 +141,11 @@ export const hermesPackageSplitTests = hermesPackageTestSplits.map(
 // NemoClaw checkout for shared policy fixtures.
 export const hermesNemoclawTestSplits: readonly PackageTestMove[] = [
   {
-    source: "test/effective-policy-contracts.test.ts",
+    source: "test/inference/managed/managed-image-capability-union.test.ts",
+    destination: "tests/image/capability-union.test.ts",
+  },
+  {
+    source: "test/onboarding/effective-policy-contracts.test.ts",
     destination: "tests/host/policy-matrix.test.ts",
   },
   { source: "test/sandbox-provisioning.test.ts", destination: "tests/image/provisioning.test.ts" },
@@ -153,7 +159,7 @@ export const hermesNemoclawTestSplits: readonly PackageTestMove[] = [
     destination: "tests/runtime/ca-tls.test.ts",
   },
   {
-    source: "test/inference-provider-id-rename.test.ts",
+    source: "test/inference/inference-provider-id-rename.test.ts",
     destination: "tests/runtime/provider-route.test.ts",
   },
 ];

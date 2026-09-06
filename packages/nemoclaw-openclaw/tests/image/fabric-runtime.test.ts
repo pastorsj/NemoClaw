@@ -14,6 +14,7 @@ describe("OpenClaw Fabric runtime entrypoint", () => {
     const dockerfile = fs.readFileSync(path.join(PACKAGE_ROOT, "Dockerfile"), "utf8");
     const manifest = fs.readFileSync(path.join(PACKAGE_ROOT, "manifest.yaml"), "utf8");
 
+    expect(manifest).toContain('interactive_command: "openclaw tui"');
     expect(manifest).toMatch(/headless_command: "nemoclaw-fabric-run\b/);
     expect(manifest).toMatch(/prompt_transport: stdin/);
     expect(dockerfile).toContain(`ln -s ${FABRIC_RUNNER_SOURCE} ${FABRIC_RUNNER_COMMAND}`);

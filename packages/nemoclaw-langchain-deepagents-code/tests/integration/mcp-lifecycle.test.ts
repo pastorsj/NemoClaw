@@ -44,9 +44,18 @@ vi.mock("../../../../src/lib/policy", async (importOriginal) => ({
 
 vi.mock("../../../../src/lib/actions/sandbox/process-recovery", () => ({
   executeGatewaySupervisorAction: mocks.executeGatewaySupervisorAction,
-  executeSandboxCommand: mocks.executeSandboxCommand,
-  executeSandboxExecCommand: mocks.executeSandboxExecCommand,
 }));
+
+vi.mock(
+  "../../../../src/lib/actions/sandbox/transport/command-execution",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../../src/lib/actions/sandbox/transport/command-execution")
+    >()),
+    executeSandboxCommand: mocks.executeSandboxCommand,
+    executeSandboxExecCommand: mocks.executeSandboxExecCommand,
+  }),
+);
 
 const packageRoot = path.resolve(import.meta.dirname, "../..");
 const repoRoot = path.resolve(packageRoot, "../..");

@@ -82,6 +82,7 @@ import { spawn, type StdioOptions } from "node:child_process";
 
 import { isStdinTty } from "../../../core/stdin";
 import { runSandboxExecChild, type SandboxExecChild, type SandboxExecSignalSource } from "../exec";
+import { requestedLegacyOpenClawTimeoutSeconds } from "./legacy-openclaw";
 
 /**
  * Exit code for a dispatch that reported success without delivering a turn.
@@ -281,25 +282,6 @@ export function isTimedOutAgentDispatch(stdout: string, stderr: string): boolean
   return OPENCLAW_AGENT_TIMEOUT_PATTERN.test(stdout) || OPENCLAW_AGENT_TIMEOUT_PATTERN.test(stderr);
 }
 
-/** Documented `openclaw agent` options that consume the next argv element. */
-export const OPENCLAW_AGENT_VALUE_FLAGS = new Set([
-  "-a",
-  "--agent",
-  "-m",
-  "--message",
-  "--model",
-  "--provider",
-  "--reply-channel",
-  "--session-id",
-  "--session-key",
-  "--thinking",
-  "--timeout",
-  "--to",
-]);
-
-/** Documented `openclaw agent` options that consume no argv element. */
-export const OPENCLAW_AGENT_BOOLEAN_FLAGS = new Set(["--deliver"]);
-
 /**
  * Extra seconds added to a requested `--timeout` before the host transport
  * stops waiting.
@@ -331,40 +313,7 @@ export const AGENT_DISPATCH_DEADLINE_BUFFER_SECONDS = 30;
  * for the same reason.
  */
 export function requestedAgentTimeoutSeconds(argv: readonly string[]): number | null {
-  if (argv[0] !== "openclaw" || argv[1] !== "agent") return null;
-  for (let index = 2; index < argv.length; index += 1) {
-    const arg = argv[index] as string;
-    if (arg === "--") return null;
-    if (arg === "--timeout") return parseDeadlineSeconds(argv[index + 1]);
-    if (arg.startsWith("--timeout=")) return parseDeadlineSeconds(arg.slice("--timeout=".length));
-    if (OPENCLAW_AGENT_VALUE_FLAGS.has(arg)) {
-      index += 1;
-      continue;
-    }
-    const equalsIndex = arg.indexOf("=");
-    if (
-      equalsIndex > 0 &&
-      arg.startsWith("--") &&
-      OPENCLAW_AGENT_VALUE_FLAGS.has(arg.slice(0, equalsIndex))
-    ) {
-      continue;
-    }
-    if (
-      arg === "--json" ||
-      arg.startsWith("--json=") ||
-      OPENCLAW_AGENT_BOOLEAN_FLAGS.has(arg)
-    ) {
-      continue;
-    }
-    return null;
-  }
-  return null;
-}
-
-function parseDeadlineSeconds(raw: string | undefined): number | null {
-  if (raw === undefined || !/^\d+$/.test(raw)) return null;
-  const seconds = Number(raw);
-  return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : null;
+  return requestedLegacyOpenClawTimeoutSeconds(argv);
 }
 
 /**
@@ -380,6 +329,11 @@ function parseDeadlineSeconds(raw: string | undefined): number | null {
  */
 export function agentDispatchDeadlineSeconds(argv: readonly string[]): number | undefined {
   const requested = requestedAgentTimeoutSeconds(argv);
+  return agentDispatchDeadlineFromRequest(requested);
+}
+
+/** Apply the core-owned grace period to a package-parsed native deadline. */
+export function agentDispatchDeadlineFromRequest(requested: number | null): number | undefined {
   if (requested === null) return undefined;
   const deadline = requested + AGENT_DISPATCH_DEADLINE_BUFFER_SECONDS;
   return Number.isSafeInteger(deadline) ? deadline : undefined;

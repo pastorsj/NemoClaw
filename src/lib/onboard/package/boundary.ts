@@ -26,7 +26,7 @@ import { bindCheckpointHarnessPackageAuthority } from "../../state/onboard-check
 import { type CompareAndSwapSessionResult, type Session } from "../../state/onboard-session";
 import { load as loadRegistry } from "../../state/registry/persistence";
 import type { SandboxRegistry } from "../../state/registry/types";
-import { resolveUnpackagedOnboardAgent } from "../agent-selection";
+import { resolveUnpackagedOnboardAgent } from "./unpackaged-agent";
 import {
   prepare as prepareLockedOnboardRuntime,
   type LockedOnboardRuntimePreparation,

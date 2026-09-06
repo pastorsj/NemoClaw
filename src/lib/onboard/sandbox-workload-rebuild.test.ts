@@ -21,39 +21,65 @@ import {
   MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
   qualifiedManagedImageDeclaration,
   type ManagedImageContractV1,
+  type ManagedImageAgent,
   type ManagedImagePlatform,
+  type PackageManagedImageContract,
   type ShippedManagedImageAgent,
 } from "./managed-image/contract";
+import type { ResolvedSandboxAgent } from "./sandbox-agent";
 import type {
   BuiltManagedStartupOnboardProfile,
   ManagedStartupOnboardProfileInput,
 } from "./managed-startup/onboard-profile";
+import { managedStartupSettingsFromProfile } from "./managed-startup/package-profile";
 import {
   decodeManagedStartupProfile,
+  encodeManagedStartupDurableProfile,
   encodeManagedStartupProfile,
+  isManagedStartupPackageProfile,
+  type ManagedStartupProfile,
 } from "./managed-startup/profile";
+import { managedWorkloadAuthorityDependencies } from "./workload/authority";
 import type { RuntimeProviderBundle } from "./runtime-provider/contract";
 import {
   buildManagedWorkloadRebuildReceipt,
   type ManagedWorkloadRebuildHandoff,
   type ManagedWorkloadReceipt,
+  type PackageManagedWorkloadRebuildCatalogHandoff,
   managedWorkloadRebuildDependencies,
   managedWorkloadRebuildHandoffMatchesEntry,
   managedWorkloadRebuildProfileEnvironment,
   prepareManagedWorkloadRebuildHandoff,
   prepareSandboxWorkloadSourceFromRebuildHandoff,
+  stageManagedPackageWorkloadRebuildProfile,
   stageManagedWorkloadRebuildProfile,
 } from "./workload/rebuild";
 import type { SandboxWorkloadRuntimeCapabilities } from "./workload/source";
+import type { PreparedSandboxWorkloadSource } from "./workload/preparation";
 
 const AGENTS = ["openclaw", "hermes", "langchain-deepagents-code"] as const;
 const ORIGINAL_PREPARE = managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource;
+const ORIGINAL_STARTUP_ADAPTER =
+  managedWorkloadRebuildDependencies.loadHarnessStartupProfileAdapterHostModule;
+const ORIGINAL_PACKAGE_RESOLVER =
+  managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent;
+const FUTURE_PACKAGE = {
+  kind: "agent-runtime",
+  id: "future-harness",
+  packageVersion: "1.2.3",
+  contentDigest: "9".repeat(64),
+} as const;
+const FUTURE_MANAGED_IMAGE = {
+  repository: "registry.example/team/future-harness",
+  architectures: ["linux/amd64"],
+  runtime_identity: { uid: 1234, gid: 1234, workdir: "/sandbox" },
+} as const;
 type RebuildProfileInput = Omit<
   ManagedStartupOnboardProfileInput,
   "agentName" | "environment" | "corporateCa"
 >;
 
-function rebuildProfileInput(agent: ShippedManagedImageAgent): RebuildProfileInput {
+function rebuildProfileInput(agent: ManagedImageAgent): RebuildProfileInput {
   const common = {
     chatUiUrl: "http://127.0.0.1:18789",
     effectiveDashboardPort: 18_789,
@@ -114,7 +140,24 @@ function rebuildProfileInput(agent: ShippedManagedImageAgent): RebuildProfileInp
       manageDashboard: false,
       hermesDashboardState: { config: null, enabled: false },
     },
-  } as const satisfies Record<ShippedManagedImageAgent, RebuildProfileInput>;
+    pi: {
+      ...common,
+      inference: {
+        routeProvider: "inference",
+        upstreamProvider: "nvidia",
+        model: "nvidia/nemotron-new",
+        routedBaseUrl: "https://inference.local/v1",
+        upstreamEndpointUrl: null,
+        api: "openai-completions",
+        primaryModelRef: null,
+        compatibility: null,
+      },
+      chatUiUrl: "",
+      effectiveDashboardPort: 0,
+      manageDashboard: false,
+      hermesDashboardState: { config: null, enabled: false },
+    },
+  } as const satisfies Record<ManagedImageAgent, RebuildProfileInput>;
   return profiles[agent];
 }
 
@@ -152,6 +195,7 @@ function profileTransport(agent: ShippedManagedImageAgent): BuiltManagedStartupO
     encodedProfile: encodedProfile as BuiltManagedStartupOnboardProfile["encodedProfile"],
     startupProfileSha256: createHash("sha256").update(encodedProfile, "utf8").digest("hex"),
     credentialProxyReplayRequired: false,
+    dashboardRemoteBindPrepared: false,
   };
 }
 
@@ -192,6 +236,95 @@ function entry(
     imageTag: workload.reference,
     workload,
   };
+}
+
+function futureEntry(generation: "old" | "new" = "old"): SandboxEntry {
+  const digit = generation === "old" ? "7" : "8";
+  const encodedProfile = encodeManagedStartupDurableProfile({
+    schemaVersion: 1,
+    profileKind: "package",
+    agent: FUTURE_PACKAGE.id,
+    harnessPackage: FUTURE_PACKAGE,
+    desiredState: futureDesiredState(),
+    packageConfig: { settings: { mode: "future" } },
+    corporateCa: { bundleSha256: null },
+  });
+  const workload: ManagedWorkloadReceipt = {
+    schemaVersion: 1,
+    kind: "managed-image",
+    reference: `${FUTURE_MANAGED_IMAGE.repository}@sha256:${digit.repeat(64)}`,
+    platform: "linux/amd64",
+    release: generation === "old" ? "v0.0.99" : "v0.0.100",
+    sourceRevision: digit.repeat(40),
+    sourceCohort: generation === "old" ? "ghrun-100-1" : "ghrun-200-2",
+    capabilityContractVersion: 1,
+    startupProfileContractVersion: 1,
+    encodedProfile,
+    startupProfileSha256: createHash("sha256").update(encodedProfile, "utf8").digest("hex"),
+    credentialProxyReplayRequired: false,
+    shared: true,
+  };
+  return {
+    name: "rebuild-future-harness",
+    agent: FUTURE_PACKAGE.id,
+    harnessPackage: FUTURE_PACKAGE,
+    openshellDriver: "mxc",
+    fromDockerfile: null,
+    imageTag: workload.reference,
+    workload,
+    dashboardRemoteBindPrepared: true,
+  };
+}
+
+function futureDesiredState(changed = false) {
+  const settings = managedStartupSettingsFromProfile(managedStartupE2eProfile("pi", changed));
+  return {
+    ...settings,
+    configuration: { agent: FUTURE_PACKAGE.id },
+    dashboard: { agent: FUTURE_PACKAGE.id, mode: "disabled" as const },
+  };
+}
+
+function futureContract(generation: "old" | "new"): PackageManagedImageContract<"future-harness"> {
+  const row = futureEntry(generation);
+  const receipt = row.workload as ManagedWorkloadReceipt;
+  const digest = receipt.reference.slice(receipt.reference.indexOf("@") + 1) as `sha256:${string}`;
+  return {
+    contractVersion: 1 as const,
+    agent: FUTURE_PACKAGE.id,
+    harnessPackage: FUTURE_PACKAGE,
+    platform: "linux/amd64" as const,
+    image: FUTURE_MANAGED_IMAGE.repository,
+    digest,
+    reference: receipt.reference as `${string}@sha256:${string}`,
+    source: {
+      repository: MANAGED_IMAGE_SOURCE_REPOSITORY,
+      revision: receipt.sourceRevision,
+      release: receipt.release,
+      cohort: receipt.sourceCohort as `ghrun-${number}-${number}`,
+    },
+    startupProfileContractVersion: 1 as const,
+    capabilityContractVersion: 1 as const,
+  };
+}
+
+function resolveFuturePackage() {
+  managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = vi.fn((row) => {
+    if (row.harnessPackage?.contentDigest !== FUTURE_PACKAGE.contentDigest) {
+      throw new Error("package receipt drifted");
+    }
+    return {
+      recordedAgent: FUTURE_PACKAGE.id,
+      effectiveAgentId: FUTURE_PACKAGE.id,
+      definition: {
+        name: FUTURE_PACKAGE.id,
+        packageRoot: "/installed/future-harness",
+        managedImage: FUTURE_MANAGED_IMAGE,
+      },
+      harnessPackage: FUTURE_PACKAGE,
+      harnessPackageMigration: null,
+    } as unknown as ResolvedSandboxAgent;
+  });
 }
 
 function runtime(
@@ -247,9 +380,7 @@ function replacement(
   revision?: string,
 ) {
   const image = managedContract(agent, "new", platform);
-  const contract = revision
-    ? { ...image, source: { ...image.source, revision } }
-    : image;
+  const contract = revision ? { ...image, source: { ...image.source, revision } } : image;
   return {
     source: {
       kind: "managed-image" as const,
@@ -265,58 +396,263 @@ function completeHandoff(
   agent: ShippedManagedImageAgent,
   catalog: Awaited<ReturnType<typeof prepareManagedWorkloadRebuildHandoff>>,
 ): ManagedWorkloadRebuildHandoff {
+  if (!catalog || catalog.harnessPackage) throw new Error("expected legacy handoff");
   return {
-    ...catalog!,
+    ...catalog,
     replacementProfile: profileTransport(agent),
   };
 }
 
+function legacyPreviousProfile(
+  handoff: NonNullable<Awaited<ReturnType<typeof prepareManagedWorkloadRebuildHandoff>>>,
+): ManagedStartupProfile {
+  if (isManagedStartupPackageProfile(handoff.previousProfile)) {
+    throw new Error("expected a legacy managed startup profile");
+  }
+  return handoff.previousProfile;
+}
+
 afterEach(() => {
   managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = ORIGINAL_PREPARE;
+  managedWorkloadRebuildDependencies.loadHarnessStartupProfileAdapterHostModule =
+    ORIGINAL_STARTUP_ADAPTER;
+  managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = ORIGINAL_PACKAGE_RESOLVER;
 });
 
 describe("managed workload rebuild preflight", () => {
-  it.each(
-    AGENTS,
-  )("prepares exact current-release authority for %s without a Dockerfile fallback", async (agent) => {
-    const prepare = vi.fn(async () => replacement(agent));
+  it("rebuilds a future package through exact receipt-backed authority", async () => {
+    resolveFuturePackage();
+    const nextContract = futureContract("new");
+    const prepare = vi.fn(async (): Promise<PreparedSandboxWorkloadSource> => ({
+      source: {
+        kind: "managed-image" as const,
+        reference: nextContract.reference,
+        contract: nextContract,
+      },
+      release: nextContract.source.release,
+      fallbackDiagnostic: null,
+    }));
     managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = prepare;
+    const row = futureEntry();
 
-    const handoff = await prepareManagedWorkloadRebuildHandoff(entry(agent), {
+    const catalog = await prepareManagedWorkloadRebuildHandoff(row, {
       runtime: runtime(),
       provider: provider(),
+      agentDefinition: {
+        name: FUTURE_PACKAGE.id,
+        managedImage: FUTURE_MANAGED_IMAGE,
+      },
       version: "0.0.100",
     });
+    if (!catalog?.harnessPackage) throw new Error("expected package handoff");
+    const reconcileStartupProfile = vi.fn((request) => ({
+      kind: "package-config" as const,
+      packageConfig: { nativeRevision: 2, model: request.desiredState.inference.model },
+      changed: true,
+    }));
+    managedWorkloadRebuildDependencies.loadHarnessStartupProfileAdapterHostModule = vi.fn(() => ({
+      startupProfileEnvironment: [],
+      prepareStartupProfile: vi.fn(),
+      buildInitialStartupProfile: vi.fn(),
+      reconcileStartupProfile,
+    }));
+    const desiredState = futureDesiredState(true);
+    const staged = stageManagedPackageWorkloadRebuildProfile(catalog, desiredState);
+    if (!staged.harnessPackage) throw new Error("expected staged package handoff");
+    const rebuiltReceipt = buildManagedWorkloadRebuildReceipt(staged, provider());
 
-    expect(handoff).toMatchObject({
-      schemaVersion: 1,
-      providerId: "mxc",
-      agent,
-      previousReceipt: {
-        kind: "managed-image",
-        platform: "linux/amd64",
-        release: "v0.0.99",
+    expect(prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentName: FUTURE_PACKAGE.id,
+        harnessPackage: FUTURE_PACKAGE,
+        managedImage: FUTURE_MANAGED_IMAGE,
+      }),
+    );
+    expect(reconcileStartupProfile).toHaveBeenCalledExactlyOnceWith({
+      packageId: FUTURE_PACKAGE.id,
+      harnessPackage: FUTURE_PACKAGE,
+      desiredState,
+      currentPackageConfig: catalog.previousProfile.packageConfig,
+    });
+    expect(staged.replacementProfile.profile).toMatchObject({
+      desiredState,
+      packageConfig: {
+        nativeRevision: 2,
+        model: desiredState.inference.model,
       },
-      replacement: {
-        source: {
-          kind: "managed-image",
-          contract: { agent, platform: "linux/amd64" },
+    });
+    expect(catalog.previousDashboardRemoteBindPrepared).toBe(true);
+    expect(staged.replacementProfile.dashboardRemoteBindPrepared).toBe(true);
+    expect(rebuiltReceipt).toMatchObject({
+      reference: nextContract.reference,
+      encodedProfile: staged.replacementProfile.encodedProfile,
+      startupProfileSha256: staged.replacementProfile.startupProfileSha256,
+    });
+    expect(managedWorkloadRebuildHandoffMatchesEntry(catalog, row, provider())).toBe(true);
+    expect(
+      managedWorkloadRebuildHandoffMatchesEntry(
+        catalog,
+        {
+          ...row,
+          harnessPackage: { ...FUTURE_PACKAGE, contentDigest: "6".repeat(64) },
         },
-        release: "v0.0.100",
-      },
-    });
-    expect(prepare).toHaveBeenCalledWith({
-      agentName: agent,
-      managedImage: qualifiedManagedImageDeclaration(agent),
-      legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
-      runtime: runtime(),
-      version: "0.0.100",
-      policy: "require-managed",
-    });
-    expect(Object.isFrozen(handoff)).toBe(true);
-    expect(Object.isFrozen(handoff?.previousProfile.proxy)).toBe(true);
-    expect(Object.isFrozen(handoff?.replacement.source.contract.source)).toBe(true);
+        provider(),
+      ),
+    ).toBe(false);
+    expect(() =>
+      buildManagedWorkloadRebuildReceipt(
+        {
+          ...staged,
+          replacementProfile: {
+            ...staged.replacementProfile,
+            dashboardRemoteBindPrepared: false,
+          },
+        },
+        provider(),
+      ),
+    ).toThrow(/remote-dashboard preparation marker/u);
+
+    const driftedPackage = { ...FUTURE_PACKAGE, contentDigest: "6".repeat(64) };
+    const driftedProfile = {
+      ...staged.replacementProfile.profile,
+      harnessPackage: driftedPackage,
+    };
+    const driftedEncodedProfile = encodeManagedStartupDurableProfile(driftedProfile);
+    expect(() =>
+      buildManagedWorkloadRebuildReceipt(
+        {
+          ...staged,
+          replacementProfile: {
+            ...staged.replacementProfile,
+            profile: driftedProfile,
+            encodedProfile:
+              driftedEncodedProfile as typeof staged.replacementProfile.encodedProfile,
+            startupProfileSha256: createHash("sha256")
+              .update(driftedEncodedProfile, "utf8")
+              .digest("hex"),
+          },
+        },
+        provider(),
+      ),
+    ).toThrow(/do not form valid durable authority/u);
+
+    managedWorkloadRebuildDependencies.loadHarnessStartupProfileAdapterHostModule = vi.fn(() => ({
+      startupProfileEnvironment: [],
+      prepareStartupProfile: vi.fn(),
+      buildInitialStartupProfile: vi.fn(),
+      reconcileStartupProfile: () => ({
+        kind: "unsupported" as const,
+        reason: "future runtime requires external reconciliation",
+      }),
+    }));
+    expect(() => stageManagedPackageWorkloadRebuildProfile(catalog, desiredState)).toThrow(
+      /does not support startup reconciliation.*external reconciliation/u,
+    );
   });
+
+  it.each(["openclaw", "hermes", "langchain-deepagents-code", "pi"] as const)(
+    "reconciles persisted desired state through the %s package adapter",
+    (agent) => {
+      const harnessPackage = {
+        kind: "agent-runtime" as const,
+        id: agent,
+        packageVersion: "1.2.3",
+        contentDigest: "5".repeat(64),
+      };
+      const previousDesiredState = managedStartupSettingsFromProfile(
+        managedStartupE2eProfile(agent),
+      );
+      const catalog = {
+        agent,
+        harnessPackage,
+        previousProfile: {
+          schemaVersion: 1,
+          profileKind: "package",
+          agent,
+          harnessPackage,
+          desiredState: previousDesiredState,
+          packageConfig: { nativeRevision: 1 },
+          corporateCa: previousDesiredState.corporateCa,
+        },
+        previousReceipt: {
+          credentialProxyReplayRequired: false,
+        },
+        previousDashboardRemoteBindPrepared: false,
+        corporateCa: null,
+      } as unknown as PackageManagedWorkloadRebuildCatalogHandoff;
+      const reconcileStartupProfile = vi.fn((request) => ({
+        kind: "package-config" as const,
+        packageConfig: { nativeRevision: 2, settings: request.desiredState },
+        changed: true,
+      }));
+      managedWorkloadRebuildDependencies.loadHarnessStartupProfileAdapterHostModule = vi.fn(() => ({
+        startupProfileEnvironment: [],
+        prepareStartupProfile: vi.fn(),
+        buildInitialStartupProfile: vi.fn(),
+        reconcileStartupProfile,
+      }));
+
+      const staged = stageManagedPackageWorkloadRebuildProfile(catalog, previousDesiredState);
+      if (!staged.harnessPackage) throw new Error("expected package rebuild handoff");
+
+      expect(reconcileStartupProfile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          packageId: agent,
+          harnessPackage,
+          currentPackageConfig: { nativeRevision: 1 },
+        }),
+      );
+      expect(staged.replacementProfile.profile).toMatchObject({
+        agent,
+        harnessPackage,
+        desiredState: reconcileStartupProfile.mock.calls[0]?.[0].desiredState,
+        packageConfig: { nativeRevision: 2 },
+      });
+    },
+  );
+
+  it.each(AGENTS)(
+    "prepares exact current-release authority for %s without a Dockerfile fallback",
+    async (agent) => {
+      const prepare = vi.fn(async () => replacement(agent));
+      managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = prepare;
+
+      const handoff = await prepareManagedWorkloadRebuildHandoff(entry(agent), {
+        runtime: runtime(),
+        provider: provider(),
+        version: "0.0.100",
+      });
+
+      expect(handoff).toMatchObject({
+        schemaVersion: 1,
+        providerId: "mxc",
+        agent,
+        previousReceipt: {
+          kind: "managed-image",
+          platform: "linux/amd64",
+          release: "v0.0.99",
+        },
+        replacement: {
+          source: {
+            kind: "managed-image",
+            contract: { agent, platform: "linux/amd64" },
+          },
+          release: "v0.0.100",
+        },
+      });
+      expect(prepare).toHaveBeenCalledWith({
+        agentName: agent,
+        managedImage: qualifiedManagedImageDeclaration(agent),
+        legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
+        runtime: runtime(),
+        version: "0.0.100",
+        policy: "require-managed",
+      });
+      expect(Object.isFrozen(handoff)).toBe(true);
+      expect(Object.isFrozen(legacyPreviousProfile(handoff!).proxy)).toBe(true);
+      expect(Object.isFrozen(handoff?.replacement.source.contract.source)).toBe(true);
+    },
+  );
 
   it("retains the live qualification revision during rebuild preflight (#9385)", async () => {
     const prepare = vi.fn(async () => replacement("langchain-deepagents-code"));
@@ -375,21 +711,16 @@ describe("managed workload rebuild preflight", () => {
   });
 
   it("uses the GitHub Actions qualification revision and retains the previous workload receipt during rebuild (#10970)", async () => {
-    const prepare = vi.fn(async () =>
-      replacement("openclaw", "linux/amd64", "c".repeat(40)),
-    );
+    const prepare = vi.fn(async () => replacement("openclaw", "linux/amd64", "c".repeat(40)));
     managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = prepare;
     vi.stubEnv("GITHUB_ACTIONS", "true");
     vi.stubEnv("E2E_MANAGED_IMAGE_REVISION", "c".repeat(40));
 
-    const handoff = await prepareManagedWorkloadRebuildHandoff(
-      entry("openclaw"),
-      {
-        runtime: runtime(),
-        provider: provider(),
-        version: "0.0.100",
-      },
-    );
+    const handoff = await prepareManagedWorkloadRebuildHandoff(entry("openclaw"), {
+      runtime: runtime(),
+      provider: provider(),
+      version: "0.0.100",
+    });
 
     expect(handoff?.previousReceipt.sourceRevision).toBe("a".repeat(40));
     expect(handoff?.replacement.source.contract.source.revision).toBe("c".repeat(40));
@@ -405,9 +736,7 @@ describe("managed workload rebuild preflight", () => {
   });
 
   it("accepts an exact PR replacement catalog newer than durable authority (#9464)", async () => {
-    const prepare = vi.fn(async () =>
-      replacement("openclaw", "linux/amd64", "c".repeat(40)),
-    );
+    const prepare = vi.fn(async () => replacement("openclaw", "linux/amd64", "c".repeat(40)));
     const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-live-e2e-catalog-"));
     const catalogPath = path.join(fixtureRoot, "catalog.json");
     fs.writeFileSync(catalogPath, "{}\n", { mode: 0o600 });
@@ -533,18 +862,21 @@ describe("managed workload rebuild preflight", () => {
       provider("mxc", { authorizesRebuild: false }),
       /does not authorize 'rebuild'/u,
     ],
-  ] as const)("rejects %s drift before catalog resolution", async (_label, row, target, selected, error) => {
-    const prepare = vi.fn();
-    managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = prepare;
+  ] as const)(
+    "rejects %s drift before catalog resolution",
+    async (_label, row, target, selected, error) => {
+      const prepare = vi.fn();
+      managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = prepare;
 
-    await expect(
-      prepareManagedWorkloadRebuildHandoff(row, {
-        runtime: target,
-        provider: selected,
-      }),
-    ).rejects.toThrow(error);
-    expect(prepare).not.toHaveBeenCalled();
-  });
+      await expect(
+        prepareManagedWorkloadRebuildHandoff(row, {
+          runtime: target,
+          provider: selected,
+        }),
+      ).rejects.toThrow(error);
+      expect(prepare).not.toHaveBeenCalled();
+    },
+  );
 
   it("revalidates retained profile and receipt authority against the live row", async () => {
     managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = vi.fn(async () =>
@@ -590,8 +922,6 @@ describe("managed workload rebuild preflight", () => {
       repository,
       architectures: ["linux/amd64"],
       runtime_identity: { uid: 4321, gid: 4322, workdir: "/sandbox" },
-      startup_profile_contract_version: 1,
-      capability_contract_version: 1,
     } as const;
     const previousReceipt = {
       ...receipt("openclaw", "old"),
@@ -640,8 +970,9 @@ describe("managed workload rebuild preflight", () => {
       runtime: runtime(),
       provider: provider(),
     });
+    if (!catalog || catalog.harnessPackage) throw new Error("expected legacy handoff");
     const crossAgentHandoff: ManagedWorkloadRebuildHandoff = {
-      ...catalog!,
+      ...catalog,
       replacement: replacement("hermes"),
       replacementProfile: profileTransport("hermes"),
     };
@@ -662,20 +993,21 @@ describe("managed workload rebuild preflight", () => {
 
     const staged = stageManagedWorkloadRebuildProfile(catalog!, rebuildProfileInput(agent), {});
     const decoded = decodeManagedStartupProfile(staged.replacementProfile.encodedProfile);
+    const previousProfile = legacyPreviousProfile(catalog!);
 
     expect(staged.replacementProfile.credentialProxyReplayRequired).toBe(false);
     expect(decoded).toMatchObject({
       agent,
       agentConfig: { agent },
       proxy: {
-        managedHost: catalog!.previousProfile.proxy.managedHost,
-        managedPort: catalog!.previousProfile.proxy.managedPort,
-        hostHttpUrl: catalog!.previousProfile.proxy.hostHttpUrl,
-        hostHttpsUrl: catalog!.previousProfile.proxy.hostHttpsUrl,
+        managedHost: previousProfile.proxy.managedHost,
+        managedPort: previousProfile.proxy.managedPort,
+        hostHttpUrl: previousProfile.proxy.hostHttpUrl,
+        hostHttpsUrl: previousProfile.proxy.hostHttpsUrl,
       },
     });
     expect(decoded.proxy.hostNoProxy).toEqual(
-      expect.arrayContaining([...catalog!.previousProfile.proxy.hostNoProxy]),
+      expect.arrayContaining([...previousProfile.proxy.hostNoProxy]),
     );
   });
 

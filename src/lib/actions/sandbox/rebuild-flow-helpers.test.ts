@@ -216,6 +216,7 @@ describe("rebuild agent base image preflight", () => {
       name: "hermes",
       displayName: "Hermes Agent",
       packageRoot: "/installed/hermes",
+      managedImage: { rebuild_base_image: "pinned-remote" },
     } as agentDefs.AgentDefinition;
     const ensureAgentBaseImage = vi
       .spyOn(agentOnboard, "ensureAgentBaseImage")
@@ -240,36 +241,46 @@ describe("rebuild agent base image preflight", () => {
     };
   }
 
-  it("uses the pinned Hermes base when a legacy sandbox has no resolution hint (#10903)", () => {
+  it("uses a package-declared pinned base for an unknown harness", () => {
     const imageRef = `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}`;
     const { agent, ensureAgentBaseImage } = mockBaseImagePreflight(imageRef);
+    const futureAgent = {
+      ...agent,
+      name: "future-harness",
+      displayName: "Future Harness",
+      packageRoot: "/installed/future-harness",
+    } as agentDefs.AgentDefinition;
     ensureAgentBaseImage.mockReturnValue({
       imageTag: imageRef,
       built: false,
     });
 
-    const result = ensureRebuildAgentBaseImage(agent, makeBail());
+    const result = ensureRebuildAgentBaseImage(futureAgent, makeBail());
 
-    expect(ensureAgentBaseImage).toHaveBeenCalledWith(expect.objectContaining({ name: "hermes" }), {
+    expect(ensureAgentBaseImage).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "future-harness" }),
+      {
       allowLocalFallback: false,
       forceBaseImageRebuild: false,
-    });
+      },
+    );
     expect(result).toEqual({
       ok: true,
       imageRef,
-      overrideEnvVar,
+      overrideEnvVar: "NEMOCLAW_FUTURE_HARNESS_SANDBOX_BASE_IMAGE_REF",
     });
   });
 
-  it("rejects a missing Hermes base when a legacy sandbox has no resolution hint (#10903)", () => {
+  it("rejects a missing package-declared pinned base", () => {
     const { agent, ensureAgentBaseImage } = mockBaseImagePreflight("");
+    const futureAgent = { ...agent, name: "future-harness" } as agentDefs.AgentDefinition;
     ensureAgentBaseImage.mockReturnValue({
       imageTag: null,
       built: false,
     });
 
-    expect(() => ensureRebuildAgentBaseImage(agent, makeBail())).toThrow(
-      "Hermes rebuild requires the release-pinned immutable base image",
+    expect(() => ensureRebuildAgentBaseImage(futureAgent, makeBail())).toThrow(
+      "Agent 'future-harness' rebuild requires the package-pinned immutable base image",
     );
   });
 

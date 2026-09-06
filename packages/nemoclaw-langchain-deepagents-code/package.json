@@ -7,10 +7,12 @@
   "type": "module",
   "scripts": {
     "build:adapters": "nemoclaw-build-adapters .",
+    "build:package": "nemoclaw-build-package . ./dist/nemoclaw-langchain-deepagents-code",
     "check:adapters": "tsc -p tsconfig.adapters.json && npm run build:adapters -- --check",
+    "check:package": "nemoclaw-validate-package .",
     "test:fabric": "bash tests/fabric/run-tests.sh",
     "test:fabric:composed": "bash tests/fabric/run-tests.sh composed",
-    "test:package": "npm run check:adapters && vitest run --config vitest.config.ts",
+    "test:package": "npm run check:adapters && npm run check:package && vitest run --config vitest.config.ts",
     "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts && npm run test:fabric:composed",
     "test:spec": "vitest run --config vitest.config.ts --reporter=tree && vitest run --config vitest.nemoclaw.ts --reporter=tree",
     "test:watch": "vitest watch --config vitest.config.ts",
@@ -31,7 +33,8 @@
   ],
   "nemoclaw": {
     "harnessManifest": "manifest.yaml",
-    "minimumNemoClawVersion": "0.0.113"
+    "minimumNemoClawVersion": "0.0.113",
+    "maximumNemoClawVersionExclusive": "0.0.121"
   },
   "engines": {
     "node": ">=22.19.0"

@@ -5,50 +5,31 @@ import { rebindLoopbackDashboardUrlPort } from "../../../dashboard/url";
 import { resolveContextWindowForModel } from "../../../inference/context-window";
 import type { SandboxMessagingPlan } from "../../../messaging";
 import { shouldManageDashboardForAgent } from "../../../onboard/dashboard-runtime";
-import { resolveHermesDashboardOnboardState } from "../../../onboard/hermes-dashboard";
-import { resolveManagedStartupInferenceRoute } from "../../../onboard/inference-route";
+import {
+  resolveManagedStartupInferenceRoute,
+  resolveManagedStartupSandboxInferenceConfig,
+} from "../../../onboard/inference-route";
+import { buildManagedStartupInferenceCandidates } from "../../../onboard/managed-startup/package-input";
 import {
   type ManagedWorkloadRebuildCatalogHandoff,
   type ManagedWorkloadRebuildHandoff,
-  stageManagedWorkloadRebuildProfile,
+  stagePreparedManagedPackageWorkloadRebuildProfile,
 } from "../../../onboard/workload/rebuild";
+import { managedPackageRebuildProfileEnvironment } from "../../../onboard/workload/rebuild-compat";
 import type { RebuildRecreateOnboardOpts } from "../rebuild-gpu-opt-out";
 import type { RebuildTargetConfig } from "../rebuild-target-preflight";
+import { prepareLegacyManagedRebuildProfileHandoff } from "./legacy-rebuild";
+
+export {
+  resolveManagedRebuildOpenClawReasoning,
+  resolveManagedRebuildOpenClawReasoningEffort,
+} from "./legacy-rebuild";
 
 export const managedRebuildProfileDependencies = {
+  getSandboxInferenceConfig: resolveManagedStartupSandboxInferenceConfig,
   resolveContextWindowForModel,
   resolveManagedStartupInferenceRoute,
 };
-
-type ManagedStartupInferenceApi = "openai-completions" | "openai-responses" | "anthropic-messages";
-
-function requireManagedStartupInferenceApi(api: string): ManagedStartupInferenceApi {
-  switch (api) {
-    case "openai-completions":
-    case "openai-responses":
-    case "anthropic-messages":
-      return api;
-    default:
-      throw new Error(`Unsupported managed startup inference API '${api}'.`);
-  }
-}
-
-export function resolveManagedRebuildOpenClawReasoning(
-  provider: string,
-  compatibleEndpointReasoning: "true" | "false" | null,
-): boolean {
-  return provider === "compatible-endpoint" && compatibleEndpointReasoning === "true";
-}
-
-export function resolveManagedRebuildOpenClawReasoningEffort(
-  provider: string,
-  inferenceApi: string,
-  compatibleEndpointReasoningEffort: "low" | "medium" | "high" | null,
-): "default" | "low" | "medium" | "high" {
-  return provider === "compatible-endpoint" && inferenceApi === "openai-completions"
-    ? (compatibleEndpointReasoningEffort ?? "default")
-    : "default";
-}
 
 /** Render the exact replacement profile while the old managed workload remains authoritative. */
 export function prepareManagedRebuildProfileHandoff(input: {
@@ -56,112 +37,81 @@ export function prepareManagedRebuildProfileHandoff(input: {
   readonly targetConfig: RebuildTargetConfig;
   readonly recreateOptions: RebuildRecreateOnboardOpts;
   readonly messagingPlan: SandboxMessagingPlan | null;
+  readonly toolDisclosureRequestedExplicitly?: boolean;
   readonly environment?: NodeJS.ProcessEnv;
 }): ManagedWorkloadRebuildHandoff {
   const { catalogHandoff, targetConfig, recreateOptions, messagingPlan } = input;
-  const agent = catalogHandoff.agent;
   const { resumeConfig, durableConfig } = targetConfig;
   const manageDashboard = shouldManageDashboardForAgent(targetConfig.agentDefinition);
   const effectiveDashboardPort = manageDashboard ? (recreateOptions.controlUiPort ?? 0) : 0;
-  const previousDashboard = catalogHandoff.previousProfile.dashboard;
-  const previousHermesBrowserUrl =
-    agent === "hermes" && previousDashboard.agent === "hermes"
-      ? previousDashboard.browserUrl
-      : undefined;
-  const hermesDashboardState = resolveHermesDashboardOnboardState({
-    agentName: agent,
-    effectivePort: effectiveDashboardPort,
-    env: input.environment ?? process.env,
-  });
-  if (
-    agent === "hermes" &&
-    manageDashboard &&
-    hermesDashboardState.enabled &&
-    previousHermesBrowserUrl === undefined
-  ) {
-    throw new Error(
-      "Cannot rebuild the Hermes dashboard because its managed startup profile has no recorded browser URL. Rerun onboarding, then rebuild the sandbox.",
+  if (catalogHandoff.harnessPackage) {
+    const previousDesiredState = catalogHandoff.previousProfile.desiredState;
+    const previousDashboard = previousDesiredState.dashboard;
+    const candidates = buildManagedStartupInferenceCandidates(
+      resumeConfig.model,
+      resumeConfig.provider,
+      resumeConfig.preferredInferenceApi,
+      managedRebuildProfileDependencies.getSandboxInferenceConfig,
     );
-  }
-  const chatUiUrl = manageDashboard
-    ? previousHermesBrowserUrl === undefined
-      ? `http://127.0.0.1:${String(effectiveDashboardPort)}`
-      : rebindLoopbackDashboardUrlPort(previousHermesBrowserUrl, effectiveDashboardPort)
-    : "";
-  const inference = managedRebuildProfileDependencies.resolveManagedStartupInferenceRoute(
-    agent,
-    resumeConfig.provider,
-    resumeConfig.model,
-    resumeConfig.preferredInferenceApi,
-  );
-  const upstreamProvider =
-    agent === "hermes" && resumeConfig.provider === "hermes-provider"
-      ? catalogHandoff.previousProfile.inference.upstreamProvider
-      : resumeConfig.provider;
-  const currentOpenClawContextWindow =
-    agent === "openclaw"
-      ? managedRebuildProfileDependencies.resolveContextWindowForModel(
+    const forwardingEnabled = previousDashboard.mode === "loopback-forwarded";
+    const previousBrowserUrl = previousDashboard.browserUrl;
+    const dashboardUrl = manageDashboard
+      ? rebindLoopbackDashboardUrlPort(
+          previousBrowserUrl ?? `http://127.0.0.1:${String(effectiveDashboardPort)}`,
+          effectiveDashboardPort,
+        )
+      : "";
+    return stagePreparedManagedPackageWorkloadRebuildProfile(catalogHandoff, {
+      inference: {
+        selectedProvider: resumeConfig.provider,
+        model: resumeConfig.model,
+        endpointUrl: resumeConfig.endpointUrl,
+        resolvedContextWindow: managedRebuildProfileDependencies.resolveContextWindowForModel(
           resumeConfig.provider,
           resumeConfig.model,
-        )
-      : null;
-  if (
-    agent === "openclaw" &&
-    currentOpenClawContextWindow === null &&
-    (catalogHandoff.previousProfile.inference.model !== resumeConfig.model ||
-      catalogHandoff.previousProfile.inference.upstreamProvider !== resumeConfig.provider)
-  ) {
-    throw new Error(
-      `Cannot determine a context window for the current OpenClaw target '${resumeConfig.provider}/${resumeConfig.model}'.`,
-    );
-  }
-
-  return stageManagedWorkloadRebuildProfile(
-    catalogHandoff,
-    {
-      inference: {
-        routeProvider: inference.providerKey,
-        upstreamProvider,
-        model: resumeConfig.model,
-        routedBaseUrl: inference.inferenceBaseUrl,
-        upstreamEndpointUrl:
-          agent === "langchain-deepagents-code" ? resumeConfig.endpointUrl : null,
-        api: requireManagedStartupInferenceApi(inference.inferenceApi),
-        primaryModelRef: agent === "openclaw" ? inference.primaryModelRef : null,
-        compatibility: agent === "openclaw" ? (inference.inferenceCompat ?? {}) : null,
+        ),
+        reasoningEnabled:
+          resumeConfig.compatibleEndpointReasoning === null
+            ? null
+            : resumeConfig.compatibleEndpointReasoning === "true",
+        reasoningEffort: resumeConfig.compatibleEndpointReasoningEffort,
+        candidates,
       },
-      chatUiUrl,
-      effectiveDashboardPort,
-      manageDashboard,
-      dashboardBindAddress:
-        previousDashboard.agent === "openclaw" && previousDashboard.bindAddress === "0.0.0.0"
-          ? "0.0.0.0"
-          : undefined,
-      wslExposure: previousDashboard.agent === "openclaw" && previousDashboard.wslExposure,
-      hermesDashboardState,
+      dashboard: {
+        managed: manageDashboard,
+        url: dashboardUrl,
+        port: effectiveDashboardPort,
+        bindAddress: previousDashboard.bindAddress === "0.0.0.0" ? "0.0.0.0" : undefined,
+        wslExposure: previousDashboard.wslExposure ?? false,
+        forwarding: {
+          enabled: forwardingEnabled,
+          publicPort: forwardingEnabled ? effectiveDashboardPort : null,
+          internalPort: forwardingEnabled ? (previousDashboard.internalPort ?? null) : null,
+          tuiEnabled: forwardingEnabled && (previousDashboard.tuiEnabled ?? false),
+        },
+      },
       webSearch: durableConfig.webSearchConfig,
       toolDisclosure: recreateOptions.toolDisclosure,
-      hermesToolGateways: targetConfig.hermesToolGateways,
+      enabledToolGateways: targetConfig.hermesToolGateways,
       messagingPlan,
-      dcodeAutoApprovalMode: recreateOptions.dcodeAutoApprovalMode,
+      approvalMode: recreateOptions.dcodeAutoApprovalMode,
       observabilityEnabled: recreateOptions.observabilityEnabled,
+      environment: managedPackageRebuildProfileEnvironment(
+        catalogHandoff.previousProfile.desiredState,
+        catalogHandoff.previousReceipt.credentialProxyReplayRequired,
+        input.environment ?? process.env,
+      ),
+      corporateCa: catalogHandoff.corporateCa,
+    });
+  }
+  return prepareLegacyManagedRebuildProfileHandoff(
+    {
+      catalogHandoff,
+      targetConfig,
+      recreateOptions,
+      messagingPlan,
+      ...(input.environment === undefined ? {} : { environment: input.environment }),
     },
-    input.environment,
-    agent === "openclaw"
-      ? {
-          ...(currentOpenClawContextWindow === null
-            ? {}
-            : { openClawContextWindow: currentOpenClawContextWindow }),
-          openClawReasoning: resolveManagedRebuildOpenClawReasoning(
-            resumeConfig.provider,
-            resumeConfig.compatibleEndpointReasoning,
-          ),
-          openClawReasoningEffort: resolveManagedRebuildOpenClawReasoningEffort(
-            resumeConfig.provider,
-            inference.inferenceApi,
-            resumeConfig.compatibleEndpointReasoningEffort,
-          ),
-        }
-      : {},
+    managedRebuildProfileDependencies,
   );
 }

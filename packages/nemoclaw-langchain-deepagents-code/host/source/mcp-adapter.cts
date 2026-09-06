@@ -13,6 +13,10 @@ const DEEPAGENTS_MCP_CAPABILITY_COMMAND =
   "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability";
 const DEEPAGENTS_UNSAFE_MCP_PROJECTION_PREFIX = "Unsafe managed Deep Agents MCP projection path";
 
+function packageShellCommand(script: any): any {
+  return { kind: "shell", script, shellTrust: "package-authored-code" };
+}
+
 function shellQuote(value: any): any {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
@@ -455,7 +459,7 @@ function buildMcpSnapshotRestorePlan(
   return {
     kind: "conditional-repair",
     applicability: {
-      command: buildMcpRuntimeKindCommand(),
+      command: packageShellCommand(buildMcpRuntimeKindCommand()),
       timeoutSeconds: 15,
       repairWhenOutput: "v2",
       skipWhenOutput: "legacy",
@@ -463,7 +467,7 @@ function buildMcpSnapshotRestorePlan(
     },
     capability: describeMcpMutationCapability({ sandboxName: request.sandboxName }),
     execution: {
-      command: buildSnapshotRepairCommand(request.entries),
+      command: packageShellCommand(buildSnapshotRepairCommand(request.entries)),
       timeoutSeconds: 30,
       success: { kind: "exit-zero" },
       failureMessage: "Deep Agents Code managed MCP projection repair failed.",
@@ -848,7 +852,7 @@ function buildMcpRegistrationPlan(
   const server = request.entry.server;
   return {
     execution: {
-      command: buildMcpRegistrationCommand(request),
+      command: packageShellCommand(buildMcpRegistrationCommand(request)),
       timeoutSeconds: 15,
       success: { kind: "exit-zero" },
       failureMessage: `Deep Agents Code MCP config registration failed for '${server}'.`,
@@ -875,7 +879,7 @@ function buildMcpRemovalPlan(
 ): ReturnType<HarnessMcpAdapterModule["buildMcpRemovalPlan"]> {
   return {
     execution: {
-      command: buildMcpRemovalCommand(request),
+      command: packageShellCommand(buildMcpRemovalCommand(request)),
       timeoutSeconds: 15,
       success: { kind: "exit-zero" },
       failureMessage: `Deep Agents Code MCP config removal failed for '${request.entry.server}'.`,
@@ -887,7 +891,7 @@ function buildMcpRemovalPlan(
 function buildMcpInspectionCommand(
   request: Parameters<HarnessMcpAdapterModule["buildMcpInspectionCommand"]>[0],
 ): ReturnType<HarnessMcpAdapterModule["buildMcpInspectionCommand"]> {
-  return buildStatusCommand(request.entry);
+  return packageShellCommand(buildStatusCommand(request.entry));
 }
 
 function describeMcpMutationCapability(
@@ -896,7 +900,7 @@ function describeMcpMutationCapability(
   const capability = getMutationCapability(request.sandboxName);
   return {
     kind: "command",
-    command: capability.command,
+    command: packageShellCommand(capability.command),
     success: { kind: "stdout-trimmed-equals", value: capability.marker },
     timeoutSeconds: 30,
     failureMessage: capability.failureMessage,

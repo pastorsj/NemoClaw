@@ -94,6 +94,99 @@ function receiptBackedRequest(): HarnessPackageStartupRequest<StartupPackageConf
 }
 
 describe("Hermes startup adapter", () => {
+  it("prepares the existing startup semantics from the generic package input", () => {
+    const legacy = request();
+    const result = adapter.prepareStartupProfile({
+      packageId: "hermes",
+      harnessPackage: receiptBackedRequest().harnessPackage,
+      phase: "initial",
+      previousDesiredState: null,
+      input: {
+        inference: {
+          selectedProvider: legacy.settings.inference.upstreamProvider,
+          model: legacy.settings.inference.model,
+          endpointUrl: null,
+          resolvedContextWindow: null,
+          reasoningEnabled: null,
+          reasoningEffort: null,
+          candidates: [
+            {
+              requestedApi: null,
+              routeProvider: legacy.settings.inference.routeProvider,
+              routedBaseUrl: legacy.settings.inference.routedBaseUrl,
+              api: legacy.settings.inference.api,
+              primaryModelRef: "custom/claude-sonnet",
+              compatibility: null,
+            },
+          ],
+        },
+        dashboard: {
+          managed: true,
+          url: legacy.settings.dashboard.browserUrl!,
+          port: legacy.settings.dashboard.publicPort!,
+          bindAddress: null,
+          wslExposure: false,
+          forwarding: {
+            enabled: true,
+            publicPort: legacy.settings.dashboard.publicPort!,
+            internalPort: legacy.settings.dashboard.internalPort!,
+            tuiEnabled: legacy.settings.dashboard.tuiEnabled!,
+          },
+        },
+        webSearch: { enabled: true, provider: "tavily" },
+        tools: legacy.settings.tools,
+        messagingPlan: legacy.settings.messaging.plan,
+        approvalMode: "disabled",
+        observabilityEnabled: false,
+        proxy: legacy.settings.proxy,
+        environment: { NEMOCLAW_CONTEXT_WINDOW: "65536" },
+        corporateCa: legacy.settings.corporateCa,
+        credentialProxyPresent: true,
+      },
+    });
+
+    expect(result).toEqual({
+      kind: "prepared",
+      desiredState: legacy.settings,
+      credentialProxyReplayRequired: true,
+      dashboardRemoteBindPrepared: false,
+    });
+  });
+
+  it("owns initial and reconciled durable package configuration", () => {
+    const legacy = request();
+    const receipt = receiptBackedRequest();
+    const profileRequest = {
+      packageId: receipt.packageId,
+      harnessPackage: receipt.harnessPackage,
+      desiredState: legacy.settings,
+    };
+    const initial = adapter.buildInitialStartupProfile(profileRequest);
+    if (initial.kind !== "package-config") throw new Error(initial.reason);
+
+    expect(initial.packageConfig).toEqual({ settings: legacy.settings });
+    expect(
+      adapter.buildStartupPlan({
+        ...receipt,
+        packageConfig: initial.packageConfig as StartupPackageConfig,
+      }),
+    ).toEqual(adapter.buildStartupPlan(legacy));
+    expect(
+      adapter.reconcileStartupProfile({
+        ...profileRequest,
+        currentPackageConfig: {
+          settings: { ...legacy.settings, configuration: {} },
+        } as unknown as HarnessStartupJsonObject,
+      }),
+    ).toEqual({ kind: "package-config", packageConfig: initial.packageConfig, changed: true });
+    expect(
+      adapter.reconcileStartupProfile({
+        ...profileRequest,
+        currentPackageConfig: initial.packageConfig,
+      }),
+    ).toEqual({ kind: "package-config", packageConfig: initial.packageConfig, changed: false });
+  });
+
   it("produces the same plan from receipt-backed package settings", () => {
     const packageRequest = receiptBackedRequest();
 

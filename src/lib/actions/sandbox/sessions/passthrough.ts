@@ -11,14 +11,16 @@ import {
   deferSandboxLifecycleExit,
   runWithDeferredSandboxLifecycleExit,
 } from "../../../core/process-exit";
-import { assertHermesPortableCommandUnavailable } from "../../../onboard/experimental/portable-agent-lifecycle";
 import { resolvePackageBackedSandboxAgent } from "../../../onboard/package/package-authority";
-import { withMcpLifecycleLock } from "../../../state/mcp-lifecycle-lock-acquisition";
 import * as registry from "../../../state/registry";
 import { buildOpenshellExecArgs, computeExitCode, execSandbox } from "../exec";
-import { ensureLiveSandboxOrExit } from "../gateway-state";
 import { WARMUP_SESSION_ID_PREFIX } from "../warmup-session";
 import { runLegacySessionList } from "./legacy-list";
+import {
+  assertSessionCommandAvailable,
+  ensureLiveSessionSandbox,
+  withSessionCommandLock,
+} from "./command-authority";
 
 const SESSION_LIST_CAPTURE_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
@@ -129,8 +131,8 @@ export async function runSessionsPassthrough(
   { verb, extraArgs = [] }: SessionsPassthroughOptions = {},
 ): Promise<void> {
   return runWithDeferredSandboxLifecycleExit(async () => {
-    await withMcpLifecycleLock(sandboxName, () => {
-      assertHermesPortableCommandUnavailable(sandboxName, `sandbox:sessions:${verb ?? "list"}`);
+    await withSessionCommandLock(sandboxName, () => {
+      assertSessionCommandAvailable(sandboxName, `sandbox:sessions:${verb ?? "list"}`);
       return runSessionsPassthroughUnlocked(sandboxName, { verb, extraArgs });
     });
   });
@@ -142,7 +144,7 @@ async function runSessionsPassthroughUnlocked(
 ): Promise<void> {
   const sandbox = registry.getSandbox(sandboxName);
   if (!sandbox?.harnessPackage) {
-    await ensureLiveSandboxOrExit(sandboxName, {
+    await ensureLiveSessionSandbox(sandboxName, {
       allowNonReadyPhase: true,
       exit: deferSandboxLifecycleExit,
     });
@@ -167,7 +169,7 @@ async function runSessionsPassthroughUnlocked(
   if (plan.kind === "unsupported") stopSessionList(plan.reason);
   // A package capability refusal must happen before a liveness probe can issue
   // any OpenShell command. Supported plans cross that boundary only here.
-  await ensureLiveSandboxOrExit(sandboxName, {
+  await ensureLiveSessionSandbox(sandboxName, {
     allowNonReadyPhase: true,
     exit: deferSandboxLifecycleExit,
   });

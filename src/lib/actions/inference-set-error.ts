@@ -3,7 +3,7 @@
 
 import { CLI_NAME } from "../cli/branding";
 import { compactText } from "../core/url-utils";
-import { redact, redactFull } from "../security/redact";
+import { redact, redactFull, redactSensitiveText } from "../security/redact";
 
 const FAILURE_DETAIL_LIMIT = 2_000;
 /** Bound untrusted subprocess output; classification scans this same captured window. */
@@ -100,6 +100,16 @@ export class InferenceSetError extends Error {
     super(message);
     this.name = "InferenceSetError";
   }
+}
+
+/** Build the CLI command shown when an inference mutation needs sandbox reconciliation. */
+export function buildInferenceRebuildCommand(sandboxName: string): string {
+  return `${CLI_NAME} ${sandboxName} rebuild`;
+}
+
+/** Keep untrusted invocation-probe failures inside the inference error boundary. */
+export function sanitizeInferenceProbeFailureDetail(value: unknown): string {
+  return redactSensitiveText(value)?.trim() ?? "";
 }
 
 export function buildOpenshellInferenceSetFailureMessage(args: {

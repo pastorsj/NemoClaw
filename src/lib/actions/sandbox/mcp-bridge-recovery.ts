@@ -16,6 +16,8 @@ import {
   getSandboxAgent,
 } from "./mcp-bridge-state";
 
+export { mcpRuntimeIntentRemediationLines } from "./mcp-bridge/recovery-guidance";
+
 const MCP_RUNTIME_INTENT_FAILURE =
   "Managed MCP runtime does not match the persisted package-owned intent";
 const ANSI_OR_UNSAFE_CONTROL_RE =
@@ -38,14 +40,6 @@ export type McpReconciliationRefusalRecoveryResult = {
 };
 
 type InspectMcpRuntimeIntent = (sandboxName: string) => McpRuntimeIntentResult;
-
-/** Keep operator recovery finite and independent of any package implementation. */
-export function mcpRuntimeIntentRemediationLines(sandboxName: string): readonly string[] {
-  return [
-    `Run \`nemoclaw ${sandboxName} mcp restart\` to restore the managed MCP configuration, then retry.`,
-    `If the package runtime is unavailable or its metadata is stale, run \`nemoclaw ${sandboxName} rebuild --yes\` instead.`,
-  ];
-}
 
 /** Sanitize package-owned inspection detail before it crosses the host terminal boundary. */
 export function sanitizeMcpRuntimeIntentDetail(

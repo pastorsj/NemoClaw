@@ -27,7 +27,7 @@ import {
   FABRIC_PACKAGE_LIVE_TEST_PATH,
   fabricPackageJourneyEnvironment,
   loadFabricPackageTarget,
-} from "./fabric-package.mts";
+} from "./fabric-target.mts";
 import { normalizeE2eSelectorId } from "./selector-aliases.mts";
 
 export const E2E_EXECUTION_PROFILES = [

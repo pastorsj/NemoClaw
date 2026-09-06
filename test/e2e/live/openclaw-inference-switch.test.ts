@@ -54,7 +54,7 @@ import {
 import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import { parseOpenClawAgentText } from "../fixtures/openclaw-agent-output.ts";
 import { runBoundedRetry } from "../../../tools/e2e/retry-evidence.mts";
-import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
+import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-target.mts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import {
   agentReplyContainsToken,

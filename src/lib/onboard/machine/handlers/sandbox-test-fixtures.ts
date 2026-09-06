@@ -18,6 +18,11 @@ import {
   type SandboxRecreateObservation,
 } from "../../sandbox-recreate-transaction";
 import type { SandboxStateOptions } from "./sandbox";
+import {
+  filterSelectedAgentWebSearchToolGateways,
+  selectedAgentResumesSandboxPrompts,
+  selectedAgentSupportsWebSearchProvider,
+} from "../../web-search/support";
 
 export function makeMinimalPlan(
   sandboxName: string,
@@ -159,7 +164,20 @@ export function bindJournaledRecreate(
 }
 
 type Gpu = { type: string } | null;
-type Agent = { displayName?: string; name?: string } | null;
+type Agent = {
+  displayName?: string;
+  name?: string;
+  web_search?:
+    | {
+        support: "providers";
+        providers: readonly ("brave" | "tavily")[];
+        tool_gateway_conflicts?: readonly {
+          provider: "brave" | "tavily";
+          tool_gateway: string;
+        }[];
+      }
+    | { support: "disabled"; reason: string };
+} | null;
 type WebSearchConfig = { fetchEnabled: true; provider?: "brave" | "tavily" };
 type MessagingChannelConfig = Record<string, string>;
 type SandboxGpuConfig = { sandboxGpuEnabled: boolean; mode: string };
@@ -286,6 +304,9 @@ export function createDeps(
     deps: {
       resolvePath: (value: string) => `/abs/${value}`,
       agentSupportsWebSearch: () => true,
+      filterSelectedAgentWebSearchToolGateways,
+      selectedAgentResumesSandboxPrompts,
+      selectedAgentSupportsWebSearchProvider,
       note: calls.note,
       cliName: () => "nemoclaw",
       loadSession: calls.loadSession,

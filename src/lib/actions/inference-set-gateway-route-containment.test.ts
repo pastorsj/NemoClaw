@@ -243,7 +243,9 @@ describe("runtime shared gateway route containment", () => {
     expect(listSandboxes).toHaveBeenCalledTimes(2);
     expect(deps.calls.rewriteConfigUrlsWithDnsPinning).toHaveBeenCalledOnce();
     expect(deps.calls.captureOpenshell).not.toHaveBeenCalled();
-    expect(deps.calls.readSandboxConfig).not.toHaveBeenCalled();
+    // The config read is an intentional, read-only preflight before route
+    // finalization, which may create an HTTPS-pin adapter route.
+    expect(deps.calls.readSandboxConfig).toHaveBeenCalledOnce();
     expect(deps.calls.updateSandbox).not.toHaveBeenCalled();
   });
 
@@ -276,7 +278,7 @@ describe("runtime shared gateway route containment", () => {
 
     expect(deps.calls.rewriteConfigUrlsWithDnsPinning).toHaveBeenCalledOnce();
     expect(deps.calls.captureOpenshell).not.toHaveBeenCalled();
-    expect(deps.calls.readSandboxConfig).not.toHaveBeenCalled();
+    expect(deps.calls.readSandboxConfig).toHaveBeenCalledOnce();
     expect(deps.calls.updateSandbox).not.toHaveBeenCalled();
   });
 

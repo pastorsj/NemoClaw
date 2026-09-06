@@ -296,6 +296,7 @@ export async function prepareRebuildTargetPreflights(args: {
         targetConfig,
         recreateOptions,
         messagingPlan,
+        toolDisclosureRequestedExplicitly: requestedToolDisclosure !== undefined,
       });
     } catch (error) {
       bail(error instanceof Error ? error.message : String(error));

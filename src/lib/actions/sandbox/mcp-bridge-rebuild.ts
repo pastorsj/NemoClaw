@@ -41,13 +41,13 @@ import { assertMcpAdapterTeardownRuntimeCapabilities } from "./mcp-bridge-runtim
 import {
   assertMcpDestroyNotPending,
   bridgeState,
-  ensureSandboxGatewaySelected,
   getBridgeAdapter,
   getSandboxAgent,
   getSandboxOrThrow,
   requireSandboxHarnessPackage,
   setBridgeState,
 } from "./mcp-bridge-state";
+import { ensureSandboxGatewaySelected } from "./mcp-bridge/gateway-selection";
 import { assertAuthenticatedBridgeEntry, validateSandboxName } from "./mcp-bridge-validation";
 
 export interface McpRebuildPreparation {

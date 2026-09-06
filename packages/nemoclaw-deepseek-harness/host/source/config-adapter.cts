@@ -23,7 +23,15 @@ const configAdapter: HarnessConfigAdapterModule = {
   describeInferenceConfig(request) {
     requireConfigTarget(request.target);
     return {
-      kind: "immutable",
+      kind: "unsupported",
+      reason: "The sandbox image owns its Fabric route. Re-onboard to change it.",
+    };
+  },
+
+  prepareInferenceConfig(request) {
+    requireConfigTarget(request.target);
+    return {
+      kind: "unsupported",
       reason: "The sandbox image owns its Fabric route. Re-onboard to change it.",
     };
   },

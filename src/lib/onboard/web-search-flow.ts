@@ -29,7 +29,7 @@ import {
 } from "./credential-navigation";
 import { exitOnboardFromPrompt } from "./prompt-helpers";
 import type { ValidationFailureLike } from "./types";
-import { agentSupportsWebSearch, agentSupportsWebSearchProvider } from "./web-search-support";
+import { agentSupportsWebSearch, agentSupportsWebSearchProvider } from "./web-search/support";
 import { verifyWebSearchInsideSandbox as verifyWebSearchInsideSandboxWithDeps } from "./web-search-verify";
 
 const BRAVE_SEARCH_HELP_URL = "https://brave.com/search/api/";

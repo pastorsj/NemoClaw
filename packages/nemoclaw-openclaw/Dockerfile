@@ -50,7 +50,7 @@ RUN npm run build \
 FROM builder AS runtime-preload-builder
 WORKDIR /opt/nemoclaw-root
 COPY tsconfig.runtime-preloads.json /opt/nemoclaw-root/
-COPY src/lib/messaging/channels/ /opt/nemoclaw-root/src/lib/messaging/channels/
+COPY packages/nemoclaw-openclaw/messaging/runtime/ /opt/nemoclaw-root/src/lib/messaging/channels/
 RUN ln -s /opt/nemoclaw/node_modules /opt/nemoclaw-root/node_modules \
     && /opt/nemoclaw/node_modules/.bin/tsc -p tsconfig.runtime-preloads.json
 
@@ -595,9 +595,16 @@ COPY packages/nemoclaw-openclaw/compat/shell-env.py /usr/local/lib/nemoclaw/clea
 COPY packages/nemoclaw-openclaw/runtime/config-permissions.py /usr/local/lib/nemoclaw/normalize_mutable_config_perms.py
 COPY packages/nemoclaw-openclaw/runtime/wechat/refresh-placeholder.py /usr/local/lib/nemoclaw/refresh-openclaw-wechat-placeholder.py
 COPY packages/nemoclaw-openclaw/runtime/config-guard.py /usr/local/lib/nemoclaw/openclaw-config-guard.py
-COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
+COPY packages/nemoclaw-openclaw/runtime/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
+COPY packages/nemoclaw-openclaw/runtime/managed-gateway-profile.py /usr/local/lib/nemoclaw/managed-gateway-profile.py
 COPY packages/nemoclaw-openclaw/start.sh /usr/local/bin/nemoclaw-start
+COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/session-admin.sh /usr/local/bin/nemoclaw-openclaw-session-admin
+COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/device-pairing-settle.sh /usr/local/bin/nemoclaw-device-pairing-settle
+COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/state-restore.sh /usr/local/bin/nemoclaw-state-restore
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/state-restore.py /usr/local/lib/nemoclaw/openclaw-state-restore.py
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/session-admin.mts /usr/local/lib/nemoclaw/openclaw-session-admin.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/auto-pair.py /usr/local/lib/nemoclaw/openclaw-startup/auto-pair.py
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/inference-reconcile.py /usr/local/lib/nemoclaw/openclaw-startup/inference-reconcile.py
 COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/gateway-setup.sh /usr/local/lib/nemoclaw/openclaw-startup/gateway-setup.sh
 COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/gateway-timing.sh /usr/local/lib/nemoclaw/openclaw-startup/gateway-timing.sh
 COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/model-routing.sh /usr/local/lib/nemoclaw/openclaw-startup/model-routing.sh
@@ -1732,7 +1739,7 @@ USER sandbox
 # Build args (NEMOCLAW_MODEL, CHAT_UI_URL) customize per deployment.
 #
 # Generate base openclaw.json from environment variables. Messaging build
-# steps run through src/lib/messaging/applier/build/messaging-build-applier.mts.
+# steps run through the package-owned messaging contract artifact.
 #
 # OpenClaw's managed proxy config activates process-wide HTTP_PROXY/HTTPS_PROXY
 # for child npm processes. During image build the OpenShell gateway is not
@@ -1856,16 +1863,14 @@ RUN --network=none --mount=from=openclaw-optional-plugin-archives,target=/opt/ne
 # invalidate only the matching offline plugin layer. Keep this as the single
 # owner; messaging intentionally stays out of openclaw-runtime-payload.
 USER root
-COPY src/lib/messaging/ /src/lib/messaging/
-RUN chmod 755 /src/lib/messaging/applier/build/messaging-build-applier.mts \
-    && chmod -R a+rX /src/lib/messaging
+COPY --chmod=0555 packages/nemoclaw-openclaw/messaging/messaging-build.mts /usr/local/lib/nemoclaw/messaging-build.mts
 
 # Bake reduced messaging runtime metadata for the entrypoint. The full
 # NEMOCLAW_MESSAGING_PLAN_B64 is a build input; OpenShell sandbox create only
 # forwards explicit runtime env, so nemoclaw-start reads this generic artifact
 # when the env plan is absent.
 # hadolint ignore=DL3059
-RUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent openclaw --phase runtime-setup
+RUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --agent openclaw --phase runtime-setup
 USER sandbox
 
 # npm still needs a writable _cacache/tmp while OpenClaw packs the verified archive,
@@ -1899,9 +1904,9 @@ RUN --mount=from=openclaw-managed-messaging-npm-cache,source=/out/npm-cache,targ
         messaging_phase=managed-image-capability-union; \
     fi; \
     NEMOCLAW_WECHAT_NPM_INSTALL_CACHE="$install_cache" \
-        NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER=/packages/nemoclaw-openclaw/compat/npm-remediation.mts \
+        NEMOCLAW_NODE_PACKAGE_REMEDIATION_HELPER=/packages/nemoclaw-openclaw/compat/npm-remediation.mts \
         OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
-        node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts \
+        node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts \
             --agent openclaw --phase "$messaging_phase"; \
     rm -rf "$install_cache"; \
     trap - EXIT; \
@@ -2051,9 +2056,11 @@ RUN chmod 755 /packages \
         /usr/local/lib/nemoclaw/gateway-supervisor.sh \
         /usr/local/lib/nemoclaw/openclaw-config-guard.py \
         /usr/local/lib/nemoclaw/managed-gateway-control.py \
+        /usr/local/lib/nemoclaw/managed-gateway-profile.py \
     && chmod 700 /usr/local/bin/nemoclaw-gateway-control \
     && chmod 500 /usr/local/lib/nemoclaw/openclaw-config-guard.py \
         /usr/local/lib/nemoclaw/managed-gateway-control.py \
+    && chmod 400 /usr/local/lib/nemoclaw/managed-gateway-profile.py \
     && chmod 444 /usr/local/lib/nemoclaw/gateway-supervisor.sh \
         /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh \
         /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
@@ -2107,7 +2114,7 @@ RUN NPM_CONFIG_IGNORE_SCRIPTS=true npm_config_ignore_scripts=true \
 
 # Apply messaging render and post-agent-install build-file hooks after agent/plugin installation.
 # hadolint ignore=DL3059,DL4006
-RUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent openclaw --phase post-agent-install
+RUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --agent openclaw --phase post-agent-install
 
 # A managed image is a neutral capability carrier, not an all-channels-enabled
 # deployment. Regenerate after every optional plugin is installed so OpenClaw's
@@ -2478,10 +2485,16 @@ RUN check_metadata() { \
     && check_metadata /usr/local/lib/nemoclaw/generate-config 'root:root:555' \
     && test ! -L /usr/local/lib/nemoclaw/seal-config \
     && check_metadata /usr/local/lib/nemoclaw/seal-config 'root:root:555' \
+    && check_metadata /usr/local/bin/nemoclaw-openclaw-session-admin 'root:root:555' \
+    && check_metadata /usr/local/bin/nemoclaw-device-pairing-settle 'root:root:555' \
+    && check_metadata /usr/local/bin/nemoclaw-state-restore 'root:root:555' \
+    && check_metadata /usr/local/lib/nemoclaw/openclaw-state-restore.py 'root:root:444' \
+    && check_metadata /usr/local/lib/nemoclaw/openclaw-session-admin.mts 'root:root:444' \
     && check_metadata /usr/local/bin/nemoclaw-gateway-control 'root:root:700' \
     && check_metadata /usr/local/lib/nemoclaw/openclaw-startup 'root:root:755' \
     && for startup_module in \
         auto-pair.py \
+        inference-reconcile.py \
         gateway-setup.sh \
         gateway-timing.sh \
         model-routing.sh \

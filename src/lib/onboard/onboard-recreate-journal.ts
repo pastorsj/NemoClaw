@@ -4,10 +4,8 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { decisionSelected } from "../state/onboard-checkpoint-decision";
-import {
-  harnessPackageIdentitiesEqual,
-  type HarnessPackageIdentity,
-} from "../agent-runtime/package/identity";
+import { harnessPackageIdentitiesEqual } from "../agent-runtime/package/identity-validation";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
 import { checkpointGatewayAuthority } from "./gateway-authority-checkpoint";

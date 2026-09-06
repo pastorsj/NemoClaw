@@ -135,17 +135,7 @@ export function loadHarnessSessionAdapterHostModule(
       request: HarnessSessionMutationPlanRequest,
     ): HarnessSessionMutationPlan {
       const plan = callSessionAdapter(() => adapter.buildMutationPlan(request));
-      const validated = validateDeclaredOperationSupport(
-        request.operation,
-        declaredOperations,
-        plan,
-      );
-      if (validated.kind === "admin-rpc" && validated.method !== `sessions.${request.operation}`) {
-        throw new HarnessSessionModuleError(
-          `Installed harness session adapter returned an admin RPC for the wrong ${request.operation} operation`,
-        );
-      }
-      return validated;
+      return validateDeclaredOperationSupport(request.operation, declaredOperations, plan);
     },
     interpretSessionMutationOutput(
       request: HarnessSessionMutationOutputRequest,

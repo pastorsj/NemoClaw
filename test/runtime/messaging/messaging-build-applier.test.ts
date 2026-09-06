@@ -9,35 +9,16 @@ import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  applyMessagingAgentRenderToLocalFiles,
+  applyPostAgentInstallBuildFilesToLocalFiles,
   applyMessagingBuildPhase,
   describeMessagingBuildPhase,
+  type MessagingBuildPlan,
   type MessagingBuildPhase,
   readMessagingBuildPlanFromEnv,
 } from "../../../src/lib/messaging/applier/build/messaging-build-applier.mts";
 import { execTimeout, testTimeout } from "../../helpers/timeouts";
 import { withLegacyMessagingPlanEnvDirect } from "../../messaging-plan-test-helper";
-
-const { remediateReviewedArchive } = vi.hoisted(() => ({
-  remediateReviewedArchive: vi.fn(({ archivePath }: { archivePath: string }) => ({
-    archivePath,
-    integrity: "sha512-messaging-test-remediation",
-    remediated: false,
-  })),
-}));
-
-vi.mock(
-  "../../../packages/nemoclaw-openclaw/compat/npm-remediation.mts",
-  async (importOriginal) => {
-    const original =
-      await importOriginal<
-        typeof import("../../../packages/nemoclaw-openclaw/compat/npm-remediation.mts")
-      >();
-    return {
-      ...original,
-      remediateReviewedOpenClawPluginArchive: remediateReviewedArchive,
-    };
-  },
-);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -356,7 +337,50 @@ describe("messaging-build-applier.mts: agent-install", () => {
     );
   });
 
-  it.each(["openclaw", "hermes"] as const)(
+  it("dispatches package-install projections by manager for an unknown package id", () => {
+    const plan: MessagingBuildPlan = {
+      schemaVersion: 1,
+      sandboxName: "future-sandbox",
+      agent: "future-harness",
+      packageBuild: {
+        configRoot: "~/.future-harness",
+        packageManagers: ["node-package", "python-package"],
+      },
+      channels: [{ channelId: "teams", active: true, disabled: false }],
+      credentialBindings: [],
+      agentRender: [],
+      buildSteps: [
+        {
+          channelId: "teams",
+          kind: "package-install",
+          outputId: "futureNodePackage",
+          required: true,
+          value: {
+            manager: "node-package",
+            spec: "npm:@openclaw/msteams@2026.7.1",
+            pin: true,
+          },
+        },
+        {
+          channelId: "teams",
+          kind: "package-install",
+          outputId: "futurePythonPackage",
+          required: true,
+          value: { manager: "python-package", spec: "microsoft-teams-apps==2.0.13.4" },
+        },
+      ],
+    };
+
+    expect(
+      describeMessagingBuildPhase(plan, "agent-install", { OPENCLAW_VERSION: "2026.7.1" }),
+    ).toMatchObject({
+      agent: "future-harness",
+      installSpecs: ["npm:@openclaw/msteams@2026.7.1"],
+      hermesUvPackages: ["microsoft-teams-apps==2.0.13.4"],
+    });
+  });
+
+  it.each(["openclaw", "hermes", "future-harness"] as const)(
     "writes a reduced %s runtime plan artifact for entrypoint startup (#5896)",
     (agent) => {
       const tmp = fs.mkdtempSync(
@@ -485,6 +509,157 @@ describe("messaging-build-applier.mts: agent-install", () => {
       }
     },
   );
+
+  it("applies a receipt-projected render target for an unknown package id", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-future-render-"));
+    const target = path.join(homeDir, ".future-harness", "config.json");
+    const plan: MessagingBuildPlan = {
+      schemaVersion: 1,
+      sandboxName: "future-sandbox",
+      agent: "future-harness",
+      packageBuild: { configRoot: "~/.future-harness", packageManagers: [] },
+      channels: [{ channelId: "future-channel", active: true, disabled: false }],
+      credentialBindings: [],
+      agentRender: [
+        {
+          channelId: "future-channel",
+          agent: "future-harness",
+          target: "~/.future-harness/config.json",
+          kind: "json-fragment",
+          path: "channels.future",
+          value: { enabled: true },
+        },
+      ],
+      buildSteps: [],
+    };
+
+    try {
+      expect(applyMessagingAgentRenderToLocalFiles(plan, { homeDir })).toEqual([target]);
+      expect(JSON.parse(fs.readFileSync(target, "utf8"))).toEqual({
+        channels: { future: { enabled: true } },
+      });
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses an unknown package build profile for finalization and build-file roots", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-future-build-"));
+    const plan: MessagingBuildPlan = {
+      schemaVersion: 1,
+      sandboxName: "future-sandbox",
+      agent: "future-harness",
+      packageBuild: {
+        configRoot: "~/.future-harness",
+        packageManagers: [],
+        renderFinalizers: ["allow-rendered-plugins"],
+      },
+      channels: [{ channelId: "future-channel", active: true, disabled: false }],
+      credentialBindings: [],
+      agentRender: [
+        {
+          channelId: "future-channel",
+          agent: "future-harness",
+          target: "~/.future-harness/config.json",
+          kind: "json-fragment",
+          path: "plugins.entries.future-plugin",
+          value: { enabled: true },
+        },
+      ],
+      buildSteps: [
+        {
+          channelId: "future-channel",
+          kind: "build-file",
+          outputId: "future-seed",
+          value: { path: "state/seed.json", content: { ready: true } },
+        },
+      ],
+    };
+
+    try {
+      applyMessagingAgentRenderToLocalFiles(plan, { homeDir });
+      expect(
+        JSON.parse(fs.readFileSync(path.join(homeDir, ".future-harness/config.json"), "utf8")),
+      ).toEqual({
+        plugins: {
+          entries: { "future-plugin": { enabled: true } },
+          allow: ["future-plugin"],
+        },
+      });
+      expect(applyPostAgentInstallBuildFilesToLocalFiles(plan, { homeDir })).toEqual([
+        path.join(homeDir, ".future-harness/state/seed.json"),
+      ]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs a package-declared post-render repair command for an unknown package id", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-future-repair-"));
+    const tracePath = path.join(tmp, "repair.trace");
+    const repairCommand = path.join(tmp, "future-repair");
+    fs.writeFileSync(
+      repairCommand,
+      [
+        "#!/bin/sh",
+        'printf "%s|%s\\n" "$1" "${FUTURE_CHANNEL_TOKEN:-}" > "${REPAIR_TRACE}"',
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const plan: MessagingBuildPlan = {
+      schemaVersion: 1,
+      sandboxName: "future-sandbox",
+      agent: "future-harness",
+      packageBuild: {
+        configRoot: "~/.future-harness",
+        packageManagers: [],
+        postRenderRepair: { command: [repairCommand, "repair-config"] },
+      },
+      channels: [{ channelId: "future-channel", active: true, disabled: false }],
+      credentialBindings: [
+        {
+          channelId: "future-channel",
+          credentialId: "future-token",
+          providerEnvKey: "FUTURE_CHANNEL_TOKEN",
+          placeholder: "openshell:resolve:env:FUTURE_CHANNEL_TOKEN",
+        },
+      ],
+      agentRender: [],
+      buildSteps: [],
+    };
+
+    try {
+      expect(
+        applyMessagingBuildPhase(plan, "post-agent-install", {
+          PATH: TEST_PATH,
+          HOME: tmp,
+          REPAIR_TRACE: tracePath,
+        }),
+      ).toEqual([]);
+      expect(fs.readFileSync(tracePath, "utf8")).toBe(
+        "repair-config|openshell:resolve:env:FUTURE_CHANNEL_TOKEN\n",
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when an unknown package plan omits its build profile", () => {
+    const plan: MessagingBuildPlan = {
+      schemaVersion: 1,
+      sandboxName: "future-sandbox",
+      agent: "future-harness",
+      channels: [{ channelId: "future-channel", active: true, disabled: false }],
+      credentialBindings: [],
+      agentRender: [],
+      buildSteps: [],
+    };
+
+    expect(() => describeMessagingBuildPhase(plan, "agent-install", {})).toThrow(
+      "missing its build profile",
+    );
+  });
 
   it("skips runtime plan artifact output when messaging is not configured", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-empty-runtime-plan-artifact-"));
@@ -670,7 +845,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
           outputId: "openclawPluginPackage",
           required: true,
           value: {
-            manager: "openclaw-plugin",
+            manager: "node-package",
             spec: "npm:@openclaw/discord@{{openclaw.version}}",
             integrity: "sha512-plan-controlled-pin",
             integrityByVersion: {
@@ -770,9 +945,6 @@ describe("messaging-build-applier.mts: agent-install", () => {
       );
       expect(trace).toContain("openclaw|plugins|install|npm-pack:");
       expect(trace).toContain("msteams-2026.7.1.tgz|");
-      expect(remediateReviewedArchive).toHaveBeenCalledWith(
-        expect.objectContaining({ packageSpec: "@openclaw/msteams@2026.7.1" }),
-      );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -806,7 +978,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
           outputId: "openclawPluginPackage",
           required: true,
           value: {
-            manager: "openclaw-plugin",
+            manager: "node-package",
             spec: "npm:@openclaw/slack@{{openclaw.version}}",
             integrity: "sha512-plan-controlled-pin",
             pin: false,
@@ -861,7 +1033,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
           outputId: "openclawPluginPackage",
           required: true,
           value: {
-            manager: "openclaw-plugin",
+            manager: "node-package",
             spec: "github:example/unreviewed-plugin",
             pin: true,
           },
@@ -1055,9 +1227,6 @@ describe("messaging-build-applier.mts: agent-install", () => {
       );
       expect(trace).toContain("openclaw|plugins|install|npm-pack:");
       expect(trace).toContain("slack-2026.7.1.tgz|");
-      expect(remediateReviewedArchive).toHaveBeenCalledWith(
-        expect.objectContaining({ packageSpec: "@openclaw/slack@2026.7.1" }),
-      );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1167,7 +1336,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
         outputId: "tamperedHermesPackage",
         required: true,
         value: {
-          manager: "hermes-uv-pip",
+          manager: "python-package",
           spec: "unexpected-package==1.2.3",
         },
       },

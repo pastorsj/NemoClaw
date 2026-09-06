@@ -21,41 +21,11 @@ interface SecretPattern {
   regex: RegExp;
 }
 
-/** Provider token formats shared by the in-process and sandbox scanners. */
-export const HIGH_CONFIDENCE_PREFIXED_TOKEN_SPECS = [
-  {
-    name: "NVIDIA API key",
-    prefixes: ["nvapi-"],
-    payloadCharacterClass: "A-Za-z0-9_-",
-    minimumPayloadLength: 20,
-  },
-  {
-    name: "GitHub token",
-    prefixes: ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"],
-    payloadCharacterClass: "A-Za-z0-9",
-    minimumPayloadLength: 36,
-  },
-  {
-    name: "GitHub token",
-    prefixes: ["github_pat_"],
-    payloadCharacterClass: "A-Za-z0-9_",
-    minimumPayloadLength: 30,
-  },
-  {
-    name: "npm token",
-    prefixes: ["npm_"],
-    payloadCharacterClass: "A-Za-z0-9",
-    minimumPayloadLength: 36,
-  },
-] as const;
-
-const HIGH_CONFIDENCE_PREFIXED_TOKEN_ALTERNATIVES = HIGH_CONFIDENCE_PREFIXED_TOKEN_SPECS.flatMap(
-  ({ prefixes, payloadCharacterClass, minimumPayloadLength }) =>
-    prefixes.map((prefix) => `${prefix}[${payloadCharacterClass}]{${minimumPayloadLength},}`),
-).join("|");
-
-/** POSIX ERE for standalone high-confidence provider tokens in sandbox shell scans. */
-export const HIGH_CONFIDENCE_PREFIXED_TOKEN_ERE = `(^|[^[:alnum:]_])(${HIGH_CONFIDENCE_PREFIXED_TOKEN_ALTERNATIVES})([^[:alnum:]_]|$)`;
+export {
+  HIGH_CONFIDENCE_PREFIXED_TOKEN_ERE,
+  HIGH_CONFIDENCE_PREFIXED_TOKEN_SPECS,
+} from "../shared/credential-filter-boundary.cjs";
+import { HIGH_CONFIDENCE_PREFIXED_TOKEN_SPECS } from "../shared/credential-filter-boundary.cjs";
 
 const SECRET_PATTERNS: SecretPattern[] = [
   ...HIGH_CONFIDENCE_PREFIXED_TOKEN_SPECS.map(

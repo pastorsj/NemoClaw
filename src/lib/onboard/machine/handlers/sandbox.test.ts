@@ -568,6 +568,95 @@ describe("handleSandboxState", () => {
     );
   });
 
+  it("uses an unknown receipt-backed package declaration for web-search conflicts", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    };
+    const session = createSession({ agent: "future-harness", harnessPackage });
+    const { deps, calls } = createDeps(
+      {
+        revalidateHarnessPackageAuthority: () => ({
+          harnessPackage,
+          harnessPackageMigration: null,
+        }),
+      },
+      session,
+    );
+    const agent = {
+      name: "future-harness",
+      displayName: "Future Harness",
+      web_search: {
+        support: "providers" as const,
+        providers: ["tavily"] as const,
+        tool_gateway_conflicts: [{ provider: "tavily" as const, tool_gateway: "future-search" }],
+      },
+    };
+
+    const result = await handleSandboxState({
+      ...baseOptions(deps, session),
+      agent,
+      webSearchConfig: { fetchEnabled: true, provider: "tavily" },
+      hermesToolGateways: ["future-search", "future-audio"],
+    });
+
+    expect(result.hermesToolGateways).toEqual(["future-audio"]);
+    expect(calls.createSandbox).toHaveBeenCalledWith(
+      expect.anything(),
+      "model",
+      "provider",
+      "openai-completions",
+      "my-assistant",
+      { fetchEnabled: true, provider: "tavily" },
+      [],
+      null,
+      agent,
+      null,
+      expect.anything(),
+      null,
+      ["future-audio"],
+      null,
+      expect.objectContaining({ sessionId: session.sessionId, selection: expect.any(Object) }),
+      expect.objectContaining({ resolved: expect.any(Object) }),
+      undefined,
+    );
+    expect(calls.note).not.toHaveBeenCalledWith(expect.stringContaining("Hermes"));
+  });
+
+  it("does not apply Hermes web-search rules to a receipt-backed package with that ID", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "1.0.0",
+      contentDigest: "b".repeat(64),
+    };
+    const session = createSession({ agent: "hermes", harnessPackage });
+    const { deps } = createDeps(
+      {
+        revalidateHarnessPackageAuthority: () => ({
+          harnessPackage,
+          harnessPackageMigration: null,
+        }),
+      },
+      session,
+    );
+
+    const result = await handleSandboxState({
+      ...baseOptions(deps, session),
+      agent: {
+        name: "hermes",
+        web_search: { support: "providers", providers: ["brave"] },
+      },
+      webSearchConfig: { fetchEnabled: true, provider: "brave" },
+      hermesToolGateways: ["nous-web"],
+    });
+
+    expect(result.webSearchConfig).toEqual({ fetchEnabled: true, provider: "brave" });
+    expect(result.hermesToolGateways).toEqual(["nous-web"]);
+  });
+
   it("reuses a Ready sandbox from the registry without reading an invalid environment plan", async () => {
     const registryPlan = makeMinimalPlan("saved", "openclaw", ["telegram"]);
     const session = createSession({
@@ -974,7 +1063,7 @@ describe("handleSandboxState", () => {
         getSandboxReuseState: () => "ready",
         getSandboxRecreateObservation: journal.observe,
         createSandbox: journal.completeCreate,
-        agentSupportsWebSearchProvider: () => true,
+        selectedAgentSupportsWebSearchProvider: () => true,
       },
       session,
     );
@@ -1038,7 +1127,7 @@ describe("handleSandboxState", () => {
     session.steps.sandbox.status = "complete";
     const { deps, calls } = createDeps({
       getSandboxReuseState: () => "ready",
-      agentSupportsWebSearchProvider: () => true,
+      selectedAgentSupportsWebSearchProvider: () => true,
       ensureValidatedWebSearchCredential: vi.fn(async () => {
         throw new Error("Tavily credential rejected");
       }),
@@ -1066,7 +1155,7 @@ describe("handleSandboxState", () => {
     session.steps.sandbox.status = "complete";
     const { deps, calls } = createDeps({
       getSandboxReuseState: () => "ready",
-      agentSupportsWebSearchProvider: () => true,
+      selectedAgentSupportsWebSearchProvider: () => true,
       getSandboxRegistryEntry: (name: string) => ({
         name,
         mcp: {

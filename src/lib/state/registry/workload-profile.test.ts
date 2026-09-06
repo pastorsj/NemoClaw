@@ -9,6 +9,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/identity";
+import { managedStartupE2eProfile } from "../../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
+import { managedStartupSettingsFromProfile } from "../../onboard/managed-startup/package-profile";
 import { encodeManagedStartupDurableProfile } from "../../onboard/managed-startup/profile";
 import type { SandboxWorkloadReceipt } from "./types";
 import { cloneSandboxWorkloadReceipt } from "./workload";
@@ -26,11 +28,17 @@ const HARNESS_PACKAGE = {
 function packageWorkload(
   profilePackage: HarnessPackageIdentity = HARNESS_PACKAGE,
 ): Extract<SandboxWorkloadReceipt, { kind: "managed-image" }> {
+  const piSettings = managedStartupSettingsFromProfile(managedStartupE2eProfile("pi"));
   const encodedProfile = encodeManagedStartupDurableProfile({
     schemaVersion: 1,
     profileKind: "package",
     agent: profilePackage.id,
     harnessPackage: profilePackage,
+    desiredState: {
+      ...piSettings,
+      configuration: { agent: profilePackage.id },
+      dashboard: { agent: profilePackage.id, mode: "disabled" },
+    },
     packageConfig: { runtimeMode: "managed" },
     corporateCa: { bundleSha256: null },
   });
@@ -41,7 +49,7 @@ function packageWorkload(
     platform: "linux/amd64",
     release: "v0.0.100",
     sourceRevision: "c".repeat(40),
-    sourceCohort: "ghrun-100-1",
+    sourceCohort: "build-2026.09.05",
     capabilityContractVersion: 1,
     startupProfileContractVersion: 1,
     encodedProfile,
@@ -78,6 +86,34 @@ describe("sandbox registry package startup profile", () => {
     expect(cloneSandboxWorkloadReceipt(workload, { harnessPackage: HARNESS_PACKAGE })).toEqual(
       workload,
     );
+  });
+
+  it("does not reinterpret a package publication cohort as stock authority", () => {
+    const workload = packageWorkload();
+
+    expect(cloneSandboxWorkloadReceipt(workload)).toEqual(workload);
+    expect(cloneSandboxWorkloadReceipt(workload, { harnessPackage: null })).toBeUndefined();
+  });
+
+  it("fails closed for a receipt created before desired state was durable", () => {
+    const oldProfile = {
+      schemaVersion: 1,
+      profileKind: "package",
+      agent: HARNESS_PACKAGE.id,
+      harnessPackage: HARNESS_PACKAGE,
+      packageConfig: { runtimeMode: "managed" },
+      corporateCa: { bundleSha256: null },
+    };
+    const encodedProfile = Buffer.from(JSON.stringify(oldProfile), "utf8").toString("base64url");
+    const workload = {
+      ...packageWorkload(),
+      encodedProfile,
+      startupProfileSha256: createHash("sha256").update(encodedProfile, "utf8").digest("hex"),
+    };
+
+    expect(
+      cloneSandboxWorkloadReceipt(workload, { harnessPackage: HARNESS_PACKAGE }),
+    ).toBeUndefined();
   });
 
   it.each([

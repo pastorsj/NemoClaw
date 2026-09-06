@@ -13,6 +13,8 @@ export type SandboxBuildContextOrigin = "custom" | "generated";
 export interface StagedBuildContext {
   buildCtx: string;
   stagedDockerfile: string;
+  /** Recheck staged bytes at their final external-consumption boundary. */
+  verifyBuildCtx?(): boolean;
 }
 
 export interface BuildContextStats {
@@ -31,7 +33,9 @@ function createBuildContextDir(tmpDir: string = os.tmpdir()): string {
 function normalizeReadModesForDockerCopy(rootDir: string): void {
   const stat = fs.lstatSync(rootDir);
   if (stat.isDirectory()) {
-    fs.chmodSync(rootDir, (stat.mode & 0o777 & ~0o022) | 0o555);
+    // Docker only needs traversal/read access. Preserve owner write access so
+    // the caller can deterministically remove this private, transient copy.
+    fs.chmodSync(rootDir, (stat.mode & 0o777 & ~0o022) | 0o755);
     for (const entry of fs.readdirSync(rootDir)) {
       normalizeReadModesForDockerCopy(path.join(rootDir, entry));
     }

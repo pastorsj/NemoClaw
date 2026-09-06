@@ -78,9 +78,9 @@ describe("OpenClaw managed startup config sealer", () => {
     expect(() => sealer.main()).toThrow(/must be 0 or 1/u);
   });
 
-  it("rejects arguments before touching managed configuration", () => {
+  it("rejects undeclared actions before touching managed configuration", () => {
     vi.spyOn(process, "argv", "get").mockReturnValue(["node", "seal-config", "attacker"]);
 
-    expect(() => sealer.main()).toThrow(/accepts no arguments/u);
+    expect(() => sealer.main()).toThrow(/accepts only refresh or verify/u);
   });
 });

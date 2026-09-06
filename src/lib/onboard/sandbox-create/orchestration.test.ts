@@ -42,7 +42,14 @@ const RECOVERY_HARNESS_PACKAGE = {
 };
 
 describe("created Hermes credential environment reconciliation", () => {
-  const plan = { agent: "hermes" } as never;
+  const plan = {
+    agent: "future-harness",
+    packageBuild: {
+      configRoot: "~/.future-harness",
+      packageManagers: [],
+      postCreateCredentialReconciliation: "restart-runtime",
+    },
+  } as never;
 
   it("finalizes sandbox registration before reconciling credentials (#9833)", async () => {
     const events: string[] = [];

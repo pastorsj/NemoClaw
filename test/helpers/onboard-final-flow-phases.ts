@@ -265,6 +265,10 @@ export function createPhases(
       ordinaryOpenClawPairingIncompleteMessage: vi.fn(
         () => "OpenClaw onboarding is incomplete; resume onboarding.",
       ),
+      settlePackageDevicePairing: vi.fn(async () => ({ kind: "settled" as const })),
+      packageDevicePairingIncompleteMessage: vi.fn(
+        () => "Harness onboarding is incomplete; resume onboarding.",
+      ),
       readRegistryAgent: vi.fn(() => "openclaw"),
       settlePortablePairing: vi.fn(async () => ({ kind: "settled" as const })),
       portablePairingIncompleteMessage: vi.fn(

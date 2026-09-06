@@ -175,11 +175,6 @@ export async function preflightRebuildImage(
   const previousReasoningEffort = process.env[REASONING_EFFORT_ENV];
   try {
     const effectiveAgent = input.agent;
-    // The Dockerfile patcher still represents OpenClaw with its established
-    // null sentinel. Keep that behavior while sourcing every path from the
-    // already pinned definition instead of reloading repository state.
-    const patchAgent = effectiveAgent.name === "openclaw" ? null : effectiveAgent;
-    const baseDockerfilePath = patchAgent ? null : effectiveAgent.dockerfileBasePath;
     if (input.provider === "compatible-endpoint") {
       process.env.NEMOCLAW_REASONING = input.compatibleEndpointReasoning ?? "false";
       applyReasoningEffortEnv(input.compatibleEndpointReasoningEffort);
@@ -201,9 +196,11 @@ export async function preflightRebuildImage(
     });
     cleanup = createIdempotentBuildContextCleanup(staged.cleanupBuildCtx);
     const { buildId, dashboardRemoteBindPrepared } = await preparePatch({
-      agent: patchAgent,
+      agent: effectiveAgent,
       rootDir: effectiveAgent.packageRoot,
-      ...(baseDockerfilePath ? { baseDockerfilePath } : {}),
+      ...(effectiveAgent.dockerfileBasePath
+        ? { baseDockerfilePath: effectiveAgent.dockerfileBasePath }
+        : {}),
       fromDockerfile: input.fromDockerfile,
       sandboxBaseImage: OPENCLAW_SANDBOX_BASE_IMAGE,
       sandboxBaseTag: SANDBOX_BASE_TAG,
@@ -248,7 +245,7 @@ export async function preflightRebuildImage(
         contextFingerprint,
         verifyBuildCtx: createBuildContextVerifier(staged.buildCtx, contextFingerprint),
         rebuildTarget: {
-          agentName: effectiveAgent.name === "openclaw" ? null : effectiveAgent.name,
+          agentName: effectiveAgent.name,
           fromDockerfile: input.fromDockerfile ? path.resolve(input.fromDockerfile) : null,
         },
       },

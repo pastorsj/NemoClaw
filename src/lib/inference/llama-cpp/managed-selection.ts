@@ -4,7 +4,7 @@
 import os from "node:os";
 
 import { dockerContextIsDefaultFromBuild } from "../../adapters/docker/client-isolation";
-import { getBuildIdentity } from "../../core/version";
+import { getBuildIdentity } from "../../core/build-identity";
 import {
   type CollectHostObservationsOptions,
   createHostReadinessReport,

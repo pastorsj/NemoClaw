@@ -32,9 +32,10 @@ import {
 } from "../../messaging/channels/channel-health";
 import type { MessagingAgentId } from "../../messaging/manifest";
 import {
-  collectBuiltInMessagingChannelDiagnostics,
+  collectMessagingChannelDiagnostics,
   type MessagingChannelDiagnosticSpec,
 } from "../../messaging/diagnostics";
+import type { ChannelManifest } from "../../messaging/manifest";
 import { createBuiltInMessagingHookRegistry } from "../../messaging/hooks";
 import {
   readChannelHealthOutputs,
@@ -140,7 +141,6 @@ export type ChannelStatusReport = ChannelStatusSnapshotReport | ChannelStatusWai
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 180;
 const DEFAULT_WAIT_POLL_INTERVAL_MS = 5_000;
-const CHANNEL_STATUS_DIAGNOSTICS = collectBuiltInMessagingChannelDiagnostics();
 const channelManifestRegistry = createBuiltInChannelManifestRegistry();
 
 function positiveNumber(value: number | undefined, fallback: number): number {
@@ -192,7 +192,7 @@ function defaultDeps(deps: StatusDeps | undefined): Required<StatusDeps> {
 type ChannelStatusProfile = Readonly<{
   agent: AgentDefinition;
   packageAuthority: SandboxMessagingProfileAuthority | null;
-  availableChannelIds: ReadonlySet<string> | null;
+  manifests: readonly ChannelManifest[];
 }>;
 
 function hasRecordedHarnessPackageAuthority(entry: registry.SandboxEntry): boolean {
@@ -208,30 +208,38 @@ function resolveChannelStatusProfile(
   deps: Required<StatusDeps>,
 ): ChannelStatusProfile {
   if (!hasRecordedHarnessPackageAuthority(entry)) {
+    const agent = deps.loadAgent(entry.agent || "openclaw");
     return Object.freeze({
-      agent: deps.loadAgent(entry.agent || "openclaw"),
+      agent,
       packageAuthority: null,
-      availableChannelIds: null,
+      manifests: channelManifestRegistry.listAvailable(
+        getMessagingManifestAvailabilityContext(agent, channelManifestRegistry.list()),
+      ),
     });
   }
 
   const packageAuthority = deps.resolveMessagingProfileAuthority(entry);
-  const channels = deps.listMessagingChannelsForProfile(packageAuthority, channelManifestRegistry);
+  const manifests = deps.listMessagingChannelsForProfile(packageAuthority, channelManifestRegistry);
   return Object.freeze({
     agent: packageAuthority.agent,
     packageAuthority,
-    availableChannelIds: new Set(channels.map((channel) => channel.id)),
+    manifests,
   });
 }
 
-function getChannelStatusDiagnostic(channelName: string): MessagingChannelDiagnosticSpec | null {
+function getChannelStatusDiagnostic(
+  channelName: string,
+  manifests: readonly ChannelManifest[],
+): MessagingChannelDiagnosticSpec | null {
   return (
-    CHANNEL_STATUS_DIAGNOSTICS.find((diagnostic) => diagnostic.channelId === channelName) ?? null
+    collectMessagingChannelDiagnostics(manifests).find(
+      (diagnostic) => diagnostic.channelId === channelName,
+    ) ?? null
   );
 }
 
 function diagnosticChannelNames(): string[] {
-  return CHANNEL_STATUS_DIAGNOSTICS.map((diagnostic) => diagnostic.channelId);
+  return channelManifestRegistry.list().map((manifest) => manifest.id);
 }
 
 function renderReport(
@@ -344,6 +352,7 @@ function buildBasicChannelReport(
   sandboxName: string,
   channelName: string,
   agent: AgentDefinition,
+  manifest: ChannelManifest,
   deps: Required<StatusDeps>,
   diagnostic: MessagingChannelDiagnosticSpec,
   options: { readonly includeDeepDiagnostics?: boolean; readonly channelPaused?: boolean } = {},
@@ -378,7 +387,9 @@ function buildBasicChannelReport(
       : `run \`${CLI_NAME} ${sandboxName} policy add ${policyPresets[0]}\``,
   });
   if (enabled) {
-    signals.push(...buildConfigStatusSignals(sandboxName, channelName, entry, agent, deps));
+    signals.push(
+      ...buildConfigStatusSignals(sandboxName, channelName, entry, agent, manifest, deps),
+    );
   }
   if (diagnostic.deepProbe !== undefined) {
     // Channel has a deep probe this path does not run: the summary view never
@@ -403,7 +414,7 @@ function buildBasicChannelReport(
   }
   // Reference the agent in a hint so the deep-diagnostic section is
   // discoverable per agent without needing extra plumbing.
-  if (!channelSupportedByAgent(channelName, agent)) {
+  if (!manifest.supportedAgents.includes(agent.name)) {
     signals.unshift({
       label: "Agent support",
       severity: "warn",
@@ -468,7 +479,7 @@ function buildUnsupportedConfiguredChannelReport(
 }
 
 function channelAvailableForProfile(channelName: string, profile: ChannelStatusProfile): boolean {
-  return profile.availableChannelIds === null || profile.availableChannelIds.has(channelName);
+  return profile.manifests.some((manifest) => manifest.id === channelName);
 }
 
 function exitForUnsupportedPackageChannel(
@@ -487,35 +498,27 @@ function exitForUnsupportedPackageChannel(
   process.exit(1);
 }
 
-function channelSupportedByAgent(channelName: string, agent: AgentDefinition): boolean {
-  return channelManifestRegistry
-    .listAvailable(getMessagingManifestAvailabilityContext(agent, channelManifestRegistry.list()))
-    .some((manifest) => manifest.id === channelName);
+export function resolveChannelHookAgent(
+  agentName: string,
+  manifests: readonly ChannelManifest[] = channelManifestRegistry.list(),
+): MessagingAgentId | null {
+  const normalized = agentName.trim();
+  return normalized && manifests.some((manifest) => manifest.supportedAgents.includes(normalized))
+    ? normalized
+    : null;
 }
 
-export function resolveChannelHookAgent(agentName: string): MessagingAgentId | null {
-  switch (agentName) {
-    case "openclaw":
-    case "hermes":
-      return agentName;
-    default:
-      return null;
-  }
-}
-
-function channelHealthStatusHook(channelName: string, agent: AgentDefinition) {
-  const agentId = resolveChannelHookAgent(agent.name);
+function channelHealthStatusHook(channelName: string, profile: ChannelStatusProfile) {
+  const agentId = resolveChannelHookAgent(profile.agent.name, profile.manifests);
   if (agentId === null) return undefined;
-  const manifest = channelManifestRegistry
-    .listAvailable(getMessagingManifestAvailabilityContext(agent, channelManifestRegistry.list()))
-    .find((candidate) => candidate.id === channelName);
+  const manifest = profile.manifests.find((candidate) => candidate.id === channelName);
   const hook = manifest?.hooks.find(
     (hook) =>
       hook.phase === "status" &&
       (!hook.agents || hook.agents.includes(agentId)) &&
       hook.outputs?.some((output) => output.id === "channelHealth") === true,
   );
-  return hook ? { agentId, hook } : undefined;
+  return hook && manifest ? { agentId, hook, manifest } : undefined;
 }
 
 // Runs a deep-probe channel's `phase:"status"` health hook through the
@@ -530,6 +533,7 @@ function runChannelHealthHook(
   sandboxName: string,
   channelName: string,
   agentId: MessagingAgentId,
+  manifest: ChannelManifest,
   deps: Required<StatusDeps>,
   diagnostic: MessagingChannelDiagnosticSpec,
   probeTimeoutMs?: number,
@@ -563,6 +567,7 @@ function runChannelHealthHook(
         timeoutMs: probeTimeoutMs,
       },
     }),
+    manifests: [manifest],
     extraInputs: channelHealthProbeInputs({
       currentSandbox: sandboxName,
       agent: agentId,
@@ -579,6 +584,7 @@ function collectChannelReport(
   sandboxName: string,
   channelName: string,
   agent: AgentDefinition,
+  manifest: ChannelManifest,
   deps: Required<StatusDeps>,
   diagnostic: MessagingChannelDiagnosticSpec,
   healthHookAgentId: MessagingAgentId | null,
@@ -599,6 +605,7 @@ function collectChannelReport(
           sandboxName,
           channelName,
           healthHookAgentId,
+          manifest,
           collectionDeps,
           diagnostic,
           probeTimeoutMs,
@@ -609,6 +616,7 @@ function collectChannelReport(
       sandboxName,
       channelName,
       agent,
+      manifest,
       collectionDeps,
       diagnostic,
       { channelPaused: channelIsPaused },
@@ -634,6 +642,7 @@ function collectChannelReport(
     channelName,
     collectionDeps.getSandbox(sandboxName),
     agent,
+    manifest,
     collectionDeps,
   );
   return {
@@ -773,15 +782,20 @@ export async function showSandboxChannelStatus(
       schemaVersion: 1,
       sandbox: sandboxName,
       channels: configuredChannels.map((channelName) => {
-        const diagnostic = getChannelStatusDiagnostic(channelName);
+        const manifest = profile.manifests.find((candidate) => candidate.id === channelName);
+        const diagnostic = manifest
+          ? getChannelStatusDiagnostic(channelName, profile.manifests)
+          : null;
         if (diagnostic && !channelAvailableForProfile(channelName, profile)) {
           return buildUnsupportedConfiguredChannelReport(sandboxName, channelName, profile);
         }
-        return diagnostic
-          ? buildBasicChannelReport(sandboxName, channelName, agent, deps, diagnostic, {
+        return diagnostic && manifest
+          ? buildBasicChannelReport(sandboxName, channelName, agent, manifest, deps, diagnostic, {
               includeDeepDiagnostics: false,
             })
-          : buildUnknownConfiguredChannelReport(sandboxName, channelName);
+          : profile.packageAuthority
+            ? buildUnsupportedConfiguredChannelReport(sandboxName, channelName, profile)
+            : buildUnknownConfiguredChannelReport(sandboxName, channelName);
       }),
     };
     if (!(asJson && quietJson)) {
@@ -791,8 +805,12 @@ export async function showSandboxChannelStatus(
   }
 
   const channelName = channelArg;
-  const diagnostic = getChannelStatusDiagnostic(channelName);
-  if (!diagnostic) {
+  const manifest = profile.manifests.find((candidate) => candidate.id === channelName);
+  const diagnostic = manifest ? getChannelStatusDiagnostic(channelName, profile.manifests) : null;
+  if (!diagnostic || !manifest) {
+    if (profile.packageAuthority && !channelAvailableForProfile(channelName, profile)) {
+      exitForUnsupportedPackageChannel(sandboxName, channelName, profile, asJson, deps);
+    }
     const known = diagnosticChannelNames().join(", ");
     if (asJson) {
       deps.out(
@@ -811,12 +829,13 @@ export async function showSandboxChannelStatus(
     exitForUnsupportedPackageChannel(sandboxName, channelName, profile, asJson, deps);
   }
 
-  const statusHook = channelHealthStatusHook(channelName, agent);
+  const statusHook = channelHealthStatusHook(channelName, profile);
   const collect = (deadlineMs?: number) =>
     collectChannelReport(
       sandboxName,
       channelName,
       agent,
+      manifest,
       deps,
       diagnostic,
       statusHook?.agentId ?? null,

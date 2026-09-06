@@ -9,6 +9,7 @@ import {
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
 } from "../../agent-runtime/package/identity";
+import * as registry from "../../state/registry";
 import { normalizeSandboxAgentName, resolveSandboxAgent } from "../sandbox-agent";
 import type { ResolveSandboxAgentOptions, ResolvedSandboxAgent } from "../sandbox-agent";
 
@@ -32,8 +33,33 @@ export interface HarnessPackageSessionAuthority {
   readonly harnessPackageMigration: HarnessPackageMigration | null;
 }
 
+export type RegisteredSandboxAuthority = registry.SandboxEntry;
+
+/** Read one registry row at a package-authority decision boundary. */
+export function readRegisteredSandboxAuthority(
+  sandboxName: string,
+): RegisteredSandboxAuthority | null {
+  return registry.getSandbox(sandboxName);
+}
+
+/** Read only a fully published registry row at a package-authority boundary. */
+export function readPublishedSandboxAuthority(
+  sandboxName: string,
+): RegisteredSandboxAuthority | null {
+  const entry = readRegisteredSandboxAuthority(sandboxName);
+  return entry && registry.isPublishedSandboxRegistration(entry) ? entry : null;
+}
+
 /** Resolve one package-backed sandbox through its exact recorded receipt. */
 export function resolvePackageBackedSandboxAgent(
+  entry: Parameters<typeof resolveSandboxAgent>[0],
+  options?: ResolveSandboxAgentOptions,
+): ResolvedSandboxAgent {
+  return options === undefined ? resolveSandboxAgent(entry) : resolveSandboxAgent(entry, options);
+}
+
+/** Resolve the durable agent authority recorded for a package or qualified sandbox. */
+export function resolveRecordedSandboxAgentAuthority(
   entry: Parameters<typeof resolveSandboxAgent>[0],
   options?: ResolveSandboxAgentOptions,
 ): ResolvedSandboxAgent {

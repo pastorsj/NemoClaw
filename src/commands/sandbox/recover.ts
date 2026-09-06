@@ -3,7 +3,7 @@
 
 import { Args } from "@oclif/core";
 
-import { recoverSandboxWithHermesCronRestore } from "../../lib/actions/sandbox/runtime/hermes-cron-restore-recovery";
+import { recoverSandboxStateAfterRestore } from "../../lib/actions/sandbox/runtime/hermes-cron-restore-recovery";
 import { NemoClawCommand } from "../../lib/cli/nemoclaw-oclif-command";
 
 export default class RecoverCliCommand extends NemoClawCommand {
@@ -21,6 +21,6 @@ export default class RecoverCliCommand extends NemoClawCommand {
 
   public async run(): Promise<void> {
     const { args } = await this.parse(RecoverCliCommand);
-    await recoverSandboxWithHermesCronRestore(args.sandboxName);
+    await recoverSandboxStateAfterRestore(args.sandboxName);
   }
 }

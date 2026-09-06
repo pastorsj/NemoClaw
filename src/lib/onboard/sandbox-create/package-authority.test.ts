@@ -84,7 +84,7 @@ describe("selected agent package authority", () => {
     }
   });
 
-  it("uses the separately trusted OpenClaw root to patch a Hermes custom Dockerfile", () => {
+  it("uses the legacy OpenClaw root for a custom Dockerfile without a package receipt", () => {
     const hermesRoot = fs.realpathSync(
       fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-package-")),
     );
@@ -97,13 +97,42 @@ describe("selected agent package authority", () => {
         name: "openclaw",
         packageRoot: openClawRoot,
       } as AgentDefinition;
-      expect(requireSandboxDockerfilePatchPackageRoot("/tmp/Containerfile", hermes, openClaw)).toBe(
-        openClawRoot,
+      expect(
+        requireSandboxDockerfilePatchPackageRoot(
+          "/tmp/Containerfile",
+          hermes,
+          false,
+          () => openClaw,
+        ),
+      ).toBe(openClawRoot);
+      expect(requireSandboxDockerfilePatchPackageRoot(null, hermes, false, () => openClaw)).toBe(
+        hermesRoot,
       );
-      expect(requireSandboxDockerfilePatchPackageRoot(null, hermes, openClaw)).toBe(hermesRoot);
     } finally {
       fs.rmSync(hermesRoot, { recursive: true, force: true });
       fs.rmSync(openClawRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("uses an unknown receipt-backed package root for its custom Dockerfile patch", () => {
+    const packageRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-future-package-")),
+    );
+    try {
+      const future = { name: "future-harness", packageRoot } as AgentDefinition;
+      const loadLegacyOpenClaw = vi.fn<() => AgentDefinition>();
+
+      expect(
+        requireSandboxDockerfilePatchPackageRoot(
+          "/tmp/Containerfile",
+          future,
+          true,
+          loadLegacyOpenClaw,
+        ),
+      ).toBe(packageRoot);
+      expect(loadLegacyOpenClaw).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(packageRoot, { recursive: true, force: true });
     }
   });
 

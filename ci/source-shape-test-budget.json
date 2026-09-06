@@ -142,6 +142,21 @@
       "category": "security"
     },
     {
+      "file": "packages/nemoclaw-hermes/tests/image/build-probes.test.ts",
+      "test": "keeps $name patch verification and application in one layer",
+      "category": "security"
+    },
+    {
+      "file": "packages/nemoclaw-hermes/tests/image/build-probes.test.ts",
+      "test": "keeps wrapper prerequisites and compatibility validation in one layer",
+      "category": "compatibility"
+    },
+    {
+      "file": "packages/nemoclaw-hermes/tests/image/build-probes.test.ts",
+      "test": "does not normalize modes on removed Hermes compatibility patchers",
+      "category": "compatibility"
+    },
+    {
       "file": "packages/nemoclaw-hermes/tests/runtime/discord-recovery.test.ts",
       "test": "hash-binds and executes the patcher in the final image",
       "category": "security"
@@ -334,6 +349,11 @@
     {
       "file": "packages/nemoclaw-openclaw/tests/runtime/doctor-permissions.test.ts",
       "test": "restore helper re-asserts 2770/660 after the tree is tightened to 700/600",
+      "category": "security"
+    },
+    {
+      "file": "packages/nemoclaw-openclaw/tests/runtime/session-admin.test.ts",
+      "test": "installs a trusted proxy wrapper and immutable helper in the OpenClaw image",
       "category": "security"
     },
     {

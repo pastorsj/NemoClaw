@@ -24,12 +24,12 @@ import { isSandboxGatewayRunningForStatus } from "./status/process-recovery";
 import {
   isInferenceHealthFailing,
   normalizeSandboxStatusHostMounts,
-  resolveSandboxStatusDcodeAutoApprovalMode,
   type SandboxStatusAgentInfo,
   type SandboxStatusRouteDrift,
   type SandboxStatusSnapshot,
   type ServingProcessHealth,
 } from "./status-snapshot";
+import { resolveLegacyDcodeAutoApprovalMode } from "./status-legacy";
 
 export interface SandboxStatusTextContext extends Pick<
   SandboxStatusSnapshot,
@@ -199,7 +199,7 @@ function printTerminalHarness(context: SandboxStatusTextContext): number | null 
 function printAgentHarness(context: SandboxStatusTextContext): number | null {
   const { sb, statusAgent } = context;
   console.log(`    Harness:  ${statusAgent.agentDisplayName} (${statusAgent.agentRuntime})`);
-  const dcodeAutoApprovalMode = resolveSandboxStatusDcodeAutoApprovalMode(sb);
+  const dcodeAutoApprovalMode = resolveLegacyDcodeAutoApprovalMode(sb);
   if (dcodeAutoApprovalMode) {
     console.log(`    DCode auto-approval capability: ${dcodeAutoApprovalMode}`);
   }

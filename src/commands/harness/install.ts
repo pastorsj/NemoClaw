@@ -4,7 +4,7 @@
 import { Args, Flags } from "@oclif/core";
 
 import { NemoClawCommand } from "../../lib/cli/nemoclaw-oclif-command";
-import { getBuildIdentity } from "../../lib/core/version";
+import { getBuildIdentity } from "../../lib/core/build-identity";
 import { isStdinTty } from "../../lib/core/stdin";
 import { prompt } from "../../lib/credentials/store";
 import {
@@ -14,7 +14,7 @@ import {
 } from "../../lib/agent/candidate";
 import {
   listHarnessPackageInventory,
-  resolveHarnessPackageInstallSelection,
+  planHarnessPackageInstall,
   type HarnessPackageInventory,
 } from "../../lib/agent-runtime/package/catalog";
 import { installHarnessPackage } from "../../lib/agent-runtime/package/install";
@@ -28,11 +28,11 @@ export const harnessInstallCommandDependencies = {
   isCandidateAgentSelectable,
   isStdinTty,
   listHarnessPackageInventory,
+  planHarnessPackageInstall,
   prompt,
   promptForHarnessPackage,
   parseHarnessPackageId,
   requireCandidateAgentSelectable,
-  resolveHarnessPackageInstallSelection,
 };
 
 function selectableHarnessInventory(inventory: HarnessPackageInventory): HarnessPackageInventory {
@@ -60,7 +60,7 @@ export default class HarnessInstallCommand extends NemoClawCommand {
   ];
   static examples = [
     "<%= config.bin %> harness install",
-    "<%= config.bin %> harness install openclaw",
+    "<%= config.bin %> harness install <id>",
     "<%= config.bin %> harness install example --from ./dist/nemoclaw-example --yes-i-trust-local-package",
   ];
   static args = {
@@ -143,9 +143,15 @@ export default class HarnessInstallCommand extends NemoClawCommand {
       selector = selection.id;
     }
 
-    const available =
-      harnessInstallCommandDependencies.resolveHarnessPackageInstallSelection(selector);
-    harnessInstallCommandDependencies.requireCandidateAgentSelectable(available.id);
+    const plan = harnessInstallCommandDependencies.planHarnessPackageInstall(selector);
+    harnessInstallCommandDependencies.requireCandidateAgentSelectable(plan.packageRecord.id);
+    if (plan.kind === "keep-installed") {
+      this.log(
+        `Harness package '${plan.packageRecord.identity.id}' is already active (${plan.packageRecord.identity.packageVersion}, sha256:${plan.packageRecord.identity.contentDigest}).`,
+      );
+      return;
+    }
+    const available = plan.packageRecord;
     const installed = harnessInstallCommandDependencies.installHarnessPackage({
       packageRoot: available.packageRoot,
       expectedId: available.id,

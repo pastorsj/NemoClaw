@@ -11,6 +11,7 @@ import { HERMES_PORTABLE_OPENSHELL_VERSION } from "../../adapters/openshell/reso
 import { createCliOpenShellSandboxObserverFromRunner } from "../../adapters/openshell/sandbox-observer-cli";
 import { NEMOCLAW_CREATE_ATTEMPT_LABEL } from "../../adapters/openshell/sandbox-identity";
 import type { AgentDefinition } from "../../agent/defs";
+import { describeHarnessProviderBroker } from "../../agent-runtime/provider-broker";
 import type { WebSearchConfig } from "../../inference/web-search";
 import {
   getMessagingPolicyKeysByChannel,
@@ -43,6 +44,8 @@ import type { DcodeSelectionDriftReader } from "../dcode-selection-drift";
 import {
   assertProviderlessInterceptorEnvironment,
   enforceRemovedImmutabilityMigrationBoundary,
+  isLegacyOpenClawAgentName,
+  selectLegacyDockerfilePatchAgent,
 } from "../entry-options";
 import type { PreRecreateBackupAuthority } from "../sandbox-backup-on-recreate";
 import type {
@@ -156,19 +159,21 @@ export function prepareSourceBackupAuthority(
   };
 }
 
-/** Select the separately trusted OpenClaw root used to patch custom Dockerfiles. */
+/** Select the package root that owns custom-Dockerfile patch assets. */
 export function requireSandboxDockerfilePatchPackageRoot(
   fromDockerfile: string | null,
   selectedAgent: AgentDefinition,
-  openClawAgent: AgentDefinition,
+  receiptBacked: boolean,
+  loadLegacyOpenClawAgent: () => AgentDefinition,
 ): string {
-  if (!fromDockerfile || selectedAgent.name === "openclaw") {
-    return requireSelectedAgentPackageRoot(
-      selectedAgent.name === "openclaw" ? null : selectedAgent,
-      selectedAgent,
-    );
+  if (!fromDockerfile || receiptBacked) {
+    return requireSelectedAgentPackageRoot(selectedAgent, selectedAgent);
   }
-  return requireSelectedAgentPackageRoot(null, openClawAgent);
+  const patchAgent = selectLegacyDockerfilePatchAgent(selectedAgent, loadLegacyOpenClawAgent);
+  return requireSelectedAgentPackageRoot(
+    patchAgent === selectedAgent ? selectedAgent : null,
+    patchAgent,
+  );
 }
 
 /** Rebind sandbox creation to the current Session and its exact pinned definition. */
@@ -297,7 +302,8 @@ export function resolveRebuildPolicyProviderAuthority(input: {
 function asMessagingAgentId(
   agent: string | null | undefined,
 ): SandboxMessagingPlan["agent"] | null {
-  return agent === "openclaw" || agent === "hermes" ? agent : null;
+  const normalized = agent?.trim().toLowerCase();
+  return normalized || null;
 }
 
 export function resolveRebuildMessagingPolicyDeltas(
@@ -660,9 +666,7 @@ function assertProviderlessApfCreateInput(input: {
   const requestedAgent = input.agent?.name.trim().toLowerCase() ?? "openclaw";
   const resolvedAgent = resolved?.policy.options.agentName?.trim().toLowerCase() || null;
   const hasProviderIntent =
-    requestedAgent !== "openclaw" ||
-    (resolvedAgent !== null &&
-      (resolvedAgent !== "openclaw" || resolvedAgent !== requestedAgent)) ||
+    sandboxCreatePlanMaterialization.hasProviderlessApfAgentIntent(requestedAgent, resolvedAgent) ||
     input.webSearchConfig !== null ||
     input.createIntent.reuseRegisteredCredentials === true ||
     [
@@ -873,7 +877,7 @@ type CreatedHermesCredentialEnvReconciliationDeps = {
 };
 
 /**
- * Reconcile credentials rendered by an older managed Hermes image before
+ * Reconcile credentials rendered by an older managed package image before
  * onboarding reports success. A changed env file is not effective until the
  * exact managed gateway supervisor restarts and passes its authenticated probe.
  */
@@ -886,30 +890,32 @@ export function reconcileCreatedHermesCredentialEnvironment(
   recordRecovery: () => void,
 ): void {
   return runWithPostCreateRecovery(() => {
-    if (input.plan?.agent !== "hermes") return;
+    if (input.plan?.packageBuild?.postCreateCredentialReconciliation !== "restart-runtime") {
+      return;
+    }
 
     deps.revalidateSandboxIdentity(
-      `reconciling Hermes messaging credentials for sandbox '${input.sandboxName}'`,
+      `reconciling package messaging credentials for sandbox '${input.sandboxName}'`,
     );
     const reconciliation = deps.reconcileCredentialEnv(input.plan, deps.revalidateSandboxIdentity);
     deps.revalidateSandboxIdentity(
-      `confirming Hermes messaging credential reconciliation for sandbox '${input.sandboxName}'`,
+      `confirming package messaging credential reconciliation for sandbox '${input.sandboxName}'`,
     );
     if (!reconciliation.changed) return;
 
     const restart = deps.restartGateway(input.sandboxName, deps.revalidateSandboxIdentity);
     if (!deps.parseRestartCompletion(restart)) {
       throw new Error(
-        `Hermes messaging credential reconciliation changed the gateway environment for sandbox '${input.sandboxName}', but the managed gateway restart did not complete.`,
+        `Package messaging credential reconciliation changed the gateway environment for sandbox '${input.sandboxName}', but the managed gateway restart did not complete.`,
       );
     }
     if (!deps.waitForGateway(input.sandboxName, deps.revalidateSandboxIdentity)) {
       throw new Error(
-        `Hermes messaging credential reconciliation restarted sandbox '${input.sandboxName}', but the managed gateway did not remain healthy.`,
+        `Package messaging credential reconciliation restarted sandbox '${input.sandboxName}', but the managed gateway did not remain healthy.`,
       );
     }
     deps.revalidateSandboxIdentity(
-      `completing Hermes messaging credential reconciliation for sandbox '${input.sandboxName}'`,
+      `completing package messaging credential reconciliation for sandbox '${input.sandboxName}'`,
     );
   }, recordRecovery);
 }
@@ -1397,7 +1403,8 @@ function readHermesPortableLifecycleGeneration(input: {
 }): string | undefined {
   if (!input.enabled) return undefined;
   const receipt = input.inspect(input.sandboxName);
-  return receipt.kind === "hermes" && receipt.gatewayName === input.gatewayName
+  return sandboxCreatePlanMaterialization.isHermesPortableReceiptDisposition(receipt) &&
+    receipt.gatewayName === input.gatewayName
     ? receipt.lifecycleGeneration
     : undefined;
 }
@@ -1414,9 +1421,10 @@ function resolveHermesPortableCreateAuthority<T>(input: {
   readonly createGpuAuthority: (runtimeAuthority: PortableOnboardRuntimeContext["authority"]) => T;
 }): HermesPortableCreateAuthority<T> | null {
   if (!input.enabled) return null;
-  if (!input.agent || input.agent.name !== "hermes" || !input.runtimeAuthority) {
+  if (!input.agent || !input.runtimeAuthority) {
     throw new Error("Hermes portable onboarding is missing exact agent or runtime authority.");
   }
+  sandboxCreatePlanMaterialization.assertHermesPortableIntentAgent(input.agent.name);
   return {
     agent: input.agent,
     gpuAuthority: input.createGpuAuthority(input.runtimeAuthority),
@@ -1625,9 +1633,8 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
     const dockerfilePatchPackageRoot = requireSandboxDockerfilePatchPackageRoot(
       fromDockerfile,
       effectiveAgent,
-      fromDockerfile && effectiveAgent.name !== "openclaw"
-        ? sandboxAgent.getEffectiveSandboxAgent(null)
-        : effectiveAgent,
+      harnessPackageSession?.harnessPackage != null,
+      () => sandboxAgent.getEffectiveSandboxAgent(null),
     );
     step(6, 8, "Creating sandbox");
     const sandboxName = validateName(
@@ -1758,11 +1765,12 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
         computePlan,
         managedWorkloadRebuild,
         tempManagedRuntime,
-        stockManagedRuntime: managedWorkloadOnboard.shouldActivateStockManagedRuntime({
+        managedRuntimeEnabled: managedWorkloadOnboard.shouldActivateManagedRuntime({
           portableLifecycle: sandboxGpuCreateFlow.resolvePortableLifecycleMode(agent),
           hermesPortableLifecycle: agentCreateInput.hermesPortableLifecycle,
           agentName: requestedAgentName,
           agentDefinition: effectiveAgent,
+          harnessPackage: harnessPackageSession?.harnessPackage ?? null,
         }),
         tempManagedRuntimeCatalog,
         agentName: requestedAgentName,
@@ -1781,7 +1789,9 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
           effectiveDashboardPort: effectivePort,
           manageDashboard,
           dashboardBindAddress: process.env.NEMOCLAW_DASHBOARD_BIND,
-          wslExposure: requestedAgentName === "openclaw" && isWsl(),
+          // Core reports the host condition; the selected startup adapter decides
+          // whether its harness needs a remote-dashboard preparation marker.
+          wslExposure: isWsl(),
           hermesDashboardState,
           webSearch: webSearchConfig,
           toolDisclosure: effectiveToolDisclosure,
@@ -1953,12 +1963,14 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
 
     let pendingStateRestore: BackupResult | null = null;
     let notReadyRecreateInProgress = false;
-    const customOpenClawImage =
-      Boolean(fromDockerfile) && getRequestedSandboxAgentName(agent) === "openclaw";
     const sourceBackupAuthority = prepareSourceBackupAuthority(sandboxName, existingEntry, {
       getSandbox: registry.getSandbox,
       resolveSandboxAgent: sandboxAgent.resolveSandboxAgent,
     });
+    const customOpenClawImage =
+      Boolean(fromDockerfile) &&
+      sourceBackupAuthority?.harnessPackage == null &&
+      isLegacyOpenClawAgentName(getRequestedSandboxAgentName(agent));
     const recreateProtection = createSandboxRecreateProtection({
       sandboxName,
       sandboxEntry: existingEntry,
@@ -2393,6 +2405,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
                   baseImageResolutionContext,
                   selectedAgent,
                   agentOnboard.createAgentSandbox,
+                  harnessPackageSession?.harnessPackage ?? null,
                 ),
               resolvePatchInput: () => ({
                 preparedBuildContext,
@@ -2471,8 +2484,14 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
                       ((targetOperation) => revalidateSandboxIdentity(false, targetOperation))
                     )(operation),
                 }),
-              getHermesToolGatewayProviderName: (targetSandbox) =>
-                getHermesToolGatewayBroker().getHermesToolGatewayProviderName(targetSandbox),
+              getHermesToolGatewayProviderName: (targetSandbox) => {
+                const authority = revalidateHarnessPackageAuthority(
+                  "describe the managed provider broker",
+                );
+                return authority.harnessPackage
+                  ? describeHarnessProviderBroker(authority.harnessPackage, targetSandbox)
+                  : getHermesToolGatewayBroker().getHermesToolGatewayProviderName(targetSandbox);
+              },
               discloseInitialSandboxPolicy,
             },
             launchInput: {

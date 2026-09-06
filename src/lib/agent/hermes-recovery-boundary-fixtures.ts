@@ -20,7 +20,14 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
     gateway_command: "test-agent gateway run",
     healthProbe: { url: "http://127.0.0.1:19000/", port: 19000, timeout_seconds: 5 },
     forwardPort: 19000,
-    dashboard: { kind: "ui", label: "UI", path: "/", healthPath: "/health", auth: "url_token" },
+    dashboard: {
+      kind: "ui",
+      label: "UI",
+      path: "/",
+      healthPath: "/health",
+      auth: "url_token",
+      tunnelAllowedOriginsPath: null,
+    },
     webAuth: { method: "none", env: null },
     configPaths: {
       dir: "/tmp/agent",
@@ -34,6 +41,18 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
       reason: "test fixture",
     },
     skillCapability: { support: "disabled", reason: "test fixture" },
+    stateLifecycle: {
+      backup_quiescence: { kind: "not-required" },
+      snapshot_restore: [],
+      rebuild: {
+        image_plugin_provenance: "not-required",
+        scheduled_work: {
+          support: "disabled",
+          reason: "This package does not run scheduled work.",
+        },
+        post_restore: { kind: "not-required" },
+      },
+    },
     managedImage: null,
     stateDirectories: [],
     stateDirs: [],

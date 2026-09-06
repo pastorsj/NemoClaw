@@ -4,10 +4,8 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
-import {
-  harnessPackageIdentitiesEqual,
-  type HarnessPackageIdentity,
-} from "../../agent-runtime/package/identity";
+import { harnessPackageIdentitiesEqual } from "../../agent-runtime/package/identity-validation";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 import {
   decodeManagedStartupDurableProfile,
   isManagedStartupPackageProfile,
@@ -19,7 +17,8 @@ import type { SandboxWorkloadReceipt } from "./types";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const REVISION_PATTERN = /^[0-9a-f]{40}$/u;
-const COHORT_PATTERN = /^ghrun-[1-9][0-9]{0,19}-[1-9][0-9]{0,9}$/u;
+const STOCK_COHORT_PATTERN = /^ghrun-[1-9][0-9]{0,19}-[1-9][0-9]{0,9}$/u;
+const PACKAGE_COHORT_PATTERN = /^[a-z0-9](?:[a-z0-9.-]{0,127})$/u;
 const MANAGED_REFERENCE_PATTERN =
   /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9][0-9]{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+@sha256:[0-9a-f]{64}$/u;
 const MANAGED_PLATFORMS = new Set(["linux/amd64", "linux/arm64"]);
@@ -122,7 +121,7 @@ export function cloneSandboxWorkloadReceipt(
     !REVISION_PATTERN.test(value.sourceRevision) ||
     typeof value.sourceCohort !== "string" ||
     Buffer.byteLength(value.sourceCohort, "utf8") > MAX_COHORT_BYTES ||
-    !COHORT_PATTERN.test(value.sourceCohort) ||
+    !PACKAGE_COHORT_PATTERN.test(value.sourceCohort) ||
     value.capabilityContractVersion !== 1 ||
     value.startupProfileContractVersion !== 1 ||
     !SHA256_PATTERN.test(value.startupProfileSha256) ||
@@ -137,6 +136,9 @@ export function cloneSandboxWorkloadReceipt(
   try {
     profile = decodeManagedStartupDurableProfile(value.encodedProfile);
   } catch {
+    return undefined;
+  }
+  if (!isManagedStartupPackageProfile(profile) && !STOCK_COHORT_PATTERN.test(value.sourceCohort)) {
     return undefined;
   }
   if (!packageProfileMatchesAuthority(profile, authority)) return undefined;

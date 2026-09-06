@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import { managedStartupE2eProfile } from "../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import {
   captureSandboxRebuildAuthority,
   type SandboxRebuildAuthoritySwapResult,
@@ -20,12 +21,19 @@ import {
   MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
   qualifiedManagedImageDeclaration,
   type ManagedImageContractV1,
+  type PackageManagedImageContract,
   type ShippedManagedImageAgent,
 } from "./managed-image/contract";
 import type { BuiltManagedStartupOnboardProfile } from "./managed-startup/onboard-profile";
 import {
+  type BuiltManagedStartupPackageProfile,
+  managedStartupSettingsFromProfile,
+} from "./managed-startup/package-profile";
+import {
   decodeManagedStartupProfile,
+  encodeManagedStartupDurableProfile,
   encodeManagedStartupProfile,
+  type ManagedStartupPackageProfile,
 } from "./managed-startup/profile";
 import {
   type ManagedWorkloadRebuildProviderOperations,
@@ -41,13 +49,30 @@ import { runManagedWorkloadRebuildTransaction } from "./managed-workload/rebuild
 import type { RuntimeProviderBundle } from "./runtime-provider/contract";
 import { RUNTIME_PROVIDER_BUNDLE_CONTRACT_VERSION } from "./runtime-provider/contract";
 import { createRuntimeProviderBundleRegistry } from "./runtime-provider/registry";
-import type { ManagedWorkloadRebuildHandoff, ManagedWorkloadReceipt } from "./workload/rebuild";
+import type { ResolvedSandboxAgent } from "./sandbox-agent";
+import type {
+  LegacyManagedWorkloadRebuildHandoff,
+  ManagedWorkloadReceipt,
+  PackageManagedWorkloadRebuildHandoff,
+} from "./workload/rebuild";
+import { managedWorkloadAuthorityDependencies } from "./workload/authority";
 
 const AGENTS = ["openclaw", "hermes", "langchain-deepagents-code"] as const;
 const PROVIDERS = ["docker", "mxc"] as const;
 const PLATFORMS = ["linux/amd64", "linux/arm64"] as const;
 const OLD_RELEASE = "v0.0.99";
 const NEW_RELEASE = "v0.0.100";
+const FUTURE_PACKAGE = {
+  kind: "agent-runtime",
+  id: "future-harness",
+  packageVersion: "1.2.3",
+  contentDigest: "9".repeat(64),
+} as const satisfies HarnessPackageIdentity;
+const FUTURE_MANAGED_IMAGE = {
+  repository: "registry.example/team/future-harness",
+  architectures: ["linux/amd64", "linux/arm64"],
+  runtime_identity: { uid: 1234, gid: 1234, workdir: "/sandbox" },
+} as const;
 
 function raiseInjectedFailure(message: string): never {
   throw new Error(message);
@@ -91,6 +116,7 @@ function profileTransport(agent: ShippedManagedImageAgent): BuiltManagedStartupO
     encodedProfile: encodedProfile as BuiltManagedStartupOnboardProfile["encodedProfile"],
     startupProfileSha256: createHash("sha256").update(encodedProfile, "utf8").digest("hex"),
     credentialProxyReplayRequired: false,
+    dashboardRemoteBindPrepared: false,
   };
 }
 
@@ -115,6 +141,153 @@ function workloadReceipt(
     startupProfileSha256: transport.startupProfileSha256,
     credentialProxyReplayRequired: false,
     shared: true,
+  };
+}
+
+function packageProfileTransport(
+  harnessPackage: HarnessPackageIdentity = FUTURE_PACKAGE,
+): BuiltManagedStartupPackageProfile {
+  const piSettings = managedStartupSettingsFromProfile(managedStartupE2eProfile("pi"));
+  const profile: ManagedStartupPackageProfile = {
+    schemaVersion: 1,
+    profileKind: "package",
+    agent: harnessPackage.id,
+    harnessPackage,
+    desiredState: {
+      ...piSettings,
+      configuration: { agent: harnessPackage.id },
+      dashboard: { agent: harnessPackage.id, mode: "disabled" },
+    },
+    packageConfig: { settings: { mode: "future" } },
+    corporateCa: { bundleSha256: null },
+  };
+  const encodedProfile = encodeManagedStartupDurableProfile(profile);
+  return {
+    profile,
+    encodedProfile: encodedProfile as BuiltManagedStartupPackageProfile["encodedProfile"],
+    startupProfileSha256: createHash("sha256").update(encodedProfile, "utf8").digest("hex"),
+    credentialProxyReplayRequired: false,
+    dashboardRemoteBindPrepared: true,
+  };
+}
+
+function packageContract(
+  generation: "old" | "new",
+  harnessPackage: HarnessPackageIdentity = FUTURE_PACKAGE,
+): PackageManagedImageContract<"future-harness"> {
+  const digit = generation === "old" ? "7" : "8";
+  const digest = `sha256:${digit.repeat(64)}` as const;
+  return {
+    contractVersion: MANAGED_IMAGE_CONTRACT_VERSION,
+    agent: "future-harness",
+    harnessPackage,
+    platform: "linux/amd64",
+    image: FUTURE_MANAGED_IMAGE.repository,
+    digest,
+    reference: `${FUTURE_MANAGED_IMAGE.repository}@${digest}`,
+    source: {
+      repository: MANAGED_IMAGE_SOURCE_REPOSITORY,
+      revision: digit.repeat(40),
+      release: generation === "old" ? OLD_RELEASE : NEW_RELEASE,
+      cohort: generation === "old" ? "ghrun-100-1" : "ghrun-200-2",
+    },
+    startupProfileContractVersion: MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
+    capabilityContractVersion: MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
+  };
+}
+
+function packageWorkloadReceipt(
+  generation: "old" | "new",
+  harnessPackage: HarnessPackageIdentity = FUTURE_PACKAGE,
+): ManagedWorkloadReceipt {
+  const image = packageContract(generation, harnessPackage);
+  const profile = packageProfileTransport(harnessPackage);
+  return {
+    schemaVersion: 1,
+    kind: "managed-image",
+    reference: image.reference,
+    platform: image.platform,
+    release: image.source.release,
+    sourceRevision: image.source.revision,
+    sourceCohort: image.source.cohort,
+    capabilityContractVersion: image.capabilityContractVersion,
+    startupProfileContractVersion: image.startupProfileContractVersion,
+    encodedProfile: profile.encodedProfile,
+    startupProfileSha256: profile.startupProfileSha256,
+    credentialProxyReplayRequired: false,
+    shared: true,
+  };
+}
+
+function packageEntry(
+  generation: "old" | "new" = "old",
+  harnessPackage: HarnessPackageIdentity = FUTURE_PACKAGE,
+): SandboxEntry {
+  const workload = packageWorkloadReceipt(generation, harnessPackage);
+  return {
+    name: "rebuild-future-harness",
+    agent: FUTURE_PACKAGE.id,
+    harnessPackage,
+    openshellDriver: "mxc",
+    provider: "ollama-local",
+    model: "nvidia/nemotron",
+    imageTag: workload.reference,
+    workload,
+    dashboardRemoteBindPrepared: true,
+    lifecycleGeneration: generation === "old" ? "generation-old" : "generation-new",
+    lifecycleLiveIdentityFingerprint: generation === "old" ? "fingerprint-old" : "fingerprint-new",
+    gatewayName: "nemoclaw",
+    gatewayPort: 8080,
+  };
+}
+
+function packageHandoff(): PackageManagedWorkloadRebuildHandoff {
+  const previousProfile = packageProfileTransport();
+  const replacementContract = packageContract("new");
+  return {
+    schemaVersion: 1,
+    providerId: "mxc",
+    agent: FUTURE_PACKAGE.id,
+    harnessPackage: FUTURE_PACKAGE,
+    managedImage: FUTURE_MANAGED_IMAGE,
+    previousReceipt: packageWorkloadReceipt("old"),
+    previousDashboardRemoteBindPrepared: true,
+    previousContract: packageContract("old"),
+    previousProfile: previousProfile.profile,
+    replacement: {
+      source: {
+        kind: "managed-image",
+        reference: replacementContract.reference,
+        contract: replacementContract,
+      },
+      release: NEW_RELEASE,
+      fallbackDiagnostic: null,
+    },
+    corporateCa: null,
+    replacementProfile: packageProfileTransport(),
+  };
+}
+
+function installFuturePackageResolver(): () => void {
+  const previous = managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent;
+  managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = vi.fn((row) => {
+    if (row.harnessPackage?.contentDigest !== FUTURE_PACKAGE.contentDigest) {
+      throw new Error("future package authority drifted");
+    }
+    return {
+      recordedAgent: FUTURE_PACKAGE.id,
+      effectiveAgentId: FUTURE_PACKAGE.id,
+      definition: {
+        name: FUTURE_PACKAGE.id,
+        packageRoot: "/installed/future-harness",
+        managedImage: FUTURE_MANAGED_IMAGE,
+      },
+      harnessPackage: FUTURE_PACKAGE,
+      harnessPackageMigration: null,
+    } as unknown as ResolvedSandboxAgent;
+  });
+  return () => {
+    managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = previous;
   };
 }
 
@@ -143,7 +316,7 @@ function handoff(
   agent: ShippedManagedImageAgent,
   providerId: string,
   platform: (typeof PLATFORMS)[number] = "linux/amd64",
-): ManagedWorkloadRebuildHandoff {
+): LegacyManagedWorkloadRebuildHandoff {
   const previousContract = contract(agent, "old", platform);
   const replacementContract = contract(agent, "new", platform);
   const previousProfile = decodeManagedStartupProfile(
@@ -153,8 +326,10 @@ function handoff(
     schemaVersion: 1,
     providerId,
     agent,
+    harnessPackage: null,
     managedImage: qualifiedManagedImageDeclaration(agent),
     previousReceipt: workloadReceipt(agent, "old", platform),
+    previousDashboardRemoteBindPrepared: false,
     previousContract,
     previousProfile,
     replacement: {
@@ -705,6 +880,121 @@ describe("managed workload rebuild transaction", () => {
       expect(harness.currentEntry().imageTag).not.toBe(harness.oldEntry.imageTag);
     },
   );
+
+  it("atomically rebuilds a synthetic unknown package through the public transaction", async () => {
+    const restorePackageResolver = installFuturePackageResolver();
+    const events: string[] = [];
+    const oldEntry = packageEntry();
+    let currentEntry = structuredClone(oldEntry);
+    const operations = operationsHarness(
+      "mxc",
+      events,
+      null,
+      oldEntry.lifecycleLiveIdentityFingerprint,
+    );
+    const commitAuthority = (
+      expected: ReturnType<typeof captureSandboxRebuildAuthority>,
+      replacement: SandboxEntry,
+    ): SandboxRebuildAuthoritySwapResult => {
+      events.push("registry-commit");
+      const currentRegistry: SandboxRegistry = {
+        sandboxes: { [oldEntry.name]: currentEntry },
+        defaultSandbox: oldEntry.name,
+      };
+      const swapped = swapSandboxRebuildAuthorityInRegistry(currentRegistry, expected, replacement);
+      if (swapped.result.status === "committed") {
+        currentEntry = structuredClone(swapped.result.entry);
+      }
+      return swapped.result;
+    };
+
+    try {
+      const result = await runManagedWorkloadRebuildTransaction(
+        {
+          previousEntry: oldEntry,
+          provider: bundle("mxc"),
+          handoff: packageHandoff(),
+          operations,
+          replacementMetadata: { model: "future-model" },
+          transactionId: "transaction-1",
+        },
+        {
+          getSandbox: () => structuredClone(currentEntry),
+          commitAuthority,
+        },
+      );
+
+      expect(result).toMatchObject({
+        status: "committed",
+        previousCleanup: "complete",
+        entry: {
+          agent: FUTURE_PACKAGE.id,
+          harnessPackage: FUTURE_PACKAGE,
+          dashboardRemoteBindPrepared: true,
+          model: "future-model",
+          workload: {
+            reference: packageContract("new").reference,
+            release: NEW_RELEASE,
+          },
+        },
+      });
+      expect(currentEntry).toEqual(result.entry);
+      expect(events).toEqual([
+        "prepare",
+        "create",
+        "readiness",
+        "restore",
+        "provider-rebind",
+        "registry-commit",
+        "retire:runtime-old-exact",
+      ]);
+    } finally {
+      restorePackageResolver();
+    }
+  });
+
+  it("aborts a synthetic package transaction when package identity drifts during preparation", async () => {
+    const restorePackageResolver = installFuturePackageResolver();
+    const events: string[] = [];
+    const oldEntry = packageEntry();
+    let currentEntry = structuredClone(oldEntry);
+    const operations = operationsHarness(
+      "mxc",
+      events,
+      null,
+      oldEntry.lifecycleLiveIdentityFingerprint,
+    );
+    const prepare = operations.prepare;
+    operations.prepare = vi.fn(async (plan) => {
+      const prepared = await prepare(plan);
+      currentEntry = packageEntry("old", {
+        ...FUTURE_PACKAGE,
+        contentDigest: "8".repeat(64),
+      });
+      return prepared;
+    });
+
+    try {
+      await expect(
+        runManagedWorkloadRebuildTransaction(
+          {
+            previousEntry: oldEntry,
+            provider: bundle("mxc"),
+            handoff: packageHandoff(),
+            operations,
+            transactionId: "transaction-1",
+          },
+          { getSandbox: () => structuredClone(currentEntry) },
+        ),
+      ).rejects.toMatchObject({ phase: "prepare" });
+
+      expect(events).toEqual(["prepare", "abort-preparation:transaction-1"]);
+      expect(operations.create).not.toHaveBeenCalled();
+      expect(operations.rollback).not.toHaveBeenCalled();
+    } finally {
+      restorePackageResolver();
+    }
+  });
 
   it.each([
     ["prepare", false],

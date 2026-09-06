@@ -52,6 +52,7 @@ function createPackageFixture(additionalFiles: readonly string[] = []): PackageF
         nemoclaw: {
           harnessManifest: "manifest.yaml",
           minimumNemoClawVersion: "0.0.113",
+          maximumNemoClawVersionExclusive: "0.0.121",
         },
       },
       null,
@@ -69,6 +70,26 @@ function createPackageFixture(additionalFiles: readonly string[] = []): PackageF
       "runtime:",
       "  kind: terminal",
       "  prompt_transport: stdin",
+      "  headless_command: future-shell --prompt",
+      "config:",
+      "  dir: /sandbox/.future-shell",
+      "  config_file: config.json",
+      "  format: json",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: This synthetic package has fixed inference configuration.",
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    image_plugin_provenance: not-required",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: This package does not run scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
       "mcp:",
       "  support: disabled",
       "messaging:",
@@ -122,6 +143,7 @@ test("materializes a synthetic publish set as one read-only NemoClaw artifact", 
       displayName: "Future Shell",
       packageVersion: "4.5.6",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifestPath: "manifest.yaml",
       fileCount: 9,
       readOnly: true,
@@ -135,6 +157,7 @@ test("materializes a synthetic publish set as one read-only NemoClaw artifact", 
         displayName: "Future Shell",
         packageVersion: "4.5.6",
         minimumNemoClawVersion: "0.0.113",
+        maximumNemoClawVersionExclusive: "0.0.121",
         manifest: "manifest.yaml",
       },
     );
@@ -173,6 +196,7 @@ test("the package builder binary writes one absent output and reports JSON", () 
       displayName: "Future Shell",
       packageVersion: "4.5.6",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifestPath: "manifest.yaml",
       fileCount: 9,
       readOnly: true,
@@ -226,6 +250,35 @@ test("leaves no output when package conformance fails", () => {
       () => materializeHarnessPackageArtifact(fixture.packageRoot, fixture.outputRoot),
       HarnessPackageConformanceError,
     );
+    assert.equal(fs.existsSync(fixture.outputRoot), false);
+  } finally {
+    removeFixture(fixture);
+  }
+});
+
+test("rejects same-size source bytes replaced after validation", (t) => {
+  const fixture = createPackageFixture();
+  const originalMkdirSync = fs.mkdirSync.bind(fs);
+  let replaced = false;
+  t.mock.method(
+    fs,
+    "mkdirSync",
+    (target: fs.PathLike, options?: fs.MakeDirectoryOptions | number) => {
+      const result = Reflect.apply(originalMkdirSync, fs, [target, options]) as string | undefined;
+      if (!replaced && path.resolve(target.toString()) === fixture.outputRoot) {
+        replaced = true;
+        fs.writeFileSync(path.join(fixture.packageRoot, "Dockerfile"), "EVIL scratch\n");
+      }
+      return result;
+    },
+  );
+  try {
+    assert.throws(
+      () => materializeHarnessPackageArtifact(fixture.packageRoot, fixture.outputRoot),
+      (error) =>
+        error instanceof HarnessPackageBuildError && error.diagnostic.code === "source-changed",
+    );
+    assert.equal(replaced, true);
     assert.equal(fs.existsSync(fixture.outputRoot), false);
   } finally {
     removeFixture(fixture);
@@ -293,9 +346,19 @@ test("the prepared contract archive contains executable builder binaries but no 
   assert.equal(modes.get("dist/build-adapters.mjs"), 0o755);
   assert.equal(modes.get("dist/validate-package.mjs"), 0o755);
   assert.equal(modes.get("dist/build-package.mjs"), 0o755);
+  assert.equal(modes.get("dist/materialize-runtime.mjs"), 0o755);
+  assert.equal(modes.get("runtime/gateway-runtime.py"), 0o755);
+  assert.equal(modes.get("runtime/messaging-build.mts"), 0o755);
   assert.equal(modes.has("README.md"), true);
+  assert.equal(modes.has("build-adapters.d.mts"), true);
+  assert.equal(modes.has("build-package.d.mts"), true);
   assert.equal(
-    files.some((file) => String(file.path).endsWith(".mts")),
+    files.some(
+      (file) =>
+        String(file.path).endsWith(".mts") &&
+        !String(file.path).endsWith(".d.mts") &&
+        file.path !== "runtime/messaging-build.mts",
+    ),
     false,
   );
   assert.equal(

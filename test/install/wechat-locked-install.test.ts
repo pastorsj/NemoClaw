@@ -141,7 +141,7 @@ printf 'verify|%s|%s|openclaw=%s|offline=%s|cache=%s\n' "$3" "$4" "$5" "$NPM_CON
           outputId: "openclawPluginPackage",
           required: true,
           value: {
-            manager: "openclaw-plugin",
+            manager: "node-package",
             spec: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
           },
         },
@@ -216,7 +216,7 @@ printf 'verify|%s|%s|openclaw=%s|offline=%s|cache=%s\n' "$3" "$4" "$5" "$NPM_CON
           outputId: "openclawPluginPackage",
           required: true,
           value: {
-            manager: "openclaw-plugin",
+            manager: "node-package",
             spec: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
           },
         },

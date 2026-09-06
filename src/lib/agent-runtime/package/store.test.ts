@@ -71,6 +71,7 @@ function packageEnvelope(packageVersion: string): Record<string, unknown> {
     displayName: "OpenClaw",
     packageVersion,
     minimumNemoClawVersion: "0.0.113",
+    maximumNemoClawVersionExclusive: "0.0.121",
     manifest: "packages/nemoclaw-openclaw/manifest.yaml",
   };
 }
@@ -90,7 +91,35 @@ function writePackageAt(root: string, packageVersion: string, payload: string): 
   writeFile(
     root,
     "packages/nemoclaw-openclaw/manifest.yaml",
-    "name: openclaw\ndisplay_name: OpenClaw\ndescription: Reviewed runtime adapter\n",
+    [
+      "name: openclaw",
+      "display_name: OpenClaw",
+      "description: Reviewed runtime adapter",
+      "runtime:",
+      "  kind: gateway",
+      "config:",
+      "  dir: /sandbox/.openclaw",
+      "  config_file: openclaw.json",
+      "  format: json",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: This synthetic package has fixed inference configuration.",
+      "messaging:",
+      "  support: disabled",
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    image_plugin_provenance: not-required",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: This package does not run scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
+      "",
+    ].join("\n"),
   );
   writeFile(root, "runtime/payload.txt", payload);
 }

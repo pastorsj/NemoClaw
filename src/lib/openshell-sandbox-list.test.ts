@@ -23,6 +23,7 @@ vi.mock("./adapters/openshell/runtime", async (importOriginal) => ({
   captureOpenshell: mocks.captureOpenshell,
 }));
 vi.mock("./gateway-runtime-action", () => ({
+  captureOpenshell: mocks.captureOpenshell,
   recoverNamedGatewayRuntime: mocks.recoverNamedGatewayRuntime,
 }));
 

@@ -545,6 +545,7 @@ describe("portable agent lifecycle dispatch", () => {
 
     expect(recoverPortableAgentSandboxLifecycle("alpha", context)).toEqual({
       kind: "already-running",
+      portableAgent: "hermes",
     });
     expect(mocks.recoverHermes).toHaveBeenCalledOnce();
     expect(mocks.recoverOpenClaw).not.toHaveBeenCalled();

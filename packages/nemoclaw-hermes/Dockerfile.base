@@ -457,7 +457,7 @@ RUN pip3 install --no-cache-dir --break-system-packages "uv==${UV_VERSION}" \
 # RUN so their bytes never enter a published image layer.
 COPY packages/nemoclaw-hermes/compat/security-dependencies.patch /tmp/hermes-security-dependencies.patch
 COPY packages/nemoclaw-hermes/agent-browser-runtime/package.json \
-    packages/nemoclaw-hermes/agent-browser-runtime/package-lock.json \
+    packages/nemoclaw-hermes/agent-browser-runtime/npm-shrinkwrap.json \
     /opt/nemoclaw-agent-browser-runtime/
 COPY packages/nemoclaw-hermes/compat/runtime-boundaries.patch /tmp/hermes-runtime-boundaries.patch
 COPY packages/nemoclaw-hermes/secure-dir-skip-chmod.patch /tmp/hermes-secure-dir-skip-chmod.patch
@@ -618,6 +618,10 @@ RUN printf '%s\n' \
 # The offline lazy-package probe runs as the sandbox user. Make the finalized
 # virtual environment readable before that unprivileged build-time check.
 RUN chmod -R a+rX /opt/hermes/.venv
+
+COPY --chmod=0555 packages/nemoclaw-hermes/checks/image-probe.py /usr/local/lib/nemoclaw/checks/image-probe.py
+RUN /usr/bin/setpriv --reuid=sandbox --regid=sandbox --init-groups -- \
+        /usr/local/lib/nemoclaw/checks/image-probe.py >/dev/null
 
 # Keep official-package compatibility separate from the final image's offline
 # lazy-installer contract. BuildKit verifies both reviewed PyPI artifacts before

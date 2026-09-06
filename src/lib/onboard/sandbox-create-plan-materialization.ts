@@ -12,19 +12,20 @@ import type {
 import { containerPathsOverlap } from "./host-mount/path-overlap";
 import { normalizeSandboxGpuDeviceForCdi } from "./sandbox-gpu-create";
 import { prepareSandboxGpuRoutePolicies } from "./sandbox-gpu-route-policy";
+import {
+  assertHermesPortableIntentAgent,
+  hasProviderlessApfAgentIntent,
+  isHermesPortableReceiptDisposition,
+} from "./experimental/portable-product-qualification";
+
+export {
+  assertHermesPortableIntentAgent,
+  hasProviderlessApfAgentIntent,
+  isHermesPortableReceiptDisposition,
+};
 
 type PrepareInitialSandboxCreatePolicy =
   typeof import("./initial-policy").prepareInitialSandboxCreatePolicy;
-
-const DCODE_MCP_SNAPSHOT_TMPFS_MOUNT = {
-  type: "tmpfs",
-  target: "/run/nemoclaw-dcode-mcp",
-  // Docker applies nosuid and nodev to tmpfs mounts by default and rejects
-  // both when they are repeated in structured MountTmpfsOptions.
-  options: ["noexec"],
-  size_bytes: 1_048_576,
-  mode: 0o1777,
-} as const;
 
 function buildSandboxDriverConfig(
   intent: SandboxCreateIntent,
@@ -69,9 +70,28 @@ function buildSandboxDriverConfig(
     }
     mountsByDriver.set(managedStateMountDriverId, providerMounts);
   }
-  if (intent.policy.options.agentName === "langchain-deepagents-code") {
-    dockerMounts.unshift(DCODE_MCP_SNAPSHOT_TMPFS_MOUNT);
-    podmanMounts.push(DCODE_MCP_SNAPSHOT_TMPFS_MOUNT);
+  for (const mount of intent.sandboxDriverMounts ?? []) {
+    const { drivers, ...driverMount } = mount;
+    for (const driver of drivers) {
+      const mounts = mountsByDriver.get(driver) ?? [];
+      if (
+        mounts.some(
+          ({ target }) =>
+            typeof target === "string" && containerPathsOverlap(target, driverMount.target),
+        )
+      ) {
+        throw new Error(
+          `Sandbox driver mount '${driverMount.target}' overlaps another ${driver} mount.`,
+        );
+      }
+      // Docker already applies nosuid and nodev to tmpfs mounts. The package
+      // declaration stays finite so it cannot replace driver-owned defaults.
+      mounts.unshift({
+        ...driverMount,
+        ...(driverMount.options ? { options: [...driverMount.options] } : {}),
+      });
+      mountsByDriver.set(driver, mounts);
+    }
   }
   const driverConfig = Object.fromEntries(
     [...mountsByDriver].flatMap(([driverId, mounts]) =>
@@ -430,8 +450,8 @@ export function materializeHermesPortableCreatePlan(input: {
   readonly fromRef: string;
 }): SandboxCreatePlan {
   const { intent, fromRef } = input;
+  assertHermesPortableIntentAgent(intent.policy.options.agentName);
   if (
-    intent.policy.options.agentName !== "hermes" ||
     !["none", "native-only"].includes(intent.gpuRoutePlan) ||
     (intent.hostMounts?.length ?? 0) > 0 ||
     intent.policy.activeMessagingChannels.length > 0 ||

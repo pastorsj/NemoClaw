@@ -18,8 +18,14 @@ export type MessagingSerializableObject = {
 /** Stable channel identifier, such as "telegram" or "wechat". */
 export type MessagingChannelId = string;
 
-/** Agent runtimes that messaging manifests can target today. */
-export type MessagingAgentId = "openclaw" | "hermes";
+/**
+ * Receipt-validated harness package identifier used by messaging plans.
+ *
+ * The package loader validates the canonical kebab-case identifier before a
+ * package profile reaches this layer. Keeping the semantic alias here makes
+ * plan fields explicit without closing the compiler to the bundled examples.
+ */
+export type MessagingAgentId = string;
 
 /** Dot-separated path into NemoClaw's persisted sandbox or channel state. */
 export type MessagingStatePath = string;
@@ -55,6 +61,19 @@ export interface ChannelManifest {
    * in `sandbox/<id>-diagnostics.ts`. Absent → basic report only.
    */
   readonly diagnosticsProbe?: "log-tail";
+  /** Receipt-backed build behavior. Absent only for legacy in-tree manifests. */
+  readonly packageBuild?: HarnessMessagingBuildProfile;
+}
+
+export interface HarnessMessagingBuildProfile {
+  readonly configRoot: string;
+  readonly packageManagers: readonly ChannelAgentPackageManager[];
+  readonly renderFinalizers?: readonly ("allow-rendered-plugins" | "inherit-api-server-toolsets")[];
+  readonly postRenderRepair?: { readonly command: readonly string[] };
+  readonly nodeArchiveRemediation?: "package-helper";
+  readonly postCreateCredentialReconciliation?: "restart-runtime";
+  readonly credentialPolicyReconciliation?: "teams-outlook-shared-login";
+  readonly degradedDiagnostics?: "gateway-log-tail";
 }
 
 /** Manifest-owned network policy preset metadata. */
@@ -164,14 +183,13 @@ export interface ChannelHostForwardSpec {
 }
 
 /** Agent-runtime metadata consumed by shared runtime setup and diagnostics. */
-export interface ChannelRuntimeByAgentSpec extends Partial<
-  Record<MessagingAgentId, ChannelRuntimeSpec>
-> {
+export interface ChannelRuntimeByAgentSpec {
+  readonly [agent: MessagingAgentId]: ChannelRuntimeSpec | ChannelOpenClawRuntimeSpec | undefined;
   readonly openclaw?: ChannelOpenClawRuntimeSpec;
   readonly hermes?: ChannelRuntimeSpec;
 }
 
-/** OpenClaw-specific runtime metadata. */
+/** OpenClaw-specific runtime metadata retained by legacy in-tree manifests. */
 export interface ChannelOpenClawRuntimeSpec extends ChannelRuntimeSpec {
   /** Key owned under openclaw.json `channels`, when this manifest manages one. */
   readonly channelName?: string;
@@ -219,7 +237,7 @@ export interface ChannelRuntimeSecretScanSpec {
   readonly exitCode?: number;
 }
 
-export type ChannelAgentPackageManager = "openclaw-plugin" | "hermes-uv-pip";
+export type ChannelAgentPackageManager = "node-package" | "python-package";
 
 export interface ChannelAgentPackageRuntimeLockSpec {
   readonly cachePath: string;
@@ -306,6 +324,8 @@ export interface SandboxMessagingPlan {
   readonly runtimeSetup?: SandboxMessagingRuntimeSetupPlan;
   readonly stateUpdates: readonly SandboxMessagingStateUpdatePlan[];
   readonly healthChecks: readonly SandboxMessagingHealthCheckPlan[];
+  /** Receipt-backed build behavior. Absent only for legacy serialized plans. */
+  readonly packageBuild?: HarnessMessagingBuildProfile;
 }
 
 /** Workflow that requested a compiled messaging plan. */

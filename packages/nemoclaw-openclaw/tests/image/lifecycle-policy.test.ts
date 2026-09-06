@@ -70,7 +70,7 @@ const optionalPluginBlock = between(
 const messagingInstallBlock = between(
   messagingApplier,
   "export function installOpenClawMessagingPlugins",
-  "export function runOpenClawMessagingDoctor",
+  "export function runMessagingPostRenderRepair",
 );
 
 const codexMatch = dockerfile.match(

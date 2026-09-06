@@ -295,12 +295,24 @@ describe("compatible endpoint sandbox smoke helpers", () => {
       runOpenshell,
       redact: (value) => value,
       messagingChannels: ["telegram"],
+      agent: {
+        name: "future-harness",
+        inference: {
+          sandbox_smoke: {
+            kind: "compatible-endpoint",
+            config_path: "/sandbox/.future-harness/config.json",
+          },
+        },
+      },
     });
 
     expect(runOpenshell).toHaveBeenNthCalledWith(
       2,
       expect.any(Array),
       expect.objectContaining({ timeout: 225_000 }),
+    );
+    expect((runOpenshell.mock.calls[1]?.[0] as string[]).at(-1)).toContain(
+      "/sandbox/.future-harness/config.json",
     );
   });
 

@@ -3,6 +3,9 @@
 # Local-only POC package. Haystack is a framework; this package constructs the
 # concrete headless Agent that NemoClaw invokes through NeMo Fabric.
 name: haystack-agent
+provider_broker:
+  support: disabled
+  reason: This package does not require a host provider broker.
 display_name: "Haystack Agent (experimental)"
 description: "Local headless agent POC built directly on the Haystack Agent API"
 version_constraint: ">=3.1.1"
@@ -34,11 +37,25 @@ config:
   config_file: fabric.json
   mutable_access: private
   format: json
+state_lifecycle:
+  backup_quiescence:
+    kind: not-required
+  snapshot_restore: []
+  rebuild:
+    image_plugin_provenance: not-required
+    scheduled_work:
+      support: disabled
+      reason: Haystack Agent does not run scheduled work.
+    post_restore:
+      kind: not-required
 state_dirs:
   - path: fabric-artifacts
     backup: false
 device_pairing: false
 inference:
+  config_update:
+    support: unsupported
+    reason: The sandbox image generates the Haystack Agent config. Re-onboard to change it.
   provider_type: openai_compatible
   default_model: nvidia/nemotron-3-super-120b-a12b
   base_url_config_key: "models.default.base_url"

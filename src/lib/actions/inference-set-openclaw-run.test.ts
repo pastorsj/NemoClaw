@@ -107,7 +107,7 @@ describe("runInferenceSet OpenClaw routing", () => {
         action: "inference_set",
         sandbox: "alpha",
         reason:
-          "inference set openclaw:nvidia-prod:nvidia/nemotron-3-super-120b-a12b (pairing convergence pending)",
+          "inference set openclaw:nvidia-prod:nvidia/nemotron-3-super-120b-a12b (additional reconciliation pending)",
       }),
     );
     expect(deps.calls.appendAuditEntry).toHaveBeenCalledWith(

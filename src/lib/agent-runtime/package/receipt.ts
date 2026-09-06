@@ -3,7 +3,11 @@
 
 import { TextDecoder } from "node:util";
 import { parseDocument } from "yaml";
-import { getBuildIdentity, type BuildIdentity, validateBuildIdentity } from "../../core/version";
+import {
+  getBuildIdentity,
+  type BuildIdentity,
+  validateBuildIdentity,
+} from "../../core/build-identity";
 import type { HarnessPackageIdentity } from "./types";
 import {
   parseHarnessPackageContentDigest,

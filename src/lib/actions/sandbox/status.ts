@@ -9,10 +9,6 @@ import { getGatewayPresets } from "../../policy";
 import { withMcpLifecycleLock } from "../../state/mcp-lifecycle-lock-acquisition";
 import * as registry from "../../state/registry";
 import { getSandboxDockerRuntime } from "./docker-health";
-import {
-  qualifyPortableAgentLifecycleAuthority,
-  type HermesPortableAgentLifecycleAuthority,
-} from "./gateway-state";
 import { printSandboxGatewayLookupStatus } from "./status-lookup-rendering";
 import {
   getSandboxStatusPreflight,
@@ -22,10 +18,10 @@ import {
 import {
   collectSandboxStatusSnapshot,
   getSandboxStatusReport as getLegacySandboxStatusReport,
-  normalizeSandboxStatusHostMounts,
   resolveSandboxStatusAgent,
   type SandboxStatusReport,
 } from "./status-snapshot";
+import { hermesPortableStatusReport, inspectHermesPortableStatus } from "./portable-status";
 import {
   printAgentProcessStatus,
   printDockerHealth,
@@ -33,6 +29,7 @@ import {
   printSandboxDetails,
   type SandboxStatusTextContext,
 } from "./status-text";
+import { ensureLegacyHermesToolBroker } from "./legacy-broker";
 
 export {
   type ClassifySandboxStatusPreflightFailureDeps,
@@ -52,70 +49,15 @@ export {
   getSandboxStatusInferenceHealth,
   isInferenceHealthFailing,
   maybeGetSandboxStatusInferenceHealth,
-  resolveSandboxStatusDcodeAutoApprovalMode,
   type SandboxStatusReport,
   type SandboxStatusSnapshot,
   type ServingProcessHealth,
 } from "./status-snapshot";
-
-function inspectHermesPortableStatus(
-  sandboxName: string,
-): HermesPortableAgentLifecycleAuthority | null {
-  const authority = qualifyPortableAgentLifecycleAuthority(sandboxName, {
-    readRegistry: getPublishedSandbox,
-  });
-  return authority.kind === "hermes" ? authority : null;
-}
+export { resolveLegacyDcodeAutoApprovalMode } from "./status-legacy";
 
 function getPublishedSandbox(sandboxName: string): registry.SandboxEntry | null {
   const entry = registry.getSandbox(sandboxName);
   return entry && registry.isPublishedSandboxRegistration(entry) ? entry : null;
-}
-
-function hermesPortableStatusReport(
-  sandboxName: string,
-  authority: HermesPortableAgentLifecycleAuthority,
-  readPolicies: typeof getGatewayPresets,
-): SandboxStatusReport {
-  const { entry, phase } = authority;
-  const model = entry?.model ?? "unknown";
-  const provider = entry?.provider ?? "unknown";
-  const livePolicies = readPolicies(sandboxName);
-  return {
-    schemaVersion: 1,
-    name: sandboxName,
-    found: phase === "active",
-    agent: "hermes",
-    agentDisplayName: "Hermes",
-    agentRuntime: "gateway",
-    dcodeAutoApprovalMode: null,
-    model,
-    provider,
-    servingProfileProvenance: entry?.servingProfileProvenance ?? null,
-    recordedRoute:
-      entry?.provider && entry.model ? { provider: entry.provider, model: entry.model } : null,
-    liveRoute: null,
-    routeDrift: null,
-    phase: null,
-    portableLifecyclePhase: phase,
-    gatewayState: "not-probed",
-    inferenceHealth: null,
-    rpcIssue: null,
-    hostGpuDetected: entry?.hostGpuDetected === true,
-    sandboxGpuEnabled: entry?.sandboxGpuEnabled ?? entry?.gpuEnabled === true,
-    sandboxGpuMode: entry?.sandboxGpuMode ?? null,
-    sandboxGpuDevice: entry?.sandboxGpuDevice ?? null,
-    sandboxGpuProof: entry?.sandboxGpuProof ?? null,
-    hostMounts: normalizeSandboxStatusHostMounts(entry?.hostMounts),
-    openshellDriver: entry?.openshellDriver ?? "unknown",
-    openshellVersion: entry?.openshellVersion ?? "unknown",
-    policies: livePolicies ?? [],
-    policiesAvailable: livePolicies !== null,
-    failureLayer: null,
-    terminalRuntimeHealth: null,
-    servingProcessHealth: null,
-    dockerPaused: false,
-  };
 }
 
 export async function getSandboxStatusReport(
@@ -133,23 +75,6 @@ export async function getSandboxStatusReport(
     }
     return getLegacySandboxStatusReport(sandboxName, deps);
   });
-}
-
-function maybeEnsureHermesToolGatewayBroker(sb: registry.SandboxEntry | null): void {
-  if (
-    !sb ||
-    sb.agent !== "hermes" ||
-    !Array.isArray(sb.hermesToolGateways) ||
-    sb.hermesToolGateways.length === 0
-  ) {
-    return;
-  }
-  try {
-    const hermesToolGatewayBroker = require("../../hermes-tool-gateway-broker");
-    hermesToolGatewayBroker.ensureHermesToolGatewayBrokerForSandboxEntry(sb, { quiet: true });
-  } catch {
-    /* non-fatal — status should still show sandbox diagnostics */
-  }
 }
 
 export async function showSandboxStatus(sandboxName: string): Promise<void> {
@@ -206,7 +131,7 @@ async function showLegacySandboxStatus(sandboxName: string): Promise<void> {
   if (effectivePreflight.exitCode !== 0) {
     process.exitCode = effectivePreflight.exitCode;
   }
-  maybeEnsureHermesToolGatewayBroker(sb);
+  ensureLegacyHermesToolBroker(sb);
   if (rpcIssue) {
     printOpenShellStateRpcIssue(rpcIssue, {
       action: `checking inference status for sandbox '${sandboxName}'`,

@@ -60,10 +60,13 @@ shift 15
 [ "$#" -gt 0 ] || fail "supervisor argv is empty"
 [[ "$1" = /* ]] || fail "supervisor executable must be absolute"
 
+# The host-authenticated profile and receipt bind the exact package identity.
+# This image boundary validates only the public package-ID grammar; it must not
+# carry a second harness catalogue that rejects otherwise valid packages.
 case "$_nemoclaw_agent" in
-  openclaw | hermes | langchain-deepagents-code | pi) ;;
-  *) fail "agent is unsupported" ;;
+  "" | [!a-z]* | *[!a-z0-9-]* | *--* | *-) fail "package id is invalid" ;;
 esac
+[ "${#_nemoclaw_agent}" -le 64 ] || fail "package id is invalid"
 case "$_nemoclaw_fingerprint" in
   *[!0-9a-f]* | "") fail "profile fingerprint must be lowercase SHA-256" ;;
 esac

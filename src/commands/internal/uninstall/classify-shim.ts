@@ -3,12 +3,11 @@
 
 import { Args } from "@oclif/core";
 import { jsonFlag } from "../../../lib/cli/common-flags";
-import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
+import { NemoClawInternalCommand } from "../../../lib/cli/internal-command";
 
 import { classifyShimPath } from "../../../lib/actions/uninstall/plan";
 
-export default class InternalUninstallClassifyShimCommand extends NemoClawCommand {
-  static hidden = true;
+export default class InternalUninstallClassifyShimCommand extends NemoClawInternalCommand {
   static strict = true;
   static summary = "Internal: classify a NemoClaw shim path";
   static description = "Classify whether a shim path is safe for the uninstaller to remove.";

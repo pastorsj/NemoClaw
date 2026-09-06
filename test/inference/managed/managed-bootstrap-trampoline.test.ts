@@ -603,8 +603,8 @@ exec /usr/bin/env -i NEMOCLAW_MANAGED_BOOTSTRAP_RESUME=1 ${JSON.stringify(
   }, 60_000);
 
   it.each(
-    MANAGED_STARTUP_AGENTS,
-  )("consumes the protected %s request or recovered claim before exact supervisor exec and drops bootstrap variables", (agent) => {
+    [...MANAGED_STARTUP_AGENTS, "future-harness"],
+  )("consumes the protected %s package request or recovered claim before exact supervisor exec and drops bootstrap variables", (agent) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-bootstrap-trampoline-"));
     try {
       const request = path.join(directory, "request.json");

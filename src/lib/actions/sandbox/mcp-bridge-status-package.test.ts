@@ -43,11 +43,14 @@ vi.mock("./mcp-bridge-resolution-probe", () => ({
 vi.mock("./mcp-bridge-state", () => ({
   bridgeState: (sandbox: { mcp?: { bridges?: Record<string, unknown> } }) =>
     sandbox.mcp?.bridges ?? {},
-  ensureSandboxGatewaySelected: mocks.ensureGateway,
   getAgentConfigDir: () => "/sandbox/.future",
   getSandboxAgent: (sandbox: { definition: unknown }) => sandbox.definition,
   getSandboxOrThrow: mocks.getSandbox,
   requireSandboxHarnessPackage: mocks.requirePackage,
+}));
+
+vi.mock("./mcp-bridge/gateway-selection", () => ({
+  ensureSandboxGatewaySelected: mocks.ensureGateway,
 }));
 
 vi.mock("./mcp-bridge-tool-discovery", () => ({ discoverMcpTools: vi.fn() }));

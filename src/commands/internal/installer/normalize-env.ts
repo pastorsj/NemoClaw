@@ -3,12 +3,11 @@
 
 import { Flags } from "@oclif/core";
 import { jsonFlag } from "../../../lib/cli/common-flags";
-import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
+import { NemoClawInternalCommand } from "../../../lib/cli/internal-command";
 
 import { normalizeInstallerEnv } from "../../../lib/actions/installer/plan";
 
-export default class InternalInstallerNormalizeEnvCommand extends NemoClawCommand {
-  static hidden = true;
+export default class InternalInstallerNormalizeEnvCommand extends NemoClawInternalCommand {
   static strict = true;
   static summary = "Internal: normalize installer environment values";
   static description =

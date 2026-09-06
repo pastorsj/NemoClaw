@@ -3,10 +3,11 @@
 
 import { createHash } from "node:crypto";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { managedStartupE2eProfile } from "../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
 import type { SandboxEntry, SandboxWorkloadReceipt } from "../state/registry/types";
+import type { ResolvedSandboxAgent } from "./sandbox-agent";
 import {
   MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
   MANAGED_IMAGE_REPOSITORIES,
@@ -14,12 +15,43 @@ import {
   type ManagedImageAgent,
   type ManagedImagePlatform,
 } from "./managed-image/contract";
-import { encodeManagedStartupProfile } from "./managed-startup/profile";
-import { ManagedWorkloadAuthorityError, readManagedWorkloadAuthority } from "./workload/authority";
+import {
+  encodeManagedStartupDurableProfile,
+  encodeManagedStartupProfile,
+} from "./managed-startup/profile";
+import { managedStartupSettingsFromProfile } from "./managed-startup/package-profile";
+import {
+  managedWorkloadAuthorityDependencies,
+  ManagedWorkloadAuthorityError,
+  readDurableManagedWorkloadAuthority,
+  readManagedWorkloadAuthority,
+} from "./workload/authority";
 
 const AGENTS = ["openclaw", "hermes", "langchain-deepagents-code"] as const;
 const PLATFORMS = ["linux/amd64", "linux/arm64"] as const;
 type ManagedWorkloadReceipt = Extract<SandboxWorkloadReceipt, { readonly kind: "managed-image" }>;
+const ORIGINAL_PACKAGE_RESOLVER =
+  managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent;
+const FUTURE_PACKAGE = {
+  kind: "agent-runtime",
+  id: "future-harness",
+  packageVersion: "1.2.3",
+  contentDigest: "9".repeat(64),
+} as const;
+const FUTURE_MANAGED_IMAGE = {
+  repository: "registry.example/team/future-harness",
+  architectures: ["linux/amd64"],
+  runtime_identity: { uid: 1234, gid: 1234, workdir: "/sandbox" },
+  publication: {
+    source: {
+      repository: "ExampleOrg/future-harness",
+      revision: "d".repeat(40),
+      release: "v0.0.100",
+      cohort: "build-2026.09.05",
+    },
+    digests: { "linux/amd64": `sha256:${"8".repeat(64)}` },
+  },
+} as const;
 
 function managedReceipt(
   agent: ManagedImageAgent,
@@ -27,8 +59,7 @@ function managedReceipt(
   profileAgent: ManagedImageAgent = agent,
 ): ManagedWorkloadReceipt {
   const encodedProfile = encodeManagedStartupProfile(managedStartupE2eProfile(profileAgent));
-  const digest =
-    agent === "openclaw" ? "a" : agent === "hermes" ? "b" : agent === "pi" ? "e" : "c";
+  const digest = agent === "openclaw" ? "a" : agent === "hermes" ? "b" : agent === "pi" ? "e" : "c";
   return {
     schemaVersion: 1,
     kind: "managed-image",
@@ -60,25 +91,161 @@ function managedEntry(
   };
 }
 
+function futureManagedEntry(): SandboxEntry {
+  const piSettings = managedStartupSettingsFromProfile(managedStartupE2eProfile("pi"));
+  const encodedProfile = encodeManagedStartupDurableProfile({
+    schemaVersion: 1,
+    profileKind: "package",
+    agent: FUTURE_PACKAGE.id,
+    harnessPackage: FUTURE_PACKAGE,
+    desiredState: {
+      ...piSettings,
+      configuration: { agent: FUTURE_PACKAGE.id },
+      dashboard: { agent: FUTURE_PACKAGE.id, mode: "disabled" },
+    },
+    packageConfig: { settings: { mode: "future" } },
+    corporateCa: { bundleSha256: null },
+  });
+  const workload: ManagedWorkloadReceipt = {
+    schemaVersion: 1,
+    kind: "managed-image",
+    reference: `${FUTURE_MANAGED_IMAGE.repository}@sha256:${"8".repeat(64)}`,
+    platform: "linux/amd64",
+    release: "v0.0.100",
+    sourceRevision: "d".repeat(40),
+    sourceCohort: FUTURE_MANAGED_IMAGE.publication.source.cohort,
+    capabilityContractVersion: 1,
+    startupProfileContractVersion: 1,
+    encodedProfile,
+    startupProfileSha256: createHash("sha256").update(encodedProfile, "utf8").digest("hex"),
+    credentialProxyReplayRequired: false,
+    shared: true,
+  };
+  return {
+    name: "authority-future-harness",
+    agent: FUTURE_PACKAGE.id,
+    harnessPackage: FUTURE_PACKAGE,
+    fromDockerfile: null,
+    imageTag: workload.reference,
+    workload,
+  };
+}
+
+afterEach(() => {
+  managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = ORIGINAL_PACKAGE_RESOLVER;
+});
+
 describe("managed workload authority", () => {
-  it.each(
-    AGENTS.flatMap((agent) => PLATFORMS.map((platform) => [agent, platform] as const)),
-  )("validates exact %s authority on %s", (agent, platform) => {
-    const row = managedEntry(agent, platform);
-    const authority = readManagedWorkloadAuthority(row);
+  it("resolves a future managed workload through its exact package receipt", () => {
+    managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = vi.fn(
+      () =>
+        ({
+          recordedAgent: FUTURE_PACKAGE.id,
+          effectiveAgentId: FUTURE_PACKAGE.id,
+          definition: {
+            name: FUTURE_PACKAGE.id,
+            packageRoot: "/installed/future-harness",
+            managedImage: FUTURE_MANAGED_IMAGE,
+          },
+          harnessPackage: FUTURE_PACKAGE,
+          harnessPackageMigration: null,
+        }) as unknown as ResolvedSandboxAgent,
+    );
+
+    const authority = readDurableManagedWorkloadAuthority(futureManagedEntry());
 
     expect(authority).toMatchObject({
-      agent,
-      contract: { agent, platform },
-      profile: { agent },
-      receipt: { kind: "managed-image", platform },
+      agent: FUTURE_PACKAGE.id,
+      harnessPackage: FUTURE_PACKAGE,
+      contract: {
+        agent: FUTURE_PACKAGE.id,
+        harnessPackage: FUTURE_PACKAGE,
+        source: FUTURE_MANAGED_IMAGE.publication.source,
+      },
+      profile: { profileKind: "package", harnessPackage: FUTURE_PACKAGE },
     });
-    expect(authority?.receipt).not.toBe(row.workload);
-    expect(Object.isFrozen(authority)).toBe(true);
-    expect(Object.isFrozen(authority?.receipt)).toBe(true);
-    expect(Object.isFrozen(authority?.contract.source)).toBe(true);
-    expect(Object.isFrozen(authority?.profile.proxy)).toBe(true);
+    expect(() => readManagedWorkloadAuthority(futureManagedEntry())).toThrow(
+      /requires a package-aware workload reader/u,
+    );
   });
+
+  it.each([
+    ["source revision", { sourceRevision: "e".repeat(40) }],
+    ["source cohort", { sourceCohort: "build-drifted" }],
+    ["source release", { release: "v1.0.0" }],
+    [
+      "image digest",
+      {
+        reference: `${FUTURE_MANAGED_IMAGE.repository}@sha256:${"9".repeat(64)}`,
+      },
+    ],
+  ] as const)("fails closed after package publication %s drift", (_label, drift) => {
+    const entry = futureManagedEntry();
+    const workload = { ...entry.workload, ...drift } as ManagedWorkloadReceipt;
+    managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = vi.fn(
+      () =>
+        ({
+          recordedAgent: FUTURE_PACKAGE.id,
+          effectiveAgentId: FUTURE_PACKAGE.id,
+          definition: {
+            name: FUTURE_PACKAGE.id,
+            packageRoot: "/installed/future-harness",
+            managedImage: FUTURE_MANAGED_IMAGE,
+          },
+          harnessPackage: FUTURE_PACKAGE,
+          harnessPackageMigration: null,
+        }) as unknown as ResolvedSandboxAgent,
+    );
+
+    expect(() =>
+      readDurableManagedWorkloadAuthority({
+        ...entry,
+        imageTag: workload.reference,
+        workload,
+      }),
+    ).toThrow(/durable image contract failed validation/u);
+  });
+
+  it("rejects a generic package cohort on a stock startup profile", () => {
+    const receipt = {
+      ...managedReceipt("openclaw", "linux/amd64"),
+      sourceCohort: "build-2026.09.05",
+    };
+
+    expect(() =>
+      readManagedWorkloadAuthority(managedEntry("openclaw", "linux/amd64", receipt)),
+    ).toThrow(/no valid durable workload receipt/u);
+  });
+
+  it("fails closed when a future package can no longer be resolved", () => {
+    managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = vi.fn(() => {
+      throw new Error("package bytes changed");
+    });
+
+    expect(() => readDurableManagedWorkloadAuthority(futureManagedEntry())).toThrow(
+      /package authority could not be resolved/u,
+    );
+  });
+
+  it.each(AGENTS.flatMap((agent) => PLATFORMS.map((platform) => [agent, platform] as const)))(
+    "validates exact %s authority on %s",
+    (agent, platform) => {
+      const row = managedEntry(agent, platform);
+      const authority = readManagedWorkloadAuthority(row);
+
+      expect(authority).toMatchObject({
+        agent,
+        contract: { agent, platform },
+        profile: { agent },
+        receipt: { kind: "managed-image", platform },
+      });
+      expect(authority?.receipt).not.toBe(row.workload);
+      expect(Object.isFrozen(authority)).toBe(true);
+      expect(Object.isFrozen(authority?.receipt)).toBe(true);
+      expect(Object.isFrozen(authority?.contract.source)).toBe(true);
+      expect(Object.isFrozen(authority?.profile.proxy)).toBe(true);
+    },
+  );
 
   it("returns null only for an unambiguously non-managed workload", () => {
     expect(
@@ -111,8 +278,6 @@ describe("managed workload authority", () => {
           repository,
           architectures: ["linux/amd64"],
           runtime_identity: { uid: 4321, gid: 4322, workdir: "/sandbox" },
-          startup_profile_contract_version: 1,
-          capability_contract_version: 1,
         },
       })?.contract.image,
     ).toBe(repository);

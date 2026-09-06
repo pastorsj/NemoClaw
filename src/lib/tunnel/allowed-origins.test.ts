@@ -22,6 +22,7 @@ const OPENCLAW_TARGET: AgentConfigTarget = {
   configDir: "/sandbox/.openclaw",
   format: "json",
   configFile: "openclaw.json",
+  tunnelAllowedOriginsPath: ["gateway", "controlUi", "allowedOrigins"],
 };
 
 /**
@@ -190,11 +191,12 @@ describe("registerTunnelOrigin", () => {
   });
 
   // Scenario 10
-  it("skips entirely for a non-OpenClaw agent", () => {
+  it("skips entirely when a harness does not declare an origins path", () => {
     const config: ConfigObject = {
       gateway: { controlUi: { allowedOrigins: [] } },
     };
-    const hermesTarget: AgentConfigTarget = { ...OPENCLAW_TARGET, agentName: "hermes" };
+    const { tunnelAllowedOriginsPath: _path, ...baseTarget } = OPENCLAW_TARGET;
+    const hermesTarget: AgentConfigTarget = { ...baseTarget, agentName: "hermes" };
     const { deps, readConfig, writeConfig, reloadGateway, info } = makeDeps(config, hermesTarget);
 
     registerTunnelOrigin("sb", "https://good.trycloudflare.com", deps);
@@ -202,7 +204,32 @@ describe("registerTunnelOrigin", () => {
     expect(readConfig).not.toHaveBeenCalled();
     expect(writeConfig).not.toHaveBeenCalled();
     expect(reloadGateway).not.toHaveBeenCalled();
-    expect(info).toHaveBeenCalledWith(expect.stringContaining("OpenClaw-only"));
+    expect(info).toHaveBeenCalledWith(expect.stringContaining("does not declare"));
+  });
+
+  it("uses a receipt-backed future harness's declared config path", () => {
+    const config: ConfigObject = {
+      ui: { security: { browserOrigins: [LOOPBACK] } },
+    };
+    const futureTarget: AgentConfigTarget = {
+      ...OPENCLAW_TARGET,
+      agentName: "future-harness",
+      configDir: "/sandbox/.future",
+      configFile: "future.json",
+      configPath: "/sandbox/.future/future.json",
+      tunnelAllowedOriginsPath: ["ui", "security", "browserOrigins"],
+    };
+    const { deps, writeConfig, reloadGateway } = makeDeps(config, futureTarget);
+
+    registerTunnelOrigin("sb", "https://future.trycloudflare.com/path", deps);
+
+    expect(writeConfig).toHaveBeenCalledWith("sb", futureTarget, expect.anything());
+    const written = writeConfig.mock.calls[0][2];
+    expect(((written.ui as ConfigObject).security as ConfigObject).browserOrigins).toEqual([
+      LOOPBACK,
+      "https://future.trycloudflare.com",
+    ]);
+    expect(reloadGateway).toHaveBeenCalledWith("sb");
   });
 
   // Scenario 11

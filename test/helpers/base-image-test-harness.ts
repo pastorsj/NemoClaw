@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createRequire } from "node:module";
+import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 
 import { vi } from "vitest";
@@ -21,10 +23,55 @@ const requireSource = createRequire(
 );
 const TEST_REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../..");
 
+function fixtureManagedImage(agentName: string): AgentDefinition["managedImage"] {
+  const common = {
+    architectures: ["linux/amd64", "linux/arm64"] as const,
+    runtime_identity: { uid: 999, gid: 999, workdir: "/sandbox" as const },
+  };
+  if (agentName === "hermes") {
+    return {
+      ...common,
+      repository: "ghcr.io/nvidia/nemoclaw/hermes-sandbox",
+      runtime_identity: { uid: 998, gid: 999, workdir: "/sandbox" },
+      base_image: {
+        security_inventory: true,
+        package_probe: true,
+        pinned_remote: {
+          argument: "BASE_IMAGE",
+          ref: `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"c588bf76ba1c280f8a366bdfd672193e852de4f509a280662c7070a9b6e2fa48"}`,
+        },
+      },
+    };
+  }
+  if (agentName === "langchain-deepagents-code") {
+    return {
+      ...common,
+      repository: "ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox",
+      base_image: { corporate_ca: true, security_inventory: true, package_probe: true },
+    };
+  }
+  if (agentName === "pi") {
+    return {
+      ...common,
+      repository: "ghcr.io/nvidia/nemoclaw/pi-sandbox",
+      base_image: { corporate_ca: true, security_inventory: true },
+    };
+  }
+  return null;
+}
+
 /** Build a minimal Hermes manifest for base-image provisioning tests. */
 export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
+  const agentName = overrides.name ?? "hermes";
+  const packagedAgentName = new Set(["hermes", "langchain-deepagents-code", "pi"]).has(agentName)
+    ? agentName
+    : "hermes";
+  const fixtureAgentRoot = path.join(
+    TEST_REPOSITORY_ROOT,
+    `packages/nemoclaw-${packagedAgentName}`,
+  );
   return {
-    name: "hermes",
+    name: agentName,
     displayName: "Hermes Agent",
     agentAliases: [],
     agentAliasSummary: null,
@@ -38,6 +85,7 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
       path: "/v1",
       healthPath: "/health",
       auth: "none",
+      tunnelAllowedOriginsPath: null,
     },
     webAuth: { method: "bearer_token", env: "API_SERVER_KEY" },
     configPaths: {
@@ -52,7 +100,19 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
       reason: "test fixture",
     },
     skillCapability: { support: "disabled", reason: "test fixture" },
-    managedImage: null,
+    stateLifecycle: {
+      backup_quiescence: { kind: "not-required" },
+      snapshot_restore: [],
+      rebuild: {
+        image_plugin_provenance: "not-required",
+        scheduled_work: {
+          support: "disabled",
+          reason: "This package does not run scheduled work.",
+        },
+        post_restore: { kind: "not-required" },
+      },
+    },
+    managedImage: fixtureManagedImage(agentName),
     stateDirectories: [],
     stateDirs: [],
     stateDirPrefixes: [],
@@ -72,8 +132,8 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
     policyAdditionsPath: null,
     pluginDir: null,
     legacyPaths: null,
-    agentDir: path.join(TEST_REPOSITORY_ROOT, "packages/nemoclaw-hermes"),
-    manifestPath: path.join(TEST_REPOSITORY_ROOT, "packages/nemoclaw-hermes/manifest.yaml"),
+    agentDir: fixtureAgentRoot,
+    manifestPath: path.join(fixtureAgentRoot, "manifest.yaml"),
     packageRoot: TEST_REPOSITORY_ROOT,
     ...overrides,
   };
@@ -100,11 +160,25 @@ export function withMockedDocker<T>(
 ): T {
   const dockerRunModule = requireSource("../adapters/docker/run.js") as DockerRunModule;
   const originalDockerCapture = dockerRunModule.dockerCapture;
-  const dockerCaptureMock = vi.fn((args: readonly string[]) =>
-    args.includes("/opt/hermes/.venv/bin/python")
+  const dockerCaptureMock = vi.fn((args: readonly string[]) => {
+    if (args.includes("/usr/local/lib/nemoclaw/checks/image-probe.py")) {
+      const imageRef =
+        args[args.indexOf("/usr/local/lib/nemoclaw/checks/image-probe.py") + 1] ?? "";
+      const packageName = imageRef.includes("deepagents")
+        ? "nemoclaw-langchain-deepagents-code"
+        : "nemoclaw-hermes";
+      const source = path.join(
+        TEST_REPOSITORY_ROOT,
+        "packages",
+        packageName,
+        "checks/image-probe.py",
+      );
+      return `nemoclaw-image-probe-ok ${crypto.createHash("sha256").update(fs.readFileSync(source)).digest("hex")}`;
+    }
+    return args.includes("/opt/hermes/.venv/bin/python")
       ? "nemoclaw-hermes-mcp-runtime-ok"
-      : "nemoclaw-security-inventory-ok",
-  );
+      : "nemoclaw-security-inventory-ok";
+  });
   dockerRunModule.dockerCapture = dockerCaptureMock as DockerRunModule["dockerCapture"];
 
   const dockerImageModule = requireSource("../adapters/docker/image.js") as DockerImageModule;

@@ -13,8 +13,7 @@ import {
   type OpenShellSandboxObserver,
   type OpenShellSandboxResult,
 } from "./adapters/openshell/sandbox-observer";
-import { captureOpenshell } from "./adapters/openshell/runtime";
-import { recoverNamedGatewayRuntime } from "./gateway-runtime-action";
+import { captureOpenshell, recoverNamedGatewayRuntime } from "./gateway-runtime-action";
 
 type SandboxListResult = OpenShellSandboxResult<OpenShellSandboxInventory>;
 

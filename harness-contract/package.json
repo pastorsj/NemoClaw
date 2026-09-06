@@ -8,33 +8,51 @@
   "scripts": {
     "build:tools": "node --experimental-strip-types --no-warnings build-tools.mts",
     "check:tools": "node --experimental-strip-types --no-warnings build-tools.mts --check",
+    "materialize-runtime": "node --experimental-strip-types --no-warnings materialize-runtime.mts",
     "check-package": "node --experimental-strip-types --no-warnings validate-package.mts",
     "build-package": "node --experimental-strip-types --no-warnings build-package.mts",
     "prepare": "npm run build:tools",
-    "test": "tsc -p tsconfig.json && npm run build:tools && npm run check:tools && node --test --experimental-strip-types --no-warnings build-adapters.test.mts validate-package.test.mts build-package.test.mts external-package.test.mts"
+    "test": "tsc -p tsconfig.json && npm run build:tools && npm run check:tools && node --test --experimental-strip-types --no-warnings build-adapters.test.mts validate-package.test.mts build-package.test.mts materialize-runtime.test.mts external-package.test.mts"
   },
   "exports": {
     ".": {
       "types": "./src/index.ts"
     },
+    "./manifest-validator": {
+      "types": "./src/manifest-validator.ts",
+      "import": "./dist/src/manifest-validator.js",
+      "require": "./dist/src/manifest-validator.js",
+      "default": "./dist/src/manifest-validator.js"
+    },
     "./build-adapters": {
+      "types": "./build-adapters.d.mts",
       "import": "./dist/build-adapters.mjs"
     },
     "./validate-package": {
       "import": "./dist/validate-package.mjs"
     },
     "./build-package": {
+      "types": "./build-package.d.mts",
       "import": "./dist/build-package.mjs"
+    },
+    "./materialize-runtime": {
+      "import": "./dist/materialize-runtime.mjs"
     }
   },
   "bin": {
     "nemoclaw-build-adapters": "./dist/build-adapters.mjs",
     "nemoclaw-validate-package": "./dist/validate-package.mjs",
-    "nemoclaw-build-package": "./dist/build-package.mjs"
+    "nemoclaw-build-package": "./dist/build-package.mjs",
+    "nemoclaw-materialize-runtime": "./dist/materialize-runtime.mjs"
   },
   "files": [
     "src/**/*.ts",
-    "dist/*.mjs"
+    "build-adapters.d.mts",
+    "build-package.d.mts",
+    "runtime/*",
+    "dist/*.mjs",
+    "dist/src/manifest-validator.js",
+    "dist/src/validation/*.js"
   ],
   "dependencies": {
     "yaml": "2.8.3"

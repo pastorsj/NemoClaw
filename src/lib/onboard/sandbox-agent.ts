@@ -19,47 +19,25 @@ import { getNameValidationGuidance, NAME_ALLOWED_FORMAT } from "../name-validati
 import { validateName } from "../runner";
 import type { SandboxEntry } from "../state/registry";
 import * as registry from "../state/registry";
+import {
+  normalizeSandboxAgentName,
+  RESERVED_SANDBOX_NAMES,
+  UNKNOWN_SANDBOX_AGENT_NAME,
+} from "./sandbox-agent/naming";
 
-// Names that collide with CLI command namespaces. A sandbox named 'status'
-// makes 'nemoclaw status connect' route to the global status command
-// instead of the sandbox, and a sandbox named 'sandbox' collides with the
-// oclif-native `nemoclaw sandbox ...` command namespace. Reject these wherever
-// a sandbox name enters the system (interactive prompt, --name flag,
-// NEMOCLAW_SANDBOX_NAME).
-export const RESERVED_SANDBOX_NAMES = new Set([
-  "onboard",
-  "list",
-  "setup",
-  "setup-spark",
-  "start",
-  "stop",
-  "status",
-  "debug",
-  "uninstall",
-  "update",
-  "credentials",
-  "help",
-  "sandbox",
-]);
-
-export const UNKNOWN_SANDBOX_AGENT_NAME = "unknown";
+export {
+  formatSandboxAgentName,
+  getRequestedSandboxAgentName,
+  normalizeSandboxAgentName,
+  RESERVED_SANDBOX_NAMES,
+  UNKNOWN_SANDBOX_AGENT_NAME,
+} from "./sandbox-agent/naming";
 const SANDBOX_AGENT_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
-export function normalizeSandboxAgentName(agentName: string | null | undefined): string {
-  const trimmed = typeof agentName === "string" ? agentName.trim() : "";
-  return trimmed && trimmed !== "openclaw" ? trimmed : "openclaw";
-}
-
-export function getRequestedSandboxAgentName(agent: AgentDefinition | null | undefined): string {
-  return normalizeSandboxAgentName(agent?.name);
-}
-
-export function formatSandboxAgentName(agentName: string | null | undefined): string {
-  const normalized = normalizeSandboxAgentName(agentName);
-  if (normalized === "openclaw") return "OpenClaw";
-  if (normalized === "hermes") return "Hermes";
-  if (normalized === "langchain-deepagents-code") return "LangChain Deep Agents Code";
-  return normalized;
+export function getEffectiveSandboxAgent(
+  agent: AgentDefinition | null | undefined,
+): AgentDefinition {
+  return agent || loadAgent("openclaw");
 }
 
 export function getDefaultSandboxNameForAgent(agent: AgentDefinition | null | undefined): string {
@@ -75,12 +53,6 @@ export function getSandboxPromptDefault(agent: AgentDefinition | null | undefine
   } catch {
     return agentDefault;
   }
-}
-
-export function getEffectiveSandboxAgent(
-  agent: AgentDefinition | null | undefined,
-): AgentDefinition {
-  return agent || loadAgent("openclaw");
 }
 
 export function getAgentInferenceProviderOptions(
@@ -115,15 +87,8 @@ export function getSandboxAgentRegistryFields(
   return {
     agent: agentName === "openclaw" ? null : agentName,
     agentVersion: agentVersionKnown ? effectiveAgent.expectedVersion || null : null,
-    // Stamp the NemoClaw build that produced this image, but ONLY for
-    // NemoClaw-managed images. `agentVersionKnown` is `!fromDockerfile` at the
-    // onboard call sites, so it doubles as "this is a managed image."
-    // Custom-image sandboxes (`--from`) are not defined by NemoClaw's build and
-    // are intentionally left without a fingerprint, so `upgrade-sandboxes` never
-    // auto-rebuilds them onto the default image. The reuse path
-    // (updateReusedSandboxMetadata) picks only `.agent` from these fields, so a
-    // reused (un-rebuilt) sandbox keeps its original fingerprint rather than
-    // being silently re-stamped as current. (#5026)
+    // Custom-image sandboxes are not defined by NemoClaw's build. The caller
+    // passes false for those paths so upgrades never treat them as managed.
     nemoclawVersion: agentVersionKnown ? getNemoclawBuildFingerprint() : null,
   };
 }

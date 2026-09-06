@@ -23,7 +23,15 @@ const configAdapter: HarnessConfigAdapterModule = {
   describeInferenceConfig(request) {
     requireTarget(request.target);
     return {
-      kind: "immutable",
+      kind: "unsupported",
+      reason: "The sandbox image generates the Pi model catalog. Re-onboard to change it.",
+    };
+  },
+
+  prepareInferenceConfig(request) {
+    requireTarget(request.target);
+    return {
+      kind: "unsupported",
       reason: "The sandbox image generates the Pi model catalog. Re-onboard to change it.",
     };
   },

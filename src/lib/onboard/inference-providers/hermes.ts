@@ -7,6 +7,7 @@
 import { rewriteConfigUrlsWithDnsPinning } from "../../sandbox/config";
 import type { HermesAuthMethod } from "../hermes-auth";
 import type { HermesDeps, SetupInferenceResult } from "./types";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 
 export async function setupHermesProviderInference(
   args: {
@@ -17,6 +18,7 @@ export async function setupHermesProviderInference(
     credentialEnv: string | null;
     hermesAuthMethod: HermesAuthMethod | string | null;
     hermesToolGateways: string[];
+    harnessPackage?: HarnessPackageIdentity | null;
   },
   deps: HermesDeps,
 ): Promise<SetupInferenceResult> {
@@ -28,6 +30,7 @@ export async function setupHermesProviderInference(
     credentialEnv,
     hermesAuthMethod,
     hermesToolGateways,
+    harnessPackage = null,
   } = args;
   // A null/absent endpointUrl is intentionally accepted: the Hermes
   // managed/OAuth path supplies the endpoint later (using the default managed
@@ -80,7 +83,7 @@ export async function setupHermesProviderInference(
     error,
     log,
     hermesProviderAuth,
-    getHermesToolGatewayBroker,
+    describeHarnessProviderBroker,
     providerExistsInGateway,
     normalizeHermesAuthMethod,
     resolveHermesNousApiKey,
@@ -115,9 +118,9 @@ export async function setupHermesProviderInference(
   const toolGatewayProviderRegistered =
     hermesToolGateways.length === 0
       ? true
-      : providerExistsInGateway(
-          getHermesToolGatewayBroker().getHermesToolGatewayProviderName(targetSandbox),
-        );
+      : harnessPackage
+        ? providerExistsInGateway(describeHarnessProviderBroker(harnessPackage, targetSandbox))
+        : providerExistsInGateway(`${targetSandbox}-hermes-tool-gateway`);
   const hasFreshNousApiKey =
     resolvedHermesAuthMethod === HERMES_AUTH_METHOD_API_KEY && !!resolveHermesNousApiKey();
   const shouldPrepareHermesCredentials =
@@ -140,6 +143,7 @@ export async function setupHermesProviderInference(
               runOpenshell,
               baseUrl: resolvedEndpointUrl || undefined,
               toolGatewayPresets: hermesToolGateways,
+              ...(harnessPackage ? { harnessPackage } : {}),
             });
     } catch (err) {
       error(

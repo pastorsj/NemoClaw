@@ -19,6 +19,7 @@ import {
   normalizeHostLocalOllamaModelRef,
   serializeHostLocalInferenceReceipt,
 } from "./host-local-inference";
+import { assertHermesPortableInferenceStartupRequest } from "./hermes-portable-inference-qualification";
 
 export const HOST_LOCAL_INFERENCE_APPLICATION_BASE_URL = "https://inference.local/v1" as const;
 
@@ -492,15 +493,16 @@ export function prepareHermesPortablePublishedHostLocalInferenceStartup(
   operation: HostLocalInferenceOperation,
   request: HostLocalInferenceStartupRequest,
 ): HostLocalInferenceStartupRoute {
-  if (
-    request.application !== "hermes" ||
-    request.service !== "ollama" ||
-    isHostOllamaRequest(request) ||
-    request.resumeReceipt === undefined ||
-    request.recover === true
-  ) {
-    throw new Error("Hermes Portable published inference recovery authority is invalid.");
-  }
+  const hasResumeReceipt =
+    "resumeReceipt" in request && request.resumeReceipt !== undefined;
+  const recover = "recover" in request && request.recover === true;
+  assertHermesPortableInferenceStartupRequest({
+    application: request.application,
+    service: request.service,
+    hostOllama: isHostOllamaRequest(request),
+    hasResumeReceipt,
+    recover,
+  });
   return prepareHostLocalInferenceStartupWithAuthority(operation, request, "published-recovery");
 }
 

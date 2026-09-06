@@ -10,6 +10,7 @@ import {
 import type { PreservedEnvFile } from "../state/preserved-env";
 import { DEFAULT_TOOL_DISCLOSURE, type ToolDisclosure } from "../tool-disclosure";
 import type { DcodeAutoApprovalMode } from "./dcode-auto-approval";
+import { legacyManagedDockerfilePatchOptions } from "./package/legacy-onboard";
 import type { SelectedDockerGpuRoute } from "./docker-gpu-route";
 import type { SandboxGpuConfig } from "./sandbox-gpu-mode";
 
@@ -19,8 +20,6 @@ type ResolvedSandboxBaseImage = NonNullable<ReturnType<PullAndResolveBaseImageDi
 type EnforceDockerGpuPatchPreserveNetwork =
   typeof import("./docker-gpu-local-inference").enforceDockerGpuPatchPreserveNetwork;
 type PatchStagedDockerfile = typeof import("./dockerfile-patch").patchStagedDockerfile;
-
-const STABLE_MANAGED_BUILD_ID_AGENTS = new Set(["openclaw", "hermes"]);
 
 export type SandboxDockerfilePatchDeps = {
   pullAndResolveBaseImageDigest?: PullAndResolveBaseImageDigest;
@@ -203,12 +202,9 @@ export async function prepareSandboxDockerfilePatch({
   // checked in here and known not to consume it. Custom --from Dockerfiles
   // and other managed agents retain the historical per-run rewrite.
   const managedAgentName = agent?.name ?? "openclaw";
-  const managedOpenClawWslExposure =
-    !fromDockerfile && managedAgentName === "openclaw" && (deps.isWsl ?? wslHostDetected)();
-  const buildIdPolicy =
-    !fromDockerfile && STABLE_MANAGED_BUILD_ID_AGENTS.has(managedAgentName)
-      ? "preserve"
-      : "rewrite";
+  const legacyManagedPatch = fromDockerfile
+    ? { buildIdPolicy: "rewrite" as const }
+    : legacyManagedDockerfilePatchOptions(managedAgentName, (deps.isWsl ?? wslHostDetected)());
   const patched = (deps.patchStagedDockerfile ?? patchStagedDockerfile)(
     stagedDockerfile,
     model,
@@ -225,12 +221,12 @@ export async function prepareSandboxDockerfilePatch({
       const metadata = fromDockerfile ? null : (resolved?.metadata ?? preResolvedBaseImageMetadata);
       return {
         agentName: managedAgentName,
-        buildIdPolicy,
+        buildIdPolicy: legacyManagedPatch.buildIdPolicy,
         toolDisclosure,
         ...(rebuildPreservedEnv ? { rebuildPreservedEnv } : {}),
         ...(!fromDockerfile ? { trustedManagedDockerfile: true } : {}),
-        ...(!fromDockerfile && managedAgentName === "openclaw"
-          ? { wslDashboardExposure: managedOpenClawWslExposure }
+        ...(!fromDockerfile && legacyManagedPatch.wslDashboardExposure !== undefined
+          ? { wslDashboardExposure: legacyManagedPatch.wslDashboardExposure }
           : {}),
         ...(endpointUrl ? { upstreamEndpointUrl: endpointUrl } : {}),
         ...(compatibleEndpointReasoning ? { compatibleEndpointReasoning } : {}),

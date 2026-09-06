@@ -14,6 +14,7 @@ import type {
   ManagedStartupPackageProfile,
   ManagedStartupProfile,
 } from "./managed-startup/profile";
+import { managedStartupSettingsFromProfile } from "./managed-startup/package-profile";
 import {
   fingerprintManagedStartupDurableProfile,
   fingerprintManagedStartupProfile,
@@ -92,6 +93,7 @@ describe("managed startup shared-state transaction", () => {
   }
 
   function futurePackageProfile(): ManagedStartupPackageProfile {
+    const piSettings = managedStartupSettingsFromProfile(managedStartupE2eProfile("pi"));
     return {
       schemaVersion: 1,
       profileKind: "package",
@@ -101,6 +103,11 @@ describe("managed startup shared-state transaction", () => {
         id: "future-harness",
         packageVersion: "2.3.4",
         contentDigest: "a".repeat(64),
+      },
+      desiredState: {
+        ...piSettings,
+        configuration: { agent: "future-harness" },
+        dashboard: { agent: "future-harness", mode: "disabled" },
       },
       packageConfig: { model: "nvidia/future-model" },
       corporateCa: { bundleSha256: null },

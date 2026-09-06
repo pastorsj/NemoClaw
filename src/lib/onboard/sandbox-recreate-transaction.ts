@@ -4,10 +4,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
-import {
-  harnessPackageIdentitiesEqual,
-  type HarnessPackageIdentity,
-} from "../agent-runtime/package/identity";
+import { harnessPackageIdentitiesEqual } from "../agent-runtime/package/identity-validation";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import { isDecisionSelected } from "../state/onboard-checkpoint-decision";
 import { deriveCheckpointFromSession } from "../state/onboard-checkpoint-migrate";
 import type {

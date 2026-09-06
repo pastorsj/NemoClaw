@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Local proof-of-concept package. This manifest is not a supported product claim.
 name: deepseek-harness
+provider_broker:
+  support: disabled
+  reason: This package does not require a host provider broker.
 display_name: "DeepSeek Harness (local POC)"
 description: "Headless DeepSeek Harness SDK runtime behind the typed NeMo Fabric boundary"
 onboarding:
@@ -34,6 +37,17 @@ config:
   config_file: fabric.json
   mutable_access: private
   format: json
+state_lifecycle:
+  backup_quiescence:
+    kind: not-required
+  snapshot_restore: []
+  rebuild:
+    image_plugin_provenance: not-required
+    scheduled_work:
+      support: disabled
+      reason: DeepSeek Harness does not run scheduled work.
+    post_restore:
+      kind: not-required
 state_dirs:
   - path: sessions
   - path: logs
@@ -42,6 +56,9 @@ state_dirs:
     backup: false
 device_pairing: false
 inference:
+  config_update:
+    support: unsupported
+    reason: The sandbox image owns its Fabric route. Re-onboard to change it.
   provider_type: openai_compatible
   default_model: nvidia/nemotron-3-super-120b-a12b
   base_url_config_key: "models.default.base_url"

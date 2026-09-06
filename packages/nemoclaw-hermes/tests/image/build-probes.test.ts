@@ -8,7 +8,6 @@ import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { dockerfileInstructions } from "../../../../src/lib/onboard/dockerfile-tool-disclosure-contract";
 import { readDockerfileInstructions } from "../helpers/dockerfile";
 
 const HERMES_PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
@@ -238,6 +237,7 @@ describe("Hermes image build probes", () => {
     expect(absenceCheckIndex).toBeGreaterThan(removalIndex);
   });
 
+  // source-shape-contract: security -- Verification and application must share one immutable image layer so an unverified patcher cannot persist in an earlier layer
   it.each([
     {
       digest: "$NEMOCLAW_HERMES_PROFILE_POLICY_PATCHER_SHA256",
@@ -252,7 +252,7 @@ describe("Hermes image build probes", () => {
       name: "neutral platform",
     },
   ])("keeps $name patch verification and application in one layer", ({ digest, invocation }) => {
-    const verificationLayer = dockerfileInstructions(dockerfile).find(
+    const verificationLayer = readDockerfileInstructions(dockerfile).find(
       ({ text }) => text.startsWith("RUN ") && text.includes(digest),
     );
 
@@ -260,8 +260,9 @@ describe("Hermes image build probes", () => {
     expect(verificationLayer?.text).toContain(invocation);
   });
 
+  // source-shape-contract: compatibility -- The prerequisite and retirement probe must remain grouped within the final image layer budget
   it("keeps wrapper prerequisites and compatibility validation in one layer", () => {
-    const runInstructions = dockerfileInstructions(dockerfile).filter(({ text }) =>
+    const runInstructions = readDockerfileInstructions(dockerfile).filter(({ text }) =>
       text.startsWith("RUN "),
     );
     const prerequisiteLayer = runInstructions.find(({ text }) =>
@@ -478,8 +479,9 @@ assert module._session_state_journal_mode(SimpleNamespace(_conn=Connection())) =
     expect(dockerfile).toContain("check_absent /sandbox/.hermes/runtime/state.db");
   });
 
+  // source-shape-contract: compatibility -- Exact image instructions must not retain removed patcher paths that no longer exist in the package build context
   it("does not normalize modes on removed Hermes compatibility patchers", () => {
-    const modeInstruction = dockerfileInstructions(dockerfile).find(({ text }) =>
+    const modeInstruction = readDockerfileInstructions(dockerfile).find(({ text }) =>
       text.includes("chmod 755 /usr/local/bin/nemoclaw-start "),
     );
 

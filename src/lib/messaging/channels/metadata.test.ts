@@ -123,6 +123,53 @@ describe("built-in messaging channel metadata", () => {
     ).toEqual([]);
   });
 
+  it("projects runtime aliases for a composed unknown package id", () => {
+    const packageId = "future-harness";
+    const manifest: ChannelManifest = {
+      schemaVersion: 1,
+      id: "future-channel",
+      displayName: "Future Channel",
+      supportedAgents: [packageId],
+      auth: { mode: "none" },
+      inputs: [],
+      credentials: [
+        {
+          id: "futureToken",
+          sourceInput: "token",
+          providerName: "{sandboxName}-future-bridge",
+          providerEnvKey: "FUTURE_SOURCE",
+          placeholder: "openshell:resolve:env:FUTURE_SOURCE",
+        },
+      ],
+      render: [],
+      runtime: {
+        [packageId]: {
+          envAliases: [
+            {
+              envKey: "FUTURE_SOURCE",
+              targetEnvKey: "FUTURE_TARGET",
+              match: "^openshell:resolve:env:FUTURE_SOURCE$",
+              value: "openshell:resolve:env:FUTURE_TARGET",
+            },
+          ],
+        },
+      },
+      hooks: [],
+    };
+
+    expect(
+      listMessagingCredentialEnvAssignments({ manifests: [manifest], agent: packageId }),
+    ).toEqual([
+      {
+        channelId: "future-channel",
+        agent: packageId,
+        sourceEnvKey: "FUTURE_SOURCE",
+        targetEnvKey: "FUTURE_TARGET",
+        placeholder: "openshell:resolve:env:FUTURE_SOURCE",
+      },
+    ]);
+  });
+
   it("resolves config env keys from manifests and compatibility aliases from metadata", () => {
     expect(listMessagingConfigEnvKeys()).toEqual([
       "TELEGRAM_ALLOWED_IDS",
@@ -253,28 +300,28 @@ describe("built-in messaging channel metadata", () => {
         channelId: "teams",
         packageId: "hermesTeamsAppsPackage",
         agents: ["hermes"],
-        manager: "hermes-uv-pip",
+        manager: "python-package",
         spec: "microsoft-teams-apps==2.0.13.4",
       },
       {
         channelId: "googlechat",
         packageId: "hermesGooglePubsubPackage",
         agents: ["hermes"],
-        manager: "hermes-uv-pip",
+        manager: "python-package",
         spec: "google-cloud-pubsub==2.39.0",
       },
       {
         channelId: "googlechat",
         packageId: "hermesGoogleApiClientPackage",
         agents: ["hermes"],
-        manager: "hermes-uv-pip",
+        manager: "python-package",
         spec: "google-api-python-client==2.194.0",
       },
       {
         channelId: "googlechat",
         packageId: "hermesGoogleAuthPackage",
         agents: ["hermes"],
-        manager: "hermes-uv-pip",
+        manager: "python-package",
         spec: "google-auth==2.55.1",
       },
     ]);
@@ -287,7 +334,7 @@ describe("built-in messaging channel metadata", () => {
           .filter(
             (agentPackage) =>
               agentPackage.agent === "openclaw" &&
-              agentPackage.manager === "openclaw-plugin" &&
+              agentPackage.manager === "node-package" &&
               agentPackage.spec.startsWith("npm:"),
           )
           .map((agentPackage) => ({
@@ -417,7 +464,7 @@ describe("built-in messaging channel metadata", () => {
           {
             id: "alphaPackage",
             agent: "openclaw",
-            manager: "openclaw-plugin",
+            manager: "node-package",
             spec: "npm:@openclaw/alpha@{{openclaw.version}}",
           },
         ],

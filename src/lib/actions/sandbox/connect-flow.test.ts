@@ -333,6 +333,39 @@ describe("connectSandbox flow", () => {
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
+  it("opens a shell-only connection for a commandless external harness package", async () => {
+    const harness = createConnectHarness({
+      agentName: "future-commandless",
+      registryEntry: {
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: "future-commandless",
+          packageVersion: "1.0.0",
+          contentDigest: "a".repeat(64),
+        },
+      },
+      sessionAgent: {
+        name: "future-commandless",
+        displayName: "Future Commandless",
+        runtime: { kind: "gateway" },
+      },
+    });
+
+    await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(0)");
+
+    const output = harness.logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain(
+      "This harness package does not declare an interactive command; this connection provides shell access only.",
+    );
+    expect(output).not.toContain("start chatting");
+    expect(harness.runSandboxExecChildSpy).toHaveBeenCalledWith(
+      "openshell",
+      ["sandbox", "connect", "alpha"],
+      expect.objectContaining({ stdin: true }),
+    );
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
   it("runs the DCode route probe through its managed runtime boundary (#6191)", async () => {
     const harness = createConnectHarness({
       agentName: "langchain-deepagents-code",
@@ -1203,7 +1236,9 @@ describe("connectSandbox flow", () => {
     vi.stubEnv("HTTPS_PROXY", "https://user:token@proxy.example");
     vi.stubEnv("OPENSHELL_GATEWAY", "ambient");
     const sandboxVersion = requireDist("../../src/lib/sandbox/version.js");
-    const broker = requireDist("../../src/lib/hermes-tool-gateway-broker.js");
+    const broker = requireDist(
+      "../../src/lib/actions/sandbox/legacy-hermes-tool-gateway-broker.js",
+    );
     const brokerSpy = vi
       .spyOn(broker, "ensureHermesToolGatewayBrokerForSandboxEntry")
       .mockImplementation(() => undefined);

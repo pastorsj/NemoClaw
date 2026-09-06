@@ -29,6 +29,7 @@ import {
   recordRebuildRecoveryBackup,
   type RebuildPackageAuthority,
 } from "./rebuild-recreate-journal";
+import { legacyRebuildRequiresImagePluginProvenance } from "./rebuild/legacy-state";
 
 export { clearRebuildPolicyHandoff, writeRebuildPolicyHandoff } from "../../state/sandbox";
 
@@ -122,21 +123,22 @@ export function runRebuildBackupPhase(
   input: RebuildBackupPhaseInput,
   backupStateForRebuild: typeof backupSandboxStateForRebuild = backupSandboxStateForRebuild,
 ): RebuildBackupPhaseResult | null {
-  const customOpenClaw =
-    Boolean(input.sandboxEntry.fromDockerfile) &&
-    (!input.sandboxEntry.agent || input.sandboxEntry.agent === "openclaw");
+  const customImageRequiresPluginProvenance = input.agentAuthority.harnessPackage
+    ? Boolean(input.sandboxEntry.fromDockerfile) &&
+      input.agentAuthority.definition.stateLifecycle.rebuild.image_plugin_provenance === "required"
+    : legacyRebuildRequiresImagePluginProvenance(input.sandboxEntry);
   const preparedRecoveryManifest = input.preparedRecoveryManifest;
   const hasPreparedRecovery = preparedRecoveryManifest !== null;
   const preparedRecoveryIsAuthoritative =
     preparedRecoveryManifest !== null &&
     hasAuthoritativeOpenClawImagePluginProvenance(preparedRecoveryManifest);
-  const restoresCustomOpenClawState =
-    customOpenClaw && (!input.staleRecovery || hasPreparedRecovery);
+  const restoresCustomImagePluginState =
+    customImageRequiresPluginProvenance && (!input.staleRecovery || hasPreparedRecovery);
   if (
     (hasPreparedRecovery &&
       preparedRecoveryManifest?.reconcileOpenClawImagePluginProvenance === true &&
       !preparedRecoveryIsAuthoritative) ||
-    (restoresCustomOpenClawState &&
+    (restoresCustomImagePluginState &&
       !preparedRecoveryIsAuthoritative &&
       (hasPreparedRecovery ||
         !hasCompleteOpenClawImagePluginProvenance(
@@ -152,11 +154,7 @@ export function runRebuildBackupPhase(
   const capturedPolicy =
     input.staleRecovery || preparedRetainedPolicy
       ? null
-      : captureRebuildPolicyDocument(
-          input.sandboxName,
-          input.gatewayName,
-          input.runtimeSelection,
-        );
+      : captureRebuildPolicyDocument(input.sandboxName, input.gatewayName, input.runtimeSelection);
   let backupManifest =
     preparedRecoveryManifest ??
     backupStateForRebuild(
@@ -171,7 +169,7 @@ export function runRebuildBackupPhase(
   if (
     backupManifest &&
     (backupManifest.reconcileOpenClawImagePluginProvenance === true ||
-      restoresCustomOpenClawState) &&
+      restoresCustomImagePluginState) &&
     !hasAuthoritativeOpenClawImagePluginProvenance(backupManifest)
   ) {
     return bailForUnsafeOpenClawPluginProvenance(input);

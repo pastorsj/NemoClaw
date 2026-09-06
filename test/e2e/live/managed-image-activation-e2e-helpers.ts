@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { shellQuote } from "../../../src/lib/core/shell-quote.ts";
-import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
+import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-target.mts";
 import {
   type ManagedImageContractCatalog,
   type ManagedImageContractV1,

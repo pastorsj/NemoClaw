@@ -443,7 +443,6 @@ function normalizeNoProxyList(raw: string | null): string[] {
 }
 
 function resolveHostProxy(
-  _agent: ManagedStartupAgent,
   environment: NodeJS.ProcessEnv,
 ): Pick<ManagedStartupProfile["proxy"], "hostHttpUrl" | "hostHttpsUrl" | "hostNoProxy"> {
   const hostHttpUrl = resolveAliasedEnvironmentValue(
@@ -487,7 +486,23 @@ function resolveHostProxy(
   };
 }
 
-function resolveCorporateCaMaterial(corporateCa: ResolvedCorporateCa | null | undefined): {
+/** Resolve common managed and credential-free host proxy intent without a harness lookup. */
+export function resolveManagedStartupProxy(
+  environment: NodeJS.ProcessEnv,
+): ManagedStartupProfile["proxy"] {
+  const managedHost =
+    presentEnvironmentValue(environment, "NEMOCLAW_PROXY_HOST") ?? DEFAULT_MANAGED_PROXY_ROUTE.host;
+  const managedPort = parsePort(
+    environment,
+    "NEMOCLAW_PROXY_PORT",
+    DEFAULT_MANAGED_PROXY_ROUTE.port,
+  );
+  return { managedHost, managedPort, ...resolveHostProxy(environment) };
+}
+
+export function resolveManagedStartupCorporateCaMaterial(
+  corporateCa: ResolvedCorporateCa | null | undefined,
+): {
   readonly bundleSha256: string | null;
   readonly corporateCaB64?: string;
 } {
@@ -871,17 +886,9 @@ function buildCandidate(input: ManagedStartupProfileBuilderInput): {
   assertNoWrongAgentEnvironment(input.agent, input.environment);
 
   const inference = input.inference;
-  const hostProxy = resolveHostProxy(input.agent, input.environment);
-  const managedHost =
-    presentEnvironmentValue(input.environment, "NEMOCLAW_PROXY_HOST") ??
-    DEFAULT_MANAGED_PROXY_ROUTE.host;
-  const managedPort = parsePort(
-    input.environment,
-    "NEMOCLAW_PROXY_PORT",
-    DEFAULT_MANAGED_PROXY_ROUTE.port,
-  );
+  const proxy = resolveManagedStartupProxy(input.environment);
   const messagingPlan = normalizeMessagingPlan(input.agent, input.messagingPlan);
-  const corporateCa = resolveCorporateCaMaterial(input.corporateCa);
+  const corporateCa = resolveManagedStartupCorporateCaMaterial(input.corporateCa);
   const webSearch = normalizeWebSearch(input.agent, input.webSearch);
 
   let agentConfig: ManagedStartupProfile["agentConfig"];
@@ -995,11 +1002,7 @@ function buildCandidate(input: ManagedStartupProfileBuilderInput): {
           : null,
       inputModalities: input.agent === "openclaw" ? parseInputModalities(input.environment) : null,
     },
-    proxy: {
-      managedHost,
-      managedPort,
-      ...hostProxy,
-    },
+    proxy,
     dashboard: input.dashboard,
     tools: {
       disclosure: input.toolDisclosure,

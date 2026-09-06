@@ -4,11 +4,11 @@
 import type { OpenShellRuntimeSelection } from "../../adapters/openshell/runtime-selection";
 import { G, R, YW } from "../../cli/terminal-style";
 import type { AgentDefinition } from "../../agent-runtime/manifest-types";
-import * as sandboxConfig from "../../sandbox/config";
 import { load as loadRegistry } from "../../state/registry/persistence";
 import type { RebuildBackupManifest } from "./rebuild-backup-phase";
 import type { RebuildLog } from "./rebuild-credential-preflight";
 import * as snapshotRestore from "./snapshot/restore-authority";
+import { reconcileLegacyDashboardProfile } from "./rebuild/legacy-dashboard";
 
 export interface RebuildRestorePhaseInput {
   sandboxName: string;
@@ -16,6 +16,8 @@ export interface RebuildRestorePhaseInput {
   targetImageIsCustom: boolean;
   backupManifest: RebuildBackupManifest;
   reconcileManagedDcodeObservability?: boolean;
+  /** Explicit no-receipt compatibility; package receipts use post_restore.command. */
+  reconcileLegacyDashboard?: boolean;
   runtimeSelection?: OpenShellRuntimeSelection;
   log: RebuildLog;
 }
@@ -56,17 +58,13 @@ export function runRebuildRestorePhase(input: RebuildRestorePhaseInput): Rebuild
     );
     restoreSucceeded = restore.success;
     if (
-      agentDefinition.name === "hermes" &&
+      input.reconcileLegacyDashboard === true &&
       restore.restoredDirs.some(
         (directory) => directory === "dashboard-home" || directory === "profiles",
       )
     ) {
-      const target = sandboxConfig.resolveAgentConfig(sandboxName, agentDefinition);
-      const seeded =
-        target.agentName === "hermes"
-          ? sandboxConfig.restoreHermesDashboardConfig(sandboxName, target)
-          : "failed";
-      log(`Hermes dashboard state after restore: ${seeded}`);
+      const seeded = reconcileLegacyDashboardProfile(sandboxName, agentDefinition);
+      log(`Legacy dashboard state after restore: ${seeded}`);
       if (seeded === "failed") restoreSucceeded = false;
     }
     if (!restore.success) {

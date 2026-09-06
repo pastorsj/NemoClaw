@@ -76,7 +76,7 @@ const { selectOnboardAgent } = require(${onboardPath});
     expect(result.stdout).toContain("OpenClaw");
     expect(result.stdout).toContain("Hermes");
     const lastLine = result.stdout.trim().split("\n").at(-1) || "{}";
-    expect(JSON.parse(lastLine)).toEqual({ agent: null });
+    expect(JSON.parse(lastLine)).toEqual({ agent: "openclaw" });
   });
 
   it("selects Hermes Agent when chosen from the interactive picker", () => {

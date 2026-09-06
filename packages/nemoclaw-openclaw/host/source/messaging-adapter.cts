@@ -19,7 +19,22 @@ const messagingAdapter: HarnessMessagingAdapterModule = {
     if (request.packageId !== PACKAGE_ID) {
       throw new Error("OpenClaw messaging request does not match this package");
     }
-    return { kind: "channels", packageId: PACKAGE_ID, channelIds: CHANNEL_IDS };
+    return {
+      kind: "channels",
+      packageId: PACKAGE_ID,
+      channelIds: CHANNEL_IDS,
+      profilePath: "messaging/profile.json",
+      build: {
+        configRoot: "~/.openclaw",
+        packageManagers: ["node-package"],
+        renderFinalizers: ["allow-rendered-plugins"],
+        postRenderRepair: {
+          command: ["openclaw", "doctor", "--fix", "--non-interactive"],
+        },
+        nodeArchiveRemediation: "package-helper",
+        credentialPolicyReconciliation: "teams-outlook-shared-login",
+      },
+    };
   },
 };
 

@@ -7,8 +7,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import type { BuildIdentity } from "../../core/version.js";
-import { getBuildIdentity } from "../../core/version.js";
+import { getBuildIdentity, type BuildIdentity } from "../../core/build-identity.js";
 import { assessHost } from "../../onboard/preflight.js";
 import { createHostReadinessReport } from "../../readiness/host.js";
 import { collectPlatformIdentity } from "../../readiness/platform-qualification.js";

@@ -40,7 +40,7 @@ describe("messaging build applier inactive channels", () => {
             outputId: "openclawPluginPackage",
             required: true,
             value: {
-              manager: "openclaw-plugin",
+              manager: "node-package",
               spec: "npm:@openclaw/slack@{{openclaw.version}}",
               pin: true,
             },

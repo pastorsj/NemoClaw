@@ -26,6 +26,7 @@ import type {
   SandboxMessagingInputReference,
   SandboxMessagingPlan,
 } from "../manifest";
+import { isDeepStrictEqual } from "node:util";
 import { planAgentRender } from "./engines/agent-render-engine";
 import { planBuildSteps } from "./engines/build-step-engine";
 import { planCredentialBindings } from "./engines/credential-binding-engine";
@@ -99,6 +100,7 @@ export class ManifestCompiler {
     const runtimeSetup = planRuntimeSetup(manifests, context.agent, channels);
     const stateUpdates = manifests.flatMap((manifest) => planStateUpdates(manifest));
     const healthChecks = activeManifests.flatMap((manifest) => planHealthChecks(manifest));
+    const packageBuild = resolvePackageBuildProfile(manifests);
 
     return {
       schemaVersion: 1,
@@ -114,6 +116,7 @@ export class ManifestCompiler {
       runtimeSetup,
       stateUpdates,
       healthChecks,
+      ...(packageBuild ? { packageBuild } : {}),
     };
   }
 
@@ -181,6 +184,20 @@ export class ManifestCompiler {
         : [],
     };
   }
+}
+
+function resolvePackageBuildProfile(manifests: readonly ChannelManifest[]) {
+  const profiles = manifests.flatMap((manifest) =>
+    manifest.packageBuild ? [manifest.packageBuild] : [],
+  );
+  if (profiles.length === 0) return undefined;
+  if (
+    profiles.length !== manifests.length ||
+    profiles.some((profile) => !isDeepStrictEqual(profile, profiles[0]))
+  ) {
+    throw new Error("Messaging channel manifests must share one receipt-backed build profile");
+  }
+  return profiles[0];
 }
 
 function ensureCommonCompilerHooks(hooks: MessagingHookRegistry): MessagingHookRegistry {

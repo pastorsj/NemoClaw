@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WebSearchConfig } from "../inference/web-search";
+import type { HarnessSandboxCreateDeclaration } from "../agent-runtime/manifest-types";
+import { sandboxCreateDriverMounts } from "../agent-runtime/sandbox-create";
 import type { DockerGpuRoutePlan } from "./docker-gpu-route";
 import type { NamedMessagingChannel } from "./messaging-prep";
 import {
@@ -58,7 +60,7 @@ export interface SandboxCreateIntentResolverDeps<Agent, ResourceProfile> {
 }
 
 export function createSandboxCreateIntentResolver<
-  Agent extends { name?: string | null } | null,
+  Agent extends { name?: string | null; sandbox_create?: HarnessSandboxCreateDeclaration } | null,
   ResourceProfile,
 >(deps: SandboxCreateIntentResolverDeps<Agent, ResourceProfile>) {
   function filterEnabledChannels(enabledChannels: readonly string[] | null, agent: Agent) {
@@ -77,8 +79,11 @@ export function createSandboxCreateIntentResolver<
     if (stagedPlan?.sandboxName === input.sandboxName) {
       return filterEnabledChannels(getActiveChannelsFromPlan(stagedPlan), input.agent) ?? [];
     }
-    const agentName = input.agent?.name?.trim().toLowerCase();
-    return agentName && agentName !== "openclaw" ? null : [];
+    const supportedChannels = filterEnabledChannels(
+      deps.channels.map((channel) => channel.name),
+      input.agent,
+    );
+    return supportedChannels && supportedChannels.length > 0 ? [] : null;
   }
 
   async function prepareMessagingCapabilities(
@@ -162,6 +167,7 @@ export function createSandboxCreateIntentResolver<
       gpuCreateArgs: buildSandboxGpuCreateArgs(input.sandboxGpuConfig),
       resourceCreateArgs,
       hostMounts: input.hostMounts,
+      sandboxDriverMounts: sandboxCreateDriverMounts(input.agent),
       gpuRoutePlan,
       sandboxGpuLogMessage,
       extraPlaceholderKeys: messaging.extraPlaceholderKeys,

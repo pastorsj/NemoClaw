@@ -29,10 +29,12 @@ type RegisteredAgentSource =
   | undefined;
 
 export {
+  type AgentInteractiveCommandPlan,
   type AgentRecoveryScript,
   buildRecoveryScript,
   getTerminalCommand,
   isTerminalAgentRecoveryScript,
+  planAgentInteractiveCommand,
   TERMINAL_AGENT_RECOVERY_SCRIPT,
 } from "./gateway-restart-scripts";
 

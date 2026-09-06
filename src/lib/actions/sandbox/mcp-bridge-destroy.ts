@@ -26,12 +26,8 @@ import {
 } from "./mcp-bridge-provider";
 import { restoreExistingMcpBridgeRuntime } from "./mcp-bridge-restart";
 import { assertMcpAdapterTeardownRuntimeCapabilities } from "./mcp-bridge-runtime-capabilities";
-import {
-  bridgeState,
-  ensureSandboxGatewaySelected,
-  getSandboxOrThrow,
-  nowIso,
-} from "./mcp-bridge-state";
+import { bridgeState, getSandboxOrThrow, nowIso } from "./mcp-bridge-state";
+import { ensureSandboxGatewaySelected } from "./mcp-bridge/gateway-selection";
 import { validateSandboxName } from "./mcp-bridge-validation";
 
 export type { McpDestroyPreparation } from "./mcp-bridge-destroy-preflight";

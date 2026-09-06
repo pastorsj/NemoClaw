@@ -1,11 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  buildInstalledMcpInspectionCommand,
-} from "../../../src/lib/actions/sandbox/mcp-bridge/package-command";
+import { buildInstalledMcpInspectionCommand } from "../../../src/lib/actions/sandbox/mcp-bridge/package-command";
 import { buildMcpCredentialRevisionObservationCommand } from "../../../src/lib/actions/sandbox/mcp-bridge-provider";
 import type { McpAttachedCredentialRevision } from "../../../src/lib/actions/sandbox/mcp-bridge-provider-readiness";
+import type { AgentMcpAdapterIdentifier } from "../../../src/lib/agent/defs";
 import type { McpBridgeEntry } from "../../../src/lib/state/registry";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
@@ -292,7 +291,7 @@ export async function readConcurrentMcpStatusAndConfirmHermesRegistration(option
   redactionValues: string[];
   scenario: {
     artifactPrefix: string;
-    expectedAdapter: string;
+    expectedAdapter: AgentMcpAdapterIdentifier;
     mcpUrl: string;
     sandboxName: string;
   };

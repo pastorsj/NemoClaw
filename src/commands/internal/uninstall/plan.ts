@@ -5,12 +5,11 @@ import { Flags } from "@oclif/core";
 import { buildHostUninstallPlan } from "../../../lib/actions/uninstall/plan";
 import { CLI_DISPLAY_NAME, CLI_NAME } from "../../../lib/cli/branding";
 import { jsonFlag } from "../../../lib/cli/common-flags";
-import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
+import { NemoClawInternalCommand } from "../../../lib/cli/internal-command";
 import { GATEWAY_PORT } from "../../../lib/core/ports";
 import { resolveGatewayName } from "../../../lib/onboard/gateway-binding";
 
-export default class InternalUninstallPlanCommand extends NemoClawCommand {
-  static hidden = true;
+export default class InternalUninstallPlanCommand extends NemoClawInternalCommand {
   static strict = true;
   static summary = `Internal: build the ${CLI_DISPLAY_NAME} uninstall plan`;
   static description = "Build a deterministic uninstall plan without applying it.";

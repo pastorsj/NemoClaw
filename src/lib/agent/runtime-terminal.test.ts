@@ -9,6 +9,7 @@ import {
   buildRecoveryScript,
   getInteractiveAgentCommand,
   getTerminalCommand,
+  planAgentInteractiveCommand,
   TERMINAL_AGENT_RECOVERY_SCRIPT,
 } from "./runtime";
 
@@ -44,6 +45,30 @@ describe("terminal agent runtime helpers", () => {
 });
 
 describe("interactive agent command resolution", () => {
+  it("returns a finite unsupported plan when a package declares no chat command", () => {
+    const commandless = {
+      name: "future-commandless",
+      runtime: { kind: "gateway" },
+    } as unknown as AgentDefinition;
+
+    expect(planAgentInteractiveCommand(commandless)).toEqual({
+      kind: "unsupported",
+      reason: "runtime.interactive_command or runtime.headless_command is not declared",
+    });
+  });
+
+  it("uses a declared headless command when an interactive command is absent", () => {
+    const headlessOnly = {
+      name: "future-headless",
+      runtime: { kind: "terminal", headless_command: "future-headless --batch" },
+    } as unknown as AgentDefinition;
+
+    expect(planAgentInteractiveCommand(headlessOnly)).toEqual({
+      kind: "command",
+      command: "future-headless --batch",
+    });
+  });
+
   it("reads the manifest interactive command for a terminal agent", () => {
     expect(
       getInteractiveAgentCommand(

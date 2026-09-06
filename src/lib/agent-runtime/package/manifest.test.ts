@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { loadValidatedHarnessManifest } from "../manifest-readers";
 import {
   HARNESS_PACKAGE_MANIFEST_MAX_BYTES,
   HARNESS_PACKAGE_METADATA_FILE,
@@ -28,9 +29,46 @@ function validEnvelope(overrides: Record<string, unknown> = {}): Record<string, 
     displayName: "OpenClaw",
     packageVersion: "1.2.3",
     minimumNemoClawVersion: "0.0.113",
+    maximumNemoClawVersionExclusive: "0.0.121",
     manifest: "packages/nemoclaw-openclaw/manifest.yaml",
     ...overrides,
   };
+}
+
+function validManifest(
+  identity: readonly string[] = ["name: openclaw", "display_name: OpenClaw"],
+): string {
+  return [
+    ...identity,
+    "runtime:",
+    "  kind: gateway",
+    "config:",
+    "  dir: /sandbox/.openclaw",
+    "  config_file: openclaw.json",
+    "  format: json",
+    "inference:",
+    "  config_update:",
+    "    support: unsupported",
+    "    reason: This synthetic package has fixed inference configuration.",
+    "messaging:",
+    "  support: disabled",
+    "state_lifecycle:",
+    "  backup_quiescence:",
+    "    kind: not-required",
+    "  snapshot_restore: []",
+    "  rebuild:",
+    "    image_plugin_provenance: not-required",
+    "    scheduled_work:",
+    "      support: disabled",
+    "      reason: This package does not run scheduled work.",
+    "    post_restore:",
+    "      kind: not-required",
+    "",
+  ].join("\n");
+}
+
+function validManifestWith(additional: readonly string[]): string {
+  return `${validManifest().trimEnd()}\n${additional.join("\n")}\n`;
 }
 
 function writePackage(
@@ -52,7 +90,7 @@ function writePackage(
     path.join(root, HARNESS_PACKAGE_METADATA_FILE),
     options.metadata ?? `${JSON.stringify(envelope)}\n`,
   );
-  fs.writeFileSync(manifestPath, options.manifest ?? "name: openclaw\ndisplay_name: OpenClaw\n");
+  fs.writeFileSync(manifestPath, options.manifest ?? validManifest());
 }
 
 afterEach(() => {
@@ -62,6 +100,51 @@ afterEach(() => {
 });
 
 describe("parseHarnessPackageManifest", () => {
+  it("gives source packages and installed receipts the same validated manifest", () => {
+    const root = makeRoot();
+    writePackage(root);
+
+    const installed = parseHarnessPackageManifest(root);
+    const source = loadValidatedHarnessManifest(installed.manifestPath, installed.envelope.id);
+
+    expect(source).toEqual(installed.manifest);
+  });
+
+  it("rejects the same unknown field from source packages and installed receipts", () => {
+    const root = makeRoot();
+    writePackage(root, { manifest: validManifestWith(["native_hook: callback"]) });
+    const manifestPath = path.join(root, "packages/nemoclaw-openclaw/manifest.yaml");
+
+    const rejectionMessage = (load: () => unknown): string => {
+      try {
+        load();
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+      throw new Error("Malformed manifest unexpectedly passed validation");
+    };
+    const sourceMessage = rejectionMessage(() =>
+      loadValidatedHarnessManifest(manifestPath, "openclaw"),
+    );
+    const receiptMessage = rejectionMessage(() => parseHarnessPackageManifest(root));
+
+    expect(sourceMessage).toContain("Harness manifest field '<root>'");
+    expect(sourceMessage).toBe(receiptMessage);
+  });
+
+  it("does not admit repository-only legacy fields through either package path", () => {
+    const root = makeRoot();
+    writePackage(root, {
+      manifest: validManifestWith(["_legacy_paths:", "  dockerfile: agents/openclaw/Dockerfile"]),
+    });
+    const manifestPath = path.join(root, "packages/nemoclaw-openclaw/manifest.yaml");
+
+    expect(() => loadValidatedHarnessManifest(manifestPath, "openclaw")).toThrow(
+      "Harness manifest field '<root>'",
+    );
+    expect(() => parseHarnessPackageManifest(root)).toThrow("Harness manifest field '<root>'");
+  });
+
   it("returns the exact package envelope and manifest data without building an agent", () => {
     const root = makeRoot();
     writePackage(root, {
@@ -77,6 +160,7 @@ describe("parseHarnessPackageManifest", () => {
       displayName: "OpenClaw",
       packageVersion: "1.2.3-rc.1+build.9",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: "packages/nemoclaw-openclaw/manifest.yaml",
     });
     expect(result.manifest.name).toBe("openclaw");
@@ -86,6 +170,177 @@ describe("parseHarnessPackageManifest", () => {
     );
     expect(result).not.toHaveProperty("agentDir");
     expect(result).not.toHaveProperty("displayName");
+  });
+
+  it.each([
+    ["missing maximum", undefined],
+    ["malformed maximum", "0.0"],
+    ["maximum equal to minimum", "0.0.113"],
+    ["maximum below minimum", "0.0.112"],
+  ])("rejects %s", (_label, maximumNemoClawVersionExclusive) => {
+    const root = makeRoot();
+    const envelope = validEnvelope();
+    if (maximumNemoClawVersionExclusive === undefined) {
+      delete envelope.maximumNemoClawVersionExclusive;
+    } else {
+      envelope.maximumNemoClawVersionExclusive = maximumNemoClawVersionExclusive;
+    }
+    writePackage(root, { envelope });
+
+    expect(() => parseHarnessPackageManifest(root)).toThrow(
+      /metadata fields|maximumNemoClawVersionExclusive/u,
+    );
+  });
+
+  it.each([
+    {
+      name: "a terminal runtime without a command",
+      manifest: validManifest().replace("runtime:\n  kind: gateway", "runtime:\n  kind: terminal"),
+      field: "runtime",
+    },
+    {
+      name: "unsafe description text",
+      manifest: validManifestWith(["description: ' leading space'"]),
+      field: "description",
+    },
+    {
+      name: "an absolute configuration file",
+      manifest: validManifest().replace(
+        "  config_file: openclaw.json",
+        "  config_file: /sandbox/openclaw.json",
+      ),
+      field: "config.config_file",
+    },
+    {
+      name: "an incomplete mutable inference declaration",
+      manifest: validManifest().replace(
+        [
+          "    support: unsupported",
+          "    reason: This synthetic package has fixed inference configuration.",
+        ].join("\n"),
+        "    support: mutable",
+      ),
+      field: "inference.config_update",
+    },
+    {
+      name: "an MCP bridge without policy binaries",
+      manifest: validManifestWith(["mcp:", "  support: bridge", "  adapter: openclaw"]),
+      field: "mcp.policy_binaries",
+    },
+    {
+      name: "an empty messaging channel declaration",
+      manifest: validManifest().replace(
+        ["messaging:", "  support: disabled"].join("\n"),
+        ["messaging:", "  support: channels", "  channels: []"].join("\n"),
+      ),
+      field: "messaging.channels",
+    },
+    {
+      name: "an unsupported session operation",
+      manifest: validManifestWith(["sessions:", "  operations:", "    - launch"]),
+      field: "sessions.operations",
+    },
+    {
+      name: "a root managed-image identity",
+      manifest: validManifestWith([
+        "managed_image:",
+        "  repository: ghcr.io/example/openclaw",
+        "  architectures:",
+        "    - linux/amd64",
+        "  runtime_identity:",
+        "    uid: 0",
+        "    gid: 1000",
+        "    workdir: /sandbox",
+      ]),
+      field: "managed_image.runtime_identity.uid",
+    },
+    {
+      name: "an enum restore key without values",
+      manifest: validManifestWith([
+        "state_files:",
+        "  - path: config.json",
+        "    restore:",
+        "      merge: key-allowlist",
+        "      user_keys:",
+        "        - key: feature.mode",
+        "          type: enum",
+      ]),
+      field: "state_files[0].restore.user_keys[0].values",
+    },
+    {
+      name: "an agent timeout option outside value options",
+      manifest: validManifest().replace(
+        "runtime:\n  kind: gateway",
+        [
+          "runtime:",
+          "  kind: gateway",
+          "  agent_command:",
+          "    argv: [openclaw, agent]",
+          "    output_mode: bounded-text",
+          "    value_options: [--message]",
+          "    timeout_option: --timeout",
+        ].join("\n"),
+      ),
+      field: "runtime.agent_command.timeout_option",
+    },
+    {
+      name: "duplicate agent command arguments",
+      manifest: validManifest().replace(
+        "runtime:\n  kind: gateway",
+        [
+          "runtime:",
+          "  kind: gateway",
+          "  agent_command:",
+          "    argv: [openclaw, openclaw]",
+          "    output_mode: direct",
+        ].join("\n"),
+      ),
+      field: "runtime.agent_command.argv",
+    },
+    {
+      name: "a privileged forwarded port",
+      manifest: validManifestWith(["forward_ports: [80]"]),
+      field: "forward_ports[0]",
+    },
+  ])("rejects $name through the shared semantic contract", ({ manifest, field }) => {
+    const root = makeRoot();
+    writePackage(root, { manifest });
+
+    expect(() => parseHarnessPackageManifest(root)).toThrow(`Harness manifest field '${field}'`);
+  });
+
+  it.each([
+    {
+      name: "an unknown runtime field",
+      manifest: validManifest().replace(
+        "  kind: gateway",
+        "  kind: gateway\n  native_hook: callback",
+      ),
+      field: "runtime",
+    },
+    {
+      name: "an unknown config field",
+      manifest: validManifest().replace(
+        "  format: json",
+        "  format: json\n  native_writer: callback",
+      ),
+      field: "config",
+    },
+    {
+      name: "a health probe without its URL",
+      manifest: validManifestWith(["health_probe:", "  port: 8080", "  timeout_seconds: 30"]),
+      field: "health_probe.url",
+    },
+    {
+      name: "a package registry without its binary",
+      manifest: validManifestWith(["package_registry:", "  hosts:", "    - registry.example.test"]),
+      field: "package_registry.binary",
+    },
+  ])("rejects $name at the core package boundary", ({ manifest, field }) => {
+    const root = makeRoot();
+    writePackage(root, { manifest });
+
+    expect(() => parseHarnessPackageManifest(root)).toThrow(`Harness manifest field '${field}'`);
   });
 
   it.each([
@@ -266,7 +521,7 @@ describe("parseHarnessPackageManifest", () => {
 
   it("enforces the manifest byte boundary", () => {
     const acceptedRoot = makeRoot();
-    const manifestPrefix = "name: openclaw\n#";
+    const manifestPrefix = `${validManifest()}#`;
     writePackage(acceptedRoot, {
       manifest: `${manifestPrefix}${" ".repeat(HARNESS_PACKAGE_MANIFEST_MAX_BYTES - manifestPrefix.length)}`,
     });
@@ -309,10 +564,10 @@ describe("parseHarnessPackageManifest", () => {
     ["description", '"Agent\\u2066Description"'],
   ])("rejects escaped terminal controls in manifest %s", (field, value) => {
     const root = makeRoot();
-    writePackage(root, { manifest: `name: openclaw\n${field}: ${value}\n` });
+    writePackage(root, { manifest: validManifest(["name: openclaw", `${field}: ${value}`]) });
 
     expect(() => parseHarnessPackageManifest(root)).toThrow(
-      `manifest ${field} must be bounded terminal-safe text`,
+      `Harness manifest field '${field}' must be bounded terminal-safe text`,
     );
   });
 
@@ -323,10 +578,10 @@ describe("parseHarnessPackageManifest", () => {
     ["description", JSON.stringify("x".repeat(2049))],
   ])("rejects invalid or oversized manifest %s", (field, value) => {
     const root = makeRoot();
-    writePackage(root, { manifest: `name: openclaw\n${field}: ${value}\n` });
+    writePackage(root, { manifest: validManifest(["name: openclaw", `${field}: ${value}`]) });
 
     expect(() => parseHarnessPackageManifest(root)).toThrow(
-      `manifest ${field} must be bounded terminal-safe text`,
+      `Harness manifest field '${field}' must be bounded terminal-safe text`,
     );
   });
 
@@ -336,7 +591,11 @@ describe("parseHarnessPackageManifest", () => {
     const description = "x".repeat(2048);
     expect(Buffer.byteLength(displayName, "utf8")).toBe(512);
     writePackage(root, {
-      manifest: `name: openclaw\ndisplay_name: ${JSON.stringify(displayName)}\ndescription: ${JSON.stringify(description)}\n`,
+      manifest: validManifest([
+        "name: openclaw",
+        `display_name: ${JSON.stringify(displayName)}`,
+        `description: ${JSON.stringify(description)}`,
+      ]),
     });
 
     expect(() => parseHarnessPackageManifest(root)).not.toThrow();

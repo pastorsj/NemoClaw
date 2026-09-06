@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentMcpAdapter } from "../../../agent/defs";
-import type { HarnessMcpSnapshotRestorePlan } from "../../../agent-runtime/host-module";
+import type {
+  HarnessMcpAdapterCommandPlan,
+  HarnessMcpSnapshotRestorePlan,
+} from "../../../agent-runtime/host-module";
 import type { McpBridgeEntry, SandboxEntry } from "../../../state/registry";
 import { inspectAdapterRegistrationCommand } from "../mcp-bridge-adapter-inspection";
 import type { OpenShellCommandResult } from "../mcp-bridge-output";
@@ -108,24 +111,27 @@ function commandStdout(result: OpenShellCommandResult | null): string {
 
 function executePlanCommand(
   prepared: PreparedInstalledMcpSnapshotRestore,
-  command: string | readonly string[],
+  command: HarnessMcpAdapterCommandPlan,
   timeoutSeconds: number,
   runtimeSelection: McpProviderInspectionRuntimeSelection,
   dependencies: InstalledMcpSnapshotDependencies,
 ): OpenShellCommandResult | null {
-  return typeof command === "string"
-    ? dependencies.executeShellCommand(
+  switch (command.kind) {
+    case "shell":
+      return dependencies.executeShellCommand(
         prepared.sandboxName,
-        command,
-        timeoutSeconds,
-        runtimeSelection,
-      )
-    : dependencies.executeArgvCommand(
-        prepared.sandboxName,
-        command,
+        command.script,
         timeoutSeconds,
         runtimeSelection,
       );
+    case "argv":
+      return dependencies.executeArgvCommand(
+        prepared.sandboxName,
+        command.argv,
+        timeoutSeconds,
+        runtimeSelection,
+      );
+  }
 }
 
 /** Apply a prepared package repair after the snapshot transaction fences are revalidated. */

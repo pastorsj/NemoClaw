@@ -3,7 +3,7 @@
 
 import { CLI_NAME } from "../../cli/branding";
 import { RD as _RD, R } from "../../cli/terminal-style";
-import { normalizeProcessExitCode } from "../../core/process-exit";
+import { normalizeProcessExitCode } from "../../core/process-status";
 import { MessagingSetupApplier, type SandboxMessagingPlan } from "../../messaging";
 import { markLastStartedStepFailed } from "../../onboard/exit-step-failure";
 import { gatewayOwnerFromCheckpoint } from "../../onboard/gateway-authority-checkpoint";

@@ -23,7 +23,11 @@ import { createPhaseProgressReporter } from "./phase-progress";
 import type { OnboardStateResult } from "./result";
 import type { OnboardMachineRunnerRuntime, OnboardStateHandlerResult } from "./runner";
 import type { OnboardSequencePhase } from "./sequence-runner";
-import type { OnboardMachineEventType, OnboardMachineState } from "./types";
+import {
+  LEGACY_OPENCLAW_SETUP_STATE,
+  type OnboardMachineEventType,
+  type OnboardMachineState,
+} from "./types";
 
 export interface FinalOnboardFlowPhaseOptions<
   Context extends OnboardFlowContext,
@@ -132,6 +136,7 @@ export function createFinalOnboardFlowPhases<
           : null,
       portableProfileSelected: context.session?.checkpoint?.profile.value === "portable",
       recreateJournalHandoff: context.recreateJournalHandoff,
+      receiptBackedPackage: context.session?.harnessPackage != null,
       deps: finalizationDeps,
     });
     return { result: finalizationResult.stateResult };
@@ -157,6 +162,7 @@ export function createFinalOnboardFlowPhases<
           : null,
       portableProfileSelected: context.session?.checkpoint?.profile.value === "portable",
       recreateJournalHandoff: context.recreateJournalHandoff,
+      receiptBackedPackage: context.session?.harnessPackage != null,
       deps: finalizationDeps,
     });
     return { result: postVerifyResult.stateResult };
@@ -226,7 +232,7 @@ function canonicalFinalFlowPhases<Context extends OnboardFlowContext>(
   phases: readonly OnboardSequencePhase<Context>[];
 } {
   const branchPhases = phases.filter(
-    (phase) => phase.state === "openclaw" || phase.state === "agent_setup",
+    (phase) => phase.state === LEGACY_OPENCLAW_SETUP_STATE || phase.state === "agent_setup",
   );
   if (branchPhases.length !== 1) {
     throw new Error(

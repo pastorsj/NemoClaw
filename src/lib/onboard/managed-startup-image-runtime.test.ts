@@ -8,7 +8,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const childProcessMock = vi.hoisted(() => ({
   spawnSync: vi.fn(),
 }));
-vi.mock("node:child_process", () => childProcessMock);
+vi.mock("node:child_process", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:child_process")>();
+  const spawnSync = ((...args: unknown[]) => {
+    const childArgs = args[1];
+    const invokesAdapterWorker =
+      Array.isArray(childArgs) &&
+      childArgs.some(
+        (argument) =>
+          typeof argument === "string" &&
+          (argument.endsWith("/agent-runtime/adapter/worker.ts") ||
+            argument.endsWith("/agent-runtime/adapter/worker.js")),
+      );
+    return Reflect.apply(
+      invokesAdapterWorker ? original.spawnSync : childProcessMock.spawnSync,
+      null,
+      args,
+    );
+  }) as typeof original.spawnSync;
+  return { ...original, spawnSync };
+});
 
 const coordinatorMock = vi.hoisted(() => ({
   coordinateManagedStartupApplication: vi.fn(),

@@ -4,7 +4,6 @@
 import { Buffer } from "node:buffer";
 import fs from "node:fs";
 import path from "node:path";
-import vm from "node:vm";
 
 import type {
   HarnessStartupAction,
@@ -16,6 +15,11 @@ import type {
 
 import { parseHarnessPackageIdentity } from "../../agent-runtime/package/identity-validation.ts";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types.ts";
+import { HARNESS_STARTUP_PLAN_ADAPTER_CONTRACT } from "../../agent-runtime/adapter/startup.ts";
+import {
+  HarnessAdapterError,
+  loadHarnessAdapterFromSource,
+} from "../../agent-runtime/adapter/loader.ts";
 import {
   isManagedStartupPackageProfile,
   type ManagedStartupDurableProfile,
@@ -25,11 +29,9 @@ import {
 export const HARNESS_STARTUP_ADAPTER_FILE = "/usr/local/lib/nemoclaw/startup-adapter.cjs";
 const MAX_ADAPTER_BYTES = 1024 * 1024;
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
-const MAX_PLAN_BYTES = 2 * 1024 * 1024;
 const MAX_ENVIRONMENT_ENTRIES = 256;
 const MAX_ENVIRONMENT_VALUE_BYTES = 512 * 1024;
 const MAX_ROOT_FILE_BYTES = 64 * 1024;
-const ADAPTER_TIMEOUT_MILLISECONDS = 500;
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const CREDENTIAL_ENVIRONMENT_NAME = /(?:^|_)(?:API_KEY|CREDENTIAL|PASSWORD|SECRET|TOKEN)(?:_|$)/iu;
 const ROOT_MATERIAL_PATH = /^\/usr\/local\/share\/nemoclaw\/[a-z0-9][a-z0-9._/-]*$/u;
@@ -435,48 +437,13 @@ function invokeStartupAdapter(
   const requestJson = JSON.stringify(request);
   if (Buffer.byteLength(requestJson, "utf8") > MAX_REQUEST_BYTES)
     fail("startup request is oversized");
-  const context = vm.createContext(Object.create(null), {
-    codeGeneration: { strings: false, wasm: false },
-    microtaskMode: "afterEvaluate",
-  });
-  Object.defineProperty(context, "__nemoclawStartupRequestJson", {
-    value: requestJson,
-    configurable: false,
-    enumerable: false,
-    writable: false,
-  });
-  const wrapped = `
-"use strict";
-(() => {
-  const module = { exports: {} };
-  const unavailableRequire = () => { throw new Error("Harness startup adapter imports are unavailable"); };
-  (function (exports, require, module, __filename, __dirname) {
-${source.source}
-  })(module.exports, unavailableRequire, module, ${JSON.stringify(source.filename)}, "/usr/local/lib/nemoclaw");
-  if (module.exports === null || typeof module.exports !== "object") throw new Error("invalid exports");
-  if (typeof module.exports.buildStartupPlan !== "function") throw new Error("missing buildStartupPlan");
-  const request = JSON.parse(globalThis.__nemoclawStartupRequestJson);
-  const result = module.exports.buildStartupPlan(request);
-  if (result && typeof result.then === "function") throw new Error("async result");
-  return JSON.stringify(result);
-})()
-`;
-  let result: unknown;
   try {
-    result = new vm.Script(wrapped, { filename: source.filename }).runInContext(context, {
-      displayErrors: false,
-      timeout: ADAPTER_TIMEOUT_MILLISECONDS,
-    });
-  } catch {
+    return loadHarnessAdapterFromSource(source, HARNESS_STARTUP_PLAN_ADAPTER_CONTRACT).buildPlan(
+      request,
+    );
+  } catch (error) {
+    if (!(error instanceof HarnessAdapterError)) throw error;
     return fail("startup adapter could not be evaluated");
-  }
-  if (typeof result !== "string" || Buffer.byteLength(result, "utf8") > MAX_PLAN_BYTES) {
-    fail("startup adapter returned an invalid or oversized plan");
-  }
-  try {
-    return JSON.parse(result) as unknown;
-  } catch {
-    return fail("startup adapter returned a non-JSON plan");
   }
 }
 

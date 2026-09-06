@@ -67,9 +67,18 @@ export function readInstalledAgentRegistryEntries(): readonly OnboardAgentRegist
   );
 }
 
-/** Read package metadata from the reviewed bundle for command-input validation. */
-export function readReviewedAgentRegistryEntries(): readonly OnboardAgentRegistryEntry[] {
-  return orderRegistryEntries(packageInventory().available.map(registryEntry));
+/**
+ * Read every selector that onboarding can explain: reviewed packages may
+ * produce install guidance, while installed-only packages proceed from their
+ * verified receipt. Installed metadata wins for an active package identity.
+ */
+export function readSelectableAgentRegistryEntries(): readonly OnboardAgentRegistryEntry[] {
+  const inventory = packageInventory();
+  const entries = new Map(
+    inventory.available.map((record) => [record.id, registryEntry(record)] as const),
+  );
+  for (const record of inventory.installed) entries.set(record.id, registryEntry(record));
+  return orderRegistryEntries([...entries.values()]);
 }
 
 export function readAgentRegistryNames(): readonly string[] {

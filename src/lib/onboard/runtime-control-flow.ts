@@ -8,7 +8,7 @@ import { isDcodeAutoApprovalMode } from "./dcode-auto-approval";
 import { managedSandboxFeatureIssue } from "./managed-sandbox-feature";
 import { stopTrackedModelRouterForAgentChange } from "./model-router-process";
 import { DCODE_OBSERVABILITY_FEATURE } from "./observability-policy-presets";
-import { formatSandboxAgentName, normalizeSandboxAgentName } from "./sandbox-agent";
+import { formatSandboxAgentName, normalizeSandboxAgentName } from "./sandbox-agent/naming";
 import { applyOnboardToolDisclosureRequest } from "./tool-disclosure-flow";
 import type { OnboardOptions } from "./types";
 

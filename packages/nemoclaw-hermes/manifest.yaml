@@ -13,6 +13,8 @@ aliases:
 alias_summary: "nemohermes → hermes"
 onboarding:
   sandbox_name: hermes
+sandbox_create:
+  generated_image_build: local-buildkit-required
 version_constraint: ">=0.8.0"
 language: python
 license: MIT
@@ -30,6 +32,13 @@ expected_version: "0.20.6"
 version_scheme: semver
 managed_image:
   repository: ghcr.io/nvidia/nemoclaw/hermes-sandbox
+  rebuild_base_image: pinned-remote
+  base_image:
+    security_inventory: true
+    package_probe: true
+    pinned_remote:
+      argument: BASE_IMAGE
+      ref: ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:c588bf76ba1c280f8a366bdfd672193e852de4f509a280662c7070a9b6e2fa48
   architectures:
     - linux/amd64
     - linux/arm64
@@ -43,17 +52,23 @@ managed_image:
   state_root:
     mount_target: /sandbox/.hermes
     mode: "3770"
-  startup_profile_contract_version: 1
-  capability_contract_version: 1
+  startup_profile_environment:
+    - { name: NEMOCLAW_CONTEXT_WINDOW, value_type: string, max_bytes: 32 }
 gateway_command: "hermes gateway run"
-# Interactive entry point a user types inside the sandbox. Hermes stays a
-# gateway agent (runtime.kind defaults to gateway); this only records the
-# command so NemoClaw stops hardcoding it.
+# Interactive entry point a user types inside the sandbox. The explicit runtime
+# kind and command let NemoClaw avoid a package-name decision.
 runtime:
+  kind: gateway
   command_shell: /bin/sh
   interactive_command: "hermes"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.hermes/fabric.json"
   prompt_transport: stdin
+  # Core invokes this package-owned controller with one finite lifecycle action
+  # and a core-generated nonce. Core still owns privileged sandbox execution.
+  process_lifecycle:
+    support: managed
+    command: [/usr/local/bin/nemoclaw-gateway-control]
+    revalidate_running_gateway: true
   # These public constants must exist in the supervisor's initial environment.
   # The authenticated recovery helper validates that exact process boundary.
   startup_environment:
@@ -99,6 +114,38 @@ config:
   env_file: .env                  # relative to dir — API keys
   auth_file: auth.json            # OAuth tokens (Nous Portal, Codex, etc.)
   format: yaml
+
+# ── State lifecycle ────────────────────────────────────────────
+state_lifecycle:
+  backup_quiescence:
+    kind: not-required
+  snapshot_restore: []
+  rebuild:
+    image_plugin_provenance: not-required
+    scheduled_work:
+      support: managed
+      controller:
+        command:
+          - /opt/hermes/.venv/bin/python
+          - -I
+          - /usr/local/lib/nemoclaw/hermes-cron-restore-control.py
+        timeout_seconds: 180
+      jobs_path: cron/jobs.json
+      scripts_path: scripts
+      profiles_path: profiles
+      runtime_root: /sandbox/.hermes
+    post_restore:
+      kind: managed
+      command:
+        command: [/usr/local/bin/nemoclaw-state-restore]
+        timeout_seconds: 60
+      reapply_messaging: false
+      restart_runtime: true
+      mutable_config: verify
+      config_integrity:
+        kind: not-required
+      settle_device_pairing: false
+      notify_gateway_token_change: true
 
 # ── State directories ──────────────────────────────────────────
 state_dirs:
@@ -183,6 +230,25 @@ device_pairing: false
 web_auth_method: bearer_token
 web_auth_env: API_SERVER_KEY
 
+# Host provider-broker behavior is package-owned and exposed through NemoClaw's
+# fixed receipt-bound adapter and controller protocol.
+provider_broker:
+  support: managed
+  adapter: provider-broker
+  operations:
+    - describe-provider
+    - register-refresh-provider
+    - ensure-broker
+
+# ── Web search ──────────────────────────────────────────────────
+web_search:
+  support: providers
+  providers:
+    - tavily
+  tool_gateway_conflicts:
+    - provider: tavily
+      tool_gateway: nous-web
+
 # ── Conversation session operations ─────────────────────────────
 sessions:
   operations:
@@ -216,6 +282,22 @@ messaging:
 # provider: "custom" + base_url in config.yaml. This is how we
 # route through OpenShell's inference.local proxy.
 inference:
+  config_update:
+    support: mutable
+    provider_api_overrides:
+      - provider: compatible-anthropic-endpoint
+        api: openai-completions
+    post_commit:
+      config_sync: required
+      gateway_restart: not-required
+      sandbox_reconcile:
+        kind: command
+        trigger: after-config-sync
+        command:
+          - /usr/bin/python3
+          - -I
+          - /usr/local/lib/nemoclaw/inference-reconcile.py
+        timeout_seconds: 30
   provider_type: custom
   base_url_config_key: "model.base_url"
   model_config_key: "model.default"
@@ -232,6 +314,12 @@ mcp:
     # Hermes runs through its Python console-script interpreter.
     - /usr/bin/python3*
     - /opt/hermes/.venv/bin/python*
+  policy_presets:
+    - nous-web
+    - nous-image
+    - nous-audio
+    - nous-browser
+    - nous-code
 
 # ── Phone-home hosts ───────────────────────────────────────────
 # Agent-specific egress endpoints needed for updates, auth, etc.

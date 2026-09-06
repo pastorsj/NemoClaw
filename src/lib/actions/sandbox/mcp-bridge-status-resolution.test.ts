@@ -41,6 +41,13 @@ const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
 const providerCommands = require("./src/lib/adapters/openshell/provider-command.js");
 const policies = require("./src/lib/policy/index.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
+const commandExecution = require("./src/lib/actions/sandbox/transport/command-execution.js");
+const replaceCommandExecution = (name, value) => Object.defineProperty(commandExecution, name, {
+  configurable: true,
+  enumerable: true,
+  value,
+  writable: true,
+});
 gatewayRuntime.gatewayRuntimeDependencies.captureOpenshell = (args, options = {}) => {
   const selectedGateway = options.env?.OPENSHELL_GATEWAY || "nemoclaw";
   return {
@@ -145,6 +152,8 @@ processRecovery.executeSandboxCommand = (sandboxName, command) => {
     stderr: "",
   };
 };
+replaceCommandExecution("executeSandboxExecCommand", processRecovery.executeSandboxExecCommand);
+replaceCommandExecution("executeSandboxCommand", processRecovery.executeSandboxCommand);
 const registerPackageSandbox = (name, agent, adapter) => registry.registerSandbox({
   name,
   agent,

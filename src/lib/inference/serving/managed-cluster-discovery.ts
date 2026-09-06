@@ -4,7 +4,7 @@
 import net from "node:net";
 import path from "node:path";
 
-import type { BuildIdentity } from "../../core/version.js";
+import type { BuildIdentity } from "../../core/build-identity.js";
 import type { SystemReadinessReport } from "../../readiness/types.js";
 import { MANAGED_CLUSTER_VLLM_MATERIALIZER_REF } from "./adapter-registry.js";
 import { loadManagedInferenceCatalog } from "./catalog-loader.js";

@@ -85,6 +85,8 @@ export type BuiltManagedStartupOnboardProfile = BuiltManagedStartupProfile & {
    * enter the canonical startup profile or durable receipt.
    */
   readonly credentialProxyReplayRequired: boolean;
+  /** Durable authorization marker shared with receipt-backed package profiles. */
+  readonly dashboardRemoteBindPrepared: boolean;
 };
 
 export class ManagedStartupOnboardProfileError extends Error {
@@ -269,5 +271,9 @@ export function buildManagedStartupOnboardProfile(
     environment,
     corporateCa: input.corporateCa,
   });
-  return Object.freeze({ ...built, credentialProxyReplayRequired });
+  return Object.freeze({
+    ...built,
+    credentialProxyReplayRequired,
+    dashboardRemoteBindPrepared: dashboard.mode === "remote",
+  });
 }

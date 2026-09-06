@@ -1,33 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createRequire } from "node:module";
 
-const mocks = vi.hoisted(() => ({
-  executeGatewaySupervisorAction: vi.fn(),
-  runOpenshellProviderCommand: vi.fn(),
-  sleepMs: vi.fn(),
-  sleepSeconds: vi.fn(),
-  waitUntil: vi.fn(),
-}));
+import type { HarnessMcpAdapterModule } from "@nvidia/nemoclaw-harness-contract";
+import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../../../../src/lib/adapters/openshell/provider-command", () => ({
-  OPENSHELL_OPERATION_TIMEOUT_MS: 30_000,
-  runOpenshellProviderCommand: mocks.runOpenshellProviderCommand,
-}));
+import { assertInstalledMcpCapability } from "../../../../src/lib/actions/sandbox/mcp-bridge/package-probe";
 
-vi.mock("../../../../src/lib/actions/sandbox/process-recovery", () => ({
-  executeGatewaySupervisorAction: mocks.executeGatewaySupervisorAction,
-  executeSandboxCommand: vi.fn(),
-}));
-
-vi.mock("../../../../src/lib/core/wait", () => ({
-  sleepMs: mocks.sleepMs,
-  sleepSeconds: mocks.sleepSeconds,
-  waitUntil: mocks.waitUntil,
-}));
-
-import { assertAgentMcpMutationRuntimeCapability } from "../../../../src/lib/actions/sandbox/mcp-bridge-adapters";
+const requireModule = createRequire(import.meta.url);
+const hermesMcpAdapter = requireModule("../../host/mcp-adapter.cts") as HarnessMcpAdapterModule;
 
 type ProbeResult = { status: number; stdout: string; stderr: string };
 
@@ -37,49 +19,35 @@ function runHermesProbe(results: ProbeResult[]) {
     workspace: "default",
   } as const;
   let calls = 0;
-  const recoveryActions: Array<{ action: string; timeout: number }> = [];
-
-  mocks.runOpenshellProviderCommand.mockImplementation((_args, options) => {
-    expect(options?.runtimeSelection).toEqual({
-      gatewayName: "nemoclaw-8091",
-      workspace: "default",
-    });
-    return results[calls++];
-  });
-  mocks.executeGatewaySupervisorAction.mockImplementation(
-    (_sandbox: string, action: string, timeout: number) => {
-      recoveryActions.push({ action, timeout });
-      return null;
-    },
-  );
-  mocks.waitUntil.mockImplementation(
-    (condition: () => boolean, optionsOrTimeout?: number | { maxAttempts?: number }): boolean => {
-      const maxAttempts =
-        typeof optionsOrTimeout === "object"
-          ? (optionsOrTimeout.maxAttempts ?? Number.POSITIVE_INFINITY)
-          : Number.POSITIVE_INFINITY;
-      let attempts = 0;
-      let ready = false;
-      while (!ready && calls < results.length && attempts < maxAttempts) {
-        attempts += 1;
-        ready = condition();
-      }
-      return ready;
-    },
-  );
+  const recoveryActions: number[] = [];
+  const probe = hermesMcpAdapter.describeMcpMutationCapability({ sandboxName: "hermes-box" });
   let message = "";
   try {
-    assertAgentMcpMutationRuntimeCapability("hermes-box", "hermes-config", runtimeSelection);
+    assertInstalledMcpCapability("hermes-box", probe, runtimeSelection, {
+      executeShellCommand: vi.fn(() => {
+        throw new Error("Hermes declares an argv probe");
+      }),
+      executeArgvCommand: (_sandboxName, command, timeoutSeconds, selectedRuntime) => {
+        expect(command).toEqual([
+          "/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
+          "probe",
+        ]);
+        expect(timeoutSeconds).toBe(30);
+        expect(selectedRuntime).toEqual(runtimeSelection);
+        return results[calls++] ?? null;
+      },
+      recoverAgentGateway: (_sandboxName, timeoutMilliseconds) => {
+        recoveryActions.push(timeoutMilliseconds);
+        return null;
+      },
+      sleep: vi.fn(),
+    });
   } catch (error) {
     message = error instanceof Error ? error.message : String(error);
   }
 
   return { calls, recoveryActions, message };
 }
-
-beforeEach(() => {
-  vi.resetAllMocks();
-});
 
 const starting: ProbeResult = {
   status: 1,
@@ -113,8 +81,7 @@ describe("Hermes managed MCP startup probe", () => {
 
     expect(result.calls).toBe(3);
     expect(result.recoveryActions).toEqual([]);
-    expect(result.message).toContain("recorded OpenShell target 'nemoclaw-8091'");
-    expect(result.message).toContain("NemoClaw did not attempt host-local supervisor recovery");
+    expect(result.message).toContain("cannot invoke the managed MCP transaction helper");
   });
 
   it("fails immediately on trust and topology errors", () => {
@@ -129,7 +96,8 @@ describe("Hermes managed MCP startup probe", () => {
 
     expect(result.calls).toBe(1);
     expect(result.recoveryActions).toEqual([]);
-    expect(result.message).toContain("does not identify the trusted launcher");
+    expect(result.message).toContain("cannot invoke the managed MCP transaction helper");
+    expect(result.message).not.toContain("does not identify the trusted launcher");
     expect(result.message).not.toContain("nemoclaw hermes-box recover");
   });
 
@@ -145,8 +113,8 @@ describe("Hermes managed MCP startup probe", () => {
 
     expect(result.calls).toBe(1);
     expect(result.recoveryActions).toEqual([]);
-    expect(result.message).toContain("nemoclaw hermes-box recover");
-    expect(result.message).toContain("managed service lifecycle");
+    expect(result.message).toContain("cannot invoke the managed MCP transaction helper");
+    expect(result.message).not.toContain("managed service lifecycle");
   });
 
   it("fails clearly when the gateway never becomes ready", () => {
@@ -154,6 +122,6 @@ describe("Hermes managed MCP startup probe", () => {
 
     expect(result.calls).toBe(3);
     expect(result.recoveryActions).toEqual([]);
-    expect(result.message).toContain("recorded OpenShell target 'nemoclaw-8091'");
+    expect(result.message).toContain("cannot invoke the managed MCP transaction helper");
   });
 });

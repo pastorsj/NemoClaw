@@ -4,11 +4,10 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { type AgentDefinition, getAgentRuntimeKind, loadAgent } from "../agent/defs";
-import {
-  normalizeSandboxAgentName,
-  resolveSandboxAgent,
-  type ResolvedSandboxAgent,
-} from "../onboard/sandbox-agent";
+import { legacyStatusDefaults } from "../agent/legacy-status";
+import { resolveRecordedSandboxAgentAuthority as resolveSandboxAgent } from "../onboard/package/package-authority";
+import { normalizeSandboxAgentName } from "../onboard/sandbox-agent/naming";
+import type { ResolvedSandboxAgent } from "../onboard/sandbox-agent";
 import type { HarnessPackageIdentity, HarnessPackageMigration } from "./package/types";
 
 export interface SandboxStatusAgentInfo {
@@ -77,7 +76,8 @@ export function resolveSandboxStatusAgent(
       ? normalizeSandboxAgentName(source)
       : normalizeSandboxAgentName(source?.agent);
   const receiptBacked = hasHarnessPackageAuthority(sandbox);
-  let agentDisplayName = agentName === "openclaw" ? "OpenClaw" : agentName;
+  const legacyDefaults = legacyStatusDefaults(agentName);
+  let agentDisplayName = legacyDefaults.displayName;
   let agentRuntime: SandboxStatusAgentInfo["agentRuntime"] = "gateway";
   let agentLoadError: string | undefined;
   let packageAuthorityInvalid = false;
@@ -97,9 +97,9 @@ export function resolveSandboxStatusAgent(
       : (deps.loadAgentImpl ?? loadAgent)(agentName);
     agentDisplayName = agent.displayName;
     agentRuntime = getAgentRuntimeKind(agent);
-    agentDefinition = receiptBacked || agentName !== "openclaw" ? agent : null;
+    agentDefinition = receiptBacked || legacyDefaults.retainLoadedDefinition ? agent : null;
   } catch (error) {
-    if (receiptBacked || agentName !== "openclaw") {
+    if (receiptBacked || !legacyDefaults.tolerateMissingDefinition) {
       agentRuntime = "unknown";
       agentLoadError = safeAgentLoadError(error);
       packageAuthorityInvalid = receiptBacked;

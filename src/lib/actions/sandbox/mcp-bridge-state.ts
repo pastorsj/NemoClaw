@@ -2,16 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type AgentDefinition, type AgentMcpAdapter, loadAgent } from "../../agent/defs";
-import type { OpenShellRuntimeSelection } from "../../adapters/openshell/runtime-selection";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
-import {
-  recoverNamedGatewayRuntime,
-  replaceOpenShellRuntimeSelectionEnv,
-} from "../../gateway-runtime-action";
 import { resolvePackageBackedSandboxAgent } from "../../onboard/package/package-authority";
 import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
-import { getSandboxTargetGatewayName } from "./gateway-target";
 import {
   isAgentMcpAdapter,
   MCP_BRIDGE_POLICY_SOURCE,
@@ -292,25 +286,4 @@ export function removeBridgeEntry(sandboxName: string, server: string): void {
   const bridges = { ...bridgeState(sandbox) };
   delete bridges[server];
   setBridgeState(sandboxName, bridges);
-}
-
-export async function ensureSandboxGatewaySelected(
-  sandboxName: string,
-  runtimeSelection: OpenShellRuntimeSelection,
-): Promise<void> {
-  const gatewayName = getSandboxTargetGatewayName(sandboxName);
-  const recovery = await recoverNamedGatewayRuntime({
-    gatewayName,
-    runtimeSelection,
-  });
-  if (!recovery.recovered || recovery.after.state !== "healthy_named") {
-    throw new McpBridgeError(
-      `Could not select healthy OpenShell gateway '${gatewayName}' for sandbox '${sandboxName}' (before: ${recovery.before.state}, after: ${recovery.after.state}). Refusing to mutate MCP resources on another gateway.`,
-    );
-  }
-  // Pin every subsequent OpenShell subprocess in this lifecycle operation to
-  // the sandbox's recorded gateway. The globally selected gateway is mutable
-  // shared metadata and another NemoClaw process may select a sibling between
-  // this health check and the provider/policy mutation.
-  replaceOpenShellRuntimeSelectionEnv(process.env, runtimeSelection);
 }

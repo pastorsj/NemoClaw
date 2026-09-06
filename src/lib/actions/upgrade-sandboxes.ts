@@ -32,6 +32,7 @@ import { diagnosticPreview, isValidName, NAME_ALLOWED_FORMAT } from "../sandbox-
 import * as registry from "../state/registry";
 import { enforceRemovedImmutabilityMigrationBoundary } from "../state/migrations/removed-immutability";
 import * as sandboxState from "../state/sandbox";
+import { isConfirmedLegacyManagedUpgradeSandbox } from "./upgrade/legacy";
 
 type RebuildModule = typeof import("./sandbox/rebuild");
 
@@ -410,7 +411,7 @@ export async function upgradeSandboxes(
     prepareBackupRecovery(
       sandbox,
       confirmedLegacyManagedNames.has(sandbox.name) &&
-        (sandbox.agent == null || sandbox.agent === "openclaw" || sandbox.agent === "hermes"),
+        isConfirmedLegacyManagedUpgradeSandbox(sandbox),
     ),
   );
   const preparedRecoveries = backupRecoveryAssessments.filter(isPreparedBackupRecovery);

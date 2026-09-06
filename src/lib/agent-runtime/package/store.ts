@@ -3,6 +3,7 @@
 
 import path from "node:path";
 
+import { getBuildIdentity, type BuildIdentity } from "../../core/build-identity";
 import { getNemoclawBaseStateRoot, resolveHome } from "../../state/state-root";
 import { acquireProcessBoundLockAt, releaseProcessBoundLock } from "../../state/registry/lock";
 import {
@@ -34,6 +35,10 @@ import {
   type ValidatedHarnessPackageTree,
 } from "./tree";
 import type { HarnessPackageIdentity } from "./types";
+import {
+  HarnessPackageCompatibilityError,
+  assertHarnessPackageSupportsNemoClaw,
+} from "./compatibility";
 import {
   assertCanonicalStoreFileUnchanged,
   assertHarnessPackageStoreAuthority,
@@ -82,6 +87,7 @@ export interface HarnessPackagePointerMutationDependencies {
 
 export interface HarnessPackageStoreOptions {
   readonly storeRoot?: string;
+  readonly getBuildIdentity?: () => BuildIdentity;
 }
 
 export interface HarnessPackagePointerMutationOptions extends HarnessPackageStoreOptions {
@@ -132,6 +138,21 @@ export function getHarnessPackageStoreRoot(home: string = resolveHome()): string
 
 function selectedStoreRoot(options: HarnessPackageStoreOptions): string {
   return path.resolve(options.storeRoot ?? getHarnessPackageStoreRoot());
+}
+
+function selectedBuildIdentity(options: HarnessPackageStoreOptions): BuildIdentity {
+  return options.getBuildIdentity?.() ?? getBuildIdentity();
+}
+
+function assertInstalledPackageCompatible(
+  installed: InstalledHarnessPackage,
+  options: HarnessPackageStoreOptions,
+): InstalledHarnessPackage {
+  assertHarnessPackageSupportsNemoClaw(
+    installed.packageManifest.envelope,
+    selectedBuildIdentity(options),
+  );
+  return installed;
 }
 
 function sameIdentity(left: HarnessPackageIdentity, right: HarnessPackageIdentity): boolean {
@@ -260,7 +281,8 @@ function integrityFailure(error: unknown): never {
   if (
     error instanceof HarnessPackageStoreIntegrityError ||
     error instanceof HarnessPackageVersionConflictError ||
-    error instanceof HarnessPackageStageCleanupError
+    error instanceof HarnessPackageStageCleanupError ||
+    error instanceof HarnessPackageCompatibilityError
   ) {
     throw error;
   }
@@ -319,7 +341,10 @@ export function resolvePinnedHarnessPackage(
     const identity = parseHarnessPackageIdentity(identityValue);
     const paths = harnessPackageStorePaths(selectedStoreRoot(options), identity.id);
     const authority = capturePinnedAuthority(paths);
-    return resolvePinnedWithAuthority(identity, paths, authority);
+    return assertInstalledPackageCompatible(
+      resolvePinnedWithAuthority(identity, paths, authority),
+      options,
+    );
   } catch (error) {
     return integrityFailure(error);
   }
@@ -337,7 +362,10 @@ export function readInstalledHarnessPackage(
     const activePath = pointerPath(paths, id);
     if (storePathIsMissing(activePath)) return null;
     const authority = capturePinnedAuthority(paths);
-    return resolveActiveWithAuthority(id, paths, pointerAuthority, authority).installed;
+    return assertInstalledPackageCompatible(
+      resolveActiveWithAuthority(id, paths, pointerAuthority, authority).installed,
+      options,
+    );
   } catch (error) {
     return integrityFailure(error);
   }
@@ -640,7 +668,7 @@ function publishUnderLock(
       "Harness package active readback selected a different package",
     );
   }
-  return installed;
+  return assertInstalledPackageCompatible(installed, input);
 }
 
 export function publishHarnessPackage(
@@ -652,6 +680,7 @@ export function publishHarnessPackage(
   try {
     const sourceManifest = parseHarnessPackageManifest(input.validatedTree.rootDir);
     assertTreeAuthority(getPackageTreeAuthority(input.validatedTree));
+    assertHarnessPackageSupportsNemoClaw(sourceManifest.envelope, selectedBuildIdentity(input));
     const sourceIdentityFromBytes = derivePackageIdentity(
       sourceManifest,
       input.validatedTree.contentDigest,
@@ -712,6 +741,7 @@ export function activateHarnessPackage(
         );
       }
       const selected = resolvePinnedWithAuthority(receipt.identity, paths, authority);
+      assertInstalledPackageCompatible(selected, options);
       const current = validateCurrentPointer(paths, authority);
       replacePointer(selected.identity, paths, authority, current, () =>
         options.dependencies?.onPointerMutationCheckpoint?.("before-active-pointer-replacement"),

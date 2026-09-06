@@ -16,6 +16,7 @@ export interface AgentConfigTarget {
   format: string;
   configFile: string;
   sensitiveFiles?: string[];
+  tunnelAllowedOriginsPath?: readonly string[];
 }
 
 export interface AgentConfigDependencies {
@@ -120,6 +121,8 @@ export function resolveAgentConfig(
   if (cfg.envFile !== undefined && cfg.envFile !== null) {
     sensitiveFiles.push(resolveConfigFile(dir, cfg.envFile, "env_file"));
   }
+  const tunnelAllowedOriginsPath =
+    "dashboard" in agent ? agent.dashboard?.tunnelAllowedOriginsPath : undefined;
 
   return {
     agentName,
@@ -128,5 +131,8 @@ export function resolveAgentConfig(
     format: cfg.format || "json",
     configFile: cfg.configFile,
     sensitiveFiles,
+    ...(tunnelAllowedOriginsPath
+      ? { tunnelAllowedOriginsPath: [...tunnelAllowedOriginsPath] }
+      : {}),
   };
 }

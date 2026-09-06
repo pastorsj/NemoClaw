@@ -20,6 +20,7 @@ it("materializes the DeepSeek publish set through the public harness contract", 
       displayName: "DeepSeek Harness (local POC)",
       packageVersion: "0.1.0",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       readOnly: true,
     });
     expect(
@@ -31,6 +32,7 @@ it("materializes the DeepSeek publish set through the public harness contract", 
       displayName: "DeepSeek Harness (local POC)",
       packageVersion: "0.1.0",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: "manifest.yaml",
     });
     expect(fs.existsSync(path.join(artifactRoot, "fabric/deepseek.fabric-adapter.json"))).toBe(

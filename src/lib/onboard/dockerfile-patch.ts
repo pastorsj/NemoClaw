@@ -232,6 +232,14 @@ function openClawRootStartupArg(dockerfile: string): DockerfileInstruction | nul
   return runtimeUserControlsStartup ? runtimeUserArg : null;
 }
 
+/** Detect the reviewed root-startup protocol from Dockerfile structure, not package identity. */
+function usesManagedRootStartupContract(dockerfile: string): boolean {
+  return (
+    /^\s*USER\s+\$\{NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER\}\s*$/mu.test(dockerfile) ||
+    /^\s*ENTRYPOINT\s+\["\/usr\/local\/bin\/nemoclaw-start"\]\s*$/mu.test(dockerfile)
+  );
+}
+
 export function patchDcodeAutoApprovalDockerArg(
   dockerfile: string,
   mode: DcodeAutoApprovalMode,
@@ -390,16 +398,14 @@ export function patchStagedDockerfile(
   // etc.) rather than the proxy-routing key. The replace is a silent no-op
   // when the staged Dockerfile predates this ARG (e.g. OpenClaw).
   const upstreamProvider = provider && provider.trim() ? provider : providerKey;
-  if (
-    options.agentName === "langchain-deepagents-code" &&
-    !isValidDcodeUpstreamProvider(upstreamProvider)
-  ) {
+  const upstreamProviderArgPattern = /^ARG NEMOCLAW_UPSTREAM_PROVIDER=.*$/m;
+  if (upstreamProviderArgPattern.test(dockerfile) && !isValidDcodeUpstreamProvider(upstreamProvider)) {
     throw new Error(
       "NEMOCLAW_UPSTREAM_PROVIDER must start with an ASCII letter or digit and contain 1-64 ASCII letters, digits, dots, underscores, or hyphens for DCode.",
     );
   }
   dockerfile = dockerfile.replace(
-    /^ARG NEMOCLAW_UPSTREAM_PROVIDER=.*$/m,
+    upstreamProviderArgPattern,
     `ARG NEMOCLAW_UPSTREAM_PROVIDER=${sanitizeDockerArg(upstreamProvider)}`,
   );
   const upstreamEndpointUrl = normalizeOptionalEndpointUrlArg(
@@ -560,11 +566,9 @@ export function patchStagedDockerfile(
     /^ARG NEMOCLAW_WEB_SEARCH_PROVIDER=.*$/m,
     `ARG NEMOCLAW_WEB_SEARCH_PROVIDER=${sanitizeDockerArg(webSearchProviderForConfig(webSearchConfig))}`,
   );
-  // These four ARGs configure OpenClaw's own diagnostics exporter and are
-  // declared only by the OpenClaw Dockerfile. Another agent's staged Dockerfile
-  // is not missing them, so report the agent mismatch the way the managed
-  // startup path already does instead of an internal Dockerfile-authoring error.
-  const otelAgentName = options.agentName ?? "openclaw";
+  // These optional diagnostics settings apply only when the staged Dockerfile
+  // declares their build arguments. Capability comes from package-owned image
+  // structure rather than a package-name branch in core.
   for (const envKey of [
     "NEMOCLAW_OPENCLAW_OTEL",
     "NEMOCLAW_OPENCLAW_OTEL_ENDPOINT",
@@ -576,9 +580,7 @@ export function patchStagedDockerfile(
     const argPattern = new RegExp(`^ARG ${envKey}=.*$`, "m");
     if (!argPattern.test(dockerfile)) {
       throw new Error(
-        otelAgentName === "openclaw"
-          ? `Dockerfile is missing ARG ${envKey}; cannot apply value ${rawValue}`
-          : `${envKey} is not supported by ${otelAgentName}`,
+        `Dockerfile is missing ARG ${envKey}; cannot apply the configured diagnostics value`,
       );
     }
     dockerfile = dockerfile.replace(argPattern, `ARG ${envKey}=${sanitizeDockerArg(rawValue)}`);
@@ -639,11 +641,11 @@ export function patchStagedDockerfile(
       );
     }
     const corporateCaArgPattern = /^ARG NEMOCLAW_CORPORATE_CA_B64=.*$/m;
-    const openClawRootStartup = options.agentName === "openclaw";
-    const runtimeUserArg = openClawRootStartup ? openClawRootStartupArg(dockerfile) : null;
+    const managedRootStartup = usesManagedRootStartupContract(dockerfile);
+    const runtimeUserArg = managedRootStartup ? openClawRootStartupArg(dockerfile) : null;
     if (
       corporateCaArgPattern.test(dockerfile) &&
-      (!openClawRootStartup || runtimeUserArg !== null)
+      (!managedRootStartup || runtimeUserArg !== null)
     ) {
       if (runtimeUserArg) {
         // Root startup creates the merged runtime trust bundle before the
@@ -668,7 +670,7 @@ export function patchStagedDockerfile(
         );
       }
       throw new Error(
-        "Custom OpenClaw Dockerfile must declare exactly one final-stage ARG NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER. " +
+        "A managed-root startup Dockerfile must declare exactly one final-stage ARG NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER. " +
           "It must set USER ${NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER} before " +
           'ENTRYPOINT ["/usr/local/bin/nemoclaw-start"]. ' +
           "NemoClaw cannot bake the corporate CA from NEMOCLAW_CORPORATE_CA_BUNDLE.",

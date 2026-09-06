@@ -34,6 +34,7 @@ describe("Hermes sandbox provisioning", () => {
     const profileDir = path.join(etcDir, "profile.d");
     const bashrcPath = path.join(etcDir, "bash.bashrc");
     const gatewayControlPath = path.join(localBin, "nemoclaw-gateway-control");
+    const stateRestorePath = path.join(localBin, "nemoclaw-state-restore");
     const gatewaySupervisorPath = path.join(localLib, "gateway-supervisor.sh");
     const buildMcpDigestPath = path.join(localLib, "build-hermes-mcp-digest.py");
     const mcpConfigTransactionPath = path.join(localLib, "hermes-mcp-config-transaction.py");
@@ -44,7 +45,10 @@ describe("Hermes sandbox provisioning", () => {
     const managedPolicyReaderPath = path.join(localLib, "managed_policy.py");
     const mcpManifest = path.join(localLib, "openshell-child-visible-credentials.v0.0.106.json");
     const managedGatewayControlPath = path.join(localLib, "managed-gateway-control.py");
+    const managedGatewayProfilePath = path.join(localLib, "managed-gateway-profile.py");
     const hermesCronRestoreControlPath = path.join(localLib, "hermes-cron-restore-control.py");
+    const inferenceReconcilePath = path.join(localLib, "inference-reconcile.py");
+    const sealConfigPath = path.join(localLib, "seal-config");
     const corporateCaRuntimePath = path.join(localLib, "corporate-ca-runtime.sh");
     const files = [
       ...hermesStartupPaths,
@@ -52,6 +56,7 @@ describe("Hermes sandbox provisioning", () => {
       path.join(localBin, "nemoclaw-managed-startup-hold"),
       path.join(localBin, "nemoclaw-managed-bootstrap"),
       gatewayControlPath,
+      stateRestorePath,
       corporateCaRuntimePath,
       path.join(localLib, "entrypoint-env-wrapper.sh"),
       path.join(localLib, "sandbox-init.sh"),
@@ -70,7 +75,9 @@ describe("Hermes sandbox provisioning", () => {
       mcpManifest,
       gatewaySupervisorPath,
       managedGatewayControlPath,
+      managedGatewayProfilePath,
       hermesCronRestoreControlPath,
+      inferenceReconcilePath,
       path.join(localLib, "sandbox-rlimits.sh"),
     ];
     const command = dockerRunCommandBetween(
@@ -92,19 +99,26 @@ describe("Hermes sandbox provisioning", () => {
       files.forEach((file) => {
         fs.writeFileSync(file, "# fixture\n", { mode: 0o600 });
       });
+      fs.writeFileSync(
+        sealConfigPath,
+        "#!/usr/bin/env bash\nprintf '%s\\n' '[SECURITY] NEMOCLAW_MANAGED_STARTUP_REPLAY must be 0 or 1'\nexit 1\n",
+        { mode: 0o700 },
+      );
       const { result, calls } = runLoggedDockerShell(command, tmp, [
         'chown() { printf "chown %s\\n" "$*" >> "$call_log"; }',
+        'stat() { printf "0:0:444\\n"; }',
       ]);
 
       expect(result.status, result.stderr).toBe(0);
       expect(calls).toContain(
-        `chown root:root ${hermesStartupDir} ${hermesStartupPaths.join(" ")} ${gatewayControlPath} ${gatewaySupervisorPath} ${managedGatewayControlPath} ${buildMcpDigestPath} ${hermesCronRestoreControlPath} ${mcpManifest}`,
+        `chown root:root ${hermesStartupDir} ${hermesStartupPaths.join(" ")} ${gatewayControlPath} ${stateRestorePath} ${gatewaySupervisorPath} ${managedGatewayControlPath} ${managedGatewayProfilePath} ${buildMcpDigestPath} ${hermesCronRestoreControlPath} ${inferenceReconcilePath} ${mcpManifest}`,
       );
       expect((fs.statSync(hermesStartupDir).mode & 0o777).toString(8)).toBe("555");
       expect(
         hermesStartupPaths.map((modulePath) => (fs.statSync(modulePath).mode & 0o777).toString(8)),
       ).toEqual(hermesStartupPaths.map(() => "444"));
       expect((fs.statSync(gatewayControlPath).mode & 0o777).toString(8)).toBe("700");
+      expect((fs.statSync(stateRestorePath).mode & 0o777).toString(8)).toBe("555");
       expect((fs.statSync(hermesCronRestoreControlPath).mode & 0o777).toString(8)).toBe("700");
       expect((fs.statSync(mcpConfigTransactionPath).mode & 0o777).toString(8)).toBe("755");
       expect((fs.statSync(langfuseCredentialPatcherPath).mode & 0o777).toString(8)).toBe("444");
@@ -114,6 +128,7 @@ describe("Hermes sandbox provisioning", () => {
       expect((fs.statSync(gatewaySupervisorPath).mode & 0o777).toString(8)).toBe("444");
       expect((fs.statSync(corporateCaRuntimePath).mode & 0o777).toString(8)).toBe("444");
       expect((fs.statSync(managedGatewayControlPath).mode & 0o777).toString(8)).toBe("500");
+      expect((fs.statSync(inferenceReconcilePath).mode & 0o777).toString(8)).toBe("444");
     } finally {
       fs.existsSync(hermesStartupDir) && fs.chmodSync(hermesStartupDir, 0o700);
       fs.rmSync(tmp, { recursive: true, force: true });

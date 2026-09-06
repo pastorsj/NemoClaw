@@ -33,13 +33,13 @@ const MCP_REFUSED_BEFORE_RESTART = {
 
 describe("binding the Hermes gateway to restored state", () => {
   it("keeps restart evidence while rebuild restores the managed MCP projection (#8671)", () => {
-    const restartState = restartHermesGatewayAfterStateRestore("alpha", "hermes", {
+    const restartState = restartHermesGatewayAfterStateRestore("alpha", true, {
       restartSandboxGateway: () => RESTARTED_WITH_MCP_MISMATCH,
     });
 
     expect(restartState).toBe("restarted");
     expect(
-      verifyHermesGatewayAfterStateRestore("alpha", "hermes", restartState, {
+      verifyHermesGatewayAfterStateRestore("alpha", true, restartState, {
         checkAndRecoverSandboxProcesses: () => ({
           checked: true,
           wasRunning: true,
@@ -50,12 +50,12 @@ describe("binding the Hermes gateway to restored state", () => {
   });
 
   it("rejects managed MCP drift that remains after rebuild restoration (#8671)", () => {
-    const restartState = restartHermesGatewayAfterStateRestore("alpha", "hermes", {
+    const restartState = restartHermesGatewayAfterStateRestore("alpha", true, {
       restartSandboxGateway: () => RESTARTED_WITH_MCP_MISMATCH,
     });
 
     expect(
-      verifyHermesGatewayAfterStateRestore("alpha", "hermes", restartState, {
+      verifyHermesGatewayAfterStateRestore("alpha", true, restartState, {
         checkAndRecoverSandboxProcesses: () => ({
           checked: true,
           wasRunning: true,
@@ -67,13 +67,13 @@ describe("binding the Hermes gateway to restored state", () => {
   });
 
   it("preserves an MCP refusal before gateway replacement (#8671)", () => {
-    const restartState = restartHermesGatewayAfterStateRestore("alpha", "hermes", {
+    const restartState = restartHermesGatewayAfterStateRestore("alpha", true, {
       restartSandboxGateway: () => MCP_REFUSED_BEFORE_RESTART,
     });
 
     expect(restartState).toBe("restart-failed");
     expect(
-      verifyHermesGatewayAfterStateRestore("alpha", "hermes", restartState, {
+      verifyHermesGatewayAfterStateRestore("alpha", true, restartState, {
         checkAndRecoverSandboxProcesses: () => ({
           checked: true,
           wasRunning: true,
@@ -90,7 +90,7 @@ describe("binding the Hermes gateway to restored state", () => {
     const observeHermesCronReplacement = vi.fn(() => replacement);
 
     expect(
-      verifyHermesGatewayAfterStateRestoreForCronGate("alpha", "hermes", "restarted", original, {
+      verifyHermesGatewayAfterStateRestoreForCronGate("alpha", true, "restarted", original, {
         restartSandboxGateway,
         observeHermesCronReplacement,
         checkAndRecoverSandboxProcesses: () => ({
@@ -114,7 +114,7 @@ describe("binding the Hermes gateway to restored state", () => {
     expect(
       verifyHermesGatewayAfterStateRestoreForCronGate(
         "alpha",
-        "hermes",
+        true,
         "restarted",
         { pid: 41, start_time: 902, drain_token: "restore-token" },
         {
@@ -135,7 +135,7 @@ describe("binding the Hermes gateway to restored state", () => {
     const restartSandboxGateway = vi.fn(() => RESTART_SUCCEEDED);
 
     expect(
-      verifyHermesGatewayAfterStateRestore("alpha", "hermes", "restarted", {
+      verifyHermesGatewayAfterStateRestore("alpha", true, "restarted", {
         restartSandboxGateway,
         checkAndRecoverSandboxProcesses: () => ({
           checked: true,
@@ -174,13 +174,12 @@ describe("Hermes rebuild post-restore verification", () => {
     });
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("Hermes post-restore verification failed");
+    ).rejects.toThrow("Hermes Agent post-restore verification failed");
 
     const output = harness.logSpy.mock.calls.map((call) => String(call[0])).join("\n");
-    expect(output).toContain("rebuilt but some post-restore steps were incomplete");
-    expect(output).toContain("Hermes gateway health was not verified after state restore");
     expect(output).not.toContain("MCP bridge definitions were preserved but not fully refreshed");
     expect(output).not.toContain("rebuilt successfully");
+    expect(harness.errorSpy).toHaveBeenCalledWith(expect.stringContaining("Backup is preserved"));
     expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry], {
       agentDefinition: expect.objectContaining({ name: "hermes" }),
     });
@@ -221,7 +220,7 @@ describe("Hermes rebuild post-restore verification", () => {
       harness.checkAndRecoverSandboxProcessesSpy.mock.invocationCallOrder[0],
     );
     expect(harness.logSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Hermes gateway restarted and verified after state restore"),
+      expect.stringContaining("Sandbox 'alpha' rebuild completed"),
     );
   });
 
@@ -243,11 +242,11 @@ describe("Hermes rebuild post-restore verification", () => {
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("Hermes post-restore verification failed");
+    ).rejects.toThrow("Hermes Agent post-restore verification failed");
 
     const output = harness.logSpy.mock.calls.map((call) => String(call[0])).join("\n");
-    expect(output).toContain("MCP bridge definitions were preserved but not fully refreshed");
     expect(output).not.toContain("rebuilt successfully");
+    expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalled();
   });
 
   it("fails when the final gateway check refuses MCP reconciliation (#7084)", async () => {
@@ -274,7 +273,7 @@ describe("Hermes rebuild post-restore verification", () => {
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("Hermes post-restore verification failed");
+    ).rejects.toThrow("Hermes Agent post-restore verification failed");
 
     expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry], {
       agentDefinition: expect.objectContaining({ name: "hermes" }),
@@ -301,7 +300,7 @@ describe("Hermes rebuild post-restore verification", () => {
 
       await expect(
         harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-      ).rejects.toThrow("Hermes post-restore verification failed");
+      ).rejects.toThrow("Hermes Agent post-restore verification failed");
 
       expect(harness.logSpy).not.toHaveBeenCalledWith(
         expect.stringContaining("rebuilt successfully"),
@@ -323,7 +322,7 @@ describe("Hermes rebuild post-restore verification", () => {
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("Hermes post-restore verification failed");
+    ).rejects.toThrow("Hermes Agent post-restore verification failed");
 
     expect(harness.logSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("rebuilt successfully"),
@@ -371,7 +370,7 @@ describe("Hermes rebuild post-restore verification", () => {
       harness.checkAndRecoverSandboxProcessesSpy.mock.invocationCallOrder[0],
     );
     expect(harness.logSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Hermes gateway restarted and verified after state restore"),
+      expect.stringContaining("Sandbox 'alpha' rebuild completed"),
     );
   });
 

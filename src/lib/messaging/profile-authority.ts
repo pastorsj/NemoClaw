@@ -7,10 +7,13 @@ import {
   type HarnessMessagingIntegration,
 } from "../agent-runtime/messaging-module";
 import type { HarnessPackageStoreOptions } from "../agent-runtime/package/store";
-import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../onboard/sandbox-agent";
+import { resolveRecordedSandboxAgentAuthority } from "../onboard/package/package-authority";
+import type { ResolvedSandboxAgent } from "../onboard/sandbox-agent";
 import type { SandboxEntry } from "../state/registry";
 import type { ChannelManifest, MessagingAgentId } from "./manifest";
 import type { ChannelManifestRegistry } from "./manifest/registry";
+import { listLegacyMessagingChannels } from "./legacy-profile";
+import { applyHarnessMessagingProfile } from "./package-profile";
 
 export type SandboxMessagingProfileAuthority = Readonly<{
   agent: AgentDefinition;
@@ -27,7 +30,7 @@ export function resolveSandboxMessagingProfileAuthority(
   entry: Pick<SandboxEntry, "agent" | "harnessPackage" | "harnessPackageMigration">,
   options: HarnessPackageStoreOptions = {},
 ): SandboxMessagingProfileAuthority {
-  const packageAuthority = resolveSandboxAgent(entry, options);
+  const packageAuthority = resolveRecordedSandboxAgentAuthority(entry, options);
   const integration = packageAuthority.harnessPackage
     ? loadHarnessMessagingIntegration(packageAuthority.harnessPackage, options)
     : null;
@@ -48,22 +51,32 @@ export function listMessagingChannelsForProfile(
 ): ChannelManifest[] {
   if (authority.integration?.kind === "disabled") return [];
 
-  const agentId = authority.agent.name as MessagingAgentId;
+  const agentId: MessagingAgentId = authority.agent.name;
   if (authority.integration === null) {
-    return registry.listAvailable({ agent: agentId });
+    return listLegacyMessagingChannels(agentId, registry);
   }
 
+  const integration = authority.integration;
   const serviceById = new Map(registry.list().map((manifest) => [manifest.id, manifest]));
-  for (const channelId of authority.integration.channelIds) {
-    const service = serviceById.get(channelId);
-    if (!service || !(service.supportedAgents as readonly string[]).includes(agentId)) {
+  return integration.channels.map((profile) => {
+    const service = serviceById.get(profile.channelId);
+    if (!service) {
       throw new HarnessMessagingSupportError(
-        `Installed harness package declares messaging channel '${channelId}' without a compatible core service`,
+        `Installed harness package declares messaging channel '${profile.channelId}' without a compatible core service`,
       );
     }
-  }
-  return registry.listAvailable({
-    agent: agentId,
-    supportedChannelIds: authority.integration.channelIds,
+    try {
+      return applyHarnessMessagingProfile(
+        service,
+        integration.packageId,
+        profile,
+        integration.build,
+      );
+    } catch (error) {
+      throw new HarnessMessagingSupportError(
+        `Installed harness package has an invalid '${profile.channelId}' messaging profile`,
+        { cause: error },
+      );
+    }
   });
 }

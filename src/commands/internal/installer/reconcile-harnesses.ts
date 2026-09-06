@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { jsonFlag } from "../../../lib/cli/common-flags";
-import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
+import { NemoClawInternalCommand } from "../../../lib/cli/internal-command";
 
 import {
   InstallerHarnessReconciliationError,
@@ -15,8 +15,7 @@ const BLOCKED_RESULT = Object.freeze({
   outcome: "blocked",
 });
 
-export default class InternalInstallerReconcileHarnessesCommand extends NemoClawCommand {
-  static hidden = true;
+export default class InternalInstallerReconcileHarnessesCommand extends NemoClawInternalCommand {
   static strict = true;
   static summary = "Internal: reconcile installer harness package authority";
   static description =

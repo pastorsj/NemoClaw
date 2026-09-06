@@ -12,6 +12,8 @@
 import type { StdioOptions } from "node:child_process";
 
 import { checkOpenAiInferenceProviderProfile } from "./adapters/openshell/provider-profile-registration";
+import { runHarnessProviderBrokerController } from "./agent-runtime/provider-broker";
+import type { HarnessPackageIdentity } from "./agent-runtime/package/types";
 import { HERMES_PROVIDER_NAME } from "./onboard/inference-providers/hermes-provider-identity";
 import * as oauth from "./oauth-device-code";
 
@@ -39,7 +41,7 @@ type HermesToolGatewayBroker = {
 };
 
 function getHermesToolGatewayBroker(): HermesToolGatewayBroker {
-  return require("./hermes-tool-gateway-broker") as HermesToolGatewayBroker;
+  return require("./actions/sandbox/legacy-hermes-tool-gateway-broker") as HermesToolGatewayBroker;
 }
 
 export const HERMES_INFERENCE_CREDENTIAL_ENV = "OPENAI_API_KEY";
@@ -153,6 +155,7 @@ export async function ensureHermesProviderOAuthCredentials(
     noBrowser = false,
     baseUrl = oauth.DEFAULT_INFERENCE_BASE_URL,
     toolGatewayPresets = [],
+    harnessPackage = null,
   }: {
     allowInteractiveLogin?: boolean;
     runOpenshell?: RunOpenshell | null;
@@ -161,6 +164,7 @@ export async function ensureHermesProviderOAuthCredentials(
     noBrowser?: boolean;
     baseUrl?: string;
     toolGatewayPresets?: string[];
+    harnessPackage?: HarnessPackageIdentity | null;
   } = {},
 ): Promise<HermesProviderCredentialState | null> {
   if (!runOpenshell) {
@@ -183,14 +187,46 @@ export async function ensureHermesProviderOAuthCredentials(
     inferenceBaseUrl,
   );
   if (Array.isArray(toolGatewayPresets) && toolGatewayPresets.length > 0) {
-    const hermesToolGateway = getHermesToolGatewayBroker();
-    hermesToolGateway.registerHermesToolGatewayRefreshProvider(
-      _sandboxName,
-      tokens.refresh_token,
-      runOpenshell,
-    );
-    if (!hermesToolGateway.ensureHermesToolGatewayBroker({ refreshToken: tokens.refresh_token })) {
-      throw new Error("Hermes managed-tool gateway broker did not become ready");
+    if (harnessPackage) {
+      const registration = runHarnessProviderBrokerController(harnessPackage, {
+        operation: "register-refresh-provider",
+        sandboxName: _sandboxName,
+        refreshToken: tokens.refresh_token,
+      });
+      if (!registration.ok || !registration.credentialEnv || !registration.credentialValue) {
+        throw new Error("Harness provider-broker registration did not return a credential binding");
+      }
+      const providerResult = onboardProviders.upsertProvider(
+        registration.providerName,
+        "generic",
+        registration.credentialEnv,
+        null,
+        { [registration.credentialEnv]: registration.credentialValue },
+        runOpenshell,
+      );
+      if (!providerResult.ok) {
+        throw new Error(
+          providerResult.message || `failed to upsert provider '${registration.providerName}'`,
+        );
+      }
+      runHarnessProviderBrokerController(harnessPackage, {
+        operation: "ensure-broker",
+        sandboxName: _sandboxName,
+        refreshToken: tokens.refresh_token,
+      });
+    } else {
+      // Explicit no-receipt compatibility quarantine for legacy Hermes sandboxes.
+      const hermesToolGateway = getHermesToolGatewayBroker();
+      hermesToolGateway.registerHermesToolGatewayRefreshProvider(
+        _sandboxName,
+        tokens.refresh_token,
+        runOpenshell,
+      );
+      if (
+        !hermesToolGateway.ensureHermesToolGatewayBroker({ refreshToken: tokens.refresh_token })
+      ) {
+        throw new Error("Hermes managed-tool gateway broker did not become ready");
+      }
     }
   }
   return {

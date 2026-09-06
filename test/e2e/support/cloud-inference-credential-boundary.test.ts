@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { HIGH_CONFIDENCE_PREFIXED_TOKEN_SPECS } from "../../../packages/nemoclaw-openclaw/plugin/src/security/secret-scanner.ts";
+import { HIGH_CONFIDENCE_PREFIXED_TOKEN_SPECS } from "../../../src/lib/shared/credential-filter-boundary.cts";
 import { buildSandboxCredentialScanCommand } from "../live/cloud-inference-credential-boundary.ts";
 
 const roots: string[] = [];

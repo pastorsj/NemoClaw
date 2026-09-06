@@ -6,75 +6,13 @@ import type { AgentDefinition } from "../agent-runtime/manifest-types";
 import { formatEnvAssignment } from "../core/url-utils";
 import { isPackageOwnedAgentDefinition } from "./docker-startup-command-agent";
 import { appendExtraPlaceholderKeysEnvArg } from "./extra-placeholder-keys";
-import { HERMES_API_PORT_ENV, resolveOnboardHermesApiPort } from "./hermes-api-port";
+import { HERMES_API_PORT_ENV } from "./hermes-api-port";
 import { appendHermesDashboardEnvArgs, type HermesDashboardOnboardState } from "./hermes-dashboard";
 import { appendHostProxyEnvArgs } from "./host-proxy-env";
-import { appendOpenClawRuntimeEnvArgs } from "./openclaw-runtime-env";
+import { appendLegacyRuntimeEnvironment } from "./legacy-runtime";
 import { isValidProxyHost, isValidProxyPort, resolveManagedProxyRoute } from "./proxy-route";
 
 const STARTUP_COMMAND_TOKEN = /^[A-Za-z0-9_./:=,@%+\-\[\]]+$/u;
-const OPENCLAW_AUTO_PAIR_RUNTIME_ENV_KEYS = [
-  "NEMOCLAW_AUTO_PAIR_DEADLINE_SECS",
-  "NEMOCLAW_AUTO_PAIR_FAST_DEADLINE_SECS",
-  "NEMOCLAW_AUTO_PAIR_FAST_REENTRY_INTERVAL_SECS",
-  "NEMOCLAW_AUTO_PAIR_FAST_REENTRY_POLLS",
-  "NEMOCLAW_AUTO_PAIR_RUN_TIMEOUT_SECS",
-  "NEMOCLAW_AUTO_PAIR_SLOW_INTERVAL_SECS",
-] as const;
-const OPENCLAW_DIAGNOSTIC_RUNTIME_ENV_KEYS = ["NEMOCLAW_MCP_SHADOW_DIAGNOSTICS"] as const;
-const OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_ENV = "NEMOCLAW_MCP_TOOLS_LIST_TIMEOUT_MS";
-const OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_MIN_MS = 1500;
-const OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_MAX_MS = 10_000;
-
-function appendOpenClawAutoPairRuntimeEnvArgs(
-  envArgs: string[],
-  agent: AgentDefinition | null,
-  env: NodeJS.ProcessEnv,
-): void {
-  if (agent && agent.name !== "openclaw") return;
-  for (const key of OPENCLAW_AUTO_PAIR_RUNTIME_ENV_KEYS) {
-    const value = env[key]?.trim();
-    if (value) envArgs.push(formatEnvAssignment(key, value));
-  }
-}
-
-function appendOpenClawDiagnosticRuntimeEnvArgs(
-  envArgs: string[],
-  agent: AgentDefinition | null,
-  env: NodeJS.ProcessEnv,
-): void {
-  if (agent && agent.name !== "openclaw") return;
-  for (const key of OPENCLAW_DIAGNOSTIC_RUNTIME_ENV_KEYS) {
-    if (env[key]?.trim() === "1") envArgs.push(formatEnvAssignment(key, "1"));
-  }
-}
-
-function appendOpenClawMcpToolsListTimeoutRuntimeEnvArg(
-  envArgs: string[],
-  agent: AgentDefinition | null,
-  env: NodeJS.ProcessEnv,
-): void {
-  if (agent && agent.name !== "openclaw") return;
-  const raw = env[OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_ENV];
-  if (raw === undefined || raw.trim() === "") return;
-  const value = raw.trim();
-  if (!/^(?:0|[1-9][0-9]*)$/u.test(value)) {
-    throw new Error(
-      `${OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_ENV} must be an integer from ${OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_MIN_MS} to ${OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_MAX_MS} milliseconds.`,
-    );
-  }
-  const timeoutMs = Number(value);
-  if (
-    !Number.isSafeInteger(timeoutMs) ||
-    timeoutMs < OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_MIN_MS ||
-    timeoutMs > OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_MAX_MS
-  ) {
-    throw new Error(
-      `${OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_ENV} must be an integer from ${OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_MIN_MS} to ${OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_MAX_MS} milliseconds.`,
-    );
-  }
-  envArgs.push(formatEnvAssignment(OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_ENV, String(timeoutMs)));
-}
 
 function appendAgentStartupEnvironment(envArgs: string[], agent: AgentDefinition | null): void {
   for (const [name, value] of Object.entries(agent?.runtime?.startup_environment ?? {})) {
@@ -139,37 +77,21 @@ export function buildSandboxRuntimeEnvArgs(input: SandboxRuntimeEnvArgsInput): {
   }
 
   appendAgentStartupEnvironment(envArgs, agent);
-  appendOpenClawRuntimeEnvArgs(envArgs, agent);
-  appendOpenClawAutoPairRuntimeEnvArgs(envArgs, agent, env);
-  appendOpenClawDiagnosticRuntimeEnvArgs(envArgs, agent, env);
-  appendOpenClawMcpToolsListTimeoutRuntimeEnvArg(envArgs, agent, env);
+  if (!isPackageOwnedAgentDefinition(agent)) {
+    appendLegacyRuntimeEnvironment(envArgs, agent, env, input.observabilityEnabled === true);
+  }
   appendHermesDashboardEnvArgs(envArgs, input.hermesDashboardState, formatEnvAssignment);
-  if (agent?.name === "hermes" && input.sandboxName) {
-    const apiPort =
-      input.hermesApiPort ??
-      resolveOnboardHermesApiPort(input.sandboxName, {
-        env,
-        warn: console.warn,
-        allowRegisteredOverride: input.allowHermesApiPortOverride,
-      });
-    envArgs.push(formatEnvAssignment(HERMES_API_PORT_ENV, String(apiPort)));
+  if (input.hermesApiPort != null && input.sandboxName) {
+    envArgs.push(formatEnvAssignment(HERMES_API_PORT_ENV, String(input.hermesApiPort)));
   }
   appendHostProxyEnvArgs(envArgs, env, {
     dropCredentialBearingProxyUrls:
-      agent?.name === "langchain-deepagents-code" || input.omitCredentialEnv === true,
+      agent?.runtime?.kind === "terminal" || input.omitCredentialEnv === true,
   });
 
   appendManagedProxyRoute(envArgs, agent, env);
   if (input.sandboxName) {
     envArgs.push(formatEnvAssignment("NEMOCLAW_SANDBOX_NAME", input.sandboxName));
-  }
-  if (agent?.name === "langchain-deepagents-code") {
-    envArgs.push(
-      formatEnvAssignment(
-        "NEMOCLAW_OBSERVABILITY",
-        input.observabilityEnabled === true ? "1" : "0",
-      ),
-    );
   }
   if (!input.omitCredentialEnv) {
     appendExtraPlaceholderKeysEnvArg(envArgs, input.extraPlaceholderKeys, formatEnvAssignment);

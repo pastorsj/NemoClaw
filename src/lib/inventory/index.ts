@@ -5,6 +5,7 @@ import { CLI_NAME } from "../cli/branding";
 import { gatewayStartGuidance } from "../gateway-start-guidance";
 import type { GatewayInference } from "../inference/config";
 import { getActiveChannelIdsFromPlan } from "../messaging/plan-validation";
+import { legacyShowsDegradedGatewayLog } from "../messaging/legacy-package";
 import type { GatewayOwnerDescription } from "../onboard/gateway-ownership";
 import { redactFull } from "../security/redact";
 import {
@@ -29,6 +30,7 @@ export interface SandboxEntry {
   openshellVersion?: string | null;
   messaging?: SandboxMessagingState | null;
   agent?: string | null;
+  harnessPackage?: unknown;
   dashboardPort?: number | null;
   // Passthrough of the durable registry reservation marker so list and status
   // hide registrations that have not committed their lifecycle yet.
@@ -774,8 +776,12 @@ export function showStatusCommand(deps: ShowStatusCommandDeps): void {
           "    Another sandbox is likely polling with the same bot token. See docs/reference/troubleshooting.mdx.",
         );
 
-        // Surface gateway log tail for Hermes sandboxes when messaging is degraded.
-        if (deps.readGatewayLog && defaultEntry?.agent === "hermes") {
+        // Package data selects the bounded diagnostics; core never dispatches by package ID.
+        if (
+          deps.readGatewayLog &&
+          (defaultEntry?.messaging?.plan.packageBuild?.degradedDiagnostics === "gateway-log-tail" ||
+            legacyShowsDegradedGatewayLog(defaultEntry ?? null))
+        ) {
           const logTail = deps.readGatewayLog(resolvedDefault);
           if (logTail) {
             log("");

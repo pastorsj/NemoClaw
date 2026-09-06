@@ -10,7 +10,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const require = createRequire(import.meta.url);
 const SOURCE_AUTH = path.join(import.meta.dirname, "hermes-provider-auth.ts");
-const SOURCE_BROKER = path.join(import.meta.dirname, "hermes-tool-gateway-broker.ts");
+const SOURCE_BROKER = path.join(
+  import.meta.dirname,
+  "actions/sandbox/legacy-hermes-tool-gateway-broker.ts",
+);
 const EXACT_OPENAI_PROFILE = JSON.stringify({
   id: "openai",
   credentials: [],

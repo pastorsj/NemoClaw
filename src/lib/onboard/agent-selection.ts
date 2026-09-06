@@ -3,7 +3,6 @@
 
 import type { AgentChoice, AgentDefinition } from "../agent/defs";
 import { getAgentChoices, loadAgent } from "../agent/defs";
-import { normalizeAgentSelector } from "../agent/aliases";
 import { resolveAgent } from "../agent/onboard";
 import { selectFromNumberedMenuOrExit } from "./prompt-helpers";
 
@@ -45,16 +44,6 @@ export async function promptForAgentChoice(
   // The caller puts its default choice first, so index 1 is the default.
   const reply = await deps.prompt("  Choose [1]: ");
   return deps.selectFromNumberedMenu(reply, 1, choices);
-}
-
-/** Resolve the remaining explicitly requested agent that has no package yet. */
-export function resolveUnpackagedOnboardAgent(
-  selector: string,
-  env: NodeJS.ProcessEnv = process.env,
-): AgentDefinition | null {
-  const agentId = normalizeAgentSelector(selector);
-  if (agentId !== "nemocua") return null;
-  return loadAgent(agentId, env);
 }
 
 export function createSelectOnboardAgent(deps: SelectOnboardAgentDeps) {

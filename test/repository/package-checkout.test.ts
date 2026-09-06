@@ -12,6 +12,7 @@ import {
   type CheckoutCommand,
   type CheckoutCommandResult,
   prepareCheckoutRootRemoval,
+  readPackageCheckoutCliOptions,
   readInstalledHarnessDigest,
   runPackageCheckoutRehearsal,
 } from "../../scripts/packages/checkout.mts";
@@ -20,20 +21,34 @@ import {
   harnessPackageStorePaths,
 } from "../../src/lib/agent-runtime/package/store-files";
 
-function createCheckoutCandidate(parent: string, fabricTestScript?: string): string {
+function createCheckoutCandidate(
+  parent: string,
+  fabricTestScript?: string,
+  buildProjects?: readonly string[],
+): string {
   const candidateRoot = path.join(parent, "candidate");
   fs.mkdirSync(candidateRoot);
   fs.writeFileSync(
     path.join(candidateRoot, "package.json"),
     `${JSON.stringify({
       name: "@nvidia/nemoclaw-example",
-      nemoclaw: { harnessManifest: "manifest.yaml" },
+      nemoclaw: {
+        harnessManifest: "manifest.yaml",
+        ...(buildProjects ? { buildProjects } : {}),
+      },
       ...(fabricTestScript ? { scripts: { "test:fabric": fabricTestScript } } : {}),
     })}\n`,
   );
   fs.writeFileSync(path.join(candidateRoot, "package-lock.json"), "{}\n");
   fs.writeFileSync(path.join(candidateRoot, "manifest.yaml"), "name: example\n");
   return candidateRoot;
+}
+
+function createBuildProject(candidateRoot: string, projectPath: string): string {
+  const projectRoot = path.join(candidateRoot, ...projectPath.split("/"));
+  fs.mkdirSync(projectRoot, { recursive: true });
+  fs.writeFileSync(path.join(projectRoot, "package-lock.json"), "{}\n");
+  return projectRoot;
 }
 
 function createCheckoutToolDirectory(parent: string, includeUv: boolean): string {
@@ -46,6 +61,46 @@ function createCheckoutToolDirectory(parent: string, includeUv: boolean): string
   }
   return toolDirectory;
 }
+
+describe("package checkout code execution acknowledgement", () => {
+  it("refuses before command execution unless the caller acknowledges trusted package code", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-package-checkout-refusal-"));
+    const candidateRoot = createCheckoutCandidate(parent);
+    const commandPurposes: string[] = [];
+
+    try {
+      expect(() =>
+        runPackageCheckoutRehearsal(
+          {
+            mode: "package-only",
+            packageId: "example",
+            candidatePackageDir: candidateRoot,
+            temporaryParentDir: parent,
+          },
+          {
+            runCommand: (command) => {
+              commandPurposes.push(command.purpose);
+              return { stdout: "" };
+            },
+          },
+        ),
+      ).toThrow(/executes trusted candidate package code .* not an untrusted-package sandbox/u);
+      expect(commandPurposes).toEqual([]);
+      expect(fs.readdirSync(parent).filter((entry) => entry.startsWith("nc-"))).toEqual([]);
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("maps only the explicit CLI flag to the API acknowledgement", () => {
+    const baseArguments = ["package-only", "--package", "example", "--candidate", "."];
+
+    expect(readPackageCheckoutCliOptions(baseArguments).allowPackageCode).toBe(false);
+    expect(
+      readPackageCheckoutCliOptions([...baseArguments, "--allow-package-code"]).allowPackageCode,
+    ).toBe(true);
+  });
+});
 
 describe("package checkout cleanup", () => {
   it("uses a canonical private home when the temporary parent has a symlinked ancestor", () => {
@@ -80,6 +135,7 @@ describe("package checkout cleanup", () => {
           mode: "package-only",
           packageId: "example",
           candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
           temporaryParentDir: selectedParent,
           parentEnvironment: { PATH: process.env.PATH },
         },
@@ -148,6 +204,7 @@ describe("package checkout cleanup", () => {
           mode: "package-only",
           packageId: "example",
           candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
           temporaryParentDir: parent,
           parentEnvironment: { PATH: process.env.PATH },
         },
@@ -171,7 +228,7 @@ describe("package checkout cleanup", () => {
     }
   });
 
-  it("stages the public harness contract without exposing NemoClaw core source", () => {
+  it("installs a packed public harness contract without exposing NemoClaw source", () => {
     const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-contract-checkout-"));
     const candidateRoot = path.join(parent, "independent-package");
     fs.mkdirSync(candidateRoot, { recursive: true });
@@ -191,21 +248,110 @@ describe("package checkout cleanup", () => {
           mode: "package-only",
           packageId: "example",
           candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
           temporaryParentDir: parent,
           parentEnvironment: { PATH: process.env.PATH },
         },
         {
           runCommand: (command) => {
+            if (command.purpose === "pack public harness contract") {
+              expect(command.cwd).toBe(path.resolve(import.meta.dirname, "../../harness-contract"));
+              expect(command.args).toEqual([
+                "pack",
+                "--json",
+                "--pack-destination",
+                expect.any(String),
+              ]);
+              return { stdout: '[{"filename":"nvidia-nemoclaw-harness-contract-0.1.0.tgz"}]' };
+            }
             const workspaceRoot = path.resolve(command.cwd, "..", "..");
             expect(command.cwd).toBe(path.join(workspaceRoot, "packages", "nemoclaw-example"));
-            expect(
-              fs.existsSync(path.join(workspaceRoot, "harness-contract", "src", "index.ts")),
-            ).toBe(true);
+            expect(fs.existsSync(path.join(workspaceRoot, "harness-contract"))).toBe(false);
             expect(fs.existsSync(path.join(workspaceRoot, "src", "lib"))).toBe(false);
+            if (command.purpose === "install candidate package dependencies") {
+              expect(command.args).toEqual([
+                "install",
+                "--ignore-scripts",
+                "--no-audit",
+                "--no-fund",
+                "--no-save",
+                expect.stringMatching(/\.tgz$/u),
+              ]);
+            }
             return { stdout: "" };
           },
         },
       );
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a later published contract range without teaching core its release", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-contract-range-"));
+    const candidateRoot = path.join(parent, "independent-package");
+    fs.mkdirSync(candidateRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(candidateRoot, "package.json"),
+      `${JSON.stringify({
+        name: "@nvidia/nemoclaw-example",
+        nemoclaw: { harnessManifest: "manifest.yaml" },
+        devDependencies: { "@nvidia/nemoclaw-harness-contract": "^9.8.7" },
+      })}\n`,
+    );
+    fs.writeFileSync(path.join(candidateRoot, "package-lock.json"), "{}\n");
+    fs.writeFileSync(path.join(candidateRoot, "manifest.yaml"), "name: example\n");
+    try {
+      expect(() =>
+        runPackageCheckoutRehearsal(
+          {
+            mode: "package-only",
+            packageId: "example",
+            candidatePackageDir: candidateRoot,
+            allowPackageCode: true,
+            temporaryParentDir: parent,
+            parentEnvironment: { PATH: process.env.PATH },
+          },
+          {
+            runCommand: (command) => ({
+              stdout:
+                command.purpose === "pack public harness contract"
+                  ? '[{"filename":"nvidia-nemoclaw-harness-contract-0.1.0.tgz"}]'
+                  : "",
+            }),
+          },
+        ),
+      ).not.toThrow();
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a local-path contract dependency in an external package rehearsal", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-contract-local-path-"));
+    const candidateRoot = path.join(parent, "independent-package");
+    fs.mkdirSync(candidateRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(candidateRoot, "package.json"),
+      `${JSON.stringify({
+        name: "@nvidia/nemoclaw-example",
+        nemoclaw: { harnessManifest: "manifest.yaml" },
+        devDependencies: { "@nvidia/nemoclaw-harness-contract": "file:../contract" },
+      })}\n`,
+    );
+    fs.writeFileSync(path.join(candidateRoot, "package-lock.json"), "{}\n");
+    fs.writeFileSync(path.join(candidateRoot, "manifest.yaml"), "name: example\n");
+    try {
+      expect(() =>
+        runPackageCheckoutRehearsal({
+          mode: "package-only",
+          packageId: "example",
+          candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
+          temporaryParentDir: parent,
+          parentEnvironment: { PATH: process.env.PATH },
+        }),
+      ).toThrow(/published .* caret range/u);
     } finally {
       fs.rmSync(parent, { recursive: true, force: true });
     }
@@ -232,6 +378,154 @@ describe("package checkout cleanup", () => {
       expect(fs.readFileSync(outsideFile, "utf8")).toBe("keep\n");
     } finally {
       fs.chmodSync(outsideRoot, 0o700);
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("package checkout build projects", () => {
+  it("installs every package-declared nested project without using the harness identity", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-project-"));
+    const candidateRoot = createCheckoutCandidate(parent, undefined, ["ui-extension"]);
+    const projectRoot = createBuildProject(candidateRoot, "ui-extension");
+    const commands: CheckoutCommand[] = [];
+
+    try {
+      runPackageCheckoutRehearsal(
+        {
+          mode: "package-only",
+          packageId: "example",
+          candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
+          temporaryParentDir: parent,
+          parentEnvironment: { PATH: process.env.PATH },
+        },
+        {
+          runCommand: (command) => {
+            commands.push(command);
+            return { stdout: "" };
+          },
+        },
+      );
+
+      const nestedInstall = commands.find(
+        ({ purpose }) => purpose === "install candidate build project dependencies: ui-extension",
+      );
+      expect(nestedInstall?.args).toEqual(["ci", "--ignore-scripts"]);
+      expect(path.relative(candidateRoot, projectRoot)).toBe("ui-extension");
+      expect(path.basename(nestedInstall?.cwd ?? "")).toBe("ui-extension");
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an empty build-project declaration", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-empty-projects-"));
+    const candidateRoot = createCheckoutCandidate(parent, undefined, []);
+    try {
+      expect(() =>
+        runPackageCheckoutRehearsal({
+          mode: "package-only",
+          packageId: "example",
+          candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
+          temporaryParentDir: parent,
+          parentEnvironment: { PATH: process.env.PATH },
+        }),
+      ).toThrow(/must contain between 1 and 8 paths/u);
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["tests/plugin", "cache/plugin", "node_modules/plugin"])(
+    "rejects a build project beneath forbidden directory %s",
+    (projectPath) => {
+      const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-forbidden-project-"));
+      const candidateRoot = createCheckoutCandidate(parent, undefined, [projectPath]);
+      createBuildProject(candidateRoot, projectPath);
+      try {
+        expect(() =>
+          runPackageCheckoutRehearsal({
+            mode: "package-only",
+            packageId: "example",
+            candidatePackageDir: candidateRoot,
+            allowPackageCode: true,
+            temporaryParentDir: parent,
+            parentEnvironment: { PATH: process.env.PATH },
+          }),
+        ).toThrow(/must not identify a test, cache, or dependency directory/u);
+      } finally {
+        fs.rmSync(parent, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([[["../outside"]], [["nested\\outside"]]])(
+    "rejects an unsafe project declaration: %j",
+    (buildProjects) => {
+      const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-invalid-project-"));
+      const candidateRoot = createCheckoutCandidate(parent, undefined, buildProjects);
+      try {
+        expect(() =>
+          runPackageCheckoutRehearsal({
+            mode: "package-only",
+            packageId: "example",
+            candidatePackageDir: candidateRoot,
+            allowPackageCode: true,
+            temporaryParentDir: parent,
+            parentEnvironment: { PATH: process.env.PATH },
+          }),
+        ).toThrow(/build project/u);
+      } finally {
+        fs.rmSync(parent, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("rejects duplicate project declarations", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-duplicate-project-"));
+    const candidateRoot = createCheckoutCandidate(parent, undefined, ["plugin", "plugin"]);
+    createBuildProject(candidateRoot, "plugin");
+    try {
+      expect(() =>
+        runPackageCheckoutRehearsal({
+          mode: "package-only",
+          packageId: "example",
+          candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
+          temporaryParentDir: parent,
+          parentEnvironment: { PATH: process.env.PATH },
+        }),
+      ).toThrow("Candidate package build projects must be unique");
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects the superseded authoringProjects metadata name", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-old-project-metadata-"));
+    const candidateRoot = createCheckoutCandidate(parent);
+    createBuildProject(candidateRoot, "plugin");
+    const packageJsonPath = path.join(candidateRoot, "package.json");
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    (packageJson.nemoclaw as Record<string, unknown>).authoringProjects = ["plugin"];
+    fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson)}\n`);
+    try {
+      expect(() =>
+        runPackageCheckoutRehearsal({
+          mode: "package-only",
+          packageId: "example",
+          candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
+          temporaryParentDir: parent,
+          parentEnvironment: { PATH: process.env.PATH },
+        }),
+      ).toThrow(/renamed to nemoclaw\.buildProjects/u);
+    } finally {
       fs.rmSync(parent, { recursive: true, force: true });
     }
   });
@@ -303,6 +597,7 @@ describe("package checkout Fabric tools", () => {
           mode: "package-only",
           packageId: "example",
           candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
           temporaryParentDir: parent,
           parentEnvironment: { PATH: hostTools },
         },
@@ -340,6 +635,7 @@ describe("package checkout Fabric tools", () => {
           mode: "package-only",
           packageId: "example",
           candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
           temporaryParentDir: parent,
           parentEnvironment: { PATH: hostTools },
         },
@@ -378,6 +674,7 @@ describe("package checkout Fabric tools", () => {
           mode: "package-only",
           packageId: "example",
           candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
           temporaryParentDir: parent,
           parentEnvironment: { PATH: hostTools },
         },
@@ -454,17 +751,29 @@ describe("package checkout installed digest", () => {
       `${JSON.stringify({
         name: "@nvidia/nemoclaw-example",
         nemoclaw: { harnessManifest: "manifest.yaml" },
+        scripts: { "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts" },
+        devDependencies: { "@nvidia/nemoclaw-harness-contract": "^0.1.0" },
       })}\n`,
     );
     fs.writeFileSync(path.join(candidateRoot, "package-lock.json"), "{}\n");
     fs.writeFileSync(path.join(candidateRoot, "manifest.yaml"), "name: example\n");
     const commandPurposes: string[] = [];
+    const commands: CheckoutCommand[] = [];
     const commandHandlers: Record<string, (command: CheckoutCommand) => CheckoutCommandResult> = {
       "read exact NemoClaw revision": () => ({ stdout: `${coreCommit}\n` }),
       "extract exact NemoClaw revision": (command) => {
         const coreRoot = command.args.at(-1) ?? "";
         expect(coreRoot).not.toBe("");
         fs.writeFileSync(path.join(coreRoot, "package-lock.json"), "{}\n");
+        fs.mkdirSync(path.join(coreRoot, "harness-contract"));
+        return { stdout: "" };
+      },
+      "pack public harness contract": (command) => {
+        expect(command.cwd).toMatch(/nemoclaw\/harness-contract$/u);
+        return { stdout: '[{"filename":"nvidia-nemoclaw-harness-contract-0.1.0.tgz"}]' };
+      },
+      "build candidate package artifact": (command) => {
+        fs.mkdirSync(path.join(command.cwd, "dist", "nemoclaw-example"), { recursive: true });
         return { stdout: "" };
       },
       "list installed harnesses": () => ({
@@ -485,6 +794,7 @@ describe("package checkout installed digest", () => {
           mode: "composed",
           packageId: "example",
           candidatePackageDir: candidateRoot,
+          allowPackageCode: true,
           coreCheckoutDir: coreCheckout,
           coreCommit,
           temporaryParentDir: parent,
@@ -493,6 +803,7 @@ describe("package checkout installed digest", () => {
         {
           runCommand: (command) => {
             commandPurposes.push(command.purpose);
+            commands.push(command);
             return commandHandlers[command.purpose]?.(command) ?? { stdout: "" };
           },
         },
@@ -509,6 +820,25 @@ describe("package checkout installed digest", () => {
         "list installed harnesses",
         "read installed harness digest",
       ]);
+      expect(commandPurposes).toContain("run candidate NemoClaw integration tests");
+      expect(
+        commands.find(({ purpose }) => purpose === "run candidate NemoClaw integration tests")?.cwd,
+      ).toMatch(/nemoclaw\/packages\/nemoclaw-example$/u);
+      const installCommand = commands.find(
+        ({ purpose }) => purpose === "install candidate harness",
+      );
+      expect(installCommand?.args).toEqual([
+        expect.stringMatching(/bin\/nemoclaw\.js$/u),
+        "harness",
+        "install",
+        "example",
+        "--from",
+        expect.stringMatching(/candidate-package\/dist\/nemoclaw-example$/u),
+        "--yes-i-trust-local-package",
+      ]);
+      expect(installCommand?.args.join(" ")).not.toContain(
+        `${path.sep}packages${path.sep}nemoclaw-example`,
+      );
     } finally {
       fs.rmSync(parent, { recursive: true, force: true });
     }

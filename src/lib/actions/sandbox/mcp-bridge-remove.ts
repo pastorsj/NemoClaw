@@ -26,12 +26,12 @@ import {
   assertMcpDestroyNotPending,
   bridgeState,
   clearMcpDestroyMarkers,
-  ensureSandboxGatewaySelected,
   getBridgeAdapter,
   getSandboxAgent,
   getSandboxOrThrow,
   removeBridgeEntry,
 } from "./mcp-bridge-state";
+import { ensureSandboxGatewaySelected } from "./mcp-bridge/gateway-selection";
 import { assertMcpCommandRuntimeAvailable } from "./mcp-bridge-runtime-capabilities";
 import {
   assertAuthenticatedBridgeEntry,

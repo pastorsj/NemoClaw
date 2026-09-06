@@ -1,9 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+/// <reference path="./js-yaml.d.ts" />
+
 import fs from "node:fs";
-import { isPlainObject } from "../core/json-types";
-import { isSafeModelId } from "../validation";
+import { TextDecoder } from "node:util";
+
+import yaml from "js-yaml";
+
+import { isPlainObject } from "../shared/object-record.ts";
+import { isSafeModelId } from "../validation.ts";
 import type {
   AgentDashboard,
   AgentDashboardKind,
@@ -17,11 +23,15 @@ import type {
   ManifestValue,
   StringMap,
 } from "./manifest-types";
-import { isAgentMcpAdapter } from "./manifest-types";
-import { isSnapshotControlPath } from "../state/snapshot/content-digest.js";
-import { readStateFileRestore } from "./state/file-restore";
+import { isAgentMcpAdapter } from "./manifest-types.ts";
+import {
+  HARNESS_MANIFEST_MAX_BYTES,
+  parseValidatedHarnessManifestDocument,
+} from "./manifest-document.ts";
+import { isSnapshotControlPath } from "../state/snapshot/content-digest.ts";
+import { readStateFileRestore } from "./state/file-restore.ts";
 
-const yaml: { load(input: string): unknown } = require("js-yaml");
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 function isManifestValue(value: unknown): value is ManifestValue {
   if (value === null || value instanceof Date) return true;
@@ -314,6 +324,30 @@ export function readDashboard(record: ManifestRecord): AgentDashboard {
     );
   }
 
+  const rawTunnelAllowedOriginsPath = dashboard.tunnel_allowed_origins_path;
+  if (
+    rawTunnelAllowedOriginsPath !== undefined &&
+    typeof rawTunnelAllowedOriginsPath !== "string"
+  ) {
+    throw new Error(
+      "Agent manifest field 'dashboard.tunnel_allowed_origins_path' must be a dotted config path",
+    );
+  }
+  const tunnelAllowedOriginsPath =
+    typeof rawTunnelAllowedOriginsPath === "string"
+      ? rawTunnelAllowedOriginsPath.split(".").map((segment) => segment.trim())
+      : null;
+  if (
+    tunnelAllowedOriginsPath !== null &&
+    (tunnelAllowedOriginsPath.length === 0 ||
+      tunnelAllowedOriginsPath.length > 16 ||
+      tunnelAllowedOriginsPath.some((segment) => !/^[A-Za-z0-9_-]+$/u.test(segment)))
+  ) {
+    throw new Error(
+      "Agent manifest field 'dashboard.tunnel_allowed_origins_path' must be a safe dotted config path",
+    );
+  }
+
   return {
     kind,
     label: normalizedLabel || defaultLabel,
@@ -321,6 +355,7 @@ export function readDashboard(record: ManifestRecord): AgentDashboard {
     healthPath: normalizePath("health_path", "/health"),
     auth,
     tokenPath,
+    tunnelAllowedOriginsPath,
   };
 }
 
@@ -355,10 +390,62 @@ export function readInference(record: ManifestRecord): AgentInference | undefine
     throw new Error("Agent manifest field 'inference.default_model' must be a safe model ID");
   }
 
+  const refreshRouteProviders = inference.refresh_route_for_messaging_providers;
+  if (
+    refreshRouteProviders !== undefined &&
+    (!Array.isArray(refreshRouteProviders) ||
+      refreshRouteProviders.length === 0 ||
+      refreshRouteProviders.length > 32 ||
+      new Set(refreshRouteProviders).size !== refreshRouteProviders.length ||
+      refreshRouteProviders.some(
+        (provider) =>
+          typeof provider !== "string" ||
+          provider.length > 256 ||
+          !/^[A-Za-z0-9._-]+$/u.test(provider),
+      ))
+  ) {
+    throw new Error(
+      "Agent manifest field 'inference.refresh_route_for_messaging_providers' must contain unique canonical provider identifiers",
+    );
+  }
+  const sandboxSmoke = inference.sandbox_smoke;
+  let parsedSandboxSmoke: AgentInference["sandbox_smoke"];
+  if (sandboxSmoke !== undefined) {
+    if (sandboxSmoke === null || typeof sandboxSmoke !== "object" || Array.isArray(sandboxSmoke)) {
+      throw new Error("Agent manifest field 'inference.sandbox_smoke' must be an object");
+    }
+    const smoke = sandboxSmoke as ManifestRecord;
+    const fields = Object.keys(smoke);
+    if (
+      fields.length !== 2 ||
+      !Object.hasOwn(smoke, "kind") ||
+      !Object.hasOwn(smoke, "config_path") ||
+      smoke.kind !== "compatible-endpoint" ||
+      typeof smoke.config_path !== "string" ||
+      !smoke.config_path.startsWith("/sandbox/")
+    ) {
+      throw new Error(
+        "Agent manifest field 'inference.sandbox_smoke' must declare compatible-endpoint and a config path below /sandbox",
+      );
+    }
+    parsedSandboxSmoke = Object.freeze({
+      kind: "compatible-endpoint",
+      config_path: smoke.config_path as `/sandbox/${string}`,
+    });
+  }
+
   return {
     provider_type: providerType,
     provider_options: providerOptionList,
     default_model: typeof defaultModel === "string" ? defaultModel.trim() : undefined,
+    ...(refreshRouteProviders
+      ? {
+          refresh_route_for_messaging_providers: Object.freeze([
+            ...(refreshRouteProviders as string[]),
+          ]),
+        }
+      : {}),
+    ...(parsedSandboxSmoke ? { sandbox_smoke: parsedSandboxSmoke } : {}),
   };
 }
 
@@ -385,12 +472,25 @@ export function readMcpCapability(record: ManifestRecord): AgentMcpCapability {
   }
 
   const policyBinaries = readMcpPolicyBinaryPaths(mcp, support);
+  const policyPresets = readStringArray(mcp, "policy_presets")?.map((entry) => entry.trim());
+  if (
+    policyPresets &&
+    (support !== "bridge" ||
+      policyPresets.length > 64 ||
+      new Set(policyPresets).size !== policyPresets.length ||
+      policyPresets.some((entry) => !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(entry)))
+  ) {
+    throw new Error(
+      "Agent manifest field 'mcp.policy_presets' must contain unique canonical policy preset names for bridge support",
+    );
+  }
   const reason = readString(mcp, "reason")?.trim();
   if (support === "bridge") {
     return {
       support,
       adapter: adapter!,
-      ...(policyBinaries ? { policy_binaries: policyBinaries } : {}),
+      policy_binaries: policyBinaries!,
+      ...(policyPresets ? { policy_presets: Object.freeze(policyPresets) } : {}),
       ...(reason ? { reason } : {}),
     };
   }
@@ -455,6 +555,25 @@ export function parseManifestRecord(source: string, label: string): ManifestReco
   return parsed;
 }
 
-export function loadManifestRecord(manifestPath: string): ManifestRecord {
+/** Load a repository-owned legacy manifest whose schema predates the public harness contract. */
+export function loadLegacyRepositoryManifest(manifestPath: string): ManifestRecord {
   return parseManifestRecord(fs.readFileSync(manifestPath, "utf8"), manifestPath);
+}
+
+/** Load one source package manifest through the same semantic contract used by installed receipts. */
+export function loadValidatedHarnessManifest(
+  manifestPath: string,
+  expectedHarnessId?: string,
+): ManifestRecord {
+  const bytes = fs.readFileSync(manifestPath);
+  if (bytes.byteLength > HARNESS_MANIFEST_MAX_BYTES) {
+    throw new Error("Harness agent manifest exceeds its byte boundary");
+  }
+  let source: string;
+  try {
+    source = UTF8_DECODER.decode(bytes);
+  } catch {
+    throw new Error("Harness agent manifest must contain valid UTF-8");
+  }
+  return parseValidatedHarnessManifestDocument(source, expectedHarnessId);
 }

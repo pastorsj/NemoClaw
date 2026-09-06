@@ -78,9 +78,20 @@ const FUTURE_MANAGED_IMAGE = {
   repository: "registry.example/team/future-harness",
   architectures: [MANAGED_IMAGE_PLATFORM],
   runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
-  startup_profile_contract_version: 1,
-  capability_contract_version: 1,
 } as const satisfies HarnessManagedImageDeclaration;
+
+const FUTURE_PUBLISHED_MANAGED_IMAGE = {
+  ...FUTURE_MANAGED_IMAGE,
+  publication: {
+    source: {
+      repository: "ExampleOrg/future-harness",
+      revision: "a".repeat(40),
+      release: "v1.2.3",
+      cohort: "build-2026.09.05",
+    },
+    digests: { "linux/amd64": `sha256:${"ab".repeat(32)}` },
+  },
+} as const;
 
 function futureHarnessContract(
   harnessPackage: HarnessPackageIdentity = FUTURE_HARNESS_PACKAGE,
@@ -380,6 +391,77 @@ describe("sandbox workload preparation", () => {
     });
   });
 
+  it("prepares a package-declared publication without resolving the stock catalogue", async () => {
+    const resolveCatalog = vi.fn(async () => {
+      throw new Error("stock catalogue must not be called");
+    });
+
+    const prepared = await prepareSandboxWorkloadSource(
+      {
+        ...input(FUTURE_HARNESS_PACKAGE.id),
+        harnessPackage: FUTURE_HARNESS_PACKAGE,
+        managedImage: FUTURE_PUBLISHED_MANAGED_IMAGE,
+        catalogRevision: "b".repeat(40),
+      },
+      { resolveCatalog },
+    );
+
+    expect(resolveCatalog).not.toHaveBeenCalled();
+    expect(prepared).toMatchObject({
+      source: {
+        kind: "managed-image",
+        reference: `${FUTURE_PUBLISHED_MANAGED_IMAGE.repository}@${FUTURE_PUBLISHED_MANAGED_IMAGE.publication.digests["linux/amd64"]}`,
+        contract: {
+          harnessPackage: FUTURE_HARNESS_PACKAGE,
+          source: FUTURE_PUBLISHED_MANAGED_IMAGE.publication.source,
+        },
+      },
+      release: "v1.2.3",
+      fallbackDiagnostic: null,
+    });
+  });
+
+  it("falls back or refuses before network access when an external package has no publication", async () => {
+    const resolveCatalog = vi.fn(async () => {
+      throw new Error("stock catalogue must not be called");
+    });
+    const preferredRuntime = {
+      ...runtime("docker"),
+      managedImageSelectionPolicy: "prefer-managed" as const,
+    };
+
+    const preferred = await prepareSandboxWorkloadSource(
+      {
+        ...input(FUTURE_HARNESS_PACKAGE.id),
+        harnessPackage: FUTURE_HARNESS_PACKAGE,
+        managedImage: FUTURE_MANAGED_IMAGE,
+        runtime: preferredRuntime,
+      },
+      { resolveCatalog },
+    );
+    expect(preferred).toEqual({
+      source: {
+        kind: "legacy-dockerfile",
+        dockerfilePath: `agents/${FUTURE_HARNESS_PACKAGE.id}/Dockerfile`,
+        reason: "contract-unavailable",
+      },
+      release: null,
+      fallbackDiagnostic: `package '${FUTURE_HARNESS_PACKAGE.id}' does not declare an immutable managed image publication`,
+    });
+    await expect(
+      prepareSandboxWorkloadSource(
+        {
+          ...input(FUTURE_HARNESS_PACKAGE.id),
+          harnessPackage: FUTURE_HARNESS_PACKAGE,
+          managedImage: FUTURE_MANAGED_IMAGE,
+          runtime: runtime("podman"),
+        },
+        { resolveCatalog },
+      ),
+    ).rejects.toThrow("does not declare an immutable managed image publication");
+    expect(resolveCatalog).not.toHaveBeenCalled();
+  });
+
   it("binds reusable stock publication evidence to an installed package receipt", async () => {
     const harnessPackage = {
       kind: "agent-runtime",
@@ -393,8 +475,6 @@ describe("sandbox workload preparation", () => {
       runtime_identity: { uid: 998, gid: 998, workdir: "/sandbox" },
       workspace: { owner: "runtime", mode: "0755" },
       state_root: { mount_target: "/sandbox/.openclaw", mode: "2770" },
-      startup_profile_contract_version: 1,
-      capability_contract_version: 1,
     } as const satisfies HarnessManagedImageDeclaration;
 
     const prepared = await prepareSandboxWorkloadSource({

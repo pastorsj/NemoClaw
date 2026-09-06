@@ -17,6 +17,12 @@ import {
 type CompatibleEndpointSmokeAgent =
   | {
       name?: string | null;
+      inference?: {
+        sandbox_smoke?: {
+          readonly kind: "compatible-endpoint";
+          readonly config_path: `/sandbox/${string}`;
+        };
+      };
     }
   | null
   | undefined;
@@ -114,10 +120,11 @@ export function verifyCompatibleEndpointSandboxSmoke(options: {
   /** Recheck sandbox identity after the sandbox proof and before success output. */
   beforeSuccess?: () => void;
 }): void {
-  const agentName = options.agent?.name || "openclaw";
+  const packageSmoke = options.agent?.inference?.sandbox_smoke;
   if (
     options.forceCanonicalRoute !== true &&
-    (agentName !== "openclaw" || options.provider !== "compatible-endpoint")
+    ((options.agent && packageSmoke?.kind !== "compatible-endpoint") ||
+      options.provider !== "compatible-endpoint")
   ) {
     return;
   }
@@ -182,7 +189,9 @@ export function verifyCompatibleEndpointSandboxSmoke(options: {
         options.model,
         options.hostLocalInferenceProofAuthority,
       )
-    : buildCompatibleEndpointSandboxSmokeCommand(options.model);
+    : buildCompatibleEndpointSandboxSmokeScript(options.model, {
+        ...(packageSmoke ? { configPath: packageSmoke.config_path } : {}),
+      });
   const smokeResult = options.runOpenshell(
     forceCanonicalRoute
       ? ["sandbox", "exec", "-n", options.sandboxName, "--", "python3", "-c", script]

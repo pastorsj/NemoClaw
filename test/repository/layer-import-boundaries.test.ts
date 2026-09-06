@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   findLayerImportBoundaryViolations,
   findManagedRuntimeBoundaryViolations,
+  findPackageImageBoundaryViolations,
   parseReceiptHarnessDecisionBaseline,
 } from "../../scripts/checks/layer-import-boundaries.mts";
 
@@ -34,10 +35,15 @@ function namedActionFixturePath(extension = ".mts"): string {
   );
 }
 
-function scanFixture(fixture: string, source: string, packagesRoot?: string) {
+function scanFixture(
+  fixture: string,
+  source: string,
+  packagesRoot?: string,
+  options?: Parameters<typeof findLayerImportBoundaryViolations>[2],
+) {
   try {
     fs.writeFileSync(fixture, source);
-    return findLayerImportBoundaryViolations(fixture, packagesRoot);
+    return findLayerImportBoundaryViolations(fixture, packagesRoot, options);
   } finally {
     fs.rmSync(fixture, { force: true });
   }
@@ -58,6 +64,231 @@ describe("CLI layer import boundaries (#6245)", () => {
 
   it("keeps managed runtime orchestration provider-neutral (#9145)", () => {
     expect(findManagedRuntimeBoundaryViolations()).toEqual([]);
+  });
+
+  it("discovers future package IDs for managed bootstrap neutrality", () => {
+    const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-packages-"));
+    const packageRoot = path.join(packagesRoot, "future-runtime");
+    const fixture = fixturePath("src/lib/onboard/managed-bootstrap", "future-package-id");
+    fs.mkdirSync(packageRoot);
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "@example/future-runtime",
+        nemoclaw: { harnessManifest: "manifest.yaml" },
+      }),
+    );
+    fs.writeFileSync(path.join(packageRoot, "manifest.yaml"), "name: future-harness\n");
+    fs.writeFileSync(fixture, 'export const encodedAgent = "future-harness";\n');
+    try {
+      expect(findManagedRuntimeBoundaryViolations(packagesRoot)).toEqual([
+        expect.objectContaining({
+          file: path.relative(REPO_ROOT, fixture),
+          rule: "managed-state-root-neutrality",
+          detail: "managed bootstrap and Podman provider code must not encode agent IDs",
+        }),
+      ]);
+    } finally {
+      fs.rmSync(fixture, { force: true });
+      fs.rmSync(packagesRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects an exact future package ID passed to receipt-store authority", () => {
+    const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-receipt-packages-"));
+    const packageRoot = path.join(packagesRoot, "future-runtime");
+    const fixture = fixturePath("src/lib", "future-receipt-selector");
+    fs.mkdirSync(packageRoot);
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "@example/future-runtime",
+        nemoclaw: { harnessManifest: "manifest.yaml" },
+      }),
+    );
+    fs.writeFileSync(path.join(packageRoot, "manifest.yaml"), "name: future-harness\n");
+    try {
+      expect(
+        scanFixture(fixture, 'readInstalledHarnessPackage("future-harness");\n', packagesRoot, {
+          verifyReceiptHarnessDecisionBaseline: false,
+        }),
+      ).toEqual([
+        expect.objectContaining({
+          rule: "receipt-backed-package-selector",
+          detail: expect.stringContaining("future-harness"),
+        }),
+      ]);
+    } finally {
+      fs.rmSync(packagesRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("allows a future package receipt selected from typed authority", () => {
+    const fixture = fixturePath("src/lib", "typed-receipt-selector");
+    expect(
+      scanFixture(
+        fixture,
+        "export function selectPackage(packageId: string) { return readInstalledHarnessPackage(packageId); }\n",
+        undefined,
+        { verifyReceiptHarnessDecisionBaseline: false },
+      ),
+    ).toEqual([]);
+  });
+
+  it("rejects an exact future package ID at the provider-broker boundary", () => {
+    const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-broker-packages-"));
+    const packageRoot = path.join(packagesRoot, "future-runtime");
+    const fixture = fixturePath("src/lib", "future-provider-broker-selector");
+    fs.mkdirSync(packageRoot);
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "@example/future-runtime",
+        nemoclaw: { harnessManifest: "manifest.yaml" },
+      }),
+    );
+    fs.writeFileSync(path.join(packageRoot, "manifest.yaml"), "name: future-harness\n");
+    try {
+      expect(
+        scanFixture(
+          fixture,
+          'runHarnessProviderBrokerController("future-harness", request);\n',
+          packagesRoot,
+          { verifyReceiptHarnessDecisionBaseline: false },
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          rule: "receipt-backed-package-selector",
+          detail: expect.stringContaining("runHarnessProviderBrokerController"),
+        }),
+      ]);
+    } finally {
+      fs.rmSync(packagesRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects core-native files copied into a publishable package image", () => {
+    const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-image-packages-"));
+    const packageRoot = path.join(packagesRoot, "future-runtime");
+    fs.mkdirSync(packageRoot);
+    fs.writeFileSync(
+      path.join(packageRoot, "Dockerfile"),
+      [
+        "FROM scratch",
+        "COPY scripts/managed-gateway-control.py /runtime/control.py",
+        "COPY src/lib/messaging/ /runtime/messaging/",
+      ].join("\n"),
+    );
+    try {
+      expect(findPackageImageBoundaryViolations(packagesRoot)).toEqual([
+        expect.objectContaining({
+          rule: "package-image-native-ownership",
+          detail: expect.stringContaining("scripts/managed-gateway-control.py"),
+        }),
+        expect.objectContaining({
+          rule: "package-image-native-ownership",
+          detail: expect.stringContaining("src/lib/messaging/"),
+        }),
+      ]);
+    } finally {
+      fs.rmSync(packagesRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("requires shared package runtimes to use the published contract materializer", () => {
+    const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-packages-"));
+    const packageRoot = path.join(packagesRoot, "future-runtime");
+    fs.mkdirSync(path.join(packageRoot, "runtime"), { recursive: true });
+    fs.mkdirSync(path.join(packageRoot, "messaging"), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, "Dockerfile"), "FROM scratch\n");
+    fs.writeFileSync(path.join(packageRoot, "runtime/managed-gateway-control.py"), "# runtime\n");
+    fs.writeFileSync(path.join(packageRoot, "messaging/messaging-build.mts"), "// runtime\n");
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        devDependencies: { "@nvidia/nemoclaw-harness-contract": "^0.1.0" },
+        scripts: {
+          "build:runtime": "tsx ../../scripts/packages/build-messaging-runtime.mts",
+          "check:runtime": "echo unchecked",
+        },
+      }),
+    );
+    try {
+      expect(findPackageImageBoundaryViolations(packagesRoot)).toEqual([
+        expect.objectContaining({
+          rule: "package-image-runtime-materializer",
+          detail: expect.stringContaining("must not reach into NemoClaw core source"),
+        }),
+        expect.objectContaining({
+          rule: "package-image-runtime-materializer",
+          detail: expect.stringContaining("runtime/managed-gateway-control.py must be built"),
+        }),
+        expect.objectContaining({
+          rule: "package-image-runtime-materializer",
+          detail: expect.stringContaining("messaging/messaging-build.mts must be built"),
+        }),
+      ]);
+
+      fs.writeFileSync(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({
+          devDependencies: { "@nvidia/nemoclaw-harness-contract": "^0.1.0" },
+          scripts: {
+            "build:runtime":
+              "nemoclaw-materialize-runtime managed-gateway runtime/managed-gateway-control.py && nemoclaw-materialize-runtime messaging-build messaging/messaging-build.mts",
+            "check:runtime":
+              "nemoclaw-materialize-runtime managed-gateway runtime/managed-gateway-control.py --check && nemoclaw-materialize-runtime messaging-build messaging/messaging-build.mts --check",
+          },
+        }),
+      );
+      expect(findPackageImageBoundaryViolations(packagesRoot)).toEqual([]);
+    } finally {
+      fs.rmSync(packagesRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects another installed package ID from a managed gateway profile", () => {
+    const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-profile-packages-"));
+    for (const packageId of ["first-agent", "future-agent"]) {
+      const packageRoot = path.join(packagesRoot, packageId);
+      fs.mkdirSync(path.join(packageRoot, "runtime"), { recursive: true });
+      fs.writeFileSync(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({
+          name: `@example/${packageId}`,
+          nemoclaw: { harnessManifest: "manifest.yaml" },
+        }),
+      );
+      fs.writeFileSync(path.join(packageRoot, "manifest.yaml"), `name: ${packageId}\n`);
+      fs.writeFileSync(path.join(packageRoot, "Dockerfile"), "FROM scratch\n");
+    }
+    fs.writeFileSync(
+      path.join(packagesRoot, "first-agent/runtime/managed-gateway-profile.py"),
+      'OTHER_PACKAGE = "future-agent"\n',
+    );
+    try {
+      expect(findPackageImageBoundaryViolations(packagesRoot)).toEqual([
+        expect.objectContaining({
+          rule: "package-image-native-ownership",
+          detail: "managed gateway profile for first-agent must not encode package future-agent",
+        }),
+      ]);
+    } finally {
+      fs.rmSync(packagesRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("recognizes the repository's hidden internal oclif command base", () => {
+    const fixture = fixturePath("src/commands/internal", "internal-command");
+    expect(
+      scanFixture(
+        fixture,
+        [
+          'import { NemoClawInternalCommand as InternalBase } from "../../lib/cli/internal-command";',
+          "export default class Example extends InternalBase {}",
+        ].join("\n"),
+      ),
+    ).toEqual([]);
   });
 
   it.each([
@@ -246,6 +477,25 @@ describe("CLI layer import boundaries (#6245)", () => {
       fs.rmSync(featureBridge, { force: true });
       fs.rmSync(authorityBridge, { force: true });
     }
+  });
+
+  it("blocks harness decisions in typed callbacks that receive package authority as data", () => {
+    const fixture = fixturePath("src/lib", "receipt-callback-consumer");
+    const repoPath = path.relative(REPO_ROOT, fixture).split(path.sep).join("/");
+    const violations = scanFixture(
+      fixture,
+      'export function decide(agent: { name: string }) {\n  return agent.name === "pi";\n}\n',
+      undefined,
+      { receiptBackedCallbackModules: new Set([repoPath]) },
+    );
+
+    expect(violations).toEqual([
+      expect.objectContaining({
+        file: repoPath,
+        rule: "receipt-backed-harness-neutrality",
+        detail: expect.stringContaining("package ID 'pi' (equality decision in 'decide')"),
+      }),
+    ]);
   });
 
   it("allows comments and diagnostics through transitive package-authority imports", () => {

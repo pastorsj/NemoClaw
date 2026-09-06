@@ -14,6 +14,14 @@
 
 import type { AgentDefinition } from "../agent-runtime/manifest-types";
 import type { AgentConfigTarget } from "./agent-config";
+import {
+  runHermesDashboardConfigSeed,
+  type HermesDashboardReseedDeps,
+  type HermesDashboardReseedResult,
+} from "./dashboard-reseed";
+import { classifyLegacyConfigAgent } from "./legacy-config";
+
+export type { HermesDashboardReseedDeps, HermesDashboardReseedResult } from "./dashboard-reseed";
 
 export type { AgentConfigTarget } from "./agent-config";
 
@@ -66,18 +74,54 @@ const {
   validatePackageConfigCommandResult,
 }: typeof import("./config-boundary") = require("./config-boundary");
 const {
-  OPENSHELL_OPERATION_TIMEOUT_MS,
-}: typeof import("../adapters/openshell/timeouts") = require("../adapters/openshell/timeouts");
-const { redactFull }: typeof import("../security/redact") = require("../security/redact");
-const {
   loadRotateTokenSession,
   readStdin,
   rotateSandboxToken,
 }: typeof import("./config-rotate-token") = require("./config-rotate-token");
-
 type ConfigObject = import("../security/credential-filter").ConfigObject;
 type ConfigValue = import("../security/credential-filter").ConfigValue;
 const { runOpenshellCommand, captureOpenshellCommand } = require("../adapters/openshell/client");
+
+function buildLegacyConfigSetRestartGuidance(sandboxName: string, agentName: string): string[] {
+  const legacyAgent = classifyLegacyConfigAgent(agentName);
+  if (legacyAgent === "sealed-yaml") {
+    return [
+      "  Note: Hermes may restart its gateway when it applies this configuration.",
+      `  Use --restart to request and verify a restart, or run: nemoclaw ${shellQuote(sandboxName)} gateway restart`,
+    ];
+  }
+  if (legacyAgent === "sealed-json") {
+    return [
+      "  Note: Some config changes require a sandbox restart to take effect.",
+      `  Re-run with --restart or run: nemoclaw ${shellQuote(sandboxName)} gateway restart`,
+    ];
+  }
+  return [
+    "  Note: Some config changes require restarting the agent runtime to take effect.",
+    `  Follow the restart procedure for '${agentName}'; NemoClaw does not manage restarts for this agent.`,
+  ];
+}
+
+function legacyConfigSetAllowsOpenShellBridge(
+  agentName: string,
+  segments: readonly string[],
+): boolean {
+  const legacyAgent = classifyLegacyConfigAgent(agentName);
+  if (legacyAgent === "sealed-yaml") {
+    return segments.length === 2 && segments[0] === "model" && segments[1] === "base_url";
+  }
+  if (legacyAgent === "sealed-json") {
+    return (
+      segments.length === 4 &&
+      segments[0] === "models" &&
+      segments[1] === "providers" &&
+      segments[2].length > 0 &&
+      !/^\d+$/.test(segments[2]) &&
+      segments[3] === "baseUrl"
+    );
+  }
+  return false;
+}
 
 function parseJson<T>(text: string): T {
   return JSON.parse(text);
@@ -154,26 +198,6 @@ function restartSandboxAgentAfterConfigSet(
   }
 }
 
-function buildConfigSetRestartGuidance(sandboxName: string, agentName: string): string[] {
-  if (agentName === "hermes") {
-    return [
-      "  Note: Hermes may restart its gateway when it applies this configuration.",
-      `  Use --restart to request and verify a restart, or run: nemoclaw ${shellQuote(sandboxName)} gateway restart`,
-    ];
-  }
-  if (agentName === "openclaw") {
-    return [
-      "  Note: Some config changes require a sandbox restart to take effect.",
-      `  Re-run with --restart or run: nemoclaw ${shellQuote(sandboxName)} gateway restart`,
-    ];
-  }
-
-  return [
-    "  Note: Some config changes require restarting the agent runtime to take effect.",
-    `  Follow the restart procedure for '${agentName}'; NemoClaw does not manage restarts for this agent.`,
-  ];
-}
-
 export class ConfigUrlValidationError extends Error {
   constructor(
     readonly urlValue: string,
@@ -194,6 +218,33 @@ const CONFIG_CAPTURE_MAX_BUFFER = MAX_OPENCLAW_CONFIG_BYTES + 1024 * 1024;
 const OPENCLAW_CONFIG_GUARD_TIMEOUT_MS = 6 * 60 * 1000;
 const HERMES_CONFIG_GUARD_TIMEOUT_MS = 150_000;
 const CONFIG_SOURCE_SHA256: unique symbol = Symbol("nemoclaw.configSourceSha256");
+
+/**
+ * Carry the compare-and-swap authority from one exact sandbox read onto a
+ * JSON-only package adapter result. The adapter never receives this private
+ * symbol, and therefore cannot forge or replace it.
+ */
+export function preserveConfigReadAuthority(
+  source: ConfigObject,
+  candidate: ConfigObject,
+): ConfigObject {
+  const expectedConfigSha256 = (source as ConfigObject & { [CONFIG_SOURCE_SHA256]?: string })[
+    CONFIG_SOURCE_SHA256
+  ];
+  if (!expectedConfigSha256) {
+    throw new Error(
+      "Cannot bind config write authority without the digest from the matching read.",
+    );
+  }
+  const authorized = structuredClone(candidate);
+  Object.defineProperty(authorized, CONFIG_SOURCE_SHA256, {
+    configurable: false,
+    enumerable: false,
+    value: expectedConfigSha256,
+    writable: false,
+  });
+  return authorized;
+}
 
 function privilegedSandboxExec(
   sandboxName: string,
@@ -433,7 +484,7 @@ function classifyNewKeyGate(inputs: NewKeyGateInputs): NewKeyGate {
  */
 function composeSandboxConfigBody(config: ConfigObject, target: AgentConfigTarget): string {
   const body = serializeConfig(config, target.format);
-  if (target.agentName === "hermes" && target.format === "yaml") {
+  if (classifyLegacyConfigAgent(target.agentName) === "sealed-yaml" && target.format === "yaml") {
     return `${buildHermesUpstreamHeader(config as Record<string, unknown>)}${body}`;
   }
   return body;
@@ -688,8 +739,9 @@ function writeSandboxConfig(
     writePackageConfigCandidate(sandboxName, target, packageCandidate);
     return;
   }
+  const legacyAgent = classifyLegacyConfigAgent(target.agentName);
   const content = validatedOpenClawCandidate?.content ?? composeSandboxConfigBody(config, target);
-  if (target.agentName === "hermes") {
+  if (legacyAgent === "sealed-yaml") {
     const expectedConfigSha256 = (config as ConfigObject & { [CONFIG_SOURCE_SHA256]?: string })[
       CONFIG_SOURCE_SHA256
     ];
@@ -729,7 +781,7 @@ function writeSandboxConfig(
     }
     return;
   }
-  if (target.agentName === "openclaw") {
+  if (legacyAgent === "sealed-json") {
     const expectedConfigSha256 = (config as ConfigObject & { [CONFIG_SOURCE_SHA256]?: string })[
       CONFIG_SOURCE_SHA256
     ];
@@ -785,7 +837,7 @@ function buildRecomputeSandboxConfigHashScript(target: AgentConfigTarget): strin
   // OpenClaw and Hermes write and refresh both hashes inside one fd-pinned sealed
   // transaction. A second pathname-based hash pass would reopen the race that
   // transaction is designed to close.
-  if (target.agentName === "openclaw" || target.agentName === "hermes") return null;
+  if (classifyLegacyConfigAgent(target.agentName) !== null) return null;
   if (!target.sensitiveFiles?.includes(`${target.configDir}/.config-hash`)) return null;
   return [
     `cd ${shellQuote(target.configDir)}`,
@@ -799,180 +851,6 @@ function recomputeSandboxConfigHash(sandboxName: string, target: AgentConfigTarg
   const script = buildRecomputeSandboxConfigHashScript(target);
   if (!script) return;
   privilegedSandboxExec(sandboxName, ["sh", "-c", script]);
-}
-
-// Absolute path to the Hermes dashboard config seeder inside the sandbox image
-// (installed by the packages/nemoclaw-hermes image build). The python resolution order
-// mirrors start.sh's trusted `_HERMES_PYTHON` list.
-const HERMES_DASHBOARD_SEEDER_PATH = "/usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py";
-const HERMES_MANAGED_POLICY_PATH = "/usr/local/share/nemoclaw/hermes-managed-policy.json";
-const HERMES_TRUSTED_PYTHON3 = [
-  "/opt/hermes/.venv/bin/python3",
-  "/usr/local/bin/python3",
-  "/usr/bin/python3",
-] as const;
-const HERMES_DASHBOARD_PATH_ABSENT_STATUS = 3;
-// OpenShell rejects CR/LF in argv, so encode the multiline program inside a
-// single-line Python expression.
-const HERMES_DASHBOARD_PATH_INSPECTION = `exec(${JSON.stringify(
-  [
-    "import os",
-    "import stat",
-    "import sys",
-    "try:",
-    "    mode = os.lstat(sys.argv[1]).st_mode",
-    "except FileNotFoundError:",
-    `    raise SystemExit(${HERMES_DASHBOARD_PATH_ABSENT_STATUS})`,
-    "except OSError as exc:",
-    '    print(f"unable to inspect Hermes dashboard path: {exc}", file=sys.stderr)',
-    "    raise SystemExit(2)",
-    "raise SystemExit(0 if stat.S_ISDIR(mode) else 2)",
-  ].join("\n"),
-)})`;
-
-export type HermesDashboardReseedResult = "converged" | "absent" | "failed";
-
-export interface HermesDashboardReseedDeps {
-  getOpenshellBinary: () => string;
-  captureOpenshellCommand: (
-    binary: string,
-    args: string[],
-    options: import("../adapters/openshell/client").CaptureOpenshellOptions,
-  ) => import("../adapters/openshell/client").CaptureOpenshellResult;
-  reportFailure?: (stage: "python" | "inspection" | "seed", detail: string) => void;
-}
-
-const HERMES_DASHBOARD_RESEED_DIAGNOSTIC_MAX_CHARS = 800;
-
-function hermesDashboardReseedFailureDetail(
-  result: import("../adapters/openshell/client").CaptureOpenshellResult,
-): string {
-  const raw =
-    result.error?.message || result.stderr?.trim() || result.output.trim() || result.stdout?.trim();
-  const detail = redactFull(raw || "no command output")
-    .replace(/\s+/gu, " ")
-    .trim();
-  const bounded = detail.slice(0, HERMES_DASHBOARD_RESEED_DIAGNOSTIC_MAX_CHARS);
-  return [
-    `status=${result.status === null ? "null" : result.status}`,
-    result.signal ? `signal=${result.signal}` : "",
-    bounded ? `detail=${bounded}` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-/**
- * Re-run the Hermes dashboard config seeder inside the sandbox so the isolated
- * dashboard profile config (`<configDir>/profiles/dashboard-home/config.yaml`)
- * re-mirrors the gateway config's model routing after an in-place
- * `inference set`. Sandbox startup runs the same seeder; without re-running it,
- * Dashboard Chat and its `/api/model/info` endpoint stay on the previous model
- * even though the gateway config, registry, and CLI status all report the new
- * one (#6893).
- *
- * Runs as the sandbox user (non-privileged `sandbox exec`, matching start.sh's
- * step-down before touching sandbox-owned dashboard-home state); the seeder does
- * no-follow atomic writes and refuses symlinked paths. Best-effort: returns
- * `failed` on failure so the caller can warn without aborting the route switch.
- */
-function runHermesDashboardConfigSeed(
-  sandboxName: string,
-  target: AgentConfigTarget,
-  mergeLegacy: boolean,
-  deps: HermesDashboardReseedDeps,
-): HermesDashboardReseedResult {
-  const dashboardHome = `${target.configDir}/profiles/dashboard-home`;
-  const legacyDashboardHome = `${target.configDir}/dashboard-home`;
-  const binary = deps.getOpenshellBinary();
-  const capture = (command: string[]) =>
-    deps.captureOpenshellCommand(
-      binary,
-      ["sandbox", "exec", "--name", sandboxName, "--", ...command],
-      {
-        ignoreError: true,
-        includeStreams: true,
-        maxBuffer: CONFIG_CAPTURE_MAX_BUFFER,
-        timeout: OPENSHELL_OPERATION_TIMEOUT_MS,
-      },
-    );
-  const failed = (result: import("../adapters/openshell/client").CaptureOpenshellResult) =>
-    Boolean(result.error || result.signal || result.status !== 0);
-  const reportFailure = (
-    stage: "python" | "inspection" | "seed",
-    result: import("../adapters/openshell/client").CaptureOpenshellResult,
-  ) => {
-    const detail = hermesDashboardReseedFailureDetail(result);
-    if (deps.reportFailure) {
-      deps.reportFailure(stage, detail);
-      return;
-    }
-    console.error(`  Hermes dashboard reseed ${stage} failed: ${detail}`);
-  };
-
-  let python: (typeof HERMES_TRUSTED_PYTHON3)[number] | null = null;
-  let lastPythonFailure: import("../adapters/openshell/client").CaptureOpenshellResult | undefined;
-  for (const candidate of HERMES_TRUSTED_PYTHON3) {
-    const probe = capture([candidate, "-c", ""]);
-    if (!failed(probe)) {
-      python = candidate;
-      break;
-    }
-    lastPythonFailure = probe;
-  }
-  if (!python) {
-    if (lastPythonFailure) reportFailure("python", lastPythonFailure);
-    return "failed";
-  }
-
-  // lstat distinguishes a genuinely absent profile from a file, a symlink
-  // (including a broken one), or an inspection error. Only the first case is a
-  // clean no-op; everything else fails closed so callers cannot report sync.
-  let inspection = capture([python, "-c", HERMES_DASHBOARD_PATH_INSPECTION, dashboardHome]);
-  if (
-    !inspection.error &&
-    !inspection.signal &&
-    inspection.status === HERMES_DASHBOARD_PATH_ABSENT_STATUS
-  ) {
-    inspection = capture([python, "-c", HERMES_DASHBOARD_PATH_INSPECTION, legacyDashboardHome]);
-    if (
-      !inspection.error &&
-      !inspection.signal &&
-      inspection.status === HERMES_DASHBOARD_PATH_ABSENT_STATUS
-    ) {
-      return "absent";
-    }
-  }
-  if (failed(inspection)) {
-    reportFailure("inspection", inspection);
-    return "failed";
-  }
-
-  const dashboardConfigPath = `${dashboardHome}/config.yaml`;
-  const seed = capture([
-    python,
-    HERMES_DASHBOARD_SEEDER_PATH,
-    ...(mergeLegacy ? ["--merge-legacy"] : []),
-    HERMES_MANAGED_POLICY_PATH,
-    target.configPath,
-    dashboardConfigPath,
-    `${target.configDir}/.env`,
-    `${dashboardHome}/.env`,
-  ]);
-  if (failed(seed)) {
-    reportFailure("seed", seed);
-    return "failed";
-  }
-  const seededMarker = `[dashboard] seeded model routing and reviewed policy into ${dashboardConfigPath}`;
-  if (
-    !String(seed.stderr ?? "")
-      .split(/\r?\n/u)
-      .includes(seededMarker)
-  ) {
-    reportFailure("seed", seed);
-    return "failed";
-  }
-  return "converged";
 }
 
 function seedHermesDashboardConfig(
@@ -1191,22 +1069,7 @@ function configSetAllowsOpenShellBridge(
   const segments = [...key.split("."), ...relativePath];
   if (segments.some((segment) => UNSAFE_KEY_SEGMENTS.has(segment))) return false;
 
-  if (agentName === "hermes") {
-    return segments.length === 2 && segments[0] === "model" && segments[1] === "base_url";
-  }
-
-  if (agentName === "openclaw") {
-    return (
-      segments.length === 4 &&
-      segments[0] === "models" &&
-      segments[1] === "providers" &&
-      segments[2].length > 0 &&
-      !/^\d+$/.test(segments[2]) &&
-      segments[3] === "baseUrl"
-    );
-  }
-
-  return false;
+  return legacyConfigSetAllowsOpenShellBridge(agentName, segments);
 }
 
 async function rewriteConfigUrlsWithDnsPinning(
@@ -1392,12 +1255,12 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
   const target = resolveAgentConfig(sandboxName);
   const installedConfigSelection = loadInstalledConfigAdapter(sandboxName, target);
   const installedConfigAdapter = installedConfigSelection?.adapter;
-  if (
-    !installedConfigAdapter &&
-    opts.restart &&
-    target.agentName !== "openclaw" &&
-    target.agentName !== "hermes"
-  ) {
+  // A package receipt either resolves its typed adapter or throws. Reaching
+  // this classifier therefore proves the pre-package compatibility path.
+  const legacyConfigAgent = installedConfigAdapter
+    ? null
+    : classifyLegacyConfigAgent(target.agentName);
+  if (!installedConfigAdapter && opts.restart && legacyConfigAgent === null) {
     configFail(
       `  --restart is supported only for OpenClaw and Hermes; '${target.agentName}' config was not changed.`,
     );
@@ -1494,7 +1357,7 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
     safeValue = await rewriteConfigUrlsWithDnsPinning(parsedValue, dnsPromises.lookup as LookupFn, {
       allowPrivateUrls:
         !installedConfigAdapter &&
-        target.agentName === "hermes" &&
+        legacyConfigAgent === "sealed-yaml" &&
         hermesConfigAllowsPrivateUrls(config),
       allowPrivateUrlsPath: (relativePath) =>
         installedConfigAdapter?.classifyConfigUrl({
@@ -1554,7 +1417,7 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
     }
     validatePackageConfigCandidate(candidate);
     preparedPackageCandidate = candidate;
-  } else if (target.agentName === "openclaw") {
+  } else if (legacyConfigAgent === "sealed-json") {
     setDotpath(config, opts.key, safeValue);
     const content = composeSandboxConfigBody(config, target);
     try {
@@ -1610,7 +1473,7 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
           `  ${target.agentName} config candidate changed after validation. Re-run config set against the current value.`,
         );
       }
-    } else if (target.agentName === "openclaw") {
+    } else if (legacyConfigAgent === "sealed-json") {
       const currentCandidateContent = composeSandboxConfigBody(currentConfig, target);
       if (
         !validatedOpenClawCandidate ||
@@ -1657,7 +1520,7 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
             ...preparedPackageCandidate.plan.restart.guidance,
             `  Re-run with --restart or run: ${CLI_NAME} ${shellQuote(sandboxName)} gateway restart`,
           ]
-      : buildConfigSetRestartGuidance(sandboxName, target.agentName);
+      : buildLegacyConfigSetRestartGuidance(sandboxName, target.agentName);
     for (const line of guidance) {
       console.log(line);
     }
@@ -1701,7 +1564,7 @@ function confirmYesNo(question: string): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 export {
-  buildConfigSetRestartGuidance,
+  buildLegacyConfigSetRestartGuidance as buildConfigSetRestartGuidance,
   buildRecomputeSandboxConfigHashScript,
   classifyNewKeyGate,
   composeSandboxConfigBody,
@@ -1718,6 +1581,7 @@ export {
   formatConfigValueForLogs,
   parseConfig,
   parseConfigGetArgs,
+  preparePackageConfigCandidate,
   readSandboxConfig,
   readStdin,
   recomputeSandboxConfigHash,

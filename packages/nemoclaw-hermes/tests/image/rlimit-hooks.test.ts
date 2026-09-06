@@ -52,11 +52,15 @@ describe("sandbox rlimit system hooks (#2173)", () => {
     const ciaoGuard = path.join(preloadDir, "ciao-network-guard.js");
     const gatewaySupervisor = path.join(localLib, "gateway-supervisor.sh");
     const managedGatewayControl = path.join(localLib, "managed-gateway-control.py");
+    const managedGatewayProfile = path.join(localLib, "managed-gateway-profile.py");
     const hermesCronRestoreControl = path.join(localLib, "hermes-cron-restore-control.py");
+    const inferenceReconcile = path.join(localLib, "inference-reconcile.py");
+    const sealConfig = path.join(localLib, "seal-config");
     const startBin = path.join(tmp, "nemoclaw-start");
     const managedStartupHold = path.join(tmp, "nemoclaw-managed-startup-hold");
     const managedBootstrap = path.join(tmp, "nemoclaw-managed-bootstrap");
     const gatewayControl = path.join(tmp, "nemoclaw-gateway-control");
+    const stateRestore = path.join(tmp, "nemoclaw-state-restore");
     const corporateCaRuntime = path.join(localLib, "corporate-ca-runtime.sh");
     const entrypointEnvWrapper = path.join(localLib, "entrypoint-env-wrapper.sh");
     const bashrc = path.join(tmp, "bash.bashrc");
@@ -90,11 +94,19 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       fs.chmodSync(ciaoGuard, 0o666);
       fs.writeFileSync(gatewaySupervisor, "# gateway supervisor fixture\n");
       fs.writeFileSync(managedGatewayControl, "# managed gateway control fixture\n");
+      fs.writeFileSync(managedGatewayProfile, "# managed gateway profile fixture\n");
       fs.writeFileSync(hermesCronRestoreControl, "# Hermes cron restore control fixture\n");
+      fs.writeFileSync(inferenceReconcile, "# inference reconcile fixture\n");
+      fs.writeFileSync(
+        sealConfig,
+        "#!/usr/bin/env bash\nprintf '%s\\n' '[SECURITY] NEMOCLAW_MANAGED_STARTUP_REPLAY must be 0 or 1'\nexit 1\n",
+        { mode: 0o700 },
+      );
       fs.writeFileSync(startBin, "#!/usr/bin/env bash\n");
       fs.writeFileSync(managedStartupHold, "#!/usr/bin/env bash\n");
       fs.writeFileSync(managedBootstrap, "#!/usr/bin/env bash\n");
       fs.writeFileSync(gatewayControl, "#!/usr/bin/env sh\n");
+      fs.writeFileSync(stateRestore, "#!/usr/bin/env sh\n");
       fs.writeFileSync(corporateCaRuntime, "# corporate CA runtime fixture\n");
       fs.writeFileSync(entrypointEnvWrapper, "# entrypoint env wrapper fixture\n");
       fs.writeFileSync(bashrc, "# stale hermes bashrc\n");
@@ -108,6 +120,7 @@ describe("sandbox rlimit system hooks (#2173)", () => {
         .replaceAll("/usr/local/bin/nemoclaw-managed-startup-hold", managedStartupHold)
         .replaceAll("/usr/local/bin/nemoclaw-managed-bootstrap", managedBootstrap)
         .replaceAll("/usr/local/bin/nemoclaw-gateway-control", gatewayControl)
+        .replaceAll("/usr/local/bin/nemoclaw-state-restore", stateRestore)
         .replaceAll("/usr/local/lib/nemoclaw/corporate-ca-runtime.sh", corporateCaRuntime)
         .replaceAll("/usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh", entrypointEnvWrapper)
         .replaceAll("/usr/local/lib/nemoclaw/sandbox-init.sh", initLib)
@@ -140,17 +153,20 @@ describe("sandbox rlimit system hooks (#2173)", () => {
         .replaceAll("/usr/local/lib/nemoclaw/preloads", preloadDir)
         .replaceAll("/opt/hermes/.venv/bin/python3", "python3")
         .replaceAll("/usr/local/lib/nemoclaw/managed-gateway-control.py", managedGatewayControl)
+        .replaceAll("/usr/local/lib/nemoclaw/managed-gateway-profile.py", managedGatewayProfile)
         .replaceAll(
           "/usr/local/lib/nemoclaw/hermes-cron-restore-control.py",
           hermesCronRestoreControl,
         )
+        .replaceAll("/usr/local/lib/nemoclaw/inference-reconcile.py", inferenceReconcile)
+        .replaceAll("/usr/local/lib/nemoclaw/seal-config", sealConfig)
         .replaceAll("/usr/local/lib/nemoclaw/sandbox-rlimits.sh", rlimitLib)
         .replaceAll("/etc/profile.d/nemoclaw-rlimits.sh", profileHook)
         .replaceAll("/etc/profile.d", path.dirname(profileHook))
         .replaceAll("/etc/bash.bashrc", bashrc);
       // The Docker image has a root:root group contract. macOS names gid 0
       // "wheel", so stub chown while preserving every chmod and hook write.
-      const command = ["chown() { :; }", replay].join("\n");
+      const command = ["chown() { :; }", 'stat() { printf "0:0:444\\n"; }', replay].join("\n");
 
       const { result } = runLoggedDockerShell(command, tmp);
       expect(result.status, result.stderr).toBe(0);
@@ -169,6 +185,8 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       expect(fs.statSync(mcpCredentialBoundary).mode & 0o777).toBe(0o444);
       expect(fs.statSync(buildMcpDigest).mode & 0o777).toBe(0o444);
       expect(fs.statSync(hermesCronRestoreControl).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(stateRestore).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(inferenceReconcile).mode & 0o777).toBe(0o444);
     } finally {
       fs.existsSync(hermesStartupDir) && fs.chmodSync(hermesStartupDir, 0o700);
       fs.rmSync(tmp, { recursive: true, force: true });

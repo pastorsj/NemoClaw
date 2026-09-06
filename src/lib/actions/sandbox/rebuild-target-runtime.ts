@@ -22,9 +22,10 @@ import {
   readGatewayProviderMetadata,
 } from "../../onboard/gateway-provider-metadata";
 import { resolveSandboxGpuConfig } from "../../onboard/sandbox-gpu-mode";
-import { agentSupportsWebSearchProvider } from "../../onboard/web-search-support";
+import { agentSupportsWebSearchProvider } from "../../onboard/web-search/support";
 import { redact } from "../../security/redact";
 import {
+  legacyRebuildCanReuseGatewayWebSearchCredential,
   preflightRebuildCredentials,
   type RebuildBail,
   type RebuildLog,
@@ -45,10 +46,10 @@ import type { RebuildTargetConfig } from "./rebuild-target-config";
  * keys to the process env only — the gateway provider is the durable system of
  * record — so a fresh `rebuild` process can hold no host credential for a
  * sandbox whose web search works (#7097). Recreate reuses that gateway binding
- * for the OpenClaw agent (messaging-prep `requiresExactOpenClawProviderBinding`),
- * so the preflight accepts the same binding instead of demanding a host key
- * the recreate will never read. Agents that never reuse the binding, and any
- * run with a host key staged, keep the validation path.
+ * for receipt-backed gateway packages, so the preflight accepts the same
+ * binding instead of demanding a host key the recreate will never read.
+ * Pre-receipt rows retain the historical OpenClaw-only compatibility path.
+ * Terminal packages and any run with a host key staged keep validation.
  */
 function canReuseGatewayWebSearchCredential(
   target: RebuildTargetConfig,
@@ -56,7 +57,11 @@ function canReuseGatewayWebSearchCredential(
   provider: WebSearchProvider,
   log: RebuildLog,
 ): boolean {
-  if (target.agentAuthority.effectiveAgentId !== "openclaw") return false;
+  const receipt = target.agentAuthority.harnessPackage;
+  const canReuseRegisteredProvider = receipt
+    ? target.agentDefinition.runtime?.kind === "gateway"
+    : legacyRebuildCanReuseGatewayWebSearchCredential(target.agentAuthority.effectiveAgentId);
+  if (!canReuseRegisteredProvider) return false;
   const credentialEnv = webSearchEnvFor(provider);
   if (getCredential(credentialEnv)) return false;
   const providerName = `${sb.name}-${provider}-search`;

@@ -28,7 +28,6 @@ function harnessPackage(agent: string, digestCharacter: string): HarnessPackageI
 
 const OPENCLAW_PACKAGE = harnessPackage("openclaw", "a");
 const HERMES_PACKAGE = harnessPackage("hermes", "b");
-const DCODE_PACKAGE = harnessPackage("langchain-deepagents-code", "c");
 
 function packageSandbox(
   name: string,
@@ -38,18 +37,49 @@ function packageSandbox(
   return { name, agent, harnessPackage: identity };
 }
 
-const dcodeSandboxEntry = packageSandbox("alpha", "langchain-deepagents-code", DCODE_PACKAGE);
+const dcodeSandboxEntry: f.SandboxRecord = {
+  name: "alpha",
+  agent: "langchain-deepagents-code",
+};
+const packagedDcodeSandboxEntry = packageSandbox(
+  "alpha",
+  "langchain-deepagents-code",
+  harnessPackage("langchain-deepagents-code", "c"),
+);
 
 describe("runSandboxSnapshot", () => {
   beforeEach(() => {
     f.resetSnapshotRestoreMocks();
     f.buildAgentDefinitionMock.mockImplementation((input) => {
       const definition = input as typeof input & { manifestPath: string };
+      const packageId = definition.manifest.name;
       return {
-        name: definition.manifest.name,
+        name: packageId,
         packageRoot: definition.packageRoot,
         manifestPath: definition.manifestPath,
         policyAdditionsPath: `${definition.packageRoot}/policy-additions.yaml`,
+        configPaths: {
+          dir: `/sandbox/.${packageId}`,
+          configFile: packageId === "openclaw" ? "openclaw.json" : "config.yaml",
+          envFile: null,
+          format: packageId === "openclaw" ? "json" : "yaml",
+        },
+        stateLifecycle: {
+          backup_quiescence:
+            packageId === "langchain-deepagents-code"
+              ? {
+                  kind: "command",
+                  command: ["/usr/local/lib/nemoclaw/state-backup-ready"],
+                  timeout_seconds: 15,
+                }
+              : { kind: "not-required" },
+          snapshot_restore: packageId === "openclaw" ? ["repair-mutable-config"] : [],
+          rebuild: {
+            image_plugin_provenance: "not-required",
+            scheduled_work: { support: "disabled", reason: "This package does not run scheduled work." },
+            post_restore: { kind: "not-required" },
+          },
+        },
       } as never;
     });
   });
@@ -259,9 +289,8 @@ describe("runSandboxSnapshot", () => {
     );
   });
 
-  it("allows dcode snapshot creation when the process probe finds no active task", async () => {
-    f.getSandboxMock.mockReturnValue(dcodeSandboxEntry);
-    mockDcodeProbe("idle");
+  it("allows dcode snapshot creation when the package readiness command succeeds", async () => {
+    f.getSandboxMock.mockReturnValue(packagedDcodeSandboxEntry);
     const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
     const manifest = {
       timestamp: "2026-06-15T00:00:00.000Z",
@@ -285,14 +314,13 @@ describe("runSandboxSnapshot", () => {
 
     expect(f.backupSandboxStateMock).toHaveBeenCalledWith(
       "alpha",
-      expect.objectContaining({ name: "idle", harnessPackage: DCODE_PACKAGE }),
+      expect.objectContaining({ name: "idle" }),
     );
     expect(consoleLog.mock.calls.flat().join("\n")).toContain("Snapshot v8 name=idle created");
   });
 
-  it("allows dcode snapshot creation when OpenShell frames the probe stdout", async () => {
-    f.getSandboxMock.mockReturnValue(dcodeSandboxEntry);
-    mockDcodeProbeResult({ status: 0, output: framedDcodeProbeOutput("idle") });
+  it("executes the receipt-declared dcode readiness command before backup", async () => {
+    f.getSandboxMock.mockReturnValue(packagedDcodeSandboxEntry);
     const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
     const manifest = {
       timestamp: "2026-06-15T00:00:00.000Z",
@@ -316,20 +344,22 @@ describe("runSandboxSnapshot", () => {
 
     expect(f.backupSandboxStateMock).toHaveBeenCalledWith(
       "alpha",
-      expect.objectContaining({ name: "framed-idle", harnessPackage: DCODE_PACKAGE }),
+      expect.objectContaining({ name: "framed-idle" }),
     );
     expect(consoleLog.mock.calls.flat().join("\n")).toContain(
       "Snapshot v9 name=framed-idle created",
     );
-    const execCall = f.captureOpenshellMock.mock.calls.find(
-      ([args]) => args[0] === "sandbox" && args[1] === "exec",
+    expect(f.executePrivilegedSandboxCommandMock).toHaveBeenCalledWith(
+      "alpha",
+      ["/usr/local/lib/nemoclaw/state-backup-ready"],
+      expect.objectContaining({
+        sanitizeEnvironment: true,
+        timeout: 15_000,
+        maxOutputBytes: 64 * 1024,
+      }),
     );
-    expect(execCall?.[1]).toMatchObject({ ignoreError: true, includeStreams: true });
-    expect(execCall?.[0]).toContain("-c");
-    expect(execCall?.[0]).not.toContain("-lc");
-    expect(String(execCall?.[0].at(-1) ?? "")).toMatch(
-      new RegExp(`${SANDBOX_EXEC_STARTED_MARKER}_[0-9a-f]{32}`),
-    );
+    expect(f.captureOpenshellMock.mock.calls.some(([args]) => args[0] === "sandbox" && args[1] === "exec"))
+      .toBe(false);
   });
 
   it("refuses an active dcode task when OpenShell frames the probe stdout", async () => {

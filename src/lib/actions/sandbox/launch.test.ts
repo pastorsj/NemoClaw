@@ -60,8 +60,8 @@ vi.mock("./exec", () => ({
   ],
   wrapExecCommandWithRuntimeEnv: (command: readonly string[]) => command,
 }));
-vi.mock("./connect-hermes-light-skin", () => ({
-  prepareHermesLightTerminalSkin: mocks.prepareHermesLightTerminalSkin,
+vi.mock("./legacy-skin", () => ({
+  prepareLegacyHermesLightSkin: mocks.prepareHermesLightTerminalSkin,
 }));
 vi.mock("./launch-readiness", () => ({
   createBoundLaunchReadinessDeps: () => ({ boundReadinessCapture: true }),
@@ -575,6 +575,56 @@ describe("launchSandbox", () => {
     expect(packageDependencies.loadAgent).not.toHaveBeenCalled();
   });
 
+  it("leaves receipt-backed Hermes terminal presentation to its package", async () => {
+    const definition = loadAgent("hermes");
+    const packageEntry = packageBackedSandboxEntry("hermes");
+    const packageDependencies = commandAgentDependencies(() => definition);
+    mocks.inspectLaunchReadiness.mockResolvedValue({
+      kind: "accepted",
+      category: "accepted",
+      agent: definition,
+      sb: packageEntry,
+    });
+
+    await launchSandbox("alpha", {
+      getSandbox: () => packageEntry,
+      commandAgentDependencies: packageDependencies,
+    });
+
+    expect(launchedCommand()).toEqual(["bash", "-lc", "hermes"]);
+    expect(mocks.prepareHermesLightTerminalSkin).not.toHaveBeenCalled();
+    expect(packageDependencies.loadAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns an explicit unsupported result for a commandless receipt-backed package", async () => {
+    const packageEntry = packageBackedSandboxEntry("future-commandless");
+    const definition = {
+      ...loadAgent("hermes"),
+      name: "future-commandless",
+      runtime: { kind: "gateway" as const },
+    };
+    const packageDependencies = commandAgentDependencies(() => definition);
+    mocks.inspectLaunchReadiness.mockResolvedValue({
+      kind: "accepted",
+      category: "accepted",
+      agent: definition,
+      sb: packageEntry,
+    });
+
+    await expect(
+      launchSandbox("alpha", {
+        getSandbox: () => packageEntry,
+        commandAgentDependencies: packageDependencies,
+      }),
+    ).rejects.toThrow(
+      "Harness package 'future-commandless' does not support interactive launch: runtime.interactive_command or runtime.headless_command is not declared.",
+    );
+
+    expect(mocks.execSandbox).not.toHaveBeenCalled();
+    expect(mocks.runSandboxExecChild).not.toHaveBeenCalled();
+    expect(packageDependencies.loadAgent).not.toHaveBeenCalled();
+  });
+
   it("rejects receipt-backed package drift inside the launch lock", async () => {
     const selectedEntry = packageBackedSandboxEntry("future-terminal", "a");
     const replacementEntry = packageBackedSandboxEntry("future-terminal", "b");
@@ -676,7 +726,12 @@ describe("launchSandbox", () => {
 
     await launchSandbox("alpha");
 
-    expect(mocks.prepareHermesLightTerminalSkin).toHaveBeenCalledWith("alpha", hermes, process.env);
+    expect(mocks.prepareHermesLightTerminalSkin).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ agent: "hermes" }),
+      hermes,
+      process.env,
+    );
     expect(mocks.calls).toEqual([
       "prepareInteractiveSession",
       "prepareHermesLightTerminalSkin",

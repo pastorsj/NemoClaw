@@ -152,20 +152,30 @@ function harness(overrides: StopHarnessOverrides = {}) {
 }
 
 describe("teardownSandboxDashboardForward", () => {
-  it("does not wait on a fallback dashboard port for a terminal agent", () => {
+  it("does not wait on a fallback dashboard port for a receipt-backed terminal package", () => {
     const registeredAgent = vi
       .spyOn(agentRuntime, "getRegisteredAgent")
       .mockReturnValue({ runtime: { kind: "terminal" } } as never);
     const resolveSandboxDashboardPort = vi.fn(() => 18789);
     const isLocalForwardReachable = vi.fn(() => true);
+    const entry = sandbox({
+      agent: "future-terminal",
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "future-terminal",
+        packageVersion: "1.0.0",
+        contentDigest: "a".repeat(64),
+      },
+    });
 
     expect(
       teardownSandboxDashboardForward("terminal-sandbox", {
-        getSandbox: () => sandbox({ agent: "terminal-agent" }),
+        getSandbox: () => entry,
         isLocalForwardReachable,
         resolveSandboxDashboardPort,
       }),
     ).toBe(true);
+    expect(registeredAgent).toHaveBeenCalledWith(entry);
     expect(resolveSandboxDashboardPort).not.toHaveBeenCalled();
     expect(isLocalForwardReachable).not.toHaveBeenCalled();
     registeredAgent.mockRestore();

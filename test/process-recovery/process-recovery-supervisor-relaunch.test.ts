@@ -199,6 +199,107 @@ function scriptedPinnedGatewayRecovery(
 }
 
 describe("checkAndRecoverSandboxProcesses supervisor relaunch", () => {
+  it("returns package-declared unsupported without entering legacy supervisor relaunch", () => {
+    setImmediateRecoveryPolling();
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-gateway",
+      packageVersion: "4.5.6",
+      contentDigest: "a".repeat(64),
+    };
+    vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue({
+      name: harnessPackage.id,
+      displayName: "Future Gateway",
+      forwardPort: 19_000,
+      healthProbe: {
+        url: "http://127.0.0.1:19000/health",
+        port: 19_000,
+        timeout_seconds: 5,
+      },
+      runtime: {
+        kind: "gateway",
+        process_lifecycle: {
+          support: "unsupported",
+          reason: "Future Gateway uses an external process manager.",
+        },
+      },
+    } as never);
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "future-box",
+      agent: harnessPackage.id,
+      harnessPackage,
+      dashboardPort: 19_000,
+      openshellDriver: "docker",
+    });
+    const requestGatewaySupervisorAction = vi.fn(() => ACCEPTED_MANAGED_PROBE);
+    const relaunchManagedSupervisorSessionImpl = vi.fn(() => null);
+
+    const result = checkAndRecoverSandboxProcesses("future-box", {
+      quiet: true,
+      isSandboxGatewayRunningImpl: () => false,
+      requestGatewaySupervisorAction,
+      relaunchManagedSupervisorSessionImpl,
+    });
+
+    expect(result).toEqual({
+      checked: true,
+      wasRunning: false,
+      recovered: false,
+      forwardRecovered: false,
+      recoveryUnsupportedReason:
+        "Future Gateway does not support gateway recovery: Future Gateway uses an external process manager.",
+    });
+    expect(requestGatewaySupervisorAction).not.toHaveBeenCalled();
+    expect(relaunchManagedSupervisorSessionImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not replace a receipt-backed sandbox when its package controller is absent", () => {
+    setImmediateRecoveryPolling();
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-gateway",
+      packageVersion: "4.5.6",
+      contentDigest: "b".repeat(64),
+    };
+    vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue({
+      name: harnessPackage.id,
+      displayName: "Future Gateway",
+      forwardPort: 19_000,
+      healthProbe: {
+        url: "http://127.0.0.1:19000/health",
+        port: 19_000,
+        timeout_seconds: 5,
+      },
+      runtime: {
+        kind: "gateway",
+        process_lifecycle: {
+          support: "managed",
+          command: ["/opt/future/process-control"],
+        },
+      },
+    } as never);
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "future-box",
+      agent: harnessPackage.id,
+      harnessPackage,
+      dashboardPort: 19_000,
+      openshellDriver: "docker",
+    });
+    const requestGatewaySupervisorAction = vi.fn(() => MISSING_MANAGED_SUPERVISOR);
+    const relaunchManagedSupervisorSessionImpl = vi.fn(() => null);
+
+    const result = checkAndRecoverSandboxProcesses("future-box", {
+      quiet: true,
+      isSandboxGatewayRunningImpl: () => false,
+      requestGatewaySupervisorAction,
+      relaunchManagedSupervisorSessionImpl,
+    });
+
+    expect(result).toMatchObject({ checked: true, wasRunning: false, recovered: false });
+    expect(requestGatewaySupervisorAction).toHaveBeenCalled();
+    expect(relaunchManagedSupervisorSessionImpl).not.toHaveBeenCalled();
+  });
+
   it("reports the onboarding remediation for a legacy Hermes recovery refusal", () => {
     setImmediateRecoveryPolling();
     vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue({
@@ -264,7 +365,7 @@ describe("checkAndRecoverSandboxProcesses supervisor relaunch", () => {
     expect(resolveContainer).not.toHaveBeenCalled();
     expect(recreate).not.toHaveBeenCalled();
     const output = errorSpy.mock.calls.flat().join("\n");
-    expect(output).toContain("Hermes dashboard profile");
+    expect(output).toContain("dashboard profile");
     expect(output).toContain("no recorded browser URL");
     expect(output).toContain("Rerun onboarding before retrying recovery");
   });

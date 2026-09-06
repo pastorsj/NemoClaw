@@ -59,9 +59,17 @@ const tempDirs: string[] = [];
 
 function declareFixtureMessaging(packageRoot: string, channelId: string): void {
   const manifestPath = path.join(packageRoot, "packages/nemoclaw-hermes/manifest.yaml");
-  fs.appendFileSync(
+  const manifest = fs.readFileSync(manifestPath, "utf8");
+  const disabledMessaging = "messaging:\n  support: disabled\n";
+  if (!manifest.includes(disabledMessaging)) {
+    throw new Error("Synthetic harness package is missing its disabled messaging declaration");
+  }
+  fs.writeFileSync(
     manifestPath,
-    `messaging:\n  support: channels\n  channels:\n    - ${channelId}\n`,
+    manifest.replace(
+      disabledMessaging,
+      `messaging:\n  support: channels\n  channels:\n    - ${channelId}\n`,
+    ),
   );
   const adapterPath = path.join(packageRoot, "packages/nemoclaw-hermes/host/messaging-adapter.cts");
   fs.mkdirSync(path.dirname(adapterPath), { recursive: true, mode: 0o700 });
@@ -69,9 +77,29 @@ function declareFixtureMessaging(packageRoot: string, channelId: string): void {
     adapterPath,
     `module.exports = {
   describeMessagingIntegration(request) {
-    return { kind: "channels", packageId: request.packageId, channelIds: [${JSON.stringify(channelId)}] };
+    return {
+      kind: "channels",
+      packageId: request.packageId,
+      channelIds: [${JSON.stringify(channelId)}],
+      profilePath: "messaging/profile.json",
+      build: { configRoot: "~/.synthetic", packageManagers: [] },
+    };
   },
 };\n`,
+    { mode: 0o600 },
+  );
+  const profilePath = path.join(packageRoot, "packages/nemoclaw-hermes/messaging/profile.json");
+  fs.mkdirSync(path.dirname(profilePath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(
+    profilePath,
+    `${JSON.stringify([
+      {
+        channelId,
+        config: { renders: [] },
+        policy: [],
+        lifecycle: { hookIds: [] },
+      },
+    ])}\n`,
     { mode: 0o600 },
   );
 }

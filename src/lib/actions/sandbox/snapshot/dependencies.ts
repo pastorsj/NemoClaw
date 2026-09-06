@@ -17,10 +17,10 @@ export {
 } from "../../../onboard/runtime-provider/host-local-inference-lifecycle";
 export { fingerprintSandboxRecreateValue } from "../../../onboard/sandbox-recreate-transaction";
 export type {
-  ManagedWorkloadCloneSnapshot,
-  PreparedManagedWorkloadCloneHandoff,
-  PrepareManagedWorkloadCloneHandoffInput,
-} from "../../../onboard/workload/clone";
+  LegacyManagedCloneSnapshot,
+  PreparedLegacyManagedWorkloadCloneHandoff,
+  PrepareLegacyManagedCloneInput,
+} from "../../../onboard/workload/legacy-clone";
 export { backupSandboxStateWithManagedAuthority } from "./backup-authority";
 export { createSnapshotCloneLifecycle, fingerprintSandboxLiveIdentity } from "./clone-lifecycle";
 export { getMcpProviderInspectionRuntimeSelection } from "../mcp-bridge-provider-inspection";
@@ -30,20 +30,22 @@ export {
   type PreparedInstalledMcpSnapshotRestore,
 } from "../mcp-bridge/package-snapshot";
 export type {
-  ManagedCloneProviderBinding,
-  ManagedCloneProviderCleanupResult,
-  ManagedCloneProviderCommandResult,
-  ManagedCloneProviderOwnershipReceipt,
-  ManagedCloneProviderRunner,
-  ManagedCloneProviderTransactionReceipt,
-  PreparedManagedCloneProvider,
-  PreparedManagedCloneProviderTransaction,
-} from "./managed-clone-providers";
+  LegacyCloneProviderBinding,
+  LegacyCloneProviderCleanupResult,
+  LegacyCloneProviderCommandResult,
+  LegacyCloneProviderOwnershipReceipt,
+  LegacyCloneProviderRunner,
+  LegacyCloneProviderTransactionReceipt,
+  PreparedLegacyCloneProvider,
+  PreparedLegacyCloneProviderTransaction,
+} from "./legacy-providers";
 export {
+  inspectManagedSnapshotCloneSupport,
   ManagedSnapshotProfileRestoreError,
   prepareManagedSnapshotProfileRestore,
   readManagedSnapshotProfileAuthority,
   rejectManagedSnapshotCloneUntilRebind,
+  type ManagedSnapshotCloneSupport,
 } from "./managed-profile";
 export type {
   PreparedSandboxRuntimeRestore,

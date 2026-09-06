@@ -21,6 +21,7 @@ import {
   serializeHostLocalInferenceReceipt,
 } from "./host-local-inference";
 import { HOST_LOCAL_INFERENCE_APPLICATION_BASE_URL } from "./host-local-inference-routing";
+import { assertHermesPortableInferenceSandbox } from "./hermes-portable-inference-qualification";
 import { requireRuntimeProviderHostLocalInferenceOperation } from "./registry";
 
 export type ManagedHostLocalInferenceService = "ollama" | "nim" | "vllm" | "llama-cpp";
@@ -481,9 +482,7 @@ export function prepareHermesPortableHostLocalInferencePublishedRecoveryAuthorit
   entryTiming?: HostLocalInferencePublishedRecoveryEntryTiming,
   operation?: HostLocalInferenceOperation,
 ): PreparedHostLocalInferenceAuthority | null {
-  if (sandbox.agent !== "hermes" || sandbox.provider !== "ollama-local") {
-    fail("published inference requalification is restricted to Hermes Portable Ollama");
-  }
+  assertHermesPortableInferenceSandbox(sandbox);
   if (!operation) {
     fail("published inference recovery requires its retained operation authority");
   }

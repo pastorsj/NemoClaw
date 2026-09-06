@@ -7,6 +7,14 @@ import type { HarnessMcpAdapterModule } from "@nvidia/nemoclaw-harness-contract"
 // host entrypoints below use the exact contract request and result types.
 const HERMES_MCP_TRANSACTION_HELPER = "/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py";
 
+function packageArgvCommand(argv: any): any {
+  return { kind: "argv", argv };
+}
+
+function packageShellCommand(script: any): any {
+  return { kind: "shell", script, shellTrust: "package-authored-code" };
+}
+
 function shellQuote(value: any): any {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
@@ -93,7 +101,7 @@ function buildMcpRegistrationPlan(
   const server = request.entry.server;
   return {
     execution: {
-      command: buildMcpRegistrationCommand(request),
+      command: packageArgvCommand(buildMcpRegistrationCommand(request)),
       timeoutSeconds: 620,
       success: {
         kind: "lifecycle-json",
@@ -126,7 +134,7 @@ function buildMcpRemovalPlan(
   const server = request.entry.server;
   return {
     execution: {
-      command: buildMcpRemovalCommand(request),
+      command: packageArgvCommand(buildMcpRemovalCommand(request)),
       timeoutSeconds: 620,
       success: {
         kind: "lifecycle-json",
@@ -143,7 +151,7 @@ function buildMcpRemovalPlan(
 function buildMcpInspectionCommand(
   request: Parameters<HarnessMcpAdapterModule["buildMcpInspectionCommand"]>[0],
 ): ReturnType<HarnessMcpAdapterModule["buildMcpInspectionCommand"]> {
-  return buildStatusCommand(request.entry);
+  return packageShellCommand(buildStatusCommand(request.entry));
 }
 
 function describeMcpMutationCapability(
@@ -151,7 +159,7 @@ function describeMcpMutationCapability(
 ): ReturnType<HarnessMcpAdapterModule["describeMcpMutationCapability"]> {
   return {
     kind: "command",
-    command: buildProbeCommand(),
+    command: packageArgvCommand(buildProbeCommand()),
     success: { kind: "last-json-line-ok" },
     timeoutSeconds: 30,
     failureMessage: `Hermes sandbox '${request.sandboxName}' cannot invoke the managed MCP transaction helper. Rebuild the sandbox before changing authenticated MCP state.`,
@@ -175,7 +183,7 @@ function describeMcpRuntimeIntentVerification(
   const payload = buildIntentPayload(request.entries, request.managedServerNames);
   return {
     kind: "command",
-    command: buildInspectCommand(JSON.stringify(payload)),
+    command: packageArgvCommand(buildInspectCommand(JSON.stringify(payload))),
     success: { kind: "last-json-line-ok" },
     timeoutSeconds: 45,
     failureMessage: "Hermes MCP runtime does not match the persisted managed intent.",

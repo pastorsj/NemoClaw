@@ -11,14 +11,11 @@ import type {
   RenderedConfigSource,
   RenderedConfigVisibilityKey,
 } from "../../messaging";
-import {
-  createBuiltInChannelManifestRegistry,
-  getBuiltInRenderedConfigParser,
-  tryGetMessagingAgentId,
-} from "../../messaging";
+import { getBuiltInRenderedConfigParser } from "../../messaging";
 import type { DiagnosticSignal } from "../../messaging/channels/channel-health";
 import type {
   ChannelConfigInputSpec,
+  ChannelManifest,
   MessagingAgentId,
   MessagingSerializableValue,
   SandboxMessagingInputReference,
@@ -32,8 +29,6 @@ import {
 
 const CONFIG_STATUS_TIMEOUT_MS = 5_000;
 const CONFIG_STATUS_MAX_SOURCE_BYTES = 64 * 1024;
-const channelManifestRegistry = createBuiltInChannelManifestRegistry();
-
 type ExecRunner = (
   sandboxName: string,
   command: string,
@@ -53,24 +48,22 @@ export function buildConfigStatusSignals(
   channelName: string,
   entry: ReturnType<typeof registry.getSandbox>,
   agent: AgentDefinition,
+  manifest: ChannelManifest,
   deps: ChannelStatusConfigDeps,
 ): DiagnosticSignal[] {
   const plan = registry.getMessagingPlanFromEntry(entry);
   const channelPlan = plan?.channels.find((channel) => channel.channelId === channelName);
   if (!channelPlan?.configured) return [];
 
-  const manifest = channelManifestRegistry.get(channelName);
-  const agentId = tryGetMessagingAgentId(
-    { name: plan?.agent ?? agent.name },
-    channelManifestRegistry.list(),
-  );
+  const agentId = plan?.agent ?? agent.name;
+  const agentSupported = manifest.supportedAgents.includes(agentId);
   const parser = manifest ? getBuiltInRenderedConfigParser(manifest.id) : null;
   const manifestConfigInputs = (manifest?.inputs ?? []).filter(
     (input): input is ChannelConfigInputSpec => input.kind === "config",
   );
   const manifestConfigInputIds = new Set(manifestConfigInputs.map((input) => input.id));
   const renderSources =
-    parser && manifest && agentId
+    parser && agentSupported
       ? resolveRenderedConfigSources(
           parser
             .listConfigVisibilityKeys({ manifest, agentId, inputs: channelPlan.inputs })
@@ -277,21 +270,27 @@ function resolveRenderedConfigSources(
 
 function resolveConfigTarget(
   target: string,
-  agentId: MessagingAgentId,
+  _agentId: MessagingAgentId,
   agent: AgentDefinition,
 ): string | null {
-  if (agentId === "openclaw" && target === "openclaw.json") {
-    return `${agent.configPaths.dir}/${agent.configPaths.configFile}`;
-  }
   const configDir = agent.configPaths.dir.replace(/\/+$/, "");
-  if (agentId === "openclaw" && target.startsWith("~/.openclaw/")) {
-    return `${configDir}/${target.slice("~/.openclaw/".length)}`;
+  if (target === agent.configPaths.configFile) return `${configDir}/${target}`;
+  if (target.startsWith("~/")) {
+    const relative = target.slice(2);
+    return isSafeConfigTarget(relative) ? `/sandbox/${relative}` : null;
   }
-  if (agentId === "hermes" && target.startsWith("~/.hermes/")) {
-    return `${configDir}/${target.slice("~/.hermes/".length)}`;
+  if (target.startsWith("/sandbox/")) {
+    return isSafeConfigTarget(target.slice("/sandbox/".length)) ? target : null;
   }
-  if (target.startsWith("/sandbox/")) return target;
-  return null;
+  return isSafeConfigTarget(target) ? `${configDir}/${target}` : null;
+}
+
+function isSafeConfigTarget(target: string): boolean {
+  return (
+    target.length > 0 &&
+    !target.includes("\\") &&
+    target.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")
+  );
 }
 
 function readConfigSourceValues(

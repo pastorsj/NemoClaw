@@ -3,12 +3,11 @@
 
 import { Flags } from "@oclif/core";
 import { jsonFlag } from "../../../lib/cli/common-flags";
-import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
+import { NemoClawInternalCommand } from "../../../lib/cli/internal-command";
 
 import { buildInstallerPlan } from "../../../lib/actions/installer/plan";
 
-export default class InternalInstallerPlanCommand extends NemoClawCommand {
-  static hidden = true;
+export default class InternalInstallerPlanCommand extends NemoClawInternalCommand {
   static strict = true;
   static summary = "Internal: build the NemoClaw installer plan";
   static description =

@@ -158,10 +158,13 @@ export function createDeps(options: {
   config: ConfigObject;
   entry?: SandboxEntry | null;
   entries?: SandboxEntry[];
+  getSandbox?: InferenceSetDeps["getSandbox"];
   defaultSandbox?: string | null;
   requestedAgent?: string | null;
   target?: AgentConfigTarget;
   configUpdateSupport?: ReturnType<InferenceSetDeps["inspectInstalledInferenceConfigSupport"]>;
+  preparePackageInferenceConfig?: InferenceSetDeps["preparePackageInferenceConfig"];
+  preserveConfigReadAuthority?: InferenceSetDeps["preserveConfigReadAuthority"];
   session?: Session | null;
   openshellStatus?: number;
   captureOpenshell?: InferenceSetDeps["captureOpenshell"];
@@ -176,7 +179,8 @@ export function createDeps(options: {
   probeSandboxRoute?: InferenceSetDeps["probeSandboxRoute"];
   updateSandbox?: InferenceSetDeps["updateSandbox"];
   restartSandboxGateway?: InferenceSetDeps["restartSandboxGateway"];
-  settleOpenClawPairing?: InferenceSetDeps["settleOpenClawPairing"];
+  reconcilePackageSandbox?: InferenceSetDeps["reconcilePackageSandbox"];
+  settleOpenClawPairing?: InferenceSetDeps["settleLegacyPairing"];
   seedHermesDashboardConfigResult?: "converged" | "absent" | "failed";
   withGatewayRouteMutationLock?: InferenceSetDeps["withGatewayRouteMutationLock"];
 }): InferenceSetDeps & {
@@ -188,6 +192,8 @@ export function createDeps(options: {
     updateSandbox: ReturnType<typeof vi.fn>;
     readSandboxConfig: ReturnType<typeof vi.fn>;
     inspectInstalledInferenceConfigSupport: ReturnType<typeof vi.fn>;
+    preparePackageInferenceConfig: ReturnType<typeof vi.fn>;
+    preserveConfigReadAuthority: ReturnType<typeof vi.fn>;
     updateSession: ReturnType<typeof vi.fn>;
     appendAuditEntry: ReturnType<typeof vi.fn>;
     log: ReturnType<typeof vi.fn>;
@@ -202,6 +208,7 @@ export function createDeps(options: {
     probeSandboxRoute: ReturnType<typeof vi.fn>;
     sleep: ReturnType<typeof vi.fn>;
     restartSandboxGateway: ReturnType<typeof vi.fn>;
+    reconcilePackageSandbox: ReturnType<typeof vi.fn>;
     settleOpenClawPairing: ReturnType<typeof vi.fn>;
     withGatewayRouteMutationLock: ReturnType<typeof vi.fn>;
   };
@@ -228,6 +235,16 @@ export function createDeps(options: {
     inspectInstalledInferenceConfigSupport: vi.fn(
       (): ReturnType<InferenceSetDeps["inspectInstalledInferenceConfigSupport"]> =>
         options.configUpdateSupport ?? { kind: "legacy" },
+    ),
+    preparePackageInferenceConfig: vi.fn(
+      options.preparePackageInferenceConfig ??
+        (() => ({
+          kind: "unsupported" as const,
+          reason: "The test package does not define inference configuration behavior.",
+        })),
+    ),
+    preserveConfigReadAuthority: vi.fn(
+      options.preserveConfigReadAuthority ?? ((_source, candidate) => candidate),
     ),
     updateSession: vi.fn((mutator: (value: Session) => Session | void) => {
       const current = session ?? baseSession();
@@ -274,6 +291,7 @@ export function createDeps(options: {
           forwardRecovered: true,
         })),
     ),
+    reconcilePackageSandbox: vi.fn(options.reconcilePackageSandbox ?? (() => undefined)),
     settleOpenClawPairing: vi.fn(options.settleOpenClawPairing ?? (() => ({ ok: true }) as const)),
     withGatewayRouteMutationLock: vi.fn(
       options.withGatewayRouteMutationLock ??
@@ -283,7 +301,7 @@ export function createDeps(options: {
   };
   return {
     getDefaultSandbox: () => defaultSandbox,
-    getSandbox: (name: string) => sandboxes[name] ?? null,
+    getSandbox: options.getSandbox ?? ((name: string) => sandboxes[name] ?? null),
     listSandboxes: () => ({ sandboxes: entries, defaultSandbox }),
     updateSandbox: calls.updateSandbox,
     getRequestedAgent: () => options.requestedAgent,
@@ -292,6 +310,8 @@ export function createDeps(options: {
     resolveAgentConfig: () => options.target ?? OPENCLAW_TARGET,
     readSandboxConfig: calls.readSandboxConfig,
     inspectInstalledInferenceConfigSupport: calls.inspectInstalledInferenceConfigSupport,
+    preparePackageInferenceConfig: calls.preparePackageInferenceConfig,
+    preserveConfigReadAuthority: calls.preserveConfigReadAuthority,
     writeSandboxConfig: calls.writeSandboxConfig,
     recomputeSandboxConfigHash: calls.recomputeSandboxConfigHash,
     seedHermesDashboardConfig: calls.seedHermesDashboardConfig,
@@ -315,7 +335,8 @@ export function createDeps(options: {
     withGatewayRouteMutationLock:
       calls.withGatewayRouteMutationLock as InferenceSetDeps["withGatewayRouteMutationLock"],
     restartSandboxGateway: calls.restartSandboxGateway,
-    settleOpenClawPairing: calls.settleOpenClawPairing,
+    reconcilePackageSandbox: calls.reconcilePackageSandbox,
+    settleLegacyPairing: calls.settleOpenClawPairing,
     calls,
     getSession: () => session,
   };

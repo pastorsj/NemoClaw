@@ -163,6 +163,156 @@ function buildStartupPlan(adapterRequest: StartupAdapterRequest): HarnessStartup
   };
 }
 
-const startupAdapter: HarnessStartupAdapterModule<StartupAdapterRequest> = { buildStartupPlan };
+function requireStartupProfileAuthority(request: {
+  readonly packageId: string;
+  readonly harnessPackage: { readonly id: string };
+}): void {
+  if (request.packageId !== PACKAGE_ID || request.harnessPackage.id !== PACKAGE_ID) {
+    fail("startup profile identity is inconsistent");
+  }
+}
+
+function preparationValue(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+  name: string,
+): string | null {
+  const value = request.input.environment[name];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+function optionalPositiveInteger(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+  name: string,
+  previous: number | null,
+  maximum = 1_000_000_000,
+): number | null {
+  const raw = preparationValue(request, name);
+  if (raw === null) return previous;
+  if (!/^[1-9][0-9]*$/u.test(raw)) fail(`${name} must be a positive integer`);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value > maximum) {
+    fail(`${name} must be no greater than ${String(maximum)}`);
+  }
+  return value;
+}
+
+function prepareStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["prepareStartupProfile"]> {
+  requireStartupProfileAuthority(request);
+  const input = request.input;
+  const candidate = input.inference.candidates.find(
+    (entry) => entry.requestedApi === "openai-completions" && entry.api === "openai-completions",
+  );
+  if (!candidate) fail("an OpenAI Completions inference candidate is required");
+  if (input.dashboard.managed || input.messagingPlan !== null || input.webSearch !== null) {
+    fail("Pi does not support dashboard, messaging, or web-search startup intent");
+  }
+  if (input.tools.enabledGateways.length > 0) fail("Pi does not support tool gateways");
+  const previous = request.previousDesiredState;
+  const reasoningRaw = preparationValue(request, "NEMOCLAW_REASONING");
+  if (reasoningRaw !== null && reasoningRaw !== "true" && reasoningRaw !== "false") {
+    fail("NEMOCLAW_REASONING must be true or false");
+  }
+  const desiredState: HarnessStartupSettings = {
+    configuration: { agent: PACKAGE_ID },
+    inference: {
+      routeProvider: candidate.routeProvider,
+      upstreamProvider: input.inference.selectedProvider ?? candidate.routeProvider,
+      model: input.inference.model,
+      routedBaseUrl: candidate.routedBaseUrl,
+      upstreamEndpointUrl: null,
+      api: candidate.api,
+      primaryModelRef: null,
+      compatibility: null,
+      inputModalities: null,
+    },
+    proxy: input.proxy,
+    dashboard: { agent: PACKAGE_ID, mode: "disabled" },
+    tools: { disclosure: input.tools.disclosure, enabledGateways: [] },
+    messaging: { plan: null },
+    tuning: {
+      contextWindow: optionalPositiveInteger(
+        request,
+        "NEMOCLAW_CONTEXT_WINDOW",
+        previous?.tuning.contextWindow ?? null,
+        4_194_304,
+      ),
+      maxTokens: optionalPositiveInteger(
+        request,
+        "NEMOCLAW_MAX_TOKENS",
+        previous?.tuning.maxTokens ?? null,
+      ),
+      reasoning:
+        reasoningRaw === null ? (previous?.tuning.reasoning ?? null) : reasoningRaw === "true",
+      reasoningEffort: null,
+    },
+    corporateCa: input.corporateCa,
+  };
+  buildStartupPlan({ packageId: PACKAGE_ID, settings: desiredState, applicationEnvironment: {} });
+  return {
+    kind: "prepared",
+    desiredState,
+    credentialProxyReplayRequired: false,
+    dashboardRemoteBindPrepared: false,
+  };
+}
+
+function packageConfigForDesiredState(
+  request: Parameters<HarnessStartupAdapterModule["buildInitialStartupProfile"]>[0],
+): StartupPackageConfig {
+  requireStartupProfileAuthority(request);
+  buildStartupPlan({
+    packageId: request.packageId,
+    settings: request.desiredState,
+    applicationEnvironment: {},
+  });
+  return { settings: request.desiredState } as unknown as StartupPackageConfig;
+}
+
+function canonicalStartupJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalStartupJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalStartupJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? fail("startup profile contains a non-JSON value");
+}
+
+function buildInitialStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["buildInitialStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["buildInitialStartupProfile"]> {
+  return { kind: "package-config", packageConfig: packageConfigForDesiredState(request) };
+}
+
+function reconcileStartupProfile(
+  request: Parameters<HarnessStartupAdapterModule["reconcileStartupProfile"]>[0],
+): ReturnType<HarnessStartupAdapterModule["reconcileStartupProfile"]> {
+  normalizeStartupRequest({
+    profileKind: "package",
+    packageId: request.packageId,
+    harnessPackage: request.harnessPackage,
+    packageConfig: request.currentPackageConfig as StartupPackageConfig,
+    corporateCa: request.desiredState.corporateCa,
+    applicationEnvironment: {},
+  });
+  const packageConfig = packageConfigForDesiredState(request);
+  return {
+    kind: "package-config",
+    packageConfig,
+    changed:
+      canonicalStartupJson(packageConfig) !== canonicalStartupJson(request.currentPackageConfig),
+  };
+}
+
+const startupAdapter: HarnessStartupAdapterModule<StartupAdapterRequest> = {
+  buildStartupPlan,
+  prepareStartupProfile,
+  buildInitialStartupProfile,
+  reconcileStartupProfile,
+};
 
 export = startupAdapter;

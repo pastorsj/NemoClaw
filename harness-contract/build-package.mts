@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -36,6 +37,7 @@ export interface MaterializedHarnessPackage {
   readonly displayName: string;
   readonly packageVersion: string;
   readonly minimumNemoClawVersion: string;
+  readonly maximumNemoClawVersionExclusive: string;
   readonly manifestPath: "manifest.yaml";
   readonly fileCount: number;
   readonly readOnly: true;
@@ -260,6 +262,9 @@ function readStableFile(packageRoot: string, publishedFile: HarnessPackagePublis
     if (!sameFileSnapshot(opened, after) || !sameFileSnapshot(after, current)) {
       throw buildError("source-changed", publishedFile.path, "changed while it was read");
     }
+    if (createHash("sha256").update(bytes).digest("hex") !== publishedFile.sha256) {
+      throw buildError("source-changed", publishedFile.path, "bytes changed after validation");
+    }
     return bytes;
   } finally {
     fs.closeSync(descriptor);
@@ -327,6 +332,7 @@ function buildEnvelope(report: HarnessPackageConformanceReport): HarnessPackageE
     displayName: report.displayName,
     packageVersion: report.packageVersion,
     minimumNemoClawVersion: report.minimumNemoClawVersion,
+    maximumNemoClawVersionExclusive: report.maximumNemoClawVersionExclusive,
     manifest: "manifest.yaml",
   });
 }
@@ -447,6 +453,7 @@ export function materializeHarnessPackageArtifact(
       displayName: report.displayName,
       packageVersion: report.packageVersion,
       minimumNemoClawVersion: report.minimumNemoClawVersion,
+      maximumNemoClawVersionExclusive: report.maximumNemoClawVersionExclusive,
       manifestPath: "manifest.yaml",
       fileCount: report.publishedFiles.length + 1,
       readOnly: true,

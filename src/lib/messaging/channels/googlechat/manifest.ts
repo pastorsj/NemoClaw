@@ -338,7 +338,7 @@ export const googlechatManifest = {
     {
       id: "openclawPluginPackage",
       agent: "openclaw",
-      manager: "openclaw-plugin",
+      manager: "node-package",
       spec: "npm:@openclaw/googlechat@{{openclaw.version}}",
       pin: true,
       integrityByVersion: {
@@ -355,21 +355,21 @@ export const googlechatManifest = {
     {
       id: "hermesGooglePubsubPackage",
       agent: "hermes",
-      manager: "hermes-uv-pip",
+      manager: "python-package",
       spec: "google-cloud-pubsub==2.39.0",
       required: true,
     },
     {
       id: "hermesGoogleApiClientPackage",
       agent: "hermes",
-      manager: "hermes-uv-pip",
+      manager: "python-package",
       spec: "google-api-python-client==2.194.0",
       required: true,
     },
     {
       id: "hermesGoogleAuthPackage",
       agent: "hermes",
-      manager: "hermes-uv-pip",
+      manager: "python-package",
       spec: "google-auth==2.55.1",
       required: true,
     },

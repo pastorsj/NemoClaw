@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HarnessPackageUnavailableError,
   listHarnessPackageInventory,
-  resolveHarnessPackageInstallSelection,
+  planHarnessPackageInstall,
 } from "../../lib/agent-runtime/package/catalog";
 import { installHarnessPackage } from "../../lib/agent-runtime/package/install";
 import type { BundledHarnessPackageSourceIdentity } from "../../lib/agent-runtime/package/receipt";
@@ -51,6 +51,34 @@ function writeFixtureFile(root: string, relativePath: string, contents: string):
   fs.chmodSync(target, 0o600);
 }
 
+function requiredManifestFields(id: string): readonly string[] {
+  return [
+    "runtime:",
+    "  kind: gateway",
+    "config:",
+    `  dir: /sandbox/.${id}`,
+    "  config_file: config.json",
+    "  format: json",
+    "state_lifecycle:",
+    "  backup_quiescence:",
+    "    kind: not-required",
+    "  snapshot_restore: []",
+    "  rebuild:",
+    "    image_plugin_provenance: not-required",
+    "    scheduled_work:",
+    "      support: disabled",
+    "      reason: This package does not run scheduled work.",
+    "    post_restore:",
+    "      kind: not-required",
+    "inference:",
+    "  config_update:",
+    "    support: unsupported",
+    "    reason: This synthetic package has fixed inference configuration.",
+    "messaging:",
+    "  support: disabled",
+  ];
+}
+
 function writeReviewedBundle(): void {
   fs.mkdirSync(bundledRoot, { recursive: true, mode: 0o700 });
   REVIEWED_FIXTURES.forEach((declaration) => {
@@ -67,6 +95,7 @@ function writeReviewedBundle(): void {
         displayName: declaration.displayName,
         packageVersion: declaration.packageVersion,
         minimumNemoClawVersion: "0.0.113",
+        maximumNemoClawVersionExclusive: "0.0.121",
         manifest: manifestPath,
       })}\n`,
     );
@@ -80,6 +109,7 @@ function writeReviewedBundle(): void {
         ...(declaration.aliases
           ? ["aliases:", ...declaration.aliases.map((alias) => `  - ${alias}`)]
           : []),
+        ...requiredManifestFields(declaration.id),
         "",
       ].join("\n"),
     );
@@ -106,13 +136,20 @@ function writePiBundle(): void {
       displayName: "Pi",
       packageVersion: "0.1.0",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: manifestPath,
     })}\n`,
   );
   writeFixtureFile(
     packageRoot,
     manifestPath,
-    ["name: pi", "display_name: Pi", "description: Reviewed candidate adapter", ""].join("\n"),
+    [
+      "name: pi",
+      "display_name: Pi",
+      "description: Reviewed candidate adapter",
+      ...requiredManifestFields("pi"),
+      "",
+    ].join("\n"),
   );
   writeFixtureFile(packageRoot, "runtime/payload.txt", "pi\n");
 }
@@ -131,6 +168,7 @@ function writeLocalPackage(id = "future-harness"): string {
       displayName: "Future Harness",
       packageVersion: "1.0.0",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: manifestPath,
     })}\n`,
   );
@@ -143,8 +181,7 @@ function writeLocalPackage(id = "future-harness"): string {
       "description: Locally built adapter",
       "aliases:",
       "  - future",
-      "runtime:",
-      "  kind: gateway",
+      ...requiredManifestFields(id),
       "",
     ].join("\n"),
   );
@@ -169,11 +206,9 @@ function wirePrivateDependencies() {
   const listInventory = vi
     .spyOn(harnessInstallCommandDependencies, "listHarnessPackageInventory")
     .mockImplementation(() => listHarnessPackageInventory(catalogueOptions()));
-  const resolveSelection = vi
-    .spyOn(harnessInstallCommandDependencies, "resolveHarnessPackageInstallSelection")
-    .mockImplementation((selector) =>
-      resolveHarnessPackageInstallSelection(selector, catalogueOptions()),
-    );
+  const planInstall = vi
+    .spyOn(harnessInstallCommandDependencies, "planHarnessPackageInstall")
+    .mockImplementation((selector) => planHarnessPackageInstall(selector, catalogueOptions()));
   const installPackage = vi
     .spyOn(harnessInstallCommandDependencies, "installHarnessPackage")
     .mockImplementation((source) => installHarnessPackage(source, { storeRoot }));
@@ -185,8 +220,8 @@ function wirePrivateDependencies() {
     installPackage,
     isStdinTty,
     listInventory,
+    planInstall,
     prompt,
-    resolveSelection,
   };
 }
 
@@ -366,7 +401,30 @@ describe("harness install oclif command", () => {
     await HarnessInstallCommand.run(["dcode"], process.cwd());
 
     expect(installedIds()).toEqual(["langchain-deepagents-code"]);
-    expect(dependencies.resolveSelection).toHaveBeenCalledWith("dcode");
+    expect(dependencies.planInstall).toHaveBeenCalledWith("dcode");
+  });
+
+  it("keeps an installed-only package selected by its receipt-backed alias", async () => {
+    const localRoot = writeLocalPackage();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const dependencies = wirePrivateDependencies();
+    installHarnessPackage(
+      {
+        packageRoot: localRoot,
+        expectedId: "future-harness",
+        sourceIdentity: { kind: "local" },
+      },
+      { storeRoot },
+    );
+
+    await HarnessInstallCommand.run(["future"], process.cwd());
+
+    expect(installedIds()).toEqual(["future-harness"]);
+    expect(dependencies.installPackage).not.toHaveBeenCalled();
+    expect(fs.existsSync(packageCodeMarker)).toBe(false);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/^Harness package 'future-harness' is already active/u),
+    );
   });
 
   it("rejects direct Pi installation before changing the store when qualification is unavailable", async () => {

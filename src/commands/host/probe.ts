@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NemoClawCommand } from "../../lib/cli/nemoclaw-oclif-command";
-import { getBuildIdentity } from "../../lib/core/version";
+import { getBuildIdentity } from "../../lib/core/build-identity";
 import {
   createPublicHostProbeReadinessReport,
   createSystemReadinessReport,

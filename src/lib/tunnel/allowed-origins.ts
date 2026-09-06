@@ -118,12 +118,13 @@ function resolveDeps(deps: Partial<RegisterTunnelOriginDeps>): Required<Register
   };
 }
 
-function readAllowedOrigins(config: ConfigObject): unknown {
-  const gateway = config.gateway;
-  if (!isConfigObject(gateway)) return undefined;
-  const controlUi = gateway.controlUi;
-  if (!isConfigObject(controlUi)) return undefined;
-  return controlUi.allowedOrigins;
+function readAllowedOrigins(config: ConfigObject, path: readonly string[]): unknown {
+  let current: unknown = config;
+  for (const segment of path) {
+    if (!isConfigObject(current)) return undefined;
+    current = current[segment];
+  }
+  return current;
 }
 
 function ensureConfigObject(record: ConfigObject, key: string): ConfigObject {
@@ -135,15 +136,20 @@ function ensureConfigObject(record: ConfigObject, key: string): ConfigObject {
 }
 
 /**
- * Set gateway.controlUi.allowedOrigins in place, materializing intermediate
- * objects if absent. Mutating the object returned by readConfig preserves the
- * read digest the OpenClaw config guard binds the write to, and leaves sibling
- * gateway keys untouched.
+ * Set the package-declared origins path in place, materializing intermediate
+ * objects if absent. Mutating the object returned by readConfig preserves its
+ * compare-and-swap digest and leaves sibling config keys untouched.
  */
-function applyAllowedOrigins(config: ConfigObject, origins: string[]): void {
-  const gateway = ensureConfigObject(config, "gateway");
-  const controlUi = ensureConfigObject(gateway, "controlUi");
-  controlUi.allowedOrigins = origins;
+function applyAllowedOrigins(
+  config: ConfigObject,
+  path: readonly string[],
+  origins: string[],
+): void {
+  let parent = config;
+  for (const segment of path.slice(0, -1)) {
+    parent = ensureConfigObject(parent, segment);
+  }
+  parent[path.at(-1)!] = origins;
 }
 
 /**
@@ -151,7 +157,8 @@ function applyAllowedOrigins(config: ConfigObject, origins: string[]): void {
  * allowedOrigins so the Web UI over the tunnel is accepted. Best-effort and
  * synchronous: any failure is swallowed with a warning so a working tunnel
  * start is never turned into a hard error. Idempotent (no write/reload when the
- * origin list is unchanged) and OpenClaw-only.
+ * origin list is unchanged). A package opts in by declaring the exact config
+ * path that accepts browser origins.
  */
 export function registerTunnelOrigin(
   sandboxName: string,
@@ -167,19 +174,23 @@ export function registerTunnelOrigin(
   try {
     const resolved = resolveDeps(deps);
     const target = resolved.resolveAgentConfig(sandboxName);
-    if (target.agentName !== "openclaw") {
-      info(`tunnel-origin auto-registration is OpenClaw-only; skipping for ${target.agentName}.`);
+    const allowedOriginsPath = target.tunnelAllowedOriginsPath;
+    if (!allowedOriginsPath || allowedOriginsPath.length === 0) {
+      info(`Harness '${target.agentName}' does not declare tunnel-origin registration; skipping.`);
       return;
     }
 
     const config = resolved.readConfig(sandboxName, target);
-    const { origins, changed } = computeTunnelAllowedOrigins(readAllowedOrigins(config), tunnelUrl);
+    const { origins, changed } = computeTunnelAllowedOrigins(
+      readAllowedOrigins(config, allowedOriginsPath),
+      tunnelUrl,
+    );
     if (!changed) {
       info(`Tunnel origin already registered: ${origin}`);
       return;
     }
 
-    applyAllowedOrigins(config, origins);
+    applyAllowedOrigins(config, allowedOriginsPath, origins);
     resolved.writeConfig(sandboxName, target, config);
     resolved.recomputeHash(sandboxName, target);
     info(`Registered tunnel origin with gateway: ${origin}`);

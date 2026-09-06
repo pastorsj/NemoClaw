@@ -2,7 +2,7 @@
   "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\nSPDX-License-Identifier: Apache-2.0",
   "name": "nemoclaw",
   "version": "0.1.0",
-  "description": "NemoClaw — run OpenClaw inside OpenShell with NVIDIA inference",
+  "description": "NemoClaw — compose agent harnesses inside OpenShell with NVIDIA inference",
   "license": "Apache-2.0",
   "exports": {
     "./lifecycle": {
@@ -50,6 +50,7 @@
     "test:fabric": "bash scripts/checks/test-fabric-integration.sh",
     "test:package": "npm run clean:cli && npm --prefix packages/nemoclaw-openclaw/plugin run clean && npm run build:cli && npm --prefix packages/nemoclaw-openclaw/plugin run build && vitest run --project package-contract",
     "test:packages": "tsx scripts/packages/run-tests.mts test",
+    "test:package:rehearsals": "node --experimental-strip-types --no-warnings scripts/packages/rehearsal-matrix.mts",
     "test:coverage:cli": "npm run clean:cli && npm run build:cli && tsx scripts/check-dist-sourcemaps.mts dist && vitest run --project cli --project integration --coverage --coverage.reporter=text-summary --coverage.reporter=json-summary --coverage.reportsDirectory=coverage/cli --coverage.include=\"bin/**/*.js\" --coverage.include=\"src/**/*.ts\" --coverage.exclude=\"test/**/*.js\" --coverage.exclude=\"test/**/*.ts\" && tsx scripts/check-coverage-ratchet.mts coverage/cli/coverage-summary.json ci/coverage-threshold-cli.json \"CLI coverage\"",
     "test:coverage:plugin": "npm --prefix packages/nemoclaw-openclaw run test:coverage",
     "test:live-e2e": "npm run clean:cli && npm run build:cli && NEMOCLAW_RUN_LIVE_E2E=1 vitest run --project e2e-live",
@@ -111,6 +112,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "3.1046.0",
+    "@nvidia/nemoclaw-harness-contract": "file:harness-contract",
     "@oclif/core": "^4.10.5",
     "ajv": "^8.17.0",
     "execa": "^9.6.1",
@@ -128,6 +130,7 @@
     "@nvidia/openshell-sdk": "0.0.106"
   },
   "bundleDependencies": [
+    "@nvidia/nemoclaw-harness-contract",
     "p-retry"
   ],
   "files": [
@@ -171,7 +174,6 @@
     "url": "https://github.com/NVIDIA/NemoClaw.git"
   },
   "devDependencies": {
-    "@nvidia/nemoclaw-harness-contract": "file:harness-contract",
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
     "@earendil-works/pi-coding-agent": "0.80.6",
@@ -179,6 +181,7 @@
     "@types/node": "^25.5.2",
     "@vitest/coverage-v8": "^4.1.0",
     "convert-source-map": "2.0.0",
+    "esbuild": "^0.27.4",
     "eslint-plugin-sonarjs": "4.2.0",
     "fast-check": "^4.8.0",
     "oxfmt": "0.63.0",

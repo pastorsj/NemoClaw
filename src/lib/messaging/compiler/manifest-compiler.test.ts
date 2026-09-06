@@ -288,7 +288,7 @@ describe("ManifestCompiler", () => {
         expect.objectContaining({
           kind: "package-install",
           value: {
-            manager: "openclaw-plugin",
+            manager: "node-package",
             spec: "npm:@openclaw/discord@{{openclaw.version}}",
             pin: true,
           },
@@ -297,7 +297,7 @@ describe("ManifestCompiler", () => {
           channelId: "wechat",
           kind: "package-install",
           value: {
-            manager: "openclaw-plugin",
+            manager: "node-package",
             spec: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
             pin: true,
           },
@@ -306,7 +306,7 @@ describe("ManifestCompiler", () => {
           channelId: "teams",
           kind: "package-install",
           value: {
-            manager: "openclaw-plugin",
+            manager: "node-package",
             spec: "npm:@openclaw/msteams@{{openclaw.version}}",
             pin: true,
           },
@@ -454,7 +454,7 @@ describe("ManifestCompiler", () => {
         outputId: "hermesTeamsAppsPackage",
         required: true,
         value: {
-          manager: "hermes-uv-pip",
+          manager: "python-package",
           spec: "microsoft-teams-apps==2.0.13.4",
         },
       },

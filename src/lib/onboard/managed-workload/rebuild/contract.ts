@@ -3,7 +3,6 @@
 
 import type { SandboxRebuildAuthority } from "../../../state/registry/rebuild-authority";
 import type { SandboxEntry } from "../../../state/registry/types";
-import type { ManagedImageAgent } from "../../managed-image/contract";
 import type { ManagedWorkloadRebuildHandoff, ManagedWorkloadReceipt } from "../../workload/rebuild";
 
 export type ManagedWorkloadRebuildPhase =
@@ -21,7 +20,7 @@ export interface ManagedWorkloadRebuildPlan {
   readonly transactionId: string;
   readonly sandboxName: string;
   readonly providerId: string;
-  readonly agent: ManagedImageAgent;
+  readonly agent: string;
   readonly previousAuthority: SandboxRebuildAuthority;
   readonly handoff: ManagedWorkloadRebuildHandoff;
   readonly replacementReceipt: ManagedWorkloadReceipt;
@@ -152,7 +151,7 @@ export interface ManagedWorkloadRebuildRecoveryTask {
   readonly stagingHandle: string;
   readonly previousAuthority: SandboxRebuildAuthority;
   readonly replacement: {
-    readonly agent: ManagedImageAgent;
+    readonly agent: string;
     readonly receipt: ManagedWorkloadReceipt;
     readonly lifecycleGeneration: string;
     readonly liveIdentityFingerprint: string;

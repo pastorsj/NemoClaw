@@ -41,13 +41,13 @@ import {
 import {
   assertMcpDestroyNotPending,
   bridgeState,
-  ensureSandboxGatewaySelected,
   getBridgeAdapter,
   getSandboxAgent,
   getSandboxOrThrow,
   nowIso,
   writeBridgeEntry,
 } from "./mcp-bridge-state";
+import { ensureSandboxGatewaySelected } from "./mcp-bridge/gateway-selection";
 import { statusMcpBridge } from "./mcp-bridge-status";
 import type { McpBridgeTargetValidation } from "./mcp-bridge-url-validation";
 import {

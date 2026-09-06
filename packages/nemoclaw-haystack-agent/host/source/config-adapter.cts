@@ -23,7 +23,15 @@ const configAdapter: HarnessConfigAdapterModule = {
   describeInferenceConfig(request) {
     requireConfigTarget(request.target);
     return {
-      kind: "immutable",
+      kind: "unsupported",
+      reason: "The sandbox image generates the Haystack Agent config. Re-onboard to change it.",
+    };
+  },
+
+  prepareInferenceConfig(request) {
+    requireConfigTarget(request.target);
+    return {
+      kind: "unsupported",
       reason: "The sandbox image generates the Haystack Agent config. Re-onboard to change it.",
     };
   },

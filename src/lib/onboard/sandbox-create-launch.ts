@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "../agent-runtime/manifest-types";
+import { requiresGeneratedImageLocalBuildKit } from "../agent-runtime/sandbox-create";
 import { buildSubprocessEnv } from "../subprocess-env";
 import {
   buildSandboxRuntimeEnvArgs,
@@ -192,7 +193,7 @@ export async function prepareSandboxCreateLaunchWithPrebuild(
   const { prebuild: prebuildInput, ...launchInput } = input;
   const requiresLocalBuildKit =
     prebuildInput.origin === "generated" &&
-    (input.agent == null || input.agent.name === "openclaw" || input.agent.name === "hermes");
+    (input.agent == null || requiresGeneratedImageLocalBuildKit(input.agent));
   const prebuild = await prebuildSandboxImageIfEligible({
     ...prebuildInput,
     createArgs: input.createArgs,

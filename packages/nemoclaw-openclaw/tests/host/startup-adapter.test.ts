@@ -109,6 +109,108 @@ function receiptBackedRequest(): HarnessPackageStartupRequest<StartupPackageConf
 }
 
 describe("OpenClaw startup adapter", () => {
+  it("prepares the existing startup semantics from the generic package input", () => {
+    const legacy = request();
+    const result = adapter.prepareStartupProfile({
+      packageId: "openclaw",
+      harnessPackage: receiptBackedRequest().harnessPackage,
+      phase: "initial",
+      previousDesiredState: null,
+      input: {
+        inference: {
+          selectedProvider: legacy.settings.inference.upstreamProvider,
+          model: legacy.settings.inference.model,
+          endpointUrl: null,
+          resolvedContextWindow: null,
+          reasoningEnabled: null,
+          reasoningEffort: null,
+          candidates: [
+            {
+              requestedApi: null,
+              routeProvider: legacy.settings.inference.routeProvider,
+              routedBaseUrl: legacy.settings.inference.routedBaseUrl,
+              api: legacy.settings.inference.api,
+              primaryModelRef: legacy.settings.inference.primaryModelRef!,
+              compatibility: legacy.settings.inference.compatibility,
+            },
+          ],
+        },
+        dashboard: {
+          managed: true,
+          url: legacy.settings.dashboard.url!,
+          port: legacy.settings.dashboard.port!,
+          bindAddress: legacy.settings.dashboard.bindAddress!,
+          wslExposure: legacy.settings.dashboard.wslExposure!,
+          forwarding: { enabled: false, publicPort: null, internalPort: null, tuiEnabled: false },
+        },
+        webSearch: { enabled: true, provider: "brave" },
+        tools: legacy.settings.tools,
+        messagingPlan: legacy.settings.messaging.plan,
+        approvalMode: "disabled",
+        observabilityEnabled: false,
+        proxy: legacy.settings.proxy,
+        environment: {
+          NEMOCLAW_AGENT_HEARTBEAT_EVERY: "30m",
+          NEMOCLAW_AGENT_TIMEOUT: "900",
+          NEMOCLAW_CONTEXT_WINDOW: "131072",
+          NEMOCLAW_EXTRA_AGENTS_JSON: '{"agents":[],"defaults":{},"main":{}}',
+          NEMOCLAW_INFERENCE_INPUTS: "text,image",
+          NEMOCLAW_MAX_TOKENS: "8192",
+          NEMOCLAW_MINIMAL_BOOTSTRAP: "1",
+          NEMOCLAW_OPENCLAW_OTEL: "1",
+          NEMOCLAW_OPENCLAW_OTEL_ENDPOINT: "http://host.openshell.internal:4318",
+          NEMOCLAW_OPENCLAW_OTEL_SAMPLE_RATE: "0.5",
+          NEMOCLAW_OPENCLAW_OTEL_SERVICE_NAME: "openclaw-gateway",
+          NEMOCLAW_REASONING: "true",
+          NEMOCLAW_REASONING_EFFORT: "high",
+        },
+        corporateCa: legacy.settings.corporateCa,
+        credentialProxyPresent: true,
+      },
+    });
+
+    expect(result).toEqual({
+      kind: "prepared",
+      desiredState: legacy.settings,
+      credentialProxyReplayRequired: true,
+      dashboardRemoteBindPrepared: true,
+    });
+  });
+
+  it("owns initial and reconciled durable package configuration", () => {
+    const legacy = request();
+    const receipt = receiptBackedRequest();
+    const profileRequest = {
+      packageId: receipt.packageId,
+      harnessPackage: receipt.harnessPackage,
+      desiredState: legacy.settings,
+    };
+    const initial = adapter.buildInitialStartupProfile(profileRequest);
+    if (initial.kind !== "package-config") throw new Error(initial.reason);
+
+    expect(initial.packageConfig).toEqual({ settings: legacy.settings });
+    expect(
+      adapter.buildStartupPlan({
+        ...receipt,
+        packageConfig: initial.packageConfig as StartupPackageConfig,
+      }),
+    ).toEqual(adapter.buildStartupPlan(legacy));
+    expect(
+      adapter.reconcileStartupProfile({
+        ...profileRequest,
+        currentPackageConfig: {
+          settings: { ...legacy.settings, configuration: {} },
+        } as unknown as HarnessStartupJsonObject,
+      }),
+    ).toEqual({ kind: "package-config", packageConfig: initial.packageConfig, changed: true });
+    expect(
+      adapter.reconcileStartupProfile({
+        ...profileRequest,
+        currentPackageConfig: initial.packageConfig,
+      }),
+    ).toEqual({ kind: "package-config", packageConfig: initial.packageConfig, changed: false });
+  });
+
   it("produces the same plan from receipt-backed package settings", () => {
     const packageRequest = receiptBackedRequest();
 

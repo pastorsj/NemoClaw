@@ -14,6 +14,7 @@ import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import * as rebuildHermesPostRestore from "./rebuild-hermes-post-restore";
 import * as rebuildMcp from "./rebuild-mcp-phase";
 import * as rebuildMessaging from "./rebuild-messaging-phase";
+import * as stateLifecycle from "./state-lifecycle";
 import { runRebuildPostRestorePhase } from "./rebuild-post-restore-phase";
 import * as sessionModels from "./reconcile-session-models";
 import * as restoredGatewayPairing from "./restore-gateway-pairing";
@@ -24,13 +25,24 @@ describe("rebuild post-restore phase", () => {
   let order: string[];
 
   function currentAgentAuthority() {
-    const authority = makeRebuildAgentAuthority(agentName === "openclaw" ? null : agentName);
+    const legacyProfile = makeRebuildAgentAuthority(agentName === "openclaw" ? null : agentName);
+    // The native action-list cases below are historical compatibility tests.
+    // Keep them on explicit repository/no-receipt authority so a receipt can
+    // never select the native OpenClaw or Hermes implementations.
+    const authority = makeRebuildAgentAuthority("nemocua");
+    const definition = {
+      ...authority.definition,
+      displayName:
+        agentName === "openclaw" ? "OpenClaw" : agentName === "hermes" ? "Hermes" : agentName,
+      runtime: legacyProfile.definition.runtime,
+      stateLifecycle: legacyProfile.definition.stateLifecycle,
+    };
     return agentExpectedVersion
       ? {
           ...authority,
-          definition: { ...authority.definition, expectedVersion: agentExpectedVersion },
+          definition: { ...definition, expectedVersion: agentExpectedVersion },
         }
-      : authority;
+      : { ...authority, definition };
   }
 
   function currentRegistryEntry() {
@@ -104,12 +116,10 @@ describe("rebuild post-restore phase", () => {
       return true;
     });
     vi.spyOn(rebuildHermesPostRestore, "restartHermesGatewayAfterStateRestore").mockImplementation(
-      (_sandboxName, targetAgentName) =>
-        targetAgentName === "hermes" ? "restarted" : "not-applicable",
+      (_sandboxName, restartRequired) => (restartRequired ? "restarted" : "not-applicable"),
     );
     vi.spyOn(rebuildHermesPostRestore, "verifyHermesGatewayAfterStateRestore").mockImplementation(
-      (_sandboxName, targetAgentName) =>
-        targetAgentName === "hermes" ? "healthy" : "not-applicable",
+      (_sandboxName, restartRequired) => (restartRequired ? "healthy" : "not-applicable"),
     );
     vi.spyOn(
       rebuildHermesPostRestore,
@@ -172,6 +182,110 @@ describe("rebuild post-restore phase", () => {
       bail: vi.fn() as never,
     };
   }
+
+  it("runs an unknown receipt-backed package only through its typed state declaration", async () => {
+    const futureReceipt = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "9.8.7",
+      contentDigest: "b".repeat(64),
+    };
+    const futureAuthority = {
+      recordedAgent: futureReceipt.id,
+      effectiveAgentId: futureReceipt.id,
+      harnessPackage: futureReceipt,
+      harnessPackageMigration: null,
+      definition: {
+        ...currentAgentAuthority().definition,
+        name: futureReceipt.id,
+        displayName: "Future Harness",
+        managedImage: {
+          runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+        },
+        stateLifecycle: {
+          backup_quiescence: { kind: "not-required" },
+          snapshot_restore: [],
+          rebuild: {
+            image_plugin_provenance: "not-required",
+            scheduled_work: { support: "disabled", reason: "No scheduled work." },
+            post_restore: {
+              kind: "managed",
+              command: {
+                command: ["/opt/future/bin/restore-state", "--after-rebuild"],
+                timeout_seconds: 31,
+              },
+              reapply_messaging: false,
+              restart_runtime: false,
+              mutable_config: "not-required",
+              config_integrity: { kind: "not-required" },
+              settle_device_pairing: false,
+              notify_gateway_token_change: false,
+            },
+          },
+        },
+      },
+    } as never;
+    vi.mocked(registry.getSandbox).mockReturnValue({
+      name: "alpha",
+      agent: futureReceipt.id,
+      harnessPackage: futureReceipt,
+      harnessPackageMigration: null,
+    } as never);
+    vi.mocked(onboardSession.loadSession).mockReturnValue({
+      sandboxName: "alpha",
+      agent: futureReceipt.id,
+      harnessPackage: futureReceipt,
+      harnessPackageMigration: null,
+    } as never);
+    vi.mocked(sandboxAgent.resolveSandboxAgent).mockReturnValue(futureAuthority);
+    const stateCommand = vi
+      .spyOn(stateLifecycle, "executeReceiptBackedStateCommand")
+      .mockReturnValue({ kind: "completed" });
+    const args = { ...input(), agentAuthority: futureAuthority };
+
+    const result = await runRebuildPostRestorePhase(args);
+
+    expect(result).toEqual({ mutableConfigPermissionsVerified: true });
+    expect(stateCommand).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ harnessPackage: futureReceipt }),
+      expect.objectContaining({ name: "future-harness" }),
+      {
+        command: ["/opt/future/bin/restore-state", "--after-rebuild"],
+        timeout_seconds: 31,
+      },
+    );
+    expect(processRecovery.executeSandboxExecCommand).not.toHaveBeenCalled();
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+    expect(restoredGatewayPairing.establishRestoredSandboxGatewayPairing).not.toHaveBeenCalled();
+  });
+
+  it("rejects a pre-contract action list when package receipt authority is present", async () => {
+    const invalidReceiptAuthority = makeRebuildAgentAuthority("hermes");
+    vi.mocked(registry.getSandbox).mockReturnValue({
+      name: "alpha",
+      agent: invalidReceiptAuthority.recordedAgent,
+      harnessPackage: invalidReceiptAuthority.harnessPackage,
+      harnessPackageMigration: null,
+    } as never);
+    vi.mocked(onboardSession.loadSession).mockReturnValue({
+      sandboxName: "alpha",
+      agent: invalidReceiptAuthority.recordedAgent,
+      harnessPackage: invalidReceiptAuthority.harnessPackage,
+      harnessPackageMigration: null,
+    } as never);
+    vi.mocked(sandboxAgent.resolveSandboxAgent).mockReturnValue(invalidReceiptAuthority);
+    const args = { ...input(), agentAuthority: invalidReceiptAuthority };
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(args.bail).toHaveBeenCalledWith(
+      "Receipt-backed package state lifecycle authority is invalid.",
+    );
+    expect(processRecovery.executeSandboxExecCommand).not.toHaveBeenCalled();
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+    expect(restoredGatewayPairing.establishRestoredSandboxGatewayPairing).not.toHaveBeenCalled();
+  });
 
   it("reconciles sessions after doctor, then seals config after MCP restoration (#7102, #9946)", async () => {
     await runRebuildPostRestorePhase(input());
@@ -252,7 +366,7 @@ describe("rebuild post-restore phase", () => {
     const agentDefinition = args.agentAuthority.definition;
     expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).toHaveBeenCalledWith(
       "alpha",
-      "hermes",
+      true,
       { agentDefinition },
     );
     expect(rebuildMcp.restoreMcpAfterRebuild).toHaveBeenCalledWith(
@@ -263,7 +377,7 @@ describe("rebuild post-restore phase", () => {
     );
     expect(rebuildHermesPostRestore.verifyHermesGatewayAfterStateRestore).toHaveBeenCalledWith(
       "alpha",
-      "hermes",
+      true,
       "restarted",
       { agentDefinition },
     );

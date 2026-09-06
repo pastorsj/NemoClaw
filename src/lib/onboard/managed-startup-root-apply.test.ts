@@ -12,6 +12,7 @@ import {
   encodeManagedStartupProfile,
   type ManagedStartupPackageProfile,
 } from "./managed-startup/profile";
+import { managedStartupSettingsFromProfile } from "./managed-startup/package-profile";
 import {
   createManagedStartupRootApplyRequest,
   MANAGED_STARTUP_ROOT_APPLY_MAX_BYTES,
@@ -49,6 +50,7 @@ describe("managed startup root-application envelope", () => {
   );
 
   it("round-trips an unknown receipt-backed package without adding it to a core catalogue", () => {
+    const piSettings = managedStartupSettingsFromProfile(managedStartupE2eProfile("pi"));
     const profile: ManagedStartupPackageProfile = {
       schemaVersion: 1,
       profileKind: "package",
@@ -58,6 +60,11 @@ describe("managed startup root-application envelope", () => {
         id: "future-harness",
         packageVersion: "2.3.4",
         contentDigest: "a".repeat(64),
+      },
+      desiredState: {
+        ...piSettings,
+        configuration: { agent: "future-harness" },
+        dashboard: { agent: "future-harness", mode: "disabled" },
       },
       packageConfig: { model: "nvidia/future-model" },
       corporateCa: { bundleSha256: null },

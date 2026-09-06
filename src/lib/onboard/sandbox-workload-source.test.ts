@@ -71,9 +71,24 @@ const FUTURE_MANAGED_IMAGE = {
   repository: "registry.example/team/future-harness",
   architectures: [MANAGED_IMAGE_PLATFORM],
   runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
-  startup_profile_contract_version: 1,
-  capability_contract_version: 1,
 } as const satisfies HarnessManagedImageDeclaration;
+
+const FUTURE_PUBLISHED_MANAGED_IMAGE = {
+  ...FUTURE_MANAGED_IMAGE,
+  architectures: ["linux/amd64", "linux/arm64"],
+  publication: {
+    source: {
+      repository: "ExampleOrg/future-harness",
+      revision: "a".repeat(40),
+      release: "v1.2.3",
+      cohort: "build-2026.09.05",
+    },
+    digests: {
+      "linux/amd64": `sha256:${"ab".repeat(32)}`,
+      "linux/arm64": `sha256:${"cd".repeat(32)}`,
+    },
+  },
+} as const;
 
 function futureHarnessContract(
   harnessPackage: HarnessPackageIdentity = FUTURE_HARNESS_PACKAGE,
@@ -252,6 +267,72 @@ describe("sandbox workload source resolution", () => {
     });
   });
 
+  it("selects an external package publication without a stock catalogue entry", () => {
+    const source = resolveSandboxWorkloadSource({
+      agentName: FUTURE_HARNESS_PACKAGE.id,
+      harnessPackage: FUTURE_HARNESS_PACKAGE,
+      managedImage: FUTURE_PUBLISHED_MANAGED_IMAGE,
+      legacyDockerfilePath: "/workspace/future-harness/Dockerfile",
+      runtime: managedRuntime("podman"),
+      catalog: {},
+      policy: "require-managed",
+    });
+
+    expect(source).toEqual({
+      kind: "managed-image",
+      reference: `${FUTURE_PUBLISHED_MANAGED_IMAGE.repository}@${FUTURE_PUBLISHED_MANAGED_IMAGE.publication.digests["linux/amd64"]}`,
+      contract: {
+        harnessPackage: FUTURE_HARNESS_PACKAGE,
+        contractVersion: 1,
+        agent: FUTURE_HARNESS_PACKAGE.id,
+        platform: "linux/amd64",
+        image: FUTURE_PUBLISHED_MANAGED_IMAGE.repository,
+        digest: FUTURE_PUBLISHED_MANAGED_IMAGE.publication.digests["linux/amd64"],
+        reference: `${FUTURE_PUBLISHED_MANAGED_IMAGE.repository}@${FUTURE_PUBLISHED_MANAGED_IMAGE.publication.digests["linux/amd64"]}`,
+        source: FUTURE_PUBLISHED_MANAGED_IMAGE.publication.source,
+        startupProfileContractVersion: 1,
+        capabilityContractVersion: 1,
+      },
+    });
+  });
+
+  it("rejects publication use when the package receipt and selected agent differ", () => {
+    expect(() =>
+      resolveSandboxWorkloadSource({
+        agentName: "another-harness",
+        harnessPackage: FUTURE_HARNESS_PACKAGE,
+        managedImage: FUTURE_PUBLISHED_MANAGED_IMAGE,
+        legacyDockerfilePath: "/workspace/future-harness/Dockerfile",
+        runtime: managedRuntime("podman"),
+        catalog: {},
+        policy: "require-managed",
+      }),
+    ).toThrow("does not match selected agent");
+  });
+
+  it("rejects a package publication that omits the runtime platform digest", () => {
+    expect(() =>
+      resolveSandboxWorkloadSource({
+        agentName: FUTURE_HARNESS_PACKAGE.id,
+        harnessPackage: FUTURE_HARNESS_PACKAGE,
+        managedImage: {
+          ...FUTURE_PUBLISHED_MANAGED_IMAGE,
+          architectures: ["linux/arm64"],
+          publication: {
+            ...FUTURE_PUBLISHED_MANAGED_IMAGE.publication,
+            digests: {
+              "linux/arm64": FUTURE_PUBLISHED_MANAGED_IMAGE.publication.digests["linux/arm64"],
+            },
+          },
+        },
+        legacyDockerfilePath: "/workspace/future-harness/Dockerfile",
+        runtime: managedRuntime("podman"),
+        catalog: {},
+        policy: "require-managed",
+      }),
+    ).toThrow("failed closed validation");
+  });
+
   it.each(["openclaw", "hermes", "langchain-deepagents-code", "pi"] as const)(
     "lets receipt authority select the package contract for known agent %s",
     (agent) => {
@@ -265,8 +346,6 @@ describe("sandbox workload source resolution", () => {
         repository: `registry.example/team/${agent}`,
         architectures: [MANAGED_IMAGE_PLATFORM],
         runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
-        startup_profile_contract_version: 1,
-        capability_contract_version: 1,
       } as const satisfies HarnessManagedImageDeclaration;
       const contract = packageContractForKnownAgent(agent, harnessPackage, declaration);
 
@@ -344,8 +423,6 @@ describe("sandbox workload source resolution", () => {
           repository: "registry.example/team/substituted-openclaw",
           architectures: [MANAGED_IMAGE_PLATFORM],
           runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
-          startup_profile_contract_version: 1,
-          capability_contract_version: 1,
         },
         legacyDockerfilePath: "Dockerfile",
         runtime: managedRuntime("podman"),
@@ -370,8 +447,6 @@ describe("sandbox workload source resolution", () => {
         repository,
         architectures: [MANAGED_IMAGE_PLATFORM],
         runtime_identity: { uid: 4321, gid: 4322, workdir: "/sandbox" },
-        startup_profile_contract_version: 1,
-        capability_contract_version: 1,
       },
       legacyDockerfilePath: "Dockerfile",
       runtime: managedRuntime("podman"),

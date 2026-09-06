@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Args } from "@oclif/core";
-import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
+import { NemoClawInternalCommand } from "../../../lib/cli/internal-command";
 
 import { runFixCoreDns } from "../../../lib/actions/dns";
 
-export default class InternalDnsFixCoreDnsCommand extends NemoClawCommand {
-  static hidden = true;
+export default class InternalDnsFixCoreDnsCommand extends NemoClawInternalCommand {
   static strict = true;
   static summary = "Internal: patch CoreDNS for local gateway DNS";
   static description = "Patch CoreDNS to use a non-loopback upstream resolver.";

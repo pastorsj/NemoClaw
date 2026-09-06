@@ -67,7 +67,9 @@ describe("sandbox BuildKit prebuild", () => {
   ] as const)("classifies an explicit %s context without invoking Docker", (context, expected) => {
     const showContext = vi.fn(() => "default");
 
-    expect(dockerContextIsDefaultFromBuild({ DOCKER_CONTEXT: context }, showContext)).toBe(expected);
+    expect(dockerContextIsDefaultFromBuild({ DOCKER_CONTEXT: context }, showContext)).toBe(
+      expected,
+    );
     expect(showContext).not.toHaveBeenCalled();
   });
 
@@ -165,6 +167,28 @@ describe("sandbox BuildKit prebuild", () => {
     expect(sandboxLocalImageRef("a".repeat(128), "next-build")).not.toBe(
       sandboxLocalImageRef("a".repeat(128), "other-build"),
     );
+  });
+
+  it("rejects staged package digest drift before invoking Docker", async () => {
+    const { buildCtx, createArgs } = createBuildContext();
+    const verifyBuildCtx = vi.fn(() => false);
+    const buildImage = vi.fn(async () => 0);
+
+    await expect(
+      prebuildSandboxImageIfEligible({
+        buildCtx,
+        buildId: BUILD_ID,
+        origin: "generated",
+        createArgs,
+        sandboxName: "alpha",
+        dockerDriverGateway: true,
+        env: { NEMOCLAW_SANDBOX_PREBUILD: "1" },
+        verifyBuildCtx,
+        buildImage,
+      }),
+    ).rejects.toThrow("Staged harness package bytes changed before the Docker build");
+    expect(verifyBuildCtx).toHaveBeenCalledOnce();
+    expect(buildImage).not.toHaveBeenCalled();
   });
 
   it("skips the build when create arguments do not use the staged Dockerfile", async () => {

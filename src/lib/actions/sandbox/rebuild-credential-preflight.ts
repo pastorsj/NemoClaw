@@ -11,6 +11,9 @@ import {
   shouldVerifyRebuildGatewayProvider,
 } from "./rebuild-provider-preflight";
 import { getRebuildCredentialEnvFromRegistry } from "./rebuild-resume-config";
+import { legacyRebuildCanReuseGatewayWebSearchCredential } from "./rebuild/legacy-state";
+
+export { legacyRebuildCanReuseGatewayWebSearchCredential };
 
 const hermesProviderAuth = require("../../hermes-provider-auth") as {
   HERMES_PROVIDER_NAME: string;

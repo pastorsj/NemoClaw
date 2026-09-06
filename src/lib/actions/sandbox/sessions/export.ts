@@ -19,9 +19,6 @@ import {
   deferSandboxLifecycleExit,
 } from "../../../core/process-exit";
 import { shellQuote } from "../../../core/shell-quote";
-import { assertHermesPortableCommandUnavailable } from "../../../onboard/experimental/portable-agent-lifecycle";
-import { withMcpLifecycleLock } from "../../../state/mcp-lifecycle-lock-acquisition";
-import { ensureLiveSandboxOrExit } from "../gateway-state";
 import { resolveHostPathFromCwd } from "../host-path";
 import { WARMUP_SESSION_ID_PREFIX } from "../warmup-session";
 import { assertDownloadedFile } from "./download-verify";
@@ -33,10 +30,13 @@ import {
   type SessionsExportResult,
 } from "./legacy-export";
 import {
-  confirmSessionPackageAuthority,
-  resolveSessionPackageAuthority,
-  type SessionPackageAuthority,
-} from "./package-authority";
+  assertSessionCommandAvailable,
+  confirmSessionCommandAuthority,
+  ensureLiveSessionSandbox,
+  resolveSessionCommandAuthority,
+  type SessionCommandAuthority,
+  withSessionCommandLock,
+} from "./command-authority";
 
 export type {
   SessionExportEntry,
@@ -76,7 +76,7 @@ function buildExportRequest(options: SessionsExportOptions): HarnessSessionExpor
 }
 
 function buildSessionExportPlan(
-  authority: SessionPackageAuthority,
+  authority: SessionCommandAuthority,
   request: HarnessSessionExportPlanRequest,
 ): HarnessSessionExportPlan {
   try {
@@ -91,11 +91,11 @@ function buildSessionExportPlan(
 
 function confirmSessionExportPlan(
   sandboxName: string,
-  authority: SessionPackageAuthority,
+  authority: SessionCommandAuthority,
   request: HarnessSessionExportPlanRequest,
   expectedPlan: HarnessSessionExportPlan,
 ) {
-  const adapter = confirmSessionPackageAuthority(sandboxName, authority.identity);
+  const adapter = confirmSessionCommandAuthority(sandboxName, authority.identity);
   let currentPlan: HarnessSessionExportPlan;
   try {
     currentPlan = adapter.buildSessionExportPlan(request);
@@ -352,7 +352,7 @@ function renderExportResult(result: SessionsExportResult, jsonOutput: boolean): 
 
 function executeIndexedExport(input: {
   readonly options: SessionsExportOptions;
-  readonly authority: SessionPackageAuthority;
+  readonly authority: SessionCommandAuthority;
   readonly request: HarnessSessionExportPlanRequest;
   readonly plan: Extract<HarnessSessionExportPlan, { readonly kind: "indexed-files" }>;
 }): SessionsExportResult {
@@ -450,7 +450,7 @@ function executeIndexedExport(input: {
 
 function executeNativeFileExport(input: {
   readonly options: SessionsExportOptions;
-  readonly authority: SessionPackageAuthority;
+  readonly authority: SessionCommandAuthority;
   readonly request: HarnessSessionExportPlanRequest;
   readonly plan: Extract<HarnessSessionExportPlan, { readonly kind: "native-file" }>;
 }): SessionsExportResult {
@@ -501,12 +501,12 @@ function executeNativeFileExport(input: {
 export async function exportSandboxSessions(
   options: SessionsExportOptions,
 ): Promise<SessionsExportResult> {
-  const authority = resolveSessionPackageAuthority(options.sandboxName);
+  const authority = resolveSessionCommandAuthority(options.sandboxName);
   if (authority === null) return exportLegacySandboxSessions(options);
 
   return runWithDeferredSandboxLifecycleExit(() =>
-    withMcpLifecycleLock(options.sandboxName, async () => {
-      assertHermesPortableCommandUnavailable(options.sandboxName, "sandbox:sessions:export");
+    withSessionCommandLock(options.sandboxName, async () => {
+      assertSessionCommandAvailable(options.sandboxName, "sandbox:sessions:export");
       const request = buildExportRequest(options);
       const plan = buildSessionExportPlan(authority, request);
       if (plan.kind === "unsupported" || plan.kind === "refused") {
@@ -514,7 +514,7 @@ export async function exportSandboxSessions(
       }
 
       // Unsupported packages fail before this liveness probe or any host path mutation.
-      await ensureLiveSandboxOrExit(options.sandboxName, {
+      await ensureLiveSessionSandbox(options.sandboxName, {
         allowNonReadyPhase: true,
         exit: deferSandboxLifecycleExit,
       });

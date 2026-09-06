@@ -7,7 +7,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { defineHarnessAdapterContract, defineHarnessAdapterOperation } from "./contract";
-import { loadHarnessAdapter } from "./loader";
+import { HarnessAdapterError, loadHarnessAdapter, loadHarnessAdapterFromSource } from "./loader";
 import { installHarnessPackage } from "../package/install";
 import type { InstalledHarnessPackage } from "../package/store";
 
@@ -80,10 +80,42 @@ function installTestPackage(moduleSource: string): InstalledHarnessPackage {
       displayName: "Future Harness",
       packageVersion: "1.0.0",
       minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: "packages/nemoclaw-future-harness/manifest.yaml",
     })}\n`,
   );
-  writeFixtureFile("packages/nemoclaw-future-harness/manifest.yaml", "name: future-harness\n");
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/manifest.yaml",
+    [
+      "name: future-harness",
+      "runtime:",
+      "  kind: terminal",
+      "  prompt_transport: stdin",
+      "  headless_command: future-harness --prompt",
+      "config:",
+      "  dir: /sandbox/.future-harness",
+      "  config_file: config.json",
+      "  format: json",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: This synthetic package has fixed inference configuration.",
+      "messaging:",
+      "  support: disabled",
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    image_plugin_provenance: not-required",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: This package does not run scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
+      "",
+    ].join("\n"),
+  );
   writeFixtureFile("packages/nemoclaw-future-harness/host/test-adapter.cts", moduleSource);
   return installHarnessPackage(
     { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
@@ -109,6 +141,19 @@ afterEach(() => {
 });
 
 describe("typed harness adapter loader", () => {
+  it("applies the same VM and schemas to already-authorized source bytes", () => {
+    const adapter = loadHarnessAdapterFromSource(
+      {
+        filename: "/usr/local/lib/nemoclaw/test-adapter.cjs",
+        source: `module.exports = { buildTestPlan(request) { return { value: request.value }; } };`,
+      },
+      TEST_CONTRACT,
+    );
+
+    expect(adapter.build({ value: "image-local" })).toEqual({ value: "image-local" });
+    expect(() => adapter.build({ value: 42 } as never)).toThrow(/request.*schema/u);
+  });
+
   it("keeps host constructors and ambient capabilities outside package operations", () => {
     const adapter = loadTestAdapter(`
 module.exports = {
@@ -160,7 +205,7 @@ module.exports = {
 while (true) {}
 module.exports = { buildTestPlan(request) { return request; } };
 `),
-    ).toThrow(/could not be evaluated/u);
+    ).toThrow(HarnessAdapterError);
   });
 
   it("bounds every package operation", () => {
@@ -168,7 +213,30 @@ module.exports = { buildTestPlan(request) { return request; } };
 module.exports = { buildTestPlan() { while (true) {} } };
 `);
 
-    expect(() => adapter.build({ value: "probe" })).toThrow(/buildTestPlan failed/u);
+    const startedAt = Date.now();
+    expect(() => adapter.build({ value: "probe" })).toThrow(HarnessAdapterError);
+    expect(Date.now() - startedAt).toBeLessThan(3_000);
+  });
+
+  it("contains aggressive package memory allocation in the adapter child", () => {
+    const adapter = loadTestAdapter(`
+module.exports = {
+  buildTestPlan() {
+    const values = new Array(100_000_000).fill("unbounded");
+    return { value: String(values.length) };
+  },
+};
+`);
+
+    expect(() => adapter.build({ value: "probe" })).toThrow(HarnessAdapterError);
+    const healthy = loadHarnessAdapterFromSource(
+      {
+        filename: "/usr/local/lib/nemoclaw/healthy-adapter.cjs",
+        source: `module.exports = { buildTestPlan(request) { return request; } };`,
+      },
+      TEST_CONTRACT,
+    );
+    expect(healthy.build({ value: "CLI remains alive" })).toEqual({ value: "CLI remains alive" });
   });
 
   it.each([
@@ -206,11 +274,9 @@ module.exports = {
 
   it("clears call state after an adapter failure", () => {
     const adapter = loadTestAdapter(`
-let callCount = 0;
 module.exports = {
   buildTestPlan(request) {
-    callCount += 1;
-    if (callCount === 1) throw new Error("first call fails");
+    if (request.value === "first") throw new Error("first call fails");
     return { value: request.value };
   },
 };
@@ -225,6 +291,6 @@ module.exports = {
 module.exports = { buildTestPlan() { return { value: "x".repeat(2000) }; } };
 `);
 
-    expect(() => adapter.build({ value: "probe" })).toThrow(/buildTestPlan failed/u);
+    expect(() => adapter.build({ value: "probe" })).toThrow(HarnessAdapterError);
   });
 });

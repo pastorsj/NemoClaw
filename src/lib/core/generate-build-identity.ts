@@ -4,7 +4,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { resolveSourceBuildIdentity } from "./version";
+import { resolveSourceBuildIdentity } from "./build-identity";
 
 const root = join(__dirname, "..", "..", "..");
 const outputPath = join(root, "dist", "build-identity.json");

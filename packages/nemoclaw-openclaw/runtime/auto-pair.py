@@ -13,6 +13,10 @@ import subprocess
 import sys
 import time
 
+ONE_SHOT = sys.argv[1:] == ['--once']
+if sys.argv[1:] and not ONE_SHOT:
+    raise SystemExit(2)
+
 LAST_SANITIZED_STATUS = None
 STATUS_PATH = '/tmp/nemoclaw-auto-pair-status.json'
 
@@ -27,6 +31,8 @@ def publish_status(state):
         'state': state,
     }, separators=(',', ':'))
     print('[auto-pair-status] ' + status, flush=True)
+    if ONE_SHOT:
+        return
     status_fd = None
     try:
         status_fd = os.open(
@@ -111,7 +117,9 @@ def _env_seconds(name, default):
 # scopes that the gateway holds as pending until something approves them; an
 # exited watcher leaves those upgrades stuck and the agent falls back to
 # embedded mode. Defaults: 8h total, 5s slow-mode cadence.
-DEADLINE = time.time() + _env_seconds('NEMOCLAW_AUTO_PAIR_DEADLINE_SECS', 28800)
+DEADLINE = time.time() + _env_seconds(
+    'NEMOCLAW_AUTO_PAIR_DEADLINE_SECS', 60 if ONE_SHOT else 28800,
+)
 # After convergence the watcher polls at SLOW_INTERVAL. A late allowlisted
 # scope upgrade — e.g. `openclaw tui` or `openclaw agent` invoked after the
 # watcher entered slow mode — can wait up to SLOW_INTERVAL before being
@@ -723,6 +731,8 @@ while time.time() < DEADLINE:
         SLOW_MODE = True
         publish_status('canonical-settled')
         print(f'[auto-pair] canonical CLI baseline settled; entering slow-mode approvals={APPROVED}')
+        if ONE_SHOT:
+            raise SystemExit(0)
 
     # Poll every 1s until canonical CLI settlement, then use SLOW_INTERVAL
     # (default 5s). Slow-mode keepalive lets late CLI
@@ -737,3 +747,5 @@ while time.time() < DEADLINE:
 else:
     publish_status('stopped')
     print(f'[auto-pair] watcher deadline reached approvals={APPROVED}')
+    if ONE_SHOT:
+        raise SystemExit(1)

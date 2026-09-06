@@ -11,11 +11,17 @@
 import { isObjectRecord } from "../../core/json-types";
 import type * as registry from "../../state/registry";
 import { createBuiltInChannelManifestRegistry } from "../channels";
+import { createChannelManifestRegistry } from "../manifest/registry";
 import {
   type ChannelHealthReport,
   MESSAGING_CHANNEL_HEALTH_OUTPUT_TYPE,
 } from "../channels/channel-health";
-import type { ChannelHookSpec, MessagingAgentId, MessagingSerializableValue } from "../manifest";
+import type {
+  ChannelHookSpec,
+  ChannelManifest,
+  MessagingAgentId,
+  MessagingSerializableValue,
+} from "../manifest";
 import { createBuiltInMessagingHookRegistry } from "./builtins";
 import { runMessagingHookSync } from "./hook-runner";
 
@@ -26,6 +32,8 @@ export interface MessagingStatusHookRunOptions {
   readonly currentSandbox?: string;
   readonly registryEntries?: readonly registry.SandboxEntry[];
   readonly hookRegistry?: ReturnType<typeof createBuiltInMessagingHookRegistry>;
+  /** Exact composed manifests authorized for this status operation. */
+  readonly manifests?: readonly ChannelManifest[];
   /** Extra serializable inputs merged into every status hook's input map. */
   readonly extraInputs?: Readonly<Record<string, MessagingSerializableValue>>;
 }
@@ -40,7 +48,9 @@ export function runMessagingStatusHooks(
   options: MessagingStatusHookRunOptions,
 ): MessagingStatusHookRunResult[] {
   const hookRegistry = options.hookRegistry ?? createBuiltInMessagingHookRegistry();
-  const manifestRegistry = createBuiltInChannelManifestRegistry();
+  const manifestRegistry = options.manifests
+    ? createChannelManifestRegistry(options.manifests)
+    : createBuiltInChannelManifestRegistry();
   const agents: ReadonlySet<MessagingAgentId> = options.agent
     ? new Set<MessagingAgentId>([options.agent])
     : (options.agents ?? new Set<MessagingAgentId>(["openclaw"]));

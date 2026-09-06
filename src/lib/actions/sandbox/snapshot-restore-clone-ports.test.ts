@@ -530,6 +530,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
             provider: "nvidia-nim",
             model: "nvidia/model-a",
             dashboardPort: 18790,
+            hermesApiPort: 8642,
             hermesDashboardEnabled: true,
             hermesDashboardPort: 18790,
             hermesDashboardInternalPort: 18901,

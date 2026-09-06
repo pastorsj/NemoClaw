@@ -3,9 +3,11 @@
 
 import { Args } from "@oclif/core";
 
-import { readInstalledHarnessPackage } from "../../lib/agent-runtime/package/store";
 import { parseHarnessPackageId } from "../../lib/agent-runtime/package/receipt";
-import { removeHarnessPackage } from "../../lib/actions/harness/remove";
+import {
+  readHarnessPackageForRemoval as readInstalledHarnessPackage,
+  removeHarnessPackage,
+} from "../../lib/actions/harness/remove";
 import { yesFlag } from "../../lib/cli/common-flags";
 import { NemoClawCommand } from "../../lib/cli/nemoclaw-oclif-command";
 import { isStdinTty } from "../../lib/core/stdin";
@@ -27,7 +29,7 @@ export default class HarnessRemoveCommand extends NemoClawCommand {
   static description =
     "Stop selecting a harness package for new sandboxes while retaining immutable history for existing sandboxes and rollback.";
   static usage = ["harness remove <id> [--yes]"];
-  static examples = ["<%= config.bin %> harness remove openclaw --yes"];
+  static examples = ["<%= config.bin %> harness remove <id> --yes"];
   static args = {
     id: Args.string({
       description: "Canonical harness package ID",

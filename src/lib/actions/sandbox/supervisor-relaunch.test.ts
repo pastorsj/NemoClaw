@@ -161,6 +161,57 @@ describe("relaunchManagedSupervisorSession", () => {
     expect(command.at(-1)).toBe("nemoclaw-start");
   });
 
+  it("uses the matching receipt-backed dashboard profile without package-ID dispatch", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-gateway",
+      packageVersion: "4.5.6",
+      contentDigest: "f".repeat(64),
+    };
+    const deps = baseDeps({
+      getSandbox: vi.fn(() => ({
+        name: "alpha",
+        agent: "future-gateway",
+        harnessPackage,
+        dashboardPort: 20400,
+        hermesDashboardEnabled: true,
+        hermesDashboardPort: 20400,
+        hermesDashboardInternalPort: 20401,
+        openshellDriver: "docker",
+      })),
+      resolveSandboxAgent: vi.fn(() => ({
+        recordedAgent: "future-gateway",
+        effectiveAgentId: "future-gateway",
+        definition: {
+          name: "future-gateway",
+          displayName: "Future Gateway",
+          forwardPort: 20400,
+          packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+          runtime: { kind: "gateway" },
+        },
+        harnessPackage,
+        harnessPackageMigration: null,
+      })) as never,
+      resolveDashboardPort: vi.fn(() => 20400),
+      readManagedWorkloadAuthority: vi.fn(
+        () =>
+          ({
+            agent: "future-gateway",
+            profile: {
+              dashboard: {
+                agent: "future-gateway",
+                browserUrl: "https://future.example.test:20400",
+              },
+            },
+          }) as never,
+      ),
+    });
+
+    expect(relaunchManagedSupervisorSession("alpha", { quiet: true, deps })).not.toBeNull();
+    const command = vi.mocked(deps.recreate).mock.calls[0]?.[0].openshellSandboxCommand ?? [];
+    expect(command).toContain("CHAT_UI_URL=https://future.example.test:20400");
+  });
+
   it("does not recreate a receipt-backed future terminal runtime", () => {
     const harnessPackage = {
       kind: "agent-runtime" as const,

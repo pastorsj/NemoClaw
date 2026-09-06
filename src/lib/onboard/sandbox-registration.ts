@@ -40,7 +40,7 @@ import {
   classifyPortableLifecycleReceipt,
   portableLifecycleReceiptMatchesGeneration,
 } from "./experimental/portable-runtime-receipt-readiness";
-import { resolveOnboardHermesApiPort } from "./hermes-api-port";
+import { isOpenClawPortableRegistryAgent } from "./experimental/portable-product-qualification";
 import {
   getHermesDashboardRegistryFields,
   type HermesDashboardOnboardState,
@@ -53,11 +53,8 @@ import {
   requireRuntimeProviderBundleForSandbox,
   requireRuntimeProviderMutationAuthority,
 } from "./runtime-provider/access";
-import {
-  getRequestedSandboxAgentName,
-  getSandboxAgentRegistryFields,
-  normalizeSandboxAgentName,
-} from "./sandbox-agent";
+import { getRequestedSandboxAgentName, normalizeSandboxAgentName } from "./sandbox-agent/naming";
+import { getSandboxAgentRegistryFields } from "./sandbox-agent";
 
 export type CreatedSandboxRuntimeFields = Pick<
   SandboxEntry,
@@ -439,15 +436,9 @@ export function buildCreatedSandboxRegistryEntry(
       input.hermesToolGateways.length > 0 ? [...input.hermesToolGateways] : undefined,
     ...getHermesDashboardRegistryFields(input.hermesDashboardState),
     hermesApiPort:
-      input.agent?.name === "hermes"
-        ? input.hermesPortableLifecycle === true
-          ? undefined
-          : (input.hermesApiPort ??
-            resolveOnboardHermesApiPort(input.sandboxName, {
-              // Registration follows a successful create/recreate that applied this environment.
-              allowRegisteredOverride: true,
-            }))
-        : undefined,
+      input.hermesPortableLifecycle === true || input.hermesApiPort == null
+        ? undefined
+        : input.hermesApiPort,
     dashboardPort: input.dashboardPort,
     dashboardRemoteBindPrepared: input.dashboardRemoteBindPrepared === true,
     lifecycleGeneration: input.lifecycleGeneration,
@@ -511,7 +502,7 @@ export function prepareCreatedSandboxRegistration(
     }
   }
   if (input.portableLifecycle === true) {
-    if (getRequestedSandboxAgentName(input.agent) !== "openclaw") {
+    if (!isOpenClawPortableRegistryAgent(getRequestedSandboxAgentName(input.agent))) {
       throw new RuntimeProviderSelectionError(
         "Portable lifecycle registration requires the OpenClaw agent.",
       );

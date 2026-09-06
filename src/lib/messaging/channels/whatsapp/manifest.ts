@@ -125,7 +125,7 @@ export const whatsappManifest = {
     {
       id: "openclawPluginPackage",
       agent: "openclaw",
-      manager: "openclaw-plugin",
+      manager: "node-package",
       spec: "npm:@openclaw/whatsapp@{{openclaw.version}}",
       pin: true,
       integrityByVersion: {

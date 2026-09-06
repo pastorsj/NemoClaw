@@ -7,6 +7,9 @@
 # baseline policy artifacts.
 
 name: openclaw
+provider_broker:
+  support: disabled
+  reason: This package does not require a host provider broker.
 display_name: "OpenClaw"
 description: "Gateway-based AI agent with plugin ecosystem (openclaw.ai)"
 aliases:
@@ -16,6 +19,8 @@ alias_summary: ""
 onboarding:
   default: true
   sandbox_name: my-assistant
+sandbox_create:
+  generated_image_build: local-buildkit-required
 version_constraint: ">=2026.3.11"
 language: nodejs
 license: Apache-2.0
@@ -29,6 +34,7 @@ expected_version: "2026.7.1"
 version_scheme: calendar
 managed_image:
   repository: ghcr.io/nvidia/nemoclaw/openclaw-sandbox
+  rebuild_base_image: not-required
   architectures:
     - linux/amd64
     - linux/arm64
@@ -42,17 +48,49 @@ managed_image:
   state_root:
     mount_target: /sandbox/.openclaw
     mode: "2770"
-  startup_profile_contract_version: 1
-  capability_contract_version: 1
+  startup_profile_environment:
+    - { name: NEMOCLAW_AGENT_HEARTBEAT_EVERY, value_type: string, max_bytes: 32 }
+    - { name: NEMOCLAW_AGENT_TIMEOUT, value_type: string, max_bytes: 32 }
+    - { name: NEMOCLAW_CONTEXT_WINDOW, value_type: string, max_bytes: 32 }
+    - { name: NEMOCLAW_EXTRA_AGENTS_JSON, value_type: string, max_bytes: 65536 }
+    - { name: NEMOCLAW_EXTRA_AGENTS_JSON_B64, value_type: string, max_bytes: 65536 }
+    - { name: NEMOCLAW_INFERENCE_INPUTS, value_type: string, max_bytes: 64 }
+    - { name: NEMOCLAW_MAX_TOKENS, value_type: positive-integer, max_bytes: 32 }
+    - { name: NEMOCLAW_MINIMAL_BOOTSTRAP, value_type: string, max_bytes: 8 }
+    - { name: NEMOCLAW_OPENCLAW_OTEL, value_type: string, max_bytes: 8 }
+    - { name: NEMOCLAW_OPENCLAW_OTEL_ENDPOINT, value_type: string, max_bytes: 2048 }
+    - { name: NEMOCLAW_OPENCLAW_OTEL_SAMPLE_RATE, value_type: string, max_bytes: 32 }
+    - { name: NEMOCLAW_OPENCLAW_OTEL_SERVICE_NAME, value_type: string, max_bytes: 256 }
+    - { name: NEMOCLAW_REASONING, value_type: string, max_bytes: 8 }
+    - { name: NEMOCLAW_REASONING_EFFORT, value_type: string, max_bytes: 16 }
 gateway_command: "openclaw gateway run"
-# Interactive entry point a user types inside the sandbox. OpenClaw stays a
-# gateway agent (runtime.kind defaults to gateway); this only records the
-# command so NemoClaw stops hardcoding it.
+# Interactive entry point a user types inside the sandbox. The explicit runtime
+# kind and command let NemoClaw avoid a package-name decision.
 runtime:
+  kind: gateway
   command_shell: /bin/sh
   interactive_command: "openclaw tui"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 15 --config /sandbox/.openclaw/fabric.json"
   prompt_transport: stdin
+  # Core invokes this package-owned controller with one finite lifecycle action
+  # and a core-generated nonce. Core still owns privileged sandbox execution.
+  process_lifecycle:
+    support: managed
+    command: [/usr/local/bin/nemoclaw-gateway-control]
+  device_pairing_settlement:
+    command: [/usr/local/bin/nemoclaw-device-pairing-settle]
+    timeout_seconds: 130
+  # OpenClaw owns this native argv grammar. NemoClaw only validates the finite
+  # declaration and applies its sandbox execution, output, and timeout policy.
+  agent_command:
+    argv: [openclaw, agent]
+    output_mode: bounded-text
+    selector_options: [--agent, --session-id, --session-key, --to]
+    selector_required: true
+    value_options: [-a, -m, --message, --model, --provider, --reply-channel, --thinking, --timeout]
+    boolean_options: [--deliver]
+    json_output_option: --json
+    timeout_option: --timeout
   smoke_boundary:
     kind: login-shell
   smoke_commands:
@@ -72,6 +110,7 @@ health_probe:
 dashboard:
   auth: url_token
   token_path: gateway.auth.token
+  tunnel_allowed_origins_path: gateway.controlUi.allowedOrigins
 forward_ports:
   - 18789
 
@@ -80,6 +119,38 @@ config:
   dir: /sandbox/.openclaw
   config_file: openclaw.json
   format: json
+
+# ── State lifecycle ────────────────────────────────────────────
+# The package selects native state semantics. NemoClaw owns archive paths,
+# mutation locks, restore transactions, rollback, and runtime-provider access.
+state_lifecycle:
+  backup_quiescence:
+    kind: not-required
+  snapshot_restore:
+    - repair-mutable-config
+  rebuild:
+    image_plugin_provenance: required
+    scheduled_work:
+      support: disabled
+      reason: OpenClaw scheduled work does not require a rebuild dispatch gate.
+    post_restore:
+      kind: managed
+      command:
+        command: [/usr/local/bin/nemoclaw-state-restore]
+        timeout_seconds: 300
+      reapply_messaging: true
+      restart_runtime: false
+      mutable_config: repair
+      config_integrity:
+        kind: commands
+        refresh:
+          command: [/usr/local/lib/nemoclaw/seal-config, refresh]
+          timeout_seconds: 30
+        verify:
+          command: [/usr/local/lib/nemoclaw/seal-config, verify]
+          timeout_seconds: 30
+      settle_device_pairing: true
+      notify_gateway_token_change: false
 
 # ── State directories ──────────────────────────────────────────
 state_dirs:
@@ -137,8 +208,34 @@ user_managed_files:
 device_pairing: true
 web_auth_method: device_pairing
 
+# ── Web search ──────────────────────────────────────────────────
+web_search:
+  support: providers
+  providers:
+    - brave
+    - tavily
+
 # ── Inference ───────────────────────────────────────────────────
 inference:
+  sandbox_smoke:
+    kind: compatible-endpoint
+    config_path: /sandbox/.openclaw/openclaw.json
+  refresh_route_for_messaging_providers:
+    - compatible-endpoint
+  config_update:
+    support: mutable
+    provider_api_overrides: []
+    post_commit:
+      config_sync: best-effort
+      gateway_restart: when-api-changes
+      sandbox_reconcile:
+        kind: command
+        trigger: when-config-changes
+        command:
+          - /usr/bin/python3
+          - -I
+          - /usr/local/lib/nemoclaw/openclaw-startup/inference-reconcile.py
+        timeout_seconds: 90
   provider_type: gateway_managed
   proxy_support: explicit # configured in openclaw.json providers block
 

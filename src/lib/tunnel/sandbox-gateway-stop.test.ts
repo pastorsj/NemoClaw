@@ -268,6 +268,27 @@ describe("stopSandboxChannels", () => {
     );
   });
 
+  it("fails closed when a receipt-backed future harness cannot be resolved", () => {
+    const h = harness();
+    h.getSandbox.mockReturnValue(
+      sandbox({
+        agent: "future-harness",
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: "future-harness",
+          packageVersion: "1.2.3",
+          contentDigest: "f".repeat(64),
+        },
+      }),
+    );
+
+    stopSandboxChannels("my-sandbox", h.deps);
+
+    expect(h.runDocker).not.toHaveBeenCalled();
+    expect(h.runProcess).not.toHaveBeenCalled();
+    expect(h.warn).toHaveBeenCalledWith(expect.stringContaining("receipt-backed harness"));
+  });
+
   it("warns when privileged shutdown reports the gateway may still be running", () => {
     const h = harness();
     h.runDocker

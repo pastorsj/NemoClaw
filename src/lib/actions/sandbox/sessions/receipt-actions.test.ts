@@ -21,11 +21,17 @@ vi.mock("../../../adapters/openshell/runtime", () => ({
   runOpenshell: mocks.run,
 }));
 vi.mock("../gateway-state", () => ({ ensureLiveSandboxOrExit: mocks.ensureLive }));
-vi.mock("../exec", () => ({ execSandbox: mocks.exec }));
+vi.mock("../exec", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../exec")>()),
+  execSandbox: mocks.exec,
+}));
 vi.mock("./gateway-rpc", () => ({ callOpenclawGateway: mocks.gateway }));
-vi.mock("./package-authority", () => ({
-  resolveSessionPackageAuthority: mocks.resolveAuthority,
-  confirmSessionPackageAuthority: mocks.confirmAuthority,
+vi.mock("./command-authority", () => ({
+  resolveSessionCommandAuthority: mocks.resolveAuthority,
+  confirmSessionCommandAuthority: mocks.confirmAuthority,
+  ensureLiveSessionSandbox: mocks.ensureLive,
+  withSessionCommandLock: mocks.withLock,
+  assertSessionCommandAvailable: vi.fn(),
 }));
 vi.mock("../../../state/mcp-lifecycle-lock-acquisition", () => ({
   withMcpLifecycleLock: mocks.withLock,
@@ -141,9 +147,8 @@ describe("receipt-backed session authority", () => {
 
   it("rechecks the complete package receipt immediately before delete mutation", async () => {
     const plan = {
-      kind: "admin-rpc" as const,
-      method: "sessions.delete" as const,
-      params: { key: "agent:main:session", deleteTranscript: true },
+      kind: "capture" as const,
+      command: ["future-session-admin", "delete", "session"],
     };
     const adapter = sessionAdapter({ buildSessionMutationPlan: vi.fn(() => plan) });
     useReceiptAdapter(adapter);
@@ -158,6 +163,84 @@ describe("receipt-backed session authority", () => {
     expect(mocks.ensureLive).toHaveBeenCalledOnce();
     expect(mocks.confirmAuthority).toHaveBeenCalledWith("alpha", PACKAGE_IDENTITY);
     expect(mocks.gateway).not.toHaveBeenCalled();
+  });
+
+  it("executes and interprets an unknown package delete capture without the legacy gateway", async () => {
+    const plan = {
+      kind: "capture" as const,
+      command: ["future-session-admin", "delete", "session"],
+    };
+    const adapter = sessionAdapter({
+      buildSessionMutationPlan: vi.fn(() => plan),
+      interpretSessionMutationOutput: vi.fn(() => ({
+        kind: "completed" as const,
+        operation: "delete" as const,
+        key: "future:session",
+        removedTranscript: true,
+        entry: null,
+      })),
+    });
+    useReceiptAdapter(adapter);
+    mocks.capture.mockReturnValue({
+      status: 0,
+      output: '{"ok":true}',
+      stdout: '{"ok":true}\n',
+      stderr: "",
+    });
+
+    await expect(deleteSandboxSession("alpha", { key: "session" })).resolves.toEqual({
+      key: "future:session",
+      removedTranscript: true,
+    });
+
+    const capturedArgs = mocks.capture.mock.calls[0]?.[0] as string[];
+    expect(capturedArgs.slice(-plan.command.length)).toEqual(plan.command);
+    expect(adapter.interpretSessionMutationOutput).toHaveBeenCalledWith({
+      request: expect.objectContaining({ operation: "delete", key: "session" }),
+      plan,
+      output: '{"ok":true}',
+    });
+    expect(mocks.gateway).not.toHaveBeenCalled();
+    expect(mocks.exec).not.toHaveBeenCalled();
+  });
+
+  it("executes and interprets an unknown package reset capture without the legacy gateway", async () => {
+    const plan = {
+      kind: "capture" as const,
+      command: ["future-session-admin", "reset", "session"],
+    };
+    const adapter = sessionAdapter({
+      buildSessionMutationPlan: vi.fn(() => plan),
+      interpretSessionMutationOutput: vi.fn(() => ({
+        kind: "completed" as const,
+        operation: "reset" as const,
+        key: "future:session",
+        reason: "new" as const,
+        entry: null,
+      })),
+    });
+    useReceiptAdapter(adapter);
+    mocks.capture.mockReturnValue({
+      status: 0,
+      output: '{"ok":true}',
+      stdout: '{"ok":true}\n',
+      stderr: "",
+    });
+
+    await expect(resetSandboxSession("alpha", { key: "session", reason: "new" })).resolves.toEqual({
+      key: "future:session",
+      reason: "new",
+    });
+
+    const capturedArgs = mocks.capture.mock.calls[0]?.[0] as string[];
+    expect(capturedArgs.slice(-plan.command.length)).toEqual(plan.command);
+    expect(adapter.interpretSessionMutationOutput).toHaveBeenCalledWith({
+      request: expect.objectContaining({ operation: "reset", key: "session", reason: "new" }),
+      plan,
+      output: '{"ok":true}',
+    });
+    expect(mocks.gateway).not.toHaveBeenCalled();
+    expect(mocks.exec).not.toHaveBeenCalled();
   });
 
   it("refuses typed unsupported export before OpenShell or host filesystem mutation", async () => {

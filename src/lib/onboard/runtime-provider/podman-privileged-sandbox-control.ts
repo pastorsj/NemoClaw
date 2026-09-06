@@ -79,7 +79,9 @@ function execute(
       ...(input.input ? ["--interactive"] : []),
       ...environment,
       "--user",
-      "root",
+      input.executionUser
+        ? `${String(input.executionUser.uid)}:${String(input.executionUser.gid)}`
+        : "root",
       target.resourceHandle,
       ...input.command,
     ],

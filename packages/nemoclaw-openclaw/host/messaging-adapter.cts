@@ -2,21 +2,28 @@
 // SPDX-License-Identifier: Apache-2.0
 "use strict";
 const PACKAGE_ID = "openclaw";
-const CHANNEL_IDS = [
-    "discord",
-    "googlechat",
-    "slack",
-    "teams",
-    "telegram",
-    "wechat",
-    "whatsapp",
-];
+const CHANNEL_IDS = ["discord", "googlechat", "slack", "teams", "telegram", "wechat", "whatsapp"];
 const messagingAdapter = {
-    describeMessagingIntegration(request) {
-        if (request.packageId !== PACKAGE_ID) {
-            throw new Error("OpenClaw messaging request does not match this package");
-        }
-        return { kind: "channels", packageId: PACKAGE_ID, channelIds: CHANNEL_IDS };
-    },
+  describeMessagingIntegration(request) {
+    if (request.packageId !== PACKAGE_ID) {
+      throw new Error("OpenClaw messaging request does not match this package");
+    }
+    return {
+      kind: "channels",
+      packageId: PACKAGE_ID,
+      channelIds: CHANNEL_IDS,
+      profilePath: "messaging/profile.json",
+      build: {
+        configRoot: "~/.openclaw",
+        packageManagers: ["node-package"],
+        renderFinalizers: ["allow-rendered-plugins"],
+        postRenderRepair: {
+          command: ["openclaw", "doctor", "--fix", "--non-interactive"],
+        },
+        nodeArchiveRemediation: "package-helper",
+        credentialPolicyReconciliation: "teams-outlook-shared-login",
+      },
+    };
+  },
 };
 module.exports = messagingAdapter;

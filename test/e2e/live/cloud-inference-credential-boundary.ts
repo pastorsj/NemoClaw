@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { shellQuote } from "../../../src/lib/core/shell-quote.ts";
-import { HIGH_CONFIDENCE_PREFIXED_TOKEN_ERE } from "../../../packages/nemoclaw-openclaw/plugin/src/security/secret-scanner.ts";
+import { HIGH_CONFIDENCE_PREFIXED_TOKEN_ERE } from "../../../src/lib/shared/credential-filter-boundary.cts";
 
 const DEFAULT_SANDBOX_STATE_DIRECTORIES = ["/sandbox/.openclaw", "/sandbox/.nemoclaw"];
 

@@ -615,6 +615,7 @@ export function restoreRecreatedSandboxStateWithManagedAuthority(
     snapshotProfile = readManagedSnapshotProfileAuthority({
       sandboxName: manifest.sandboxName,
       agentType: manifest.agentType,
+      ...(manifest.harnessPackage ? { harnessPackage: manifest.harnessPackage } : {}),
       workload: manifest.workload,
     });
   } catch (error) {
@@ -642,6 +643,7 @@ export function restoreRecreatedSandboxStateWithManagedAuthority(
           {
             sandboxName: manifest.sandboxName,
             agentType: manifest.agentType,
+            ...(manifest.harnessPackage ? { harnessPackage: manifest.harnessPackage } : {}),
             workload: manifest.workload,
           },
           target,
@@ -711,6 +713,7 @@ export function restoreRecreatedSandboxStateWithManagedAuthority(
           {
             sandboxName: manifest.sandboxName,
             agentType: manifest.agentType,
+            ...(manifest.harnessPackage ? { harnessPackage: manifest.harnessPackage } : {}),
             workload: manifest.workload,
           },
           current,

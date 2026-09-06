@@ -3,19 +3,27 @@
 
 /** MCP capabilities, finite execution plans, and package adapter operations. */
 export type HarnessMcpSupport = "bridge" | "disabled";
-export type HarnessMcpAdapter = string;
+
+/** Canonical lowercase identifier shared by manifests, receipts, and durable MCP state. */
+export type HarnessMcpAdapterIdentifier = `${Lowercase<string>}`;
+
+/** Compatibility name retained for existing package authors. */
+export type HarnessMcpAdapter = HarnessMcpAdapterIdentifier;
 
 export type HarnessMcpCapability =
   | {
       support: "bridge";
-      adapter: HarnessMcpAdapter;
-      policy_binaries?: readonly string[];
+      adapter: HarnessMcpAdapterIdentifier;
+      policy_binaries: readonly string[];
+      /** Optional policy presets suggested for the open tier. */
+      policy_presets?: readonly string[];
       reason?: string;
     }
   | {
       support: "disabled";
       adapter?: never;
       policy_binaries?: never;
+      policy_presets?: never;
       reason?: string;
     };
 
@@ -40,7 +48,23 @@ export interface HarnessMcpRemovalRequest {
   readonly configDirectory: string | null;
 }
 
-export type HarnessMcpAdapterCommand = string | readonly string[];
+export interface HarnessMcpArgvCommandPlan {
+  readonly kind: "argv";
+  readonly argv: readonly string[];
+}
+
+export interface HarnessMcpShellCommandPlan {
+  readonly kind: "shell";
+  readonly script: string;
+  /** Shell parsing is accepted only because this source came from trusted package code. */
+  readonly shellTrust: "package-authored-code";
+}
+
+/** A finite package command with an explicit execution transport and trust boundary. */
+export type HarnessMcpAdapterCommandPlan = HarnessMcpArgvCommandPlan | HarnessMcpShellCommandPlan;
+
+/** Compatibility name retained for existing imports; raw strings and arrays are no longer valid. */
+export type HarnessMcpAdapterCommand = HarnessMcpAdapterCommandPlan;
 export type HarnessMcpExecutionSuccess =
   | { readonly kind: "exit-zero" }
   | {
@@ -51,7 +75,7 @@ export type HarnessMcpExecutionSuccess =
     };
 
 export interface HarnessMcpExecutionPlan {
-  readonly command: HarnessMcpAdapterCommand;
+  readonly command: HarnessMcpAdapterCommandPlan;
   readonly timeoutSeconds: number;
   readonly success: HarnessMcpExecutionSuccess;
   readonly failureMessage: string;
@@ -98,7 +122,7 @@ export type HarnessMcpCapabilityProbe =
   | { readonly kind: "not-required" }
   | {
       readonly kind: "command";
-      readonly command: HarnessMcpAdapterCommand;
+      readonly command: HarnessMcpAdapterCommandPlan;
       readonly success:
         | { readonly kind: "exit-zero" }
         | { readonly kind: "stdout-trimmed-equals"; readonly value: string }
@@ -137,7 +161,7 @@ export interface HarnessMcpSnapshotRestoreRequest {
 }
 
 export interface HarnessMcpSnapshotApplicability {
-  readonly command: HarnessMcpAdapterCommand;
+  readonly command: HarnessMcpAdapterCommandPlan;
   readonly timeoutSeconds: number;
   readonly repairWhenOutput: string;
   readonly skipWhenOutput: string;
@@ -161,7 +185,9 @@ export interface HarnessMcpAdapterModule {
     request: HarnessMcpRegistrationRequest,
   ) => HarnessMcpRegistrationPlan;
   readonly buildMcpRemovalPlan: (request: HarnessMcpRemovalRequest) => HarnessMcpRemovalPlan;
-  readonly buildMcpInspectionCommand: (request: HarnessMcpInspectionRequest) => string;
+  readonly buildMcpInspectionCommand: (
+    request: HarnessMcpInspectionRequest,
+  ) => HarnessMcpShellCommandPlan;
   readonly describeMcpMutationCapability: (
     request: HarnessMcpCapabilityRequest,
   ) => HarnessMcpCapabilityProbe;

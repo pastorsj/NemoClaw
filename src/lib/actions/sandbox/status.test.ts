@@ -14,7 +14,7 @@ import {
   getSandboxStatusReport,
   isDockerDaemonUnreachableForStatus,
   maybeGetSandboxStatusInferenceHealth,
-  resolveSandboxStatusDcodeAutoApprovalMode,
+  resolveLegacyDcodeAutoApprovalMode,
   sandboxGpuProofStatusSuffix,
   sandboxGpuProofUnverified,
 } from "./status";
@@ -132,7 +132,7 @@ describe("sandbox status package definition", () => {
 describe("sandbox status DCode auto-approval (#6478)", () => {
   it("defaults legacy DCode entries to disabled", () => {
     expect(
-      resolveSandboxStatusDcodeAutoApprovalMode({
+      resolveLegacyDcodeAutoApprovalMode({
         name: "dcode",
         agent: "langchain-deepagents-code",
       } as never),
@@ -189,17 +189,33 @@ describe("sandbox status DCode auto-approval (#6478)", () => {
 
   it("reports the recorded DCode mode and omits it for other agents", () => {
     expect(
-      resolveSandboxStatusDcodeAutoApprovalMode({
+      resolveLegacyDcodeAutoApprovalMode({
         name: "dcode",
         agent: "langchain-deepagents-code",
         dcodeAutoApprovalMode: "thread-opt-in",
       } as never),
     ).toBe("thread-opt-in");
     expect(
-      resolveSandboxStatusDcodeAutoApprovalMode({
+      resolveLegacyDcodeAutoApprovalMode({
         name: "openclaw",
         agent: "openclaw",
         dcodeAutoApprovalMode: "thread-opt-in",
+      } as never),
+    ).toBeNull();
+  });
+
+  it("does not project the legacy DCode field through receipt-backed package authority", () => {
+    expect(
+      resolveLegacyDcodeAutoApprovalMode({
+        name: "dcode",
+        agent: "langchain-deepagents-code",
+        dcodeAutoApprovalMode: "thread-opt-in",
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: "langchain-deepagents-code",
+          packageVersion: "1.2.3",
+          contentDigest: "a".repeat(64),
+        },
       } as never),
     ).toBeNull();
   });

@@ -24,7 +24,7 @@ import os from "node:os";
 
 import { type AgentBranding, getAgentBranding } from "../../cli/branding";
 import { GATEWAY_PORT } from "../../core/ports";
-import { spawnExitCode } from "../../core/process-exit";
+import { spawnExitCode } from "../../core/process-status";
 import { readLineFromStdin } from "../../core/stdin";
 import { resolveGatewayName } from "../../onboard/gateway-binding";
 import { listGatewayStateRoots } from "../../state/gateway-registry";

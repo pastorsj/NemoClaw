@@ -19,9 +19,10 @@ import {
   type InstalledHarnessPackage,
 } from "../agent-runtime/package/store";
 import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
-import { promptForAgentChoice, resolveUnpackagedOnboardAgent } from "./agent-selection";
+import { promptForAgentChoice } from "./agent-selection";
 import { selectFromNumberedMenuOrExit } from "./prompt-helpers";
 import { resolveSandboxAgent } from "./sandbox-agent";
+import { resolveUnpackagedOnboardAgent } from "./package/unpackaged-agent";
 
 export interface SelectOnboardHarnessPackageInput {
   readonly agentFlag?: string | null;

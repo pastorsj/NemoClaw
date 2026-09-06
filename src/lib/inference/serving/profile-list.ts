@@ -3,7 +3,7 @@
 
 import os from "node:os";
 
-import { getBuildIdentity } from "../../core/version.js";
+import { getBuildIdentity } from "../../core/build-identity.js";
 import { createHostReadinessReport } from "../../readiness/host.js";
 import { loadServingCatalog, managedInferenceCatalogFromServingCatalog } from "./catalog-loader.js";
 import { resolveManagedInferenceServing } from "./resolver.js";

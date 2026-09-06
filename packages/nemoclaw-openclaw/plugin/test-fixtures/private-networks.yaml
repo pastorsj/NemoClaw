@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Package-local security fixture. Production uses the core-owned blueprint input.
+ipv4:
+  - { address: 0.0.0.0, prefix: 8, purpose: This network }
+  - { address: 10.0.0.0, prefix: 8, purpose: Private network }
+  - { address: 100.64.0.0, prefix: 10, purpose: Shared address space }
+  - { address: 127.0.0.0, prefix: 8, purpose: Loopback }
+  - { address: 169.254.0.0, prefix: 16, purpose: Link-local }
+  - { address: 172.16.0.0, prefix: 12, purpose: Private network }
+  - { address: 192.0.0.0, prefix: 24, purpose: Protocol assignments }
+  - { address: 192.0.2.0, prefix: 24, purpose: Documentation network }
+  - { address: 192.168.0.0, prefix: 16, purpose: Private network }
+  - { address: 198.18.0.0, prefix: 15, purpose: Benchmark network }
+  - { address: 198.51.100.0, prefix: 24, purpose: Documentation network }
+  - { address: 203.0.113.0, prefix: 24, purpose: Documentation network }
+ipv6:
+  - { address: "::", prefix: 128, purpose: Unspecified }
+  - { address: "::1", prefix: 128, purpose: Loopback }
+  - { address: "64:ff9b::", prefix: 96, purpose: NAT64 }
+  - { address: "64:ff9b:1::", prefix: 48, purpose: Local NAT64 }
+  - { address: "2001::", prefix: 32, purpose: Teredo }
+  - { address: "2002::", prefix: 16, purpose: 6to4 }
+  - { address: "fc00::", prefix: 7, purpose: Unique local }
+  - { address: "fe80::", prefix: 10, purpose: Link-local }
+  - { address: "ff00::", prefix: 8, purpose: Multicast }
+names:
+  - { name: localhost, purpose: Loopback hostname }

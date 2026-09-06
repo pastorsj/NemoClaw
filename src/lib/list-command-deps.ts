@@ -8,7 +8,7 @@ import { getLiveGatewayInference } from "./inference/live";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "./adapters/openshell/timeouts";
 import { parseSshProcesses, createSystemDeps } from "./state/sandbox-session";
 import { resolveOpenshell } from "./adapters/openshell/resolve";
-import { captureOpenshell } from "./adapters/openshell/runtime";
+import { captureOpenshell } from "./gateway-runtime-action";
 import { recoverRegistryEntries } from "./registry-recovery-action";
 import * as registry from "./state/registry";
 import * as policy from "./policy";

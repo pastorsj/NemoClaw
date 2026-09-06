@@ -36,6 +36,7 @@ export type {
 
 const SESSION_ADAPTER_SOURCE_MAX_BYTES = 512 * 1024;
 const SESSION_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
+const SESSION_MUTATION_OUTPUT_MAX_BYTES = 1024 * 1024;
 const SESSION_ADAPTER_VALUE_MAX_BYTES = SESSION_OUTPUT_MAX_BYTES + 1024 * 1024;
 
 const sessionManifestSchema: AnySchemaObject = Object.freeze({
@@ -235,7 +236,14 @@ const unsupportedOrRefusedPlanSchemas: AnySchemaObject[] = ["unsupported", "refu
   }),
 );
 
-const mutationPlanSchema: AnySchemaObject = withSessionJsonDefinition({
+const mutationCapturePlanSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["kind", "command"],
+  properties: { kind: { const: "capture" }, command: commandSchema },
+});
+
+const mutationPlanSchema: AnySchemaObject = Object.freeze({
   oneOf: [
     ...unsupportedOrRefusedPlanSchemas,
     {
@@ -247,34 +255,20 @@ const mutationPlanSchema: AnySchemaObject = withSessionJsonDefinition({
     {
       type: "object",
       additionalProperties: false,
-      required: ["kind", "method", "params"],
-      properties: {
-        kind: { const: "admin-rpc" },
-        method: { enum: ["sessions.delete", "sessions.reset"] },
-        params: {
-          type: "object",
-          maxProperties: 32,
-          propertyNames: { type: "string", minLength: 1, maxLength: 128 },
-          additionalProperties: { $ref: "#/$defs/sessionJsonValue" },
-        },
-      },
+      required: ["kind", "command"],
+      properties: { kind: { const: "capture" }, command: commandSchema },
     },
   ],
 });
 
-const mutationOutputRequestSchema: AnySchemaObject = withSessionJsonDefinition({
+const mutationOutputRequestSchema: AnySchemaObject = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["request", "plan", "payload"],
+  required: ["request", "plan", "output"],
   properties: {
     request: mutationPlanRequestSchema,
-    plan: mutationPlanSchema.oneOf[3],
-    payload: {
-      type: "object",
-      maxProperties: 10_000,
-      propertyNames: { type: "string", maxLength: 1024 },
-      additionalProperties: { $ref: "#/$defs/sessionJsonValue" },
-    },
+    plan: mutationCapturePlanSchema,
+    output: { type: "string", maxLength: SESSION_MUTATION_OUTPUT_MAX_BYTES },
   },
 });
 

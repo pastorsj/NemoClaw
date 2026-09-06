@@ -16,7 +16,7 @@ import { runAgentPassthrough } from "../../src/lib/actions/sandbox/agent/passthr
 import { loadHarnessMcpAdapterHostModule } from "../../src/lib/agent-runtime/host-module";
 import {
   listHarnessPackageInventory,
-  resolveHarnessPackageInstallSelection,
+  planHarnessPackageInstall,
 } from "../../src/lib/agent-runtime/package/catalog";
 import { installHarnessPackage } from "../../src/lib/agent-runtime/package/install";
 import type { BundledHarnessPackageSourceIdentity } from "../../src/lib/agent-runtime/package/receipt";
@@ -67,6 +67,7 @@ function writeFutureAuthoringPackage(): void {
       nemoclaw: {
         harnessManifest: "manifest.yaml",
         minimumNemoClawVersion: "0.0.113",
+        maximumNemoClawVersionExclusive: "0.0.121",
       },
     })}\n`,
   );
@@ -87,9 +88,30 @@ function writeFutureAuthoringPackage(): void {
       "  interactive_command: future-terminal",
       `  headless_command: nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config ${FABRIC_CONFIG_PATH}`,
       "  prompt_transport: stdin",
+      "config:",
+      "  dir: /sandbox/.future-terminal",
+      "  config_file: fabric.json",
+      "  format: json",
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    image_plugin_provenance: not-required",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: This package does not run scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: This synthetic package has fixed inference configuration.",
       "mcp:",
       "  support: disabled",
       "  reason: This package does not expose MCP.",
+      "messaging:",
+      "  support: disabled",
       "",
     ].join("\n"),
   );
@@ -137,12 +159,13 @@ describe("future harness package composition", () => {
     expect(initialInventory.available.map(({ id }) => id)).toEqual([PACKAGE_ID]);
     expect(initialInventory.installed).toEqual([]);
 
-    const installSelection = resolveHarnessPackageInstallSelection(PACKAGE_ALIAS, {
+    const installPlan = planHarnessPackageInstall(PACKAGE_ALIAS, {
       bundledRoot,
       storeRoot,
     });
+    assert.equal(installPlan.kind, "install-reviewed");
     const installed = installHarnessPackage(
-      { packageRoot: installSelection.packageRoot, sourceIdentity: SOURCE_IDENTITY },
+      { packageRoot: installPlan.packageRecord.packageRoot, sourceIdentity: SOURCE_IDENTITY },
       { storeRoot },
     );
     const selected = await selectOnboardHarnessPackage({

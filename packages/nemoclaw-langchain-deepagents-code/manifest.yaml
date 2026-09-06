@@ -7,6 +7,9 @@
 # interactive/headless execution to the user's sandbox shell.
 
 name: langchain-deepagents-code
+provider_broker:
+  support: disabled
+  reason: This package does not require a host provider broker.
 display_name: "LangChain Deep Agents Code"
 description: "Terminal coding agent built on the Deep Agents SDK"
 aliases:
@@ -41,6 +44,17 @@ aliases:
 alias_summary: "nemo-deepagents/dcode/deepagents/deepagents-code/langchain → langchain-deepagents-code"
 onboarding:
   sandbox_name: deepagents-code
+sandbox_create:
+  driver_mounts:
+    - type: tmpfs
+      drivers:
+        - docker
+        - podman
+      target: /run/nemoclaw-dcode-mcp
+      options:
+        - noexec
+      size_bytes: 1048576
+      mode: 1023
 version_constraint: ">=0.1.55"
 language: python
 license: MIT
@@ -54,6 +68,10 @@ expected_version: "0.1.55"
 version_scheme: semver
 managed_image:
   repository: ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox
+  base_image:
+    corporate_ca: true
+    security_inventory: true
+    package_probe: true
   architectures:
     - linux/amd64
     - linux/arm64
@@ -64,8 +82,8 @@ managed_image:
   workspace:
     owner: root
     mode: "1775"
-  startup_profile_contract_version: 1
-  capability_contract_version: 1
+  startup_profile_environment:
+    - { name: NEMOCLAW_REASONING_EFFORT, value_type: string, max_bytes: 16 }
 runtime:
   kind: terminal
   command_shell: /bin/sh
@@ -94,6 +112,22 @@ config:
   shields_files:
     - fabric.json
   format: toml
+
+# ── State lifecycle ────────────────────────────────────────────
+state_lifecycle:
+  backup_quiescence:
+    kind: command
+    command:
+      - /usr/local/lib/nemoclaw/state-backup-ready
+    timeout_seconds: 15
+  snapshot_restore: []
+  rebuild:
+    image_plugin_provenance: not-required
+    scheduled_work:
+      support: disabled
+      reason: Deep Agents Code does not run scheduled work.
+    post_restore:
+      kind: not-required
 
 # ── State directories ──────────────────────────────────────────
 # dcode runs with HOME=/sandbox, so its state dirs resolve under
@@ -153,6 +187,9 @@ device_pairing: false
 # Routes NVIDIA/OpenAI-compatible selections through OpenShell's managed
 # inference.local endpoint using Deep Agents Code's OpenAI-compatible provider.
 inference:
+  config_update:
+    support: unsupported
+    reason: This configuration is materialized by the sandbox image. Re-onboard to change it.
   provider_type: openai_compatible
   default_model: nvidia/nemotron-3-ultra-550b-a55b
   base_url_config_key: "models.providers.openai.base_url"

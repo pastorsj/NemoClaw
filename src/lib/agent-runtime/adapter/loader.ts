@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import path from "node:path";
-import vm from "node:vm";
 import { TextDecoder } from "node:util";
 
 import { readString } from "../manifest-readers";
@@ -24,17 +24,28 @@ import { HarnessAdapterSchemaError, prepareHarnessAdapterValue } from "./schema"
 
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const ADAPTER_MODULE_PATH_PATTERN = /^host\/[a-z][a-z0-9-]*-adapter\.cts$/u;
-const ADAPTER_EVALUATION_TIMEOUT_MS = 500;
-const ADAPTER_REQUEST_SLOT = "__nemoclawAdapterRequestJson";
-const ADAPTER_BRIDGE_NAME = "__nemoclawInvokeAdapter";
+const ADAPTER_CHILD_TIMEOUT_MS = 1_000;
+const ADAPTER_CHILD_MEMORY_MIB = 256;
+const MAX_ADAPTER_SOURCE_BYTES = 2 * 1024 * 1024;
+const MAX_ADAPTER_VALUE_BYTES = 64 * 1024 * 1024;
+const MAX_ADAPTER_OPERATIONS = 32;
+const MAX_ADAPTER_CHILD_INPUT_BYTES = 70 * 1024 * 1024;
 
 export interface LoadHarnessAdapterOptions extends HarnessPackageStoreOptions {
   readonly validateManifest?: (manifest: ManifestRecord) => void;
 }
 
+/** Already-authorized adapter bytes that still cross the common child and schema boundary. */
+export interface HarnessAdapterSource {
+  readonly filename: string;
+  readonly source: string;
+}
+
 interface HarnessAdapterRuntime {
-  readonly context: vm.Context;
-  readonly invocationScripts: Readonly<Record<string, vm.Script>>;
+  readonly source: string;
+  readonly filename: string;
+  readonly operations: readonly (readonly [string, string])[];
+  readonly resultMaxBytes: number;
 }
 
 export class HarnessAdapterError extends Error {
@@ -66,108 +77,6 @@ function decodeAdapterModule(source: Buffer, displayName: string): string {
   }
 }
 
-function buildAdapterRuntimeSource(
-  source: string,
-  filename: string,
-  contract: HarnessAdapterContract<HarnessAdapterOperations>,
-): string {
-  const operations = Object.entries(contract.operations).map(
-    ([operationName, operation]) => [operationName, operation.exportName] as const,
-  );
-  return `
-"use strict";
-(() => {
-  const arrayIsArray = Array.isArray;
-  const jsonParse = JSON.parse;
-  const jsonStringify = JSON.stringify;
-  const objectCreate = Object.create;
-  const objectDefineProperty = Object.defineProperty;
-  const objectFreeze = Object.freeze;
-  const objectIsFrozen = Object.isFrozen;
-  const objectValues = Object.values;
-  const reflectApply = Reflect.apply;
-  const objectToString = Object.prototype.toString;
-  const promiseConstructor = Promise;
-  const operationEntries = ${JSON.stringify(operations)};
-  const moduleRecord = objectCreate(null);
-  const initialExports = objectCreate(null);
-  moduleRecord.exports = initialExports;
-  const unavailableRequire = (specifier) => {
-    const error = new Error("Harness adapter imports are unavailable");
-    error.code = "NEMOCLAW_ADAPTER_IMPORT_UNAVAILABLE";
-    error.specifier = String(specifier);
-    throw error;
-  };
-
-  try {
-    (function (exports, require, module, __filename, __dirname) {
-      "use strict";
-${source}
-    })(initialExports, unavailableRequire, moduleRecord, ${JSON.stringify(filename)}, ${JSON.stringify(path.dirname(filename))});
-  } catch (error) {
-    return error && error.code === "NEMOCLAW_ADAPTER_IMPORT_UNAVAILABLE"
-      ? "error:import"
-      : "error:evaluation";
-  }
-
-  const moduleExports = moduleRecord.exports;
-  if (moduleExports === null || typeof moduleExports !== "object" || arrayIsArray(moduleExports)) {
-    return "error:exports";
-  }
-
-  const builders = objectCreate(null);
-  try {
-    for (let index = 0; index < operationEntries.length; index += 1) {
-      const operationName = operationEntries[index][0];
-      const exportName = operationEntries[index][1];
-      const builder = moduleExports[exportName];
-      if (typeof builder !== "function") return "error:missing:" + String(index);
-      builders[operationName] = builder;
-    }
-  } catch {
-    return "error:evaluation";
-  }
-  objectFreeze(builders);
-
-  const freezeJson = (value) => {
-    if (value === null || typeof value !== "object" || objectIsFrozen(value)) return value;
-    for (const entry of objectValues(value)) freezeJson(entry);
-    return objectFreeze(value);
-  };
-
-  const invokeAdapter = (operationName, requestJson) => {
-    try {
-      const request = freezeJson(jsonParse(requestJson));
-      const result = builders[operationName](request);
-      if (
-        result instanceof promiseConstructor ||
-        (result !== null &&
-          (typeof result === "object" || typeof result === "function") &&
-          (reflectApply(objectToString, result, []) === "[object Promise]" ||
-            typeof result.then === "function"))
-      ) {
-        return "error:async";
-      }
-      const resultJson = jsonStringify(result);
-      if (typeof resultJson !== "string") return "error:serialization";
-      if (resultJson.length > ${String(contract.resultMaxBytes)}) return "error:oversized";
-      return "ok:" + resultJson;
-    } catch {
-      return "error:operation";
-    }
-  };
-
-  objectDefineProperty(globalThis, ${JSON.stringify(ADAPTER_BRIDGE_NAME)}, {
-    value: invokeAdapter,
-    enumerable: false,
-    configurable: false,
-    writable: false,
-  });
-  return "ready";
-})()
-`;
-}
-
 function readAdapterInitialization(
   result: unknown,
   contract: HarnessAdapterContract<HarnessAdapterOperations>,
@@ -193,39 +102,91 @@ function readAdapterInitialization(
   throw adapterFailure(`Installed harness ${contract.displayName} could not be evaluated`);
 }
 
+function adapterWorkerPath(): { readonly path: string; readonly stripTypes: boolean } {
+  const sourceExecution = __filename.endsWith(".ts");
+  return Object.freeze({
+    path: path.join(__dirname, sourceExecution ? "worker.ts" : "worker.js"),
+    stripTypes: sourceExecution,
+  });
+}
+
+function runAdapterWorker(
+  runtime: HarnessAdapterRuntime,
+  operationName?: string,
+  request?: unknown,
+): string {
+  const worker = adapterWorkerPath();
+  const payload = JSON.stringify({
+    source: runtime.source,
+    filename: runtime.filename,
+    operations: runtime.operations,
+    ...(operationName === undefined ? {} : { operationName, request }),
+    resultMaxBytes: runtime.resultMaxBytes,
+  });
+  if (Buffer.byteLength(payload, "utf8") > MAX_ADAPTER_CHILD_INPUT_BYTES) {
+    throw adapterFailure("Installed harness adapter child input exceeds its boundary");
+  }
+  const result = spawnSync(
+    process.execPath,
+    [
+      `--max-old-space-size=${String(ADAPTER_CHILD_MEMORY_MIB)}`,
+      "--max-semi-space-size=8",
+      ...(worker.stripTypes ? ["--experimental-strip-types", "--no-warnings"] : []),
+      worker.path,
+    ],
+    {
+      input: payload,
+      encoding: "utf8",
+      timeout: ADAPTER_CHILD_TIMEOUT_MS,
+      maxBuffer: runtime.resultMaxBytes + 64 * 1024,
+      env: { NODE_NO_WARNINGS: "1" },
+      windowsHide: true,
+    },
+  );
+  if (result.error || result.status !== 0 || result.signal || typeof result.stdout !== "string") {
+    throw adapterFailure("Installed harness adapter child process failed");
+  }
+  return result.stdout;
+}
+
 function loadAdapterRuntime(
   source: string,
   filename: string,
   contract: HarnessAdapterContract<HarnessAdapterOperations>,
 ): HarnessAdapterRuntime {
-  const context = vm.createContext(Object.create(null), {
-    codeGeneration: { strings: false, wasm: false },
-    microtaskMode: "afterEvaluate",
+  const runtime = Object.freeze({
+    source,
+    filename,
+    operations: Object.freeze(
+      Object.entries(contract.operations).map(([operationName, operation]) =>
+        Object.freeze([operationName, operation.exportName] as const),
+      ),
+    ),
+    resultMaxBytes: contract.resultMaxBytes,
   });
   try {
-    const initialization = new vm.Script(buildAdapterRuntimeSource(source, filename, contract), {
-      filename,
-    }).runInContext(context, {
-      timeout: ADAPTER_EVALUATION_TIMEOUT_MS,
-      displayErrors: false,
-    });
-    readAdapterInitialization(initialization, contract);
+    readAdapterInitialization(runAdapterWorker(runtime), contract);
   } catch (error) {
     if (error instanceof HarnessAdapterError) throw error;
     throw adapterFailure(`Installed harness ${contract.displayName} could not be evaluated`);
   }
+  return runtime;
+}
 
-  const invocationScripts: Record<string, vm.Script> = Object.create(null) as Record<
-    string,
-    vm.Script
-  >;
-  for (const operationName of Object.keys(contract.operations)) {
-    invocationScripts[operationName] = new vm.Script(
-      `globalThis[${JSON.stringify(ADAPTER_BRIDGE_NAME)}](${JSON.stringify(operationName)}, globalThis[${JSON.stringify(ADAPTER_REQUEST_SLOT)}])`,
-      { filename: `${filename}#${operationName}` },
-    );
+function requireBoundedAdapterSource(
+  source: HarnessAdapterSource,
+  contract: HarnessAdapterContract<HarnessAdapterOperations>,
+): HarnessAdapterSource {
+  validateAdapterContract(contract);
+  if (
+    typeof source.filename !== "string" ||
+    source.filename.length === 0 ||
+    typeof source.source !== "string" ||
+    Buffer.byteLength(source.source, "utf8") > contract.sourceMaxBytes
+  ) {
+    throw adapterFailure(`Installed harness ${contract.displayName} exceeds its read boundary`);
   }
-  return Object.freeze({ context, invocationScripts: Object.freeze(invocationScripts) });
+  return Object.freeze({ filename: source.filename, source: source.source });
 }
 
 function validateAdapterContract(contract: HarnessAdapterContract<HarnessAdapterOperations>): void {
@@ -233,11 +194,15 @@ function validateAdapterContract(contract: HarnessAdapterContract<HarnessAdapter
     !ADAPTER_MODULE_PATH_PATTERN.test(contract.modulePath) ||
     !Number.isSafeInteger(contract.sourceMaxBytes) ||
     contract.sourceMaxBytes <= 0 ||
+    contract.sourceMaxBytes > MAX_ADAPTER_SOURCE_BYTES ||
     !Number.isSafeInteger(contract.requestMaxBytes) ||
     contract.requestMaxBytes <= 0 ||
+    contract.requestMaxBytes > MAX_ADAPTER_VALUE_BYTES ||
     !Number.isSafeInteger(contract.resultMaxBytes) ||
     contract.resultMaxBytes <= 0 ||
-    Object.keys(contract.operations).length === 0
+    contract.resultMaxBytes > MAX_ADAPTER_VALUE_BYTES ||
+    Object.keys(contract.operations).length === 0 ||
+    Object.keys(contract.operations).length > MAX_ADAPTER_OPERATIONS
   ) {
     throw adapterFailure("Harness adapter contract is invalid");
   }
@@ -334,25 +299,13 @@ function buildLoadedOperations<Contract extends HarnessAdapterContract<HarnessAd
         throw error;
       }
 
-      const requestJson = JSON.stringify(preparedRequest);
       let bridgeResult: unknown;
       try {
-        Object.defineProperty(runtime.context, ADAPTER_REQUEST_SLOT, {
-          value: requestJson,
-          enumerable: false,
-          configurable: true,
-          writable: false,
-        });
-        bridgeResult = runtime.invocationScripts[operationName]?.runInContext(runtime.context, {
-          timeout: ADAPTER_EVALUATION_TIMEOUT_MS,
-          displayErrors: false,
-        });
+        bridgeResult = runAdapterWorker(runtime, operationName, preparedRequest);
       } catch {
         throw adapterFailure(
           `Installed harness ${contract.displayName} ${operation.exportName} failed`,
         );
-      } finally {
-        Reflect.deleteProperty(runtime.context, ADAPTER_REQUEST_SLOT);
       }
 
       if (typeof bridgeResult !== "string" || !bridgeResult.startsWith("ok:")) {
@@ -397,8 +350,8 @@ function buildLoadedOperations<Contract extends HarnessAdapterContract<HarnessAd
 /**
  * Load fixed operations from an exact installed package without passing host capabilities.
  *
- * The VM supplies a narrow JSON boundary and execution timeout. It is defense in depth for an
- * integrity-verified package, not a sandbox for hostile code.
+ * A constrained core-owned child supplies the narrow JSON boundary. Candidate evaluation and
+ * invocation never share the CLI process or receive host capabilities.
  */
 export function loadHarnessAdapter<
   const Contract extends HarnessAdapterContract<HarnessAdapterOperations>,
@@ -410,6 +363,17 @@ export function loadHarnessAdapter<
   const loaded = readReceiptBoundAdapterModule(identity, contract, options);
   return buildLoadedOperations(
     loadAdapterRuntime(loaded.source, loaded.filename, contract),
+    contract,
+  );
+}
+
+/** Load caller-authorized image-local bytes through the common constrained adapter boundary. */
+export function loadHarnessAdapterFromSource<
+  const Contract extends HarnessAdapterContract<HarnessAdapterOperations>,
+>(source: HarnessAdapterSource, contract: Contract): LoadedHarnessAdapter<Contract> {
+  const bounded = requireBoundedAdapterSource(source, contract);
+  return buildLoadedOperations(
+    loadAdapterRuntime(bounded.source, bounded.filename, contract),
     contract,
   );
 }

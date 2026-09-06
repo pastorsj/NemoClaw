@@ -49,15 +49,18 @@ describe("managed gateway control completion", () => {
     ["ok", 4242, 4242],
     ["already-running", 4242, 4242],
     ["already-running", 4242, 5252],
-  ] as const)("preserves the exact %s controller disposition (#7919)", (disposition, oldPid, newPid) => {
-    expect(
-      parseManagedGatewayControlCompletion({
-        status: 0,
-        stdout: `v1 ${nonce} complete ${disposition} ${oldPid} ${newPid}\nGATEWAY_PID=${newPid}`,
-        stderr: "",
-      }),
-    ).toEqual({ disposition, oldPid, newPid });
-  });
+  ] as const)(
+    "preserves the exact %s controller disposition (#7919)",
+    (disposition, oldPid, newPid) => {
+      expect(
+        parseManagedGatewayControlCompletion({
+          status: 0,
+          stdout: `v1 ${nonce} complete ${disposition} ${oldPid} ${newPid}\nGATEWAY_PID=${newPid}`,
+          stderr: "",
+        }),
+      ).toEqual({ disposition, oldPid, newPid });
+    },
+  );
 
   it.each([
     [`v1 ${nonce} complete already-running 4242 4242\nGATEWAY_PID=5252`, ""],
@@ -68,6 +71,21 @@ describe("managed gateway control completion", () => {
     ["GATEWAY_PID=4242", ""],
   ])("rejects malformed or unstructured controller output (#7919)", (stdout, stderr) => {
     expect(parseManagedGatewayControlCompletion({ status: 0, stdout, stderr })).toBeNull();
+  });
+
+  it("binds a structured package response to the core-issued nonce", () => {
+    const result = {
+      status: 0,
+      stdout: `v1 ${nonce} complete ok 0 4242\nGATEWAY_PID=4242`,
+      stderr: "",
+    };
+
+    expect(parseManagedGatewayControlCompletion(result, nonce)).toEqual({
+      disposition: "ok",
+      oldPid: 0,
+      newPid: 4242,
+    });
+    expect(parseManagedGatewayControlCompletion(result, "b".repeat(64))).toBeNull();
   });
 });
 
@@ -288,32 +306,35 @@ describe("recreated sandbox OpenShell readiness", () => {
   it.each([
     OPENSHELL_RELAY_OPEN_TIMED_OUT_STDERR,
     OPENSHELL_SUPERVISOR_RELAY_CHANNEL_TIMED_OUT_STDERR,
-  ])("retries when the connected supervisor misses OpenShell's relay deadline (#7227)", (stderr) => {
-    const captureOpenshellImpl = vi
-      .fn()
-      .mockReturnValueOnce({
-        status: 1,
-        output: stderr.trim(),
-        stdout: "",
-        stderr,
-      })
-      .mockReturnValueOnce({ status: 0, output: "", stdout: "", stderr: "" });
-    const beforeProbe = vi.fn(() => true);
-    const sleeps: number[] = [];
+  ])(
+    "retries when the connected supervisor misses OpenShell's relay deadline (#7227)",
+    (stderr) => {
+      const captureOpenshellImpl = vi
+        .fn()
+        .mockReturnValueOnce({
+          status: 1,
+          output: stderr.trim(),
+          stdout: "",
+          stderr,
+        })
+        .mockReturnValueOnce({ status: 0, output: "", stdout: "", stderr: "" });
+      const beforeProbe = vi.fn(() => true);
+      const sleeps: number[] = [];
 
-    expect(
-      waitForRecreatedSandboxOpenShellReady("recreated-box", {
-        beforeProbe,
-        captureOpenshellImpl,
-        intervalSeconds: 3,
-        sleepImpl: (seconds) => sleeps.push(seconds),
-        timeoutSeconds: 30,
-      }),
-    ).toBe(true);
-    expect(beforeProbe).toHaveBeenCalledTimes(2);
-    expect(captureOpenshellImpl).toHaveBeenCalledTimes(2);
-    expect(sleeps).toEqual([3]);
-  });
+      expect(
+        waitForRecreatedSandboxOpenShellReady("recreated-box", {
+          beforeProbe,
+          captureOpenshellImpl,
+          intervalSeconds: 3,
+          sleepImpl: (seconds) => sleeps.push(seconds),
+          timeoutSeconds: 30,
+        }),
+      ).toBe(true);
+      expect(beforeProbe).toHaveBeenCalledTimes(2);
+      expect(captureOpenshellImpl).toHaveBeenCalledTimes(2);
+      expect(sleeps).toEqual([3]);
+    },
+  );
 
   it("retries when OpenShell drops the replacement supervisor's reverse relay", () => {
     const captureOpenshellImpl = vi
@@ -342,35 +363,35 @@ describe("recreated sandbox OpenShell readiness", () => {
     expect(sleeps).toEqual([3]);
   });
 
-  it.each([
-    OPENSHELL_RELAY_TARGET_NOT_FOUND_STDERR,
-    OPENSHELL_RELAY_TARGET_REFUSED_STDERR,
-  ])("retries while the replacement supervisor's local relay target starts (#7273)", (stderr) => {
-    const captureOpenshellImpl = vi
-      .fn()
-      .mockReturnValueOnce({
-        status: 1,
-        output: stderr.trim(),
-        stdout: "",
-        stderr,
-      })
-      .mockReturnValueOnce({ status: 0, output: "", stdout: "", stderr: "" });
-    const beforeProbe = vi.fn(() => true);
-    const sleeps: number[] = [];
+  it.each([OPENSHELL_RELAY_TARGET_NOT_FOUND_STDERR, OPENSHELL_RELAY_TARGET_REFUSED_STDERR])(
+    "retries while the replacement supervisor's local relay target starts (#7273)",
+    (stderr) => {
+      const captureOpenshellImpl = vi
+        .fn()
+        .mockReturnValueOnce({
+          status: 1,
+          output: stderr.trim(),
+          stdout: "",
+          stderr,
+        })
+        .mockReturnValueOnce({ status: 0, output: "", stdout: "", stderr: "" });
+      const beforeProbe = vi.fn(() => true);
+      const sleeps: number[] = [];
 
-    expect(
-      waitForRecreatedSandboxOpenShellReady("recreated-box", {
-        beforeProbe,
-        captureOpenshellImpl,
-        intervalSeconds: 3,
-        sleepImpl: (seconds) => sleeps.push(seconds),
-        timeoutSeconds: 30,
-      }),
-    ).toBe(true);
-    expect(beforeProbe).toHaveBeenCalledTimes(2);
-    expect(captureOpenshellImpl).toHaveBeenCalledTimes(2);
-    expect(sleeps).toEqual([3]);
-  });
+      expect(
+        waitForRecreatedSandboxOpenShellReady("recreated-box", {
+          beforeProbe,
+          captureOpenshellImpl,
+          intervalSeconds: 3,
+          sleepImpl: (seconds) => sleeps.push(seconds),
+          timeoutSeconds: 30,
+        }),
+      ).toBe(true);
+      expect(beforeProbe).toHaveBeenCalledTimes(2);
+      expect(captureOpenshellImpl).toHaveBeenCalledTimes(2);
+      expect(sleeps).toEqual([3]);
+    },
+  );
 
   it.each([
     `Error:   × status: DeadlineExceeded, message: "policy update timed out"`,
@@ -666,11 +687,54 @@ describe("confirmRecoveredSandboxGatewayManaged scope", () => {
           harnessPackage,
         }),
         getSessionAgentImpl: () =>
-          ({ name: harnessPackage.id, runtime: { kind: "gateway" } }) as never,
+          ({
+            name: harnessPackage.id,
+            runtime: {
+              kind: "gateway",
+              process_lifecycle: {
+                support: "managed",
+                command: ["/opt/future/process-control"],
+              },
+            },
+          }) as never,
         requestGatewaySupervisorActionImpl: requestGatewaySupervisorAction,
       }),
     ).toBe(true);
     expect(requestGatewaySupervisorAction).toHaveBeenCalledWith("future-box", "probe");
+  });
+
+  it("does not probe a receipt-backed package that declines process lifecycle support", () => {
+    requestGatewaySupervisorAction.mockClear();
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-gateway",
+      packageVersion: "1.2.3",
+      contentDigest: "c".repeat(64),
+    };
+
+    expect(
+      confirmRecoveredSandboxGatewayManaged("future-box", {
+        getSandboxImpl: () => ({
+          ...openClawEntry,
+          name: "future-box",
+          agent: harnessPackage.id,
+          harnessPackage,
+        }),
+        getSessionAgentImpl: () =>
+          ({
+            name: harnessPackage.id,
+            runtime: {
+              kind: "gateway",
+              process_lifecycle: {
+                support: "unsupported",
+                reason: "uses an external process manager",
+              },
+            },
+          }) as never,
+        requestGatewaySupervisorActionImpl: requestGatewaySupervisorAction,
+      }),
+    ).toBeNull();
+    expect(requestGatewaySupervisorAction).not.toHaveBeenCalled();
   });
 
   it("does not probe a receipt-backed terminal package as a managed gateway", () => {

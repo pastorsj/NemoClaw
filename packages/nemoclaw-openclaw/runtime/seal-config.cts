@@ -147,9 +147,31 @@ function sealManagedConfiguration(paths = {}) {
   writeHashAtomically(hashPath, buildConfigHash(config, fabric));
 }
 
+function verifyManagedConfiguration(paths = {}) {
+  const configPath = paths.configPath ?? CONFIG_PATH;
+  const fabricPath = paths.fabricPath ?? FABRIC_PATH;
+  const hashPath = paths.hashPath ?? HASH_PATH;
+  const config = readStableFile(configPath, BigInt(MAX_CONFIG_BYTES));
+  const fabric = readStableFile(fabricPath, BigInt(MAX_FABRIC_BYTES));
+  const recordedHash = readStableFile(hashPath, 64n * 1024n);
+  const expectedHash = Buffer.from(buildConfigHash(config, fabric), "utf8");
+  if (!recordedHash.equals(expectedHash)) fail("the protected configuration hash is stale");
+}
+
 function main() {
-  if (process.argv.length !== 2) fail("the managed config sealer accepts no arguments");
   if (process.geteuid?.() === 0) fail("the seal must run as the sandbox account");
+  const action = process.argv[2];
+  if (action === "refresh" && process.argv.length === 3) {
+    sealManagedConfiguration();
+    return;
+  }
+  if (action === "verify" && process.argv.length === 3) {
+    verifyManagedConfiguration();
+    return;
+  }
+  if (process.argv.length !== 2) {
+    fail("the managed config sealer accepts only refresh or verify");
+  }
   const replay = process.env[REPLAY_ENV];
   if (replay !== "0" && replay !== "1") fail(`${REPLAY_ENV} must be 0 or 1`);
   if (replay === "0") sealManagedConfiguration();
@@ -161,6 +183,7 @@ module.exports = {
   readStableFile,
   sealManagedConfiguration,
   validateOpenClawConfiguration,
+  verifyManagedConfiguration,
   writeHashAtomically,
 };
 

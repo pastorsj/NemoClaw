@@ -24,7 +24,9 @@ type SandboxEntry = import("../state/registry").SandboxEntry;
 export interface PrivilegedSandboxCommandOptions {
   readonly input?: string | Buffer;
   readonly sanitizeEnvironment?: boolean;
+  readonly expectedProviderId?: string;
   readonly expectedResourceHandle?: string;
+  readonly executionUser?: { readonly uid: number; readonly gid: number };
   readonly timeout?: number;
   readonly maxOutputBytes?: number;
 }
@@ -43,6 +45,7 @@ function readSandboxEntry(sandboxName: string): SandboxEntry {
 function privilegedSandboxControl(sandboxName: string): {
   readonly sandbox: SandboxEntry;
   readonly control: RuntimeProviderPrivilegedSandboxControl;
+  readonly providerId: string;
 } {
   const sandbox = readSandboxEntry(sandboxName);
   const provider = requireRuntimeProviderBundleForSandbox(
@@ -54,7 +57,11 @@ function privilegedSandboxControl(sandboxName: string): {
       `Runtime provider '${provider.identity.id}' does not support privileged sandbox control.`,
     );
   }
-  return { sandbox, control: provider.lifecycle.privilegedSandboxControl };
+  return {
+    sandbox,
+    control: provider.lifecycle.privilegedSandboxControl,
+    providerId: provider.identity.id,
+  };
 }
 
 function registeredSandboxNames(sandboxName: string): readonly string[] {
@@ -100,7 +107,10 @@ export function executePrivilegedSandboxCommand(
   command: readonly string[],
   options: PrivilegedSandboxCommandOptions = {},
 ): RuntimeProviderPrivilegedSandboxCommandResult {
-  const { sandbox, control } = privilegedSandboxControl(sandboxName);
+  const { sandbox, control, providerId } = privilegedSandboxControl(sandboxName);
+  if (options.expectedProviderId !== undefined && options.expectedProviderId !== providerId) {
+    throw new Error(`Runtime provider identity changed for '${sandboxName}'.`);
+  }
   const input =
     options.input === undefined
       ? undefined
@@ -112,6 +122,7 @@ export function executePrivilegedSandboxCommand(
     sandbox,
     sandboxName,
     command,
+    ...(options.executionUser ? { executionUser: options.executionUser } : {}),
     sanitizeEnvironment: options.sanitizeEnvironment === true,
     timeoutMs: options.timeout ?? DEFAULT_PRIVILEGED_SANDBOX_COMMAND_TIMEOUT_MS,
     ...(input ? { input } : {}),

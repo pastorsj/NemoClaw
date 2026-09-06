@@ -81,6 +81,98 @@ function receiptBackedRequest(): HarnessPackageStartupRequest<StartupPackageConf
 }
 
 describe("Pi startup adapter", () => {
+  it("prepares the existing startup semantics from the generic package input", () => {
+    const legacy = request();
+    const result = adapter.prepareStartupProfile({
+      packageId: "pi",
+      harnessPackage: receiptBackedRequest().harnessPackage,
+      phase: "initial",
+      previousDesiredState: null,
+      input: {
+        inference: {
+          selectedProvider: legacy.settings.inference.upstreamProvider,
+          model: legacy.settings.inference.model,
+          endpointUrl: null,
+          resolvedContextWindow: null,
+          reasoningEnabled: null,
+          reasoningEffort: null,
+          candidates: [
+            {
+              requestedApi: "openai-completions",
+              routeProvider: legacy.settings.inference.routeProvider,
+              routedBaseUrl: legacy.settings.inference.routedBaseUrl,
+              api: "openai-completions",
+              primaryModelRef: "inference/nvidia/nemotron",
+              compatibility: null,
+            },
+          ],
+        },
+        dashboard: {
+          managed: false,
+          url: "",
+          port: 0,
+          bindAddress: null,
+          wslExposure: false,
+          forwarding: { enabled: false, publicPort: null, internalPort: null, tuiEnabled: false },
+        },
+        webSearch: null,
+        tools: legacy.settings.tools,
+        messagingPlan: null,
+        approvalMode: "disabled",
+        observabilityEnabled: false,
+        proxy: legacy.settings.proxy,
+        environment: {
+          NEMOCLAW_CONTEXT_WINDOW: "131072",
+          NEMOCLAW_MAX_TOKENS: "8192",
+          NEMOCLAW_REASONING: "true",
+        },
+        corporateCa: legacy.settings.corporateCa,
+        credentialProxyPresent: false,
+      },
+    });
+
+    expect(result).toEqual({
+      kind: "prepared",
+      desiredState: legacy.settings,
+      credentialProxyReplayRequired: false,
+      dashboardRemoteBindPrepared: false,
+    });
+  });
+
+  it("owns initial and reconciled durable package configuration", () => {
+    const legacy = request();
+    const receipt = receiptBackedRequest();
+    const profileRequest = {
+      packageId: receipt.packageId,
+      harnessPackage: receipt.harnessPackage,
+      desiredState: legacy.settings,
+    };
+    const initial = adapter.buildInitialStartupProfile(profileRequest);
+    if (initial.kind !== "package-config") throw new Error(initial.reason);
+
+    expect(initial.packageConfig).toEqual({ settings: legacy.settings });
+    expect(
+      adapter.buildStartupPlan({
+        ...receipt,
+        packageConfig: initial.packageConfig as StartupPackageConfig,
+      }),
+    ).toEqual(adapter.buildStartupPlan(legacy));
+    expect(
+      adapter.reconcileStartupProfile({
+        ...profileRequest,
+        currentPackageConfig: {
+          settings: { ...legacy.settings, configuration: {} },
+        } as unknown as HarnessStartupJsonObject,
+      }),
+    ).toEqual({ kind: "package-config", packageConfig: initial.packageConfig, changed: true });
+    expect(
+      adapter.reconcileStartupProfile({
+        ...profileRequest,
+        currentPackageConfig: initial.packageConfig,
+      }),
+    ).toEqual({ kind: "package-config", packageConfig: initial.packageConfig, changed: false });
+  });
+
   it("produces the same plan from receipt-backed package settings", () => {
     const packageRequest = receiptBackedRequest();
 

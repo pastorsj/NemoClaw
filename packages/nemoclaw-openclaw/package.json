@@ -6,11 +6,16 @@
   "license": "Apache-2.0",
   "scripts": {
     "build:adapters": "nemoclaw-build-adapters .",
+    "build:runtime": "nemoclaw-materialize-runtime managed-gateway runtime/managed-gateway-control.py && nemoclaw-materialize-runtime messaging-build messaging/messaging-build.mts",
+    "build:package": "npm run build:runtime && nemoclaw-build-package . ./dist/nemoclaw-openclaw",
     "check:adapters": "tsc -p tsconfig.adapters.json && npm run build:adapters -- --check",
-    "test:package": "npm run check:adapters && vitest run --config vitest.config.ts",
+    "check:runtime": "nemoclaw-materialize-runtime managed-gateway runtime/managed-gateway-control.py --check && nemoclaw-materialize-runtime messaging-build messaging/messaging-build.mts --check",
+    "check:package": "nemoclaw-validate-package .",
+    "test:package": "npm run check:adapters && npm run check:runtime && npm run check:package && vitest run --config vitest.config.ts && npm run test:plugin",
     "test:fabric": "bash tests/fabric/run-tests.sh",
     "test:fabric:composed": "bash tests/fabric/run-tests.sh composed",
-    "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts && npm --prefix plugin test && npm run test:fabric:composed",
+    "test:nemoclaw": "npm --prefix plugin run build && vitest run --config vitest.nemoclaw.ts && npm run test:fabric:composed",
+    "test:plugin": "npm --prefix plugin run build && npm --prefix plugin test",
     "test:coverage": "vitest run --config vitest.coverage.mts --coverage && node --experimental-strip-types --no-warnings tests/helpers/coverage-ratchet.mts",
     "test:spec": "vitest run --config vitest.config.ts --reporter=tree && vitest run --config vitest.nemoclaw.ts --reporter=tree && npm --prefix plugin test -- --reporter=tree",
     "test:watch": "vitest watch --config vitest.config.ts",
@@ -32,9 +37,7 @@
     "!vitest.coverage.mts",
     "!vitest.nemoclaw.ts",
     "!plugin/src/**/*.test.ts",
-    "!plugin/tsconfig.json",
     "!plugin/tsconfig.runner.json",
-    "!plugin/tsconfig.shared.json",
     "!plugin/tsconfig.test.json",
     "!plugin/vitest.config.ts",
     "!plugin/vitest.project.ts",
@@ -45,7 +48,11 @@
   ],
   "nemoclaw": {
     "harnessManifest": "manifest.yaml",
-    "minimumNemoClawVersion": "0.0.113"
+    "minimumNemoClawVersion": "0.0.113",
+    "maximumNemoClawVersionExclusive": "0.0.121",
+    "buildProjects": [
+      "plugin"
+    ]
   },
   "engines": {
     "node": ">=22.19.0"

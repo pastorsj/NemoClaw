@@ -74,3 +74,15 @@ export function parseHarnessPackageIdentity(value: unknown): HarnessPackageIdent
     contentDigest: parseHarnessPackageContentDigest(record.contentDigest),
   };
 }
+
+/** Compare complete immutable package identities after validating both values. */
+export function harnessPackageIdentitiesEqual(leftValue: unknown, rightValue: unknown): boolean {
+  const left = parseHarnessPackageIdentity(leftValue);
+  const right = parseHarnessPackageIdentity(rightValue);
+  return (
+    left.kind === right.kind &&
+    left.id === right.id &&
+    left.packageVersion === right.packageVersion &&
+    left.contentDigest === right.contentDigest
+  );
+}

@@ -4,6 +4,8 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { TextDecoder } from "node:util";
+import type { HarnessStartupSettings } from "@nvidia/nemoclaw-harness-contract";
+import { parseHarnessStartupDesiredState } from "../../agent-runtime/adapter/startup.ts";
 import { parseHarnessPackageIdentity } from "../../agent-runtime/package/identity-validation.ts";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types.ts";
 import { isLoopbackDashboardUrl } from "../../dashboard/url.ts";
@@ -352,6 +354,9 @@ export interface ManagedStartupPackageProfile {
   readonly profileKind: "package";
   readonly agent: string;
   readonly harnessPackage: HarnessPackageIdentity;
+  /** Normalized operator intent owned and validated by core, but independent of a harness catalogue. */
+  readonly desiredState: HarnessStartupSettings;
+  /** Opaque package-owned representation used by the exact receipt-pinned startup adapter. */
   readonly packageConfig: ManagedStartupJsonObject;
   readonly corporateCa: ManagedStartupCorporateCa;
 }
@@ -930,6 +935,7 @@ const PACKAGE_PROFILE_KEYS = new Set([
   "profileKind",
   "agent",
   "harnessPackage",
+  "desiredState",
   "packageConfig",
   "corporateCa",
 ]);
@@ -2331,6 +2337,17 @@ export function validateManagedStartupPackageProfile(value: unknown): ManagedSta
     invalid("agent must match harnessPackage.id");
   }
 
+  let desiredState: HarnessStartupSettings;
+  try {
+    desiredState = parseHarnessStartupDesiredState(profile.desiredState);
+  } catch (error) {
+    invalid(
+      `desiredState is missing or invalid; rerun onboarding to create current package startup authority: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
   const corporateCa = requireRecord(profile.corporateCa, "corporateCa");
   rejectUnknownKeys(corporateCa, CORPORATE_CA_KEYS, "corporateCa");
   const bundleSha256 = corporateCa.bundleSha256;
@@ -2340,12 +2357,16 @@ export function validateManagedStartupPackageProfile(value: unknown): ManagedSta
   ) {
     invalid("corporateCa.bundleSha256 must be null or a lowercase SHA-256 digest");
   }
+  if (desiredState.corporateCa.bundleSha256 !== bundleSha256) {
+    invalid("desiredState.corporateCa must match corporateCa");
+  }
 
   return {
     schemaVersion: MANAGED_STARTUP_PROFILE_SCHEMA_VERSION,
     profileKind: "package",
     agent: harnessPackage.id,
     harnessPackage,
+    desiredState,
     packageConfig: requireJsonObject(profile.packageConfig, "packageConfig"),
     corporateCa: { bundleSha256 },
   };

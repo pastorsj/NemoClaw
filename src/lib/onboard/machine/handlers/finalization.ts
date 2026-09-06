@@ -6,6 +6,10 @@ import { type DashboardRuntimeAgent, shouldManageDashboardForAgent } from "../..
 import type { WebSearchVerifyProvider } from "../../web-search-verify";
 import type { PortableOpenClawPairingSettlementResult } from "../../../actions/sandbox/launch-readiness";
 import type { OrdinaryOpenClawPairingSettlementResult } from "../finalization-deps";
+import type { HarnessDevicePairingSettlementDeclaration } from "@nvidia/nemoclaw-harness-contract";
+import type { PackageDevicePairingSettlementResult } from "../../sandbox-create/device-pairing";
+import { isOpenClawPortableRegistryAgent } from "../../experimental/portable-product-qualification";
+import { legacyDevicePairingRequired } from "../../package/legacy-onboard";
 import {
   advanceTo,
   completeOnboardMachine,
@@ -29,6 +33,8 @@ export interface FinalizationStateOptions<Agent, VerifyChain, VerificationResult
   webSearchProvider: WebSearchVerifyProvider | null;
   portableProfileSelected?: boolean;
   recreateJournalHandoff?: boolean;
+  /** True when the selected agent is bound to an installed package receipt. */
+  receiptBackedPackage?: boolean;
   deps: {
     /**
      * Mark this sandbox as the default. Called here (not at sandbox creation) so
@@ -48,6 +54,17 @@ export interface FinalizationStateOptions<Agent, VerifyChain, VerificationResult
     ordinaryOpenClawPairingIncompleteMessage(
       sandboxName: string,
       reason: Extract<OrdinaryOpenClawPairingSettlementResult, { kind: "incomplete" }>["reason"],
+    ): string;
+    settlePackageDevicePairing(
+      sandboxName: string,
+      packageId: string,
+      declaration: HarnessDevicePairingSettlementDeclaration,
+      executionUser: { readonly uid: number; readonly gid: number },
+    ): Promise<PackageDevicePairingSettlementResult>;
+    packageDevicePairingIncompleteMessage(
+      displayName: string,
+      sandboxName: string,
+      reason: Extract<PackageDevicePairingSettlementResult, { kind: "incomplete" }>["reason"],
     ): string;
     readRegistryAgent(sandboxName: string): string | null;
     settlePortablePairing(
@@ -115,6 +132,21 @@ type TerminalReadyAgent = {
   } | null;
 };
 
+type PackagePairingAgent = {
+  displayName?: unknown;
+  name?: unknown;
+  hasDevicePairing?: unknown;
+  runtime?: {
+    device_pairing_settlement?: HarnessDevicePairingSettlementDeclaration;
+  } | null;
+  managed_image?: {
+    runtime_identity?: {
+      uid?: unknown;
+      gid?: unknown;
+    } | null;
+  } | null;
+};
+
 type PortableAgentDisposition = "invalid" | "ordinary" | "strict-openclaw";
 
 function portableAgentDisposition(
@@ -128,7 +160,7 @@ function portableAgentDisposition(
   // Keep malformed/unknown objects invalid; only the canonical null sentinel
   // receives default-OpenClaw semantics.
   const selectedAgent = agent === null ? "openclaw" : (agent as { readonly name?: unknown })?.name;
-  if (selectedAgent === "openclaw") return "strict-openclaw";
+  if (isOpenClawPortableRegistryAgent(selectedAgent)) return "strict-openclaw";
   if (
     typeof selectedAgent === "string" &&
     selectedAgent.length > 0 &&
@@ -140,10 +172,33 @@ function portableAgentDisposition(
   return "invalid";
 }
 
-function selectedAgentName(agent: unknown): string | null {
-  if (agent === null) return "openclaw";
-  const name = (agent as { readonly name?: unknown })?.name;
-  return typeof name === "string" && name.trim() === name && name ? name : null;
+function packagePairingOperation(agent: unknown): {
+  readonly displayName: string;
+  readonly packageId: string;
+  readonly declaration: HarnessDevicePairingSettlementDeclaration;
+  readonly executionUser: { readonly uid: number; readonly gid: number };
+} | null {
+  const pairingAgent = agent as PackagePairingAgent | null;
+  if (pairingAgent?.hasDevicePairing !== true) return null;
+  if (
+    typeof pairingAgent.name !== "string" ||
+    pairingAgent.name.trim() === "" ||
+    pairingAgent.runtime?.device_pairing_settlement === undefined
+  ) {
+    throw new Error("Installed harness device-pairing declaration is incomplete");
+  }
+  const uid = pairingAgent.managed_image?.runtime_identity?.uid;
+  const gid = pairingAgent.managed_image?.runtime_identity?.gid;
+  if (!Number.isInteger(uid) || !Number.isInteger(gid)) {
+    throw new Error("Installed harness device-pairing runtime identity is incomplete");
+  }
+  return {
+    displayName:
+      typeof pairingAgent.displayName === "string" ? pairingAgent.displayName : pairingAgent.name,
+    packageId: pairingAgent.name,
+    declaration: pairingAgent.runtime.device_pairing_settlement,
+    executionUser: { uid: uid as number, gid: gid as number },
+  };
 }
 
 function logTerminalReadyBlock(
@@ -227,6 +282,7 @@ export async function handlePostVerifyState<Agent, VerifyChain, VerificationResu
   webSearchProvider,
   portableProfileSelected,
   recreateJournalHandoff,
+  receiptBackedPackage,
   deps,
 }: FinalizationStateOptions<
   Agent,
@@ -240,9 +296,14 @@ export async function handlePostVerifyState<Agent, VerifyChain, VerificationResu
     portableProfileSelected,
     deps.readRegistryAgent,
   );
-  const ordinaryOpenClawPairingRequired =
+  const packagePairing =
+    portableAgent === "ordinary" && receiptBackedPackage === true && recreateJournalHandoff !== true
+      ? packagePairingOperation(agent)
+      : null;
+  const legacyPairingRequired =
     portableAgent === "ordinary" &&
-    selectedAgentName(agent) === "openclaw" &&
+    receiptBackedPackage !== true &&
+    legacyDevicePairingRequired(agent as { readonly name?: unknown } | null) &&
     recreateJournalHandoff !== true;
   let verificationDiagnostics: string[] = [];
   let deploymentHealthy = true;
@@ -277,7 +338,42 @@ export async function handlePostVerifyState<Agent, VerifyChain, VerificationResu
       };
     }
   }
-  if (ordinaryOpenClawPairingRequired) {
+  if (packagePairing) {
+    const pairing = await deps.settlePackageDevicePairing(
+      sandboxName,
+      packagePairing.packageId,
+      packagePairing.declaration,
+      packagePairing.executionUser,
+    );
+    if (pairing.kind !== "settled") {
+      const message = deps.packageDevicePairingIncompleteMessage(
+        packagePairing.displayName,
+        sandboxName,
+        pairing.reason,
+      );
+      deps.error(`  ${message}`);
+      deps.reportDeploymentReadiness(false);
+      const sessionUpdates = deps.toSessionUpdates({
+        sandboxName,
+        provider,
+        model,
+        hermesAuthMethod,
+        hermesToolGateways,
+      });
+      return {
+        stateResult: pauseOnboardMachine(sessionUpdates, {
+          state: "post_verify",
+          reason: "deployment_not_ready",
+        }),
+        verificationDiagnostics: [message],
+        deploymentHealthy: false,
+      };
+    }
+    if (manageDashboard) {
+      deps.checkAndRecoverSandboxProcesses(sandboxName, { quiet: true });
+    }
+  }
+  if (legacyPairingRequired) {
     const pairing = await deps.settleOrdinaryOpenClawPairing(sandboxName);
     if (pairing.kind !== "settled") {
       const message = deps.ordinaryOpenClawPairingIncompleteMessage(sandboxName, pairing.reason);

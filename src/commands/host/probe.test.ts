@@ -26,7 +26,7 @@ vi.mock("../../lib/readiness/gateway-production", () => ({
   createProductionGatewayReadinessDependencies: mocks.createProductionGatewayReadinessDependencies,
 }));
 
-vi.mock("../../lib/core/version", () => ({
+vi.mock("../../lib/core/build-identity", () => ({
   getBuildIdentity: mocks.getBuildIdentity,
 }));
 

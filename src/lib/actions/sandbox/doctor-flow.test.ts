@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
+import type { AgentDefinition } from "../../agent/defs";
 
 type RunSandboxDoctor = (typeof import("./doctor"))["runSandboxDoctor"];
 type PortableAgentReceiptDisposition = ReturnType<
@@ -14,6 +15,7 @@ type PortableAgentReceiptDisposition = ReturnType<
 >;
 type WithMcpLifecycleLock =
   (typeof import("../../state/mcp-lifecycle-lock-acquisition"))["withMcpLifecycleLock"];
+type SandboxStatusAgentInfo = import("../../agent-runtime/status-agent").SandboxStatusAgentInfo;
 
 function hermesPortableDisposition(phase: "pending" | "configuring" | "active") {
   return {
@@ -25,14 +27,24 @@ function hermesPortableDisposition(phase: "pending" | "configuring" | "active") 
   };
 }
 
+function harnessPackageIdentity(id: string) {
+  return {
+    kind: "agent-runtime" as const,
+    id,
+    packageVersion: "1.0.0",
+    contentDigest: "a".repeat(64),
+  };
+}
+
 type DoctorHarnessOptions = {
   portableDisposition?:
     | PortableAgentReceiptDisposition
     | Error
     | (() => PortableAgentReceiptDisposition | Error);
   registryEntry?: "present" | "missing";
-  registryAgent?: "openclaw" | "hermes";
+  registryAgent?: string;
   registryOverrides?: Record<string, unknown>;
+  packageStatusAgent?: SandboxStatusAgentInfo | Error;
   withMcpLifecycleLock?: WithMcpLifecycleLock;
 };
 
@@ -57,6 +69,7 @@ function createDoctorHarness(
   logSpy: MockInstance;
   recoverNamedGatewayRuntimeSpy: MockInstance;
   repairMutableConfigPermsSpy: MockInstance;
+  resolveSandboxStatusAgentSpy: MockInstance;
   resolveOpenShellSpy: MockInstance;
   resolveSandboxGatewayNameSpy: MockInstance;
   runSandboxDoctor: RunSandboxDoctor;
@@ -71,6 +84,7 @@ function createDoctorHarness(
   const runtime = requireDist("../../adapters/openshell/runtime.js");
   const agentDefs = requireDist("../../agent/defs.js");
   const agentRuntime = requireDist("../../agent/runtime.js");
+  const statusAgentRuntime = requireDist("../../agent-runtime/status-agent.js");
   const gatewayRuntime = requireDist("../../gateway-runtime-action.js");
   const health = requireDist("../../inference/health.js");
   const dockerDriverPlatform = requireDist("../../onboard/docker-driver-platform.js");
@@ -206,6 +220,18 @@ function createDoctorHarness(
   });
   vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue({ name: "openclaw" });
   vi.spyOn(agentRuntime, "getAgentDisplayName").mockReturnValue("OpenClaw");
+  const resolveSandboxStatusAgentSpy = vi
+    .spyOn(statusAgentRuntime, "resolveSandboxStatusAgent")
+    .mockImplementation((entry: unknown) => {
+      if (options.packageStatusAgent instanceof Error) throw options.packageStatusAgent;
+      if (options.packageStatusAgent) return options.packageStatusAgent;
+      return {
+        agentName: "openclaw",
+        agentDisplayName: "OpenClaw",
+        agentRuntime: "gateway",
+        agentDefinition: null,
+      };
+    });
   vi.spyOn(sandboxVersion, "checkAgentVersion").mockReturnValue({
     sandboxVersion: "0.1.0",
     expectedVersion: "0.2.0",
@@ -276,6 +302,7 @@ function createDoctorHarness(
     logSpy,
     recoverNamedGatewayRuntimeSpy,
     repairMutableConfigPermsSpy,
+    resolveSandboxStatusAgentSpy,
     resolveOpenShellSpy,
     resolveSandboxGatewayNameSpy,
     runSandboxDoctor,
@@ -906,6 +933,134 @@ describe("runSandboxDoctor flow", () => {
         detail: expect.stringContaining("dashboardPort"),
       }),
     );
+  });
+
+  it("uses an exact future terminal package for DCode-style doctor decisions", async () => {
+    const agent = {
+      name: "future-terminal",
+      displayName: "Future Terminal",
+      runtime: { kind: "terminal" as const, interactive_command: "future-terminal" },
+      configPaths: {
+        dir: "/sandbox/.future-terminal",
+        configFile: "config.json",
+        format: "json" as const,
+      },
+    } as unknown as AgentDefinition;
+    const harness = createDoctorHarness("ollama-local", {
+      registryAgent: "future-terminal",
+      registryOverrides: {
+        harnessPackage: harnessPackageIdentity("future-terminal"),
+        dashboardPort: null,
+      },
+      packageStatusAgent: {
+        agentName: "future-terminal",
+        agentDisplayName: "Future Terminal",
+        agentRuntime: "terminal",
+        agentDefinition: agent,
+      },
+    });
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+    expect(harness.resolveSandboxStatusAgentSpy).toHaveBeenCalledOnce();
+    expect(harness.loadAgentSpy).not.toHaveBeenCalled();
+    expect(report?.checks).toContainEqual({
+      group: "Sandbox",
+      label: "Harness package authority",
+      status: "ok",
+      detail: "exact installed package resolved as a terminal runtime",
+    });
+    expect(report?.checks).not.toContainEqual(
+      expect.objectContaining({ group: "Inference", label: "Serving process" }),
+    );
+    expect(report?.checks).not.toContainEqual(
+      expect.objectContaining({
+        group: "Sandbox",
+        label: "Lifecycle registration",
+        detail: expect.stringContaining("dashboardPort"),
+      }),
+    );
+  });
+
+  it.each([
+    { packageId: "openclaw", recordedAgent: null, displayName: "OpenClaw" },
+    { packageId: "hermes", recordedAgent: "hermes", displayName: "Hermes" },
+  ] as const)(
+    "uses exact $packageId receipt authority for gateway doctor decisions",
+    async ({ packageId, recordedAgent, displayName }) => {
+      const agent = {
+        name: packageId,
+        displayName,
+        runtime: { kind: "gateway" as const, interactive_command: packageId },
+        configPaths: {
+          dir: `/sandbox/.${packageId}`,
+          configFile: "config.json",
+          format: "json" as const,
+        },
+      } as unknown as AgentDefinition;
+      const harness = createDoctorHarness("ollama-local", {
+        registryAgent: packageId,
+        registryOverrides: {
+          agent: recordedAgent,
+          harnessPackage: harnessPackageIdentity(packageId),
+        },
+        packageStatusAgent: {
+          agentName: packageId,
+          agentDisplayName: displayName,
+          agentRuntime: "gateway",
+          agentDefinition: agent,
+        },
+      });
+
+      const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+      expect(harness.resolveSandboxStatusAgentSpy).toHaveBeenCalledOnce();
+      expect(harness.loadAgentSpy).not.toHaveBeenCalled();
+      expect(report?.checks).toContainEqual({
+        group: "Sandbox",
+        label: "Harness package authority",
+        status: "ok",
+        detail: "exact installed package resolved as a gateway runtime",
+      });
+      expect(report?.checks).toContainEqual(
+        expect.objectContaining({ group: "Inference", label: "Serving process" }),
+      );
+      expect(harness.buildToolScopeChecksSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports invalid external package authority without ambient harness fallback", async () => {
+    const harness = createDoctorHarness("ollama-local", {
+      registryAgent: "future-invalid",
+      registryOverrides: {
+        agent: null,
+        harnessPackage: harnessPackageIdentity("future-invalid"),
+      },
+      packageStatusAgent: {
+        agentName: "future-invalid",
+        agentDisplayName: "future-invalid",
+        agentRuntime: "unknown",
+        agentLoadError: "installed package digest no longer matches its receipt",
+        packageAuthorityInvalid: true,
+        agentDefinition: null,
+      },
+    });
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+    expect(harness.resolveSandboxStatusAgentSpy).toHaveBeenCalledOnce();
+    expect(harness.loadAgentSpy).not.toHaveBeenCalled();
+    expect(report?.checks).toContainEqual({
+      group: "Sandbox",
+      label: "Harness package authority",
+      status: "fail",
+      detail: "installed package digest no longer matches its receipt",
+      hint: "reinstall the recorded harness package or re-onboard this sandbox, then retry",
+    });
+    expect(report?.checks).not.toContainEqual(
+      expect.objectContaining({ group: "Inference", label: "Serving process" }),
+    );
+    expect(harness.buildToolScopeChecksSpy).not.toHaveBeenCalled();
   });
 
   it("appends the local gateway result without mutating provider health", async () => {

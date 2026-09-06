@@ -97,6 +97,7 @@ function writeFutureHarnessPackage(repositoryRoot: string): void {
         nemoclaw: {
           harnessManifest: "manifest.yaml",
           minimumNemoClawVersion: "0.0.113",
+          maximumNemoClawVersionExclusive: "0.0.121",
         },
       },
       null,
@@ -105,7 +106,34 @@ function writeFutureHarnessPackage(repositoryRoot: string): void {
   );
   fs.writeFileSync(
     path.join(packageRoot, "manifest.yaml"),
-    'name: future-harness\ndisplay_name: "Future Harness"\n',
+    [
+      "name: future-harness",
+      'display_name: "Future Harness"',
+      "runtime:",
+      "  kind: gateway",
+      "config:",
+      "  dir: /sandbox/.future-harness",
+      "  config_file: config.json",
+      "  format: json",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: This synthetic package has fixed inference configuration.",
+      "messaging:",
+      "  support: disabled",
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    image_plugin_provenance: not-required",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: This package does not run scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
+      "",
+    ].join("\n"),
   );
   fs.writeFileSync(path.join(packageRoot, "Dockerfile.base"), "FROM scratch\n");
   fs.writeFileSync(
@@ -187,6 +215,7 @@ describe("bundled harness package artifacts", () => {
           displayName: "Future Harness",
           packageVersion: "9.8.7",
           minimumNemoClawVersion: "0.0.113",
+          maximumNemoClawVersionExclusive: "0.0.121",
           manifestPath: "packages/nemoclaw-future-harness/manifest.yaml",
         },
       ]);
@@ -200,6 +229,7 @@ describe("bundled harness package artifacts", () => {
         displayName: "Future Harness",
         packageVersion: "9.8.7",
         minimumNemoClawVersion: "0.0.113",
+        maximumNemoClawVersionExclusive: "0.0.121",
         manifest: "packages/nemoclaw-future-harness/manifest.yaml",
       });
       expect(validateHarnessPackageTree(packageRoot).contentDigest).toMatch(/^[a-f0-9]{64}$/u);
@@ -229,6 +259,7 @@ describe("bundled harness package artifacts", () => {
         manifestName: parsed.manifest.name,
         packageVersion: parsed.envelope.packageVersion,
         minimumNemoClawVersion: parsed.envelope.minimumNemoClawVersion,
+        maximumNemoClawVersionExclusive: parsed.envelope.maximumNemoClawVersionExclusive,
         dockerfile: relativePackageAsset(parsed.packageRoot, definition.dockerfilePath),
         baseDockerfile: relativePackageAsset(parsed.packageRoot, definition.dockerfileBasePath),
         legacyDockerfile: relativePackageAsset(
@@ -251,6 +282,7 @@ describe("bundled harness package artifacts", () => {
             "id",
             "kind",
             "manifest",
+            "maximumNemoClawVersionExclusive",
             "minimumNemoClawVersion",
             "packageVersion",
             "schemaVersion",
@@ -260,6 +292,7 @@ describe("bundled harness package artifacts", () => {
           manifestName: id,
           packageVersion: source.packageVersion,
           minimumNemoClawVersion: source.minimumNemoClawVersion,
+          maximumNemoClawVersionExclusive: source.maximumNemoClawVersionExclusive,
           dockerfile: `${packagePath}/Dockerfile`,
           baseDockerfile: `${packagePath}/Dockerfile.base`,
           legacyDockerfile: null,

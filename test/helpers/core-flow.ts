@@ -311,6 +311,14 @@ export function createPhases(
         throw new Error(`exit ${code}`);
       }) as (code: number) => never,
       ...overrides.sandboxDeps,
+      filterSelectedAgentWebSearchToolGateways:
+        overrides.sandboxDeps?.filterSelectedAgentWebSearchToolGateways ??
+        ((_agent, _receiptBacked, _provider, gateways) => [...gateways]),
+      selectedAgentResumesSandboxPrompts:
+        overrides.sandboxDeps?.selectedAgentResumesSandboxPrompts ??
+        ((agent, receiptBackedPackage) => !receiptBackedPackage && agent?.name === "openclaw"),
+      selectedAgentSupportsWebSearchProvider:
+        overrides.sandboxDeps?.selectedAgentSupportsWebSearchProvider ?? (() => true),
       loadSession: overrides.sandboxDeps?.loadSession ?? (() => createSession()),
       compareAndSwapSession:
         overrides.sandboxDeps?.compareAndSwapSession ??
