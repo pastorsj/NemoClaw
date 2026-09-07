@@ -4,7 +4,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -15,7 +14,6 @@ import {
   auditMaterializedSourceGraph,
   emitAuditReceipt,
   materializeSourceGraph,
-  normalizeOpenClawSignatureAlias,
   parseAuditConfig,
   reviewedArchiveGraphManifest,
   selectReviewedLockSha256,
@@ -84,20 +82,28 @@ function runConsolidatedAuditFixture(
   const artifactDirectory = path.join(targetRoot, "artifacts", "reviewed-npm-audit");
   try {
     fs.mkdirSync(path.join(trustedRoot, "ci"), { recursive: true });
-    fs.mkdirSync(path.join(targetRoot, "agents", "openclaw", "wechat-runtime"), {
+    fs.mkdirSync(path.join(targetRoot, "packages", "nemoclaw-openclaw", "runtime", "wechat"), {
       recursive: true,
     });
     fs.mkdirSync(bin);
     fs.cpSync(path.join(REPO_ROOT, "scripts"), path.join(trustedRoot, "scripts"), {
       recursive: true,
     });
+    fs.mkdirSync(path.join(trustedRoot, "packages", "nemoclaw-openclaw"), {
+      recursive: true,
+    });
+    fs.cpSync(
+      path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "compat"),
+      path.join(trustedRoot, "packages", "nemoclaw-openclaw", "compat"),
+      { recursive: true },
+    );
     fs.writeFileSync(
       path.join(trustedRoot, "ci", "npm-audit-exceptions.json"),
       '{"schemaVersion":1,"exceptions":[]}\n',
     );
     const runtimeLockValue = JSON.parse(
       fs.readFileSync(
-        path.join(REPO_ROOT, "agents/openclaw/wechat-runtime/package-lock.json"),
+        path.join(REPO_ROOT, "packages/nemoclaw-openclaw/runtime/wechat/npm-shrinkwrap.json"),
         "utf8",
       ),
     );
@@ -118,12 +124,13 @@ function runConsolidatedAuditFixture(
         exceptionFile: "ci/npm-audit-exceptions.json",
         lockedGraphs: [
           {
-            directory: "agents/openclaw/wechat-runtime",
+            directory: "packages/nemoclaw-openclaw/runtime/wechat",
             id: "wechat-runtime",
             inputValidation: "wechat-runtime",
             installMode: "legacy-peer-deps",
             integrity,
             label: "WeChat fixture",
+            lockFile: "npm-shrinkwrap.json",
             lockSha256: createHash("sha256").update(runtimeLock).digest("hex"),
             packageSpec: "@tencent-weixin/openclaw-weixin@2.4.3",
             severityThreshold: "low",
@@ -156,11 +163,11 @@ function runConsolidatedAuditFixture(
       JSON.stringify({ ...manifest, lockfileVersion: 3, packages: { "": manifest } }),
     );
     fs.copyFileSync(
-      path.join(REPO_ROOT, "agents/openclaw/wechat-runtime/package.json"),
-      path.join(targetRoot, "agents/openclaw/wechat-runtime/package.json"),
+      path.join(REPO_ROOT, "packages/nemoclaw-openclaw/runtime/wechat/package.json"),
+      path.join(targetRoot, "packages/nemoclaw-openclaw/runtime/wechat/package.json"),
     );
     fs.writeFileSync(
-      path.join(targetRoot, "agents/openclaw/wechat-runtime/package-lock.json"),
+      path.join(targetRoot, "packages/nemoclaw-openclaw/runtime/wechat/npm-shrinkwrap.json"),
       runtimeLock,
     );
     mutateTarget(targetRoot);
@@ -254,12 +261,18 @@ process.exit(0);
     const provenanceFile = path.join(artifactDirectory, "source-graph.provenance.json");
     const receiptFile = path.join(artifactDirectory, "wechat-runtime.receipt.json");
     const rawReportFile = path.join(artifactDirectory, "wechat-runtime.raw.json");
-    const lockedDirectory = path.join(targetRoot, "agents", "openclaw", "wechat-runtime");
+    const lockedDirectory = path.join(
+      targetRoot,
+      "packages",
+      "nemoclaw-openclaw",
+      "runtime",
+      "wechat",
+    );
     return {
       lockedReceipt: fs.existsSync(receiptFile) ? fs.readFileSync(receiptFile, "utf-8") : undefined,
       lockedRawReport: fs.existsSync(rawReportFile) ? fs.readFileSync(rawReportFile) : undefined,
       lockedPackageJson: fs.readFileSync(path.join(lockedDirectory, "package.json")),
-      lockedPackageLock: fs.readFileSync(path.join(lockedDirectory, "package-lock.json")),
+      lockedPackageLock: fs.readFileSync(path.join(lockedDirectory, "npm-shrinkwrap.json")),
       npmCalls: fs.existsSync(callsFile)
         ? fs.readFileSync(callsFile, "utf-8").trim().split("\n")
         : [],
@@ -278,9 +291,6 @@ process.exit(0);
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
-
-const DOMEXCEPTION_INTEGRITY =
-  "sha512-tlc/FcYIv5i8RYsl2iDil4A0gOihaas1R5jPcIC4Zw3GhjKsVilw90aHcVlhZPTBLGBzd379S+VcnsDjd9ChiA==";
 
 function requiredStep(job: WorkflowJob, name: string): WorkflowStep {
   const step = job.steps?.find((candidate) => candidate.name === name);
@@ -373,7 +383,7 @@ describe("trusted reviewed npm audit workflow (#5896)", () => {
   it("rejects a target-controlled npm registry override", () => {
     const fixture = runConsolidatedAuditFixture((targetRoot) => {
       fs.writeFileSync(
-        path.join(targetRoot, "agents", "openclaw", "wechat-runtime", ".npmrc"),
+        path.join(targetRoot, "packages", "nemoclaw-openclaw", "runtime", "wechat", ".npmrc"),
         "registry=https://registry.example.test/\n",
       );
     });
@@ -387,10 +397,11 @@ describe("trusted reviewed npm audit workflow (#5896)", () => {
     const fixture = runConsolidatedAuditFixture((targetRoot) => {
       const lockFile = path.join(
         targetRoot,
-        "agents",
-        "openclaw",
-        "wechat-runtime",
-        "package-lock.json",
+        "packages",
+        "nemoclaw-openclaw",
+        "runtime",
+        "wechat",
+        "npm-shrinkwrap.json",
       );
       const lock = JSON.parse(fs.readFileSync(lockFile, "utf-8"));
       lock.packages["node_modules/qrcode-terminal"].resolved =
@@ -489,9 +500,11 @@ describe("trusted reviewed npm audit workflow (#5896)", () => {
     ).toBe(true);
     expect(config.lockedGraphs).toContainEqual(
       expect.objectContaining({
+        directory: "packages/nemoclaw-openclaw/runtime/wechat",
         id: "wechat-runtime",
         inputValidation: "wechat-runtime",
         installMode: "legacy-peer-deps",
+        lockFile: "npm-shrinkwrap.json",
         lockSha256: "09a91cabd559ed2294fb263602009f9f79259e765281992e56961eed0e8c1ed9",
         severityThreshold: "low",
         signatureAudit: "retry-download-failures",
@@ -502,8 +515,8 @@ describe("trusted reviewed npm audit workflow (#5896)", () => {
   it("validates the exact checked-in WeChat runtime inputs", () => {
     expect(() =>
       validateWechatRuntimeInputs(
-        path.join(REPO_ROOT, "agents/openclaw/wechat-runtime/package.json"),
-        path.join(REPO_ROOT, "agents/openclaw/wechat-runtime/package-lock.json"),
+        path.join(REPO_ROOT, "packages/nemoclaw-openclaw/runtime/wechat/package.json"),
+        path.join(REPO_ROOT, "packages/nemoclaw-openclaw/runtime/wechat/npm-shrinkwrap.json"),
         "https://registry.npmjs.org/",
       ),
     ).not.toThrow();
@@ -621,6 +634,7 @@ describe("trusted reviewed npm audit workflow (#5896)", () => {
     const configFile = path.join(REPO_ROOT, "ci", "reviewed-npm-audit.json");
     const readConfig = () =>
       JSON.parse(fs.readFileSync(configFile, "utf-8")) as {
+        lockedGraphs: Array<{ lockFile?: string }>;
         sourceRegistryPackage: { packageSpec: string };
         sourceRegistryPackagesWithoutIntegrity: Array<{ packageSpec: string }>;
       };
@@ -651,6 +665,12 @@ describe("trusted reviewed npm audit workflow (#5896)", () => {
 
     config = readConfig();
     config.sourceRegistryPackagesWithoutIntegrity[0]!.packageSpec = "not-an-exact-spec";
+    expect(() => parseAuditConfig(JSON.stringify(config))).toThrow(
+      "ci/reviewed-npm-audit.json is invalid",
+    );
+
+    config = readConfig();
+    config.lockedGraphs[0]!.lockFile = "../../package-lock.json";
     expect(() => parseAuditConfig(JSON.stringify(config))).toThrow(
       "ci/reviewed-npm-audit.json is invalid",
     );
@@ -1427,70 +1447,5 @@ esac
     ).toThrow(
       "reviewed npm audit threshold failed\nNemoClaw CLI locked production graph: 1 unaccepted at or above high",
     );
-  });
-
-  it("normalizes only the reviewed OpenClaw npm alias for registry signature verification", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-signature-alias-"));
-    const aliasPath = path.join("node_modules", "openclaw", "node_modules", "node-domexception");
-    const actualPath = path.join(
-      "node_modules",
-      "openclaw",
-      "node_modules",
-      "@nolyfill",
-      "domexception",
-    );
-    const requesterPath = path.join("node_modules", "openclaw", "node_modules", "fetch-blob");
-    const aliasManifest = { name: "@nolyfill/domexception", version: "1.0.28" };
-    const requesterManifest = {
-      name: "fetch-blob",
-      version: "3.2.0",
-      dependencies: { "node-domexception": "^1.0.0" },
-    };
-    const lock = {
-      lockfileVersion: 3,
-      packages: {
-        [aliasPath]: {
-          ...aliasManifest,
-          resolved: "https://registry.npmjs.org/@nolyfill/domexception/-/domexception-1.0.28.tgz",
-          integrity: DOMEXCEPTION_INTEGRITY,
-        },
-        [requesterPath]: requesterManifest,
-      },
-    };
-    try {
-      for (const [directory, manifest] of [
-        [aliasPath, aliasManifest],
-        [requesterPath, requesterManifest],
-      ] as const) {
-        fs.mkdirSync(path.join(root, directory), { recursive: true });
-        fs.writeFileSync(
-          path.join(root, directory, "package.json"),
-          `${JSON.stringify(manifest)}\n`,
-        );
-      }
-
-      fs.writeFileSync(path.join(root, "package-lock.json"), `${JSON.stringify(lock)}\n`);
-
-      normalizeOpenClawSignatureAlias(root);
-
-      const normalizedLock = JSON.parse(
-        fs.readFileSync(path.join(root, "package-lock.json"), "utf-8"),
-      );
-      const normalizedRequester = createRequire(import.meta.url)(
-        path.join(root, requesterPath, "package.json"),
-      );
-      expect(fs.existsSync(path.join(root, aliasPath))).toBe(false);
-      expect(fs.existsSync(path.join(root, actualPath, "package.json"))).toBe(true);
-      expect(normalizedLock.packages[aliasPath]).toBeUndefined();
-      expect(normalizedLock.packages[actualPath]).toMatchObject(aliasManifest);
-      expect(normalizedLock.packages[requesterPath].dependencies).toEqual({
-        "@nolyfill/domexception": "1.0.28",
-      });
-      expect(normalizedRequester.dependencies).toEqual({
-        "@nolyfill/domexception": "1.0.28",
-      });
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
   });
 });

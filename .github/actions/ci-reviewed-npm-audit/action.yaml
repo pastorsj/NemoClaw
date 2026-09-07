@@ -58,12 +58,18 @@ runs:
         if (!/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(config.npmIntegrity) || /[\r\n]/.test(config.npmIntegrity)) {
           throw new Error("reviewed npm audit configuration has an invalid npmIntegrity");
         }
-        const directories = ["", ...config.lockedGraphs.map((graph) => graph.directory)].sort();
+        const graphInputs = [
+          { directory: "", lockFile: "package-lock.json" },
+          ...config.lockedGraphs.map((graph) => ({
+            directory: graph.directory,
+            lockFile: graph.lockFile ?? "package-lock.json",
+          })),
+        ].sort((left, right) => left.directory.localeCompare(right.directory));
         const hash = createHash("sha256");
         hash.update(configSource);
         hash.update(JSON.stringify({ argv: ["audit", "--registry=https://registry.yarnpkg.com", "--omit=dev", "--json"], npmVersion: config.npmVersion, registry: "https://registry.yarnpkg.com/", schemaVersion: 1 }));
-        for (const directory of directories) {
-          for (const file of ["package.json", "package-lock.json"]) {
+        for (const { directory, lockFile } of graphInputs) {
+          for (const file of ["package.json", lockFile]) {
             const relative = join(directory, file);
             hash.update(relative);
             hash.update(readFileSync(resolvePathWithinRoot(targetRoot, relative, "reviewed npm audit target input")));

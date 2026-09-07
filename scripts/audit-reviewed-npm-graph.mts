@@ -44,6 +44,7 @@ type LockedGraph = ReviewedPackage &
     id: string;
     inputValidation?: "wechat-runtime";
     installMode?: "legacy-peer-deps";
+    lockFile?: "package-lock.json" | "npm-shrinkwrap.json";
     lockSha256: string;
     replacementLockSha256?: string;
     severityThreshold?: Severity;
@@ -221,6 +222,9 @@ export function parseAuditConfig(contents: string): AuditConfig {
         !graph.id ||
         typeof graph.directory !== "string" ||
         !graph.directory ||
+        (graph.lockFile !== undefined &&
+          graph.lockFile !== "package-lock.json" &&
+          graph.lockFile !== "npm-shrinkwrap.json") ||
         typeof graph.lockSha256 !== "string" ||
         !/^[0-9a-f]{64}$/.test(graph.lockSha256) ||
         (graph.inputValidation !== undefined && graph.inputValidation !== "wechat-runtime") ||
@@ -365,7 +369,7 @@ function materializeLockedGraph(
     `${graph.label} package manifest`,
   );
   const sourceLock = targetRepositoryPath(
-    path.join(graph.directory, "package-lock.json"),
+    path.join(graph.directory, graph.lockFile ?? "package-lock.json"),
     `${graph.label} lockfile`,
   );
   if (graph.inputValidation === "wechat-runtime") {
@@ -984,7 +988,7 @@ function main(): void {
           `${graph.label} package manifest`,
         ),
         packageLockFile: targetRepositoryPath(
-          path.join(graph.directory, "package-lock.json"),
+          path.join(graph.directory, graph.lockFile ?? "package-lock.json"),
           `${graph.label} lockfile`,
         ),
         rawReportFile: path.join(artifactDirectory, `locked-graph-${index + 1}.json`),

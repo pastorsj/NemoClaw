@@ -20,7 +20,11 @@ type CompositeAction = {
 
 const REPO_ROOT = path.join(import.meta.dirname, "../../..");
 
-function copyGraphInputs(targetRoot: string, directory: string) {
+function copyGraphInputs(
+  targetRoot: string,
+  directory: string,
+  lockFile = "package-lock.json",
+) {
   const sourceDirectory = path.join(REPO_ROOT, directory);
   const targetDirectory = path.join(targetRoot, directory);
   fs.mkdirSync(targetDirectory, { recursive: true });
@@ -29,8 +33,8 @@ function copyGraphInputs(targetRoot: string, directory: string) {
     path.join(targetDirectory, "package.json"),
   );
   fs.copyFileSync(
-    path.join(sourceDirectory, "package-lock.json"),
-    path.join(targetDirectory, "package-lock.json"),
+    path.join(sourceDirectory, lockFile),
+    path.join(targetDirectory, lockFile),
   );
 }
 
@@ -42,9 +46,9 @@ describe("reviewed npm audit cache identity", () => {
     const externalFile = path.join(root, "external-sentinel");
     try {
       copyGraphInputs(targetRoot, "");
-      copyGraphInputs(targetRoot, "agents/openclaw/openclaw-runtime");
-      copyGraphInputs(targetRoot, "agents/openclaw/mcporter-runtime");
-      copyGraphInputs(targetRoot, "agents/openclaw/wechat-runtime");
+      copyGraphInputs(targetRoot, "packages/nemoclaw-openclaw/runtime/openclaw", "npm-shrinkwrap.json");
+      copyGraphInputs(targetRoot, "packages/nemoclaw-openclaw/runtime/mcporter", "npm-shrinkwrap.json");
+      copyGraphInputs(targetRoot, "packages/nemoclaw-openclaw/runtime/wechat", "npm-shrinkwrap.json");
       copyGraphInputs(targetRoot, "tools/mcp-tool-discovery-runtime");
       fs.writeFileSync(externalFile, "do not read\n");
       fs.rmSync(path.join(targetRoot, "package.json"));
