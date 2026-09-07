@@ -1653,7 +1653,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
         inferenceProvider: provider,
         enabledChannels,
         webSearchConfig,
-        agent,
+        agent: effectiveAgent,
         receiptBackedPackage: harnessPackageSession?.harnessPackage != null,
         sandboxGpuConfig: effectiveSandboxGpuConfig,
         resourceProfile,

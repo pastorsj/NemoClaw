@@ -88,9 +88,9 @@ describe("OpenClaw messaging adapter", () => {
         fs.existsSync(path.resolve("policies", "presets", `${presetName}.yaml`)),
       ),
     ).toBe(true);
-    expect(
-      profiles.find(({ channelId }) => channelId === "whatsapp")?.lifecycle.statusProbe,
-    ).toEqual({
+    const whatsapp = profiles.find(({ channelId }) => channelId === "whatsapp");
+    expect(whatsapp?.config.statePaths).toEqual(["whatsapp"]);
+    expect(whatsapp?.lifecycle.statusProbe).toEqual({
       kind: "channel-status-json",
       command: {
         argv: ["openclaw", "channels", "status", "--channel", "whatsapp", "--json"],

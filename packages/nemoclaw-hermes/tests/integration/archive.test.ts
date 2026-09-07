@@ -2,7 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -159,10 +167,46 @@ describe("published Hermes package", () => {
     expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
   });
 
-  it("ships the package-owned messaging build source as read-only data", () => {
+  it("ships a runnable package-owned messaging build runtime as read-only data", () => {
     const artifact = "messaging/messaging-build.mts";
     expect(packedFiles.get(artifact)?.mode).toBe(0o644);
     expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o777).toBe(0o644);
+
+    // Node intentionally refuses to type-strip files below node_modules. Copy
+    // the exact installed bytes into an execution directory so this test still
+    // proves the packed artifact and both sibling profiles work together.
+    const executableRuntimeRoot = path.join(temporaryRoot, "installed-messaging-runtime");
+    mkdirSync(executableRuntimeRoot);
+    for (const filename of ["messaging-build.mts", "profile.json", "runtime-profile.json"]) {
+      copyFileSync(
+        path.join(installedPackageRoot, "messaging", filename),
+        path.join(executableRuntimeRoot, filename),
+      );
+    }
+
+    const description = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          path.join(executableRuntimeRoot, "messaging-build.mts"),
+          "--agent",
+          "hermes",
+          "--phase",
+          "runtime-setup",
+          "--profile",
+          path.join(executableRuntimeRoot, "runtime-profile.json"),
+          "--dry-run",
+        ],
+        { encoding: "utf8" },
+      ),
+    ) as Record<string, unknown>;
+    expect(description).toMatchObject({
+      phase: "runtime-setup",
+      channels: [],
+      installSpecs: [],
+      pythonPackages: [],
+    });
   });
 
   it("ships the package-owned managed gateway runtime as executable", () => {

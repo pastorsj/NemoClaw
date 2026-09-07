@@ -256,6 +256,44 @@ describe("managed startup package profile", () => {
     ).toThrow(/credential-shaped field name/u);
   });
 
+  it("preserves reviewed messaging credential placeholders in package-owned settings", () => {
+    const desiredState = {
+      ...futureDesiredState(),
+      messaging: {
+        plan: {
+          credentialBindings: [{ placeholder: "xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN" }],
+        },
+      },
+    };
+
+    expect(() =>
+      buildManagedStartupPackageProfile({
+        harnessPackage: FUTURE_PACKAGE_IDENTITY,
+        desiredState,
+        packageConfig: { settings: desiredState },
+        credentialProxyReplayRequired: true,
+        dashboardRemoteBindPrepared: false,
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      buildManagedStartupPackageProfile({
+        harnessPackage: FUTURE_PACKAGE_IDENTITY,
+        desiredState,
+        packageConfig: {
+          settings: {
+            ...desiredState,
+            messaging: {
+              plan: { credentialBindings: [{ placeholder: "xoxb-not-a-placeholder-token" }] },
+            },
+          },
+        },
+        credentialProxyReplayRequired: true,
+        dashboardRemoteBindPrepared: false,
+      }),
+    ).toThrow(/packageConfig[.]settings.*credential-shaped string data/u);
+  });
+
   it("binds package configuration to the full receipt identity", () => {
     expect(() =>
       validateManagedStartupPackageProfile({

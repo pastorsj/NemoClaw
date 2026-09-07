@@ -14,8 +14,8 @@ import type {
   HarnessStartupPlan,
   HarnessStartupSettings,
 } from "@nvidia/nemoclaw-harness-contract";
-import { defineHarnessAdapterContract, defineHarnessAdapterOperation } from "./contract";
-import { prepareHarnessAdapterValue } from "./schema";
+import { defineHarnessAdapterContract, defineHarnessAdapterOperation } from "./contract.ts";
+import { prepareHarnessAdapterValue } from "./schema.ts";
 
 export type {
   HarnessInitialStartupProfileRequest,

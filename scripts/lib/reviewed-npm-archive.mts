@@ -18,6 +18,10 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
+declare global {
+  var NEMOCLAW_PACKAGE_MESSAGING_RUNTIME_BUILD: boolean | undefined;
+}
+
 const NPM_OUTPUT_MAX_BUFFER = 16 * 1024 * 1024;
 const EXACT_NPM_PACKAGE_SPEC =
   /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)@[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/;
@@ -912,7 +916,7 @@ function isMainModule(): boolean {
   return process.argv[1] ? import.meta.url === pathToFileURL(resolve(process.argv[1])).href : false;
 }
 
-if (isMainModule()) {
+if (globalThis.NEMOCLAW_PACKAGE_MESSAGING_RUNTIME_BUILD !== true && isMainModule()) {
   try {
     const options = parseCliOptions(process.argv.slice(2));
     if (options.mode === "cache") {

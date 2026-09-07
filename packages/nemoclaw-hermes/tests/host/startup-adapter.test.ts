@@ -96,7 +96,7 @@ function receiptBackedRequest(): HarnessPackageStartupRequest<StartupPackageConf
 describe("Hermes startup adapter", () => {
   it("prepares the existing startup semantics from the generic package input", () => {
     const legacy = request();
-    const result = adapter.prepareStartupProfile({
+    const preparationRequest: Parameters<typeof adapter.prepareStartupProfile>[0] = {
       packageId: "hermes",
       harnessPackage: receiptBackedRequest().harnessPackage,
       phase: "initial",
@@ -143,13 +143,26 @@ describe("Hermes startup adapter", () => {
         corporateCa: legacy.settings.corporateCa,
         credentialProxyPresent: true,
       },
-    });
+    };
+    const result = adapter.prepareStartupProfile(preparationRequest);
 
     expect(result).toEqual({
       kind: "prepared",
       desiredState: legacy.settings,
       credentialProxyReplayRequired: true,
       dashboardRemoteBindPrepared: false,
+    });
+
+    const { webSearch: _webSearch, ...inputWithoutWebSearch } = preparationRequest.input;
+    const resultWithoutWebSearch = adapter.prepareStartupProfile({
+      ...preparationRequest,
+      input: inputWithoutWebSearch,
+    });
+    expect(resultWithoutWebSearch.kind).toBe("prepared");
+    if (resultWithoutWebSearch.kind !== "prepared") throw new Error(resultWithoutWebSearch.reason);
+    expect(resultWithoutWebSearch.desiredState.configuration.webSearch).toEqual({
+      enabled: false,
+      provider: "tavily",
     });
   });
 

@@ -5,7 +5,6 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   applyMessagingBuildPhase,
@@ -30,8 +29,6 @@ const OPENCLAW_SLACK_2026_7_1_INTEGRITY =
   "sha512-dwVGEVCmoTQrOIeZaSCIOPg8pT7hB883QQEXdp9EZUDzTGuvSc+KxH2iERSOV/59hROQctYdcobGn/vdB1H4XA==";
 const OPENCLAW_SLACK_2026_7_1_TARBALL =
   "https://registry.npmjs.org/@openclaw/slack/-/slack-2026.7.1.tgz";
-const REPO_ROOT = path.join(import.meta.dirname, "../../..");
-
 function channelsB64(channels: string[]): string {
   return Buffer.from(JSON.stringify(channels)).toString("base64");
 }
@@ -65,48 +62,6 @@ function thrownMessage(run: () => void): string {
 }
 
 describe("messaging-build-applier.mts: plugin archive integrity", () => {
-  it("loads the real build applier from the Hermes image module boundary", () => {
-    const dockerfile = fs.readFileSync(
-      path.join(REPO_ROOT, "packages", "nemoclaw-hermes", "Dockerfile"),
-      "utf8",
-    );
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-applier-boundary-"));
-    const messagingRoot = path.join(root, "src", "lib", "messaging");
-    try {
-      [
-        ...dockerfile.matchAll(
-          /^COPY (src\/lib\/messaging\/|scripts\/lib\/reviewed-npm-archive\.mts) (\/\S+)$/gm,
-        ),
-      ].forEach((copy) => {
-        const source = copy[1] ?? "";
-        const destination = copy[2] ?? "";
-        const sourcePath = path.join(REPO_ROOT, source);
-        const destinationPath = path.join(root, destination.replace(/^\//, ""));
-        fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
-        fs.cpSync(sourcePath, destinationPath, { recursive: true });
-      });
-      const stagedApplier = path.join(
-        messagingRoot,
-        "applier",
-        "build",
-        "messaging-build-applier.mts",
-      );
-      const result = spawnSync(
-        process.execPath,
-        [
-          "--experimental-strip-types",
-          "--input-type=module",
-          "--eval",
-          `await import(${JSON.stringify(pathToFileURL(stagedApplier).href)})`,
-        ],
-        { encoding: "utf8", timeout: 10_000 },
-      );
-      expect(result.status, result.stderr).toBe(0);
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
-
   it(
     "accepts the reviewed messaging plugin registry tarball URL before install",
     async () => {

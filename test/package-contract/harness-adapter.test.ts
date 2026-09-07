@@ -12,6 +12,7 @@ import { loadHarnessAdapter } from "../../dist/lib/agent-runtime/adapter/loader.
 import { HARNESS_CONFIG_ADAPTER_CONTRACT } from "../../dist/lib/agent-runtime/adapter/config.js";
 import { HARNESS_MCP_ADAPTER_CONTRACT } from "../../dist/lib/agent-runtime/adapter/mcp.js";
 import { installHarnessPackage } from "../../dist/lib/agent-runtime/package/install.js";
+import { loadHarnessStartupProfileAdapterHostModule } from "../../dist/lib/agent-runtime/startup-module.js";
 
 const REPOSITORY_ROOT = path.join(import.meta.dirname, "..", "..");
 const COMPILED_HARNESS_ROOT = path.join(REPOSITORY_ROOT, "dist", "harnesses");
@@ -145,6 +146,82 @@ describe("compiled harness adapter boundary", () => {
   it("discovers at least one compiled MCP bridge declaration", () => {
     expect(COMPILED_MCP_PACKAGE_IDS.length).toBeGreaterThan(0);
   });
+
+  it("prepares OpenClaw startup through its receipt-pinned VM adapter", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(TEST_PARENT, "startup-fixture-"));
+    fs.chmodSync(fixtureRoot, 0o700);
+    const storeRoot = path.join(fixtureRoot, "store");
+    try {
+      fs.mkdirSync(storeRoot, { mode: 0o700 });
+      const installed = installHarnessPackage(
+        {
+          packageRoot: path.join(COMPILED_HARNESS_ROOT, "nemoclaw-openclaw"),
+          sourceIdentity: SOURCE_IDENTITY,
+        },
+        { storeRoot },
+      );
+      const adapter = loadHarnessStartupProfileAdapterHostModule(installed.identity, { storeRoot });
+      const result = adapter.prepareStartupProfile({
+        packageId: installed.identity.id,
+        harnessPackage: installed.identity,
+        phase: "initial",
+        previousDesiredState: null,
+        input: {
+          inference: {
+            selectedProvider: "nvidia-prod",
+            model: "nvidia/test-model",
+            endpointUrl: null,
+            resolvedContextWindow: null,
+            reasoningEnabled: null,
+            reasoningEffort: null,
+            candidates: [
+              {
+                requestedApi: null,
+                routeProvider: "inference",
+                routedBaseUrl: "https://inference.local/v1",
+                api: "openai-completions",
+                primaryModelRef: "inference/nvidia/test-model",
+                compatibility: null,
+              },
+            ],
+          },
+          dashboard: {
+            managed: true,
+            url: "http://127.0.0.1:18789",
+            port: 18_789,
+            bindAddress: null,
+            wslExposure: false,
+            forwarding: { enabled: false, publicPort: null, internalPort: null, tuiEnabled: false },
+          },
+          webSearch: null,
+          tools: { disclosure: "progressive", enabledGateways: [] },
+          messagingPlan: null,
+          approvalMode: "disabled",
+          observabilityEnabled: false,
+          proxy: {
+            managedHost: "host.openshell.internal",
+            managedPort: 3128,
+            hostHttpUrl: null,
+            hostHttpsUrl: null,
+            hostNoProxy: [],
+          },
+          environment: {},
+          corporateCa: { bundleSha256: null },
+          credentialProxyPresent: false,
+        },
+      });
+
+      expect(result).toMatchObject({
+        kind: "prepared",
+        desiredState: {
+          configuration: { agent: "openclaw" },
+          dashboard: { mode: "loopback" },
+        },
+      });
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it.each(COMPILED_PACKAGE_IDS)(
     "loads %s configuration through the same compiled contract",

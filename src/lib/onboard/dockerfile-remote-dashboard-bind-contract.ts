@@ -102,6 +102,19 @@ const CANONICAL_POST_GENERATOR_INSTRUCTION_SHA256 = new Set([
   "3e13d45f89b7bb0f70d4ba2c8007efa787178827ca550f63359d4bab137b5aa0",
   "eb2eacb9252f93219562cf38fb6ecfae385837d03ab8f7542c93fbb8b4688cc5",
   "9c39e3aefbfefb7a48c6ba6879701954ad300f3593d18713063a12056f71af93",
+  // Reviewed package-owned messaging, Fabric, and final metadata instructions.
+  // These are exact normalized instructions: any appended config rewrite still
+  // changes the digest and fails the remote-dashboard preservation contract.
+  "ce861c121aa81bcf33158cfc66847be4e747834a8d9e2cddf8c389b022df7ecb",
+  "489b6454017db70fa555c450d2b74e37720e458d3dc70efb79dbbd0429e24860",
+  "6e42f00b5ddc167106f10035dfc982cd4597fffa64484a7515fdc899fbec754b",
+  "d60732cdc92667514b0a7cb588ec8f4ed3742db645eafeadd2a4513637d3acdf",
+  "82a7051eecccef6dad0323edfd25d3f5367b2930ba775330bbd28315ff1dd894",
+  "2f3e6cddfc2dc3c0e2220551ca364f6ee29fe7e25c3f3fbd502dda56e7caccc8",
+  "796ae482fc004aa70a1a2e9d00a7c0937ef684b96644348527d013bedac49a63",
+  "abfda045af30b4b1b01d151f7b4359fc6148e8e1290baf18c8da2676604a7346",
+  "e44035491cd58ad3456203e0f4a298fd1f5f3fb54c0f6012a3045835c821bdbc",
+  "8c887df24bd240e1beceb2f6e340b3a151512a14465a707a18b7afb083d9037e",
   // COPY --from=openclaw-runtime-payload / /
   // The reviewed scratch payload has no /sandbox/.openclaw content, so this
   // exact late copy preserves the generated remote-dashboard configuration.

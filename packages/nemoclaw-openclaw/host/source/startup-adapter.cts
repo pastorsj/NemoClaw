@@ -310,6 +310,47 @@ function inputModalities(
   return values as readonly ("text" | "image")[];
 }
 
+/** Read the host from the core-produced HTTP URL without relying on VM globals. */
+function dashboardHostname(value: string): string {
+  const schemeEnd = value.indexOf("://");
+  const scheme = schemeEnd < 0 ? "" : value.slice(0, schemeEnd).toLowerCase();
+  if ((scheme !== "http" && scheme !== "https") || schemeEnd + 3 >= value.length) {
+    return fail("dashboard URL is invalid");
+  }
+  const remainder = value.slice(schemeEnd + 3);
+  const authorityEnd = remainder.search(/[/?#]/u);
+  const authority = authorityEnd < 0 ? remainder : remainder.slice(0, authorityEnd);
+  if (authority === "" || authority.includes("@")) return fail("dashboard URL is invalid");
+  const validPort = (raw: string): boolean => {
+    if (!/^[0-9]+$/u.test(raw)) return false;
+    const port = Number(raw);
+    return Number.isSafeInteger(port) && port <= 65_535;
+  };
+
+  if (authority.startsWith("[")) {
+    const bracket = authority.indexOf("]");
+    const suffix = bracket < 0 ? "" : authority.slice(bracket + 1);
+    if (
+      bracket <= 1 ||
+      (suffix !== "" && (!suffix.startsWith(":") || !validPort(suffix.slice(1))))
+    ) {
+      return fail("dashboard URL is invalid");
+    }
+    return authority.slice(0, bracket + 1).toLowerCase();
+  }
+
+  const parts = authority.split(":");
+  if (
+    parts.length > 2 ||
+    parts[0] === "" ||
+    !/^[A-Za-z0-9.-]+$/u.test(parts[0]!) ||
+    (parts.length === 2 && !validPort(parts[1]!))
+  ) {
+    return fail("dashboard URL is invalid");
+  }
+  return parts[0]!.toLowerCase();
+}
+
 function extraAgents(
   request: Parameters<HarnessStartupAdapterModule["prepareStartupProfile"]>[0],
 ): NonNullable<HarnessStartupSettings["configuration"]["extraAgents"]> {
@@ -376,12 +417,7 @@ function prepareStartupProfile(
   }
   const bind = input.dashboard.bindAddress;
   if (bind !== null && bind !== "0.0.0.0") fail("dashboard bind address is invalid");
-  let dashboardHost: string;
-  try {
-    dashboardHost = new URL(input.dashboard.url).hostname;
-  } catch {
-    return fail("dashboard URL is invalid");
-  }
+  const dashboardHost = dashboardHostname(input.dashboard.url);
   const remote =
     bind === "0.0.0.0" ||
     input.dashboard.wslExposure ||

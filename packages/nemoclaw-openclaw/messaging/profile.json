@@ -538,7 +538,8 @@
           "path": "plugins.entries.whatsapp",
           "value": { "enabled": true }
         }
-      ]
+      ],
+      "statePaths": ["whatsapp"]
     },
     "policy": [{ "presetName": "whatsapp", "policyKeys": ["whatsapp"] }],
     "lifecycle": {

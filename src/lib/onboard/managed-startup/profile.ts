@@ -1098,6 +1098,12 @@ function messagingAuthorizedFieldKey(path: readonly string[]): string {
   return JSON.stringify(path);
 }
 
+function managedStartupSettingsPath(path: readonly string[]): readonly string[] {
+  if (path[0] === "desiredState") return path.slice(1);
+  if (path[0] === "packageConfig" && path[1] === "settings") return path.slice(2);
+  return path;
+}
+
 function buildStepPlaceholderKey(path: readonly string[], value: string): string {
   return JSON.stringify([path, value]);
 }
@@ -1578,15 +1584,16 @@ function assertPayloadStructureAndCredentialShapes(root: unknown): void {
 
     if (typeof current.value === "string") {
       observeText(current.value);
+      const settingsPath = managedStartupSettingsPath(current.path);
       if (
-        !isAllowedMessagingRuntimeAliasStringPath(current.path, allowedRuntimeAliasIndexes) &&
+        !isAllowedMessagingRuntimeAliasStringPath(settingsPath, allowedRuntimeAliasIndexes) &&
         !isMessagingCredentialPlaceholder(
-          current.path,
+          settingsPath,
           current.value,
           allowedBuildStepPlaceholders,
           allowedMessagingCredentialFields,
         ) &&
-        !isMessagingCredentialPlaceholderAssignment(selectedAgent, current.path, current.value) &&
+        !isMessagingCredentialPlaceholderAssignment(selectedAgent, settingsPath, current.value) &&
         (valueLooksLikeSecret(current.value) ||
           containsMessagingCredentialPlaceholder(current.value))
       ) {
@@ -1644,22 +1651,23 @@ function assertPayloadStructureAndCredentialShapes(root: unknown): void {
       if ("toJSON" in current.value) {
         invalid("payload must not define a custom JSON serializer");
       }
-      if (isCanonicalMessagingRuntimeEnvAlias(selectedAgent, current.path, current.value)) {
-        allowedRuntimeAliasIndexes.add(current.path[4] as string);
+      const settingsPath = managedStartupSettingsPath(current.path);
+      if (isCanonicalMessagingRuntimeEnvAlias(selectedAgent, settingsPath, current.value)) {
+        allowedRuntimeAliasIndexes.add(settingsPath[4] as string);
       }
-      const messagingPlanSection = current.path[2];
+      const messagingPlanSection = settingsPath[2];
       if (
-        current.path.length === 4 &&
-        current.path[0] === "messaging" &&
-        current.path[1] === "plan" &&
+        settingsPath.length === 4 &&
+        settingsPath[0] === "messaging" &&
+        settingsPath[1] === "plan" &&
         (messagingPlanSection === "buildSteps" || messagingPlanSection === "agentRender") &&
-        JSON_ARRAY_INDEX_SEGMENT_RE.test(current.path[3] ?? "")
+        JSON_ARRAY_INDEX_SEGMENT_RE.test(settingsPath[3] ?? "")
       ) {
         for (const authorization of authorizeMessagingManagedStartupFields(
           current.value,
           messagingPlanSection,
         )) {
-          const authorizedPath = [...current.path, ...authorization.path];
+          const authorizedPath = [...settingsPath, ...authorization.path];
           allowedMessagingCredentialFields.add(messagingAuthorizedFieldKey(authorizedPath));
           if (typeof authorization.value === "string") {
             allowedBuildStepPlaceholders.add(
@@ -1695,18 +1703,19 @@ function assertPayloadStructureAndCredentialShapes(root: unknown): void {
           invalid("payload must contain only JSON data properties");
         }
         const child = descriptor.value;
+        const childSettingsPath = [...settingsPath, key];
         if (
           isCredentialShapedName(key) &&
           !allowedMessagingCredentialFields.has(
-            messagingAuthorizedFieldKey([...current.path, key]),
+            messagingAuthorizedFieldKey(childSettingsPath),
           ) &&
           !isMessagingCredentialPlaceholder(
-            [...current.path, key],
+            childSettingsPath,
             child,
             allowedBuildStepPlaceholders,
             allowedMessagingCredentialFields,
           ) &&
-          !isMessagingPackagePin([...current.path, key], child)
+          !isMessagingPackagePin(childSettingsPath, child)
         ) {
           invalid(
             `payload field ${payloadPath([...current.path, key])} has a credential-shaped field name`,
