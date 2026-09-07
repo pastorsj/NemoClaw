@@ -410,6 +410,7 @@ describe("sandbox create intent machine boundary", () => {
       enabledChannels: [],
       webSearchConfig: braveConfig,
       agent: null,
+      receiptBackedPackage: false,
       requiredBindings: [
         { name: "tm-brave-search", type: "brave", credentialEnv: "BRAVE_API_KEY" },
       ],
@@ -425,6 +426,7 @@ describe("sandbox create intent machine boundary", () => {
       enabledChannels: ["telegram"],
       webSearchConfig: null,
       agent: null,
+      receiptBackedPackage: false,
       requiredBindings: [
         {
           name: "tm-telegram-bridge",

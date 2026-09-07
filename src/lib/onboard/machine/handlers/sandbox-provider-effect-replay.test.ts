@@ -212,6 +212,7 @@ describe("handleSandboxState provider effect replay", () => {
       enabledChannels: ["slack"],
       webSearchConfig: null,
       agent: null,
+      receiptBackedPackage: false,
       requiredBindings: slackProviderBindings,
     });
     expect(calls.createSandbox).toHaveBeenCalledTimes(1);
@@ -300,6 +301,7 @@ describe("handleSandboxState provider effect replay", () => {
       enabledChannels: [],
       webSearchConfig: { fetchEnabled: true, provider: "tavily" },
       agent: null,
+      receiptBackedPackage: false,
       requiredBindings: [tavilyBinding],
     });
     expect(calls.createSandbox).toHaveBeenCalledTimes(1);

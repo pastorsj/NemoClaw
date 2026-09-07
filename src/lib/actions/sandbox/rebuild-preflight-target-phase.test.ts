@@ -149,16 +149,18 @@ describe("receipt-backed rebuild messaging policy authority", () => {
       result: {
         status: 0,
         stdout:
-          "Name: alpha-telegram-bridge\nType: nemoclaw-mcp-v1\nCredential keys: TELEGRAM_BOT_TOKEN\nConfig keys: <none>\n",
+          "Id: telegram-provider-id\nName: alpha-telegram-bridge\nType: nemoclaw-mcp-v1\nCredential keys: TELEGRAM_BOT_TOKEN\nConfig keys: <none>\n",
       },
       hostToken: undefined,
       expected: null,
+      expectedProbeCount: 2,
     },
     {
       name: "missing",
       result: { status: 1, stderr: "provider 'alpha-telegram-bridge' not found" },
       hostToken: undefined,
       expected: "was not found",
+      expectedProbeCount: 1,
     },
     {
       name: "collision",
@@ -169,18 +171,21 @@ describe("receipt-backed rebuild messaging policy authority", () => {
       },
       hostToken: undefined,
       expected: "does not match its exact credential binding",
+      expectedProbeCount: 1,
     },
     {
       name: "indeterminate",
       result: { status: 1, stderr: "gateway unavailable" },
       hostToken: undefined,
       expected: "could not be inspected",
+      expectedProbeCount: 1,
     },
     {
       name: "repairable missing",
       result: { status: 1, stderr: "provider 'alpha-telegram-bridge' not found" },
       hostToken: "123456:replacement-telegram-token",
       expected: null,
+      expectedProbeCount: 1,
     },
     {
       name: "colliding with a recoverable credential",
@@ -191,16 +196,18 @@ describe("receipt-backed rebuild messaging policy authority", () => {
       },
       hostToken: "123456:replacement-telegram-token",
       expected: "does not match its exact credential binding",
+      expectedProbeCount: 1,
     },
     {
       name: "indeterminate with a recoverable credential",
       result: { status: 1, stderr: "gateway unavailable" },
       hostToken: "123456:replacement-telegram-token",
       expected: "could not be inspected",
+      expectedProbeCount: 1,
     },
   ])("classifies an $name receipt messaging provider before mutation", (testCase) => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", testCase.hostToken);
-    mocks.runOpenshell.mockReturnValueOnce(testCase.result);
+    mocks.runOpenshell.mockReturnValue(testCase.result);
     const definition = makeAgent({ name: "future-harness" });
     const authority = {
       recordedAgent: "future-harness",
@@ -244,6 +251,15 @@ describe("receipt-backed rebuild messaging policy authority", () => {
           credentialAvailable: true,
         },
       ],
+      providerReceipts: [
+        {
+          channelId: "telegram",
+          providerName: "alpha-telegram-bridge",
+          providerId: "telegram-provider-id",
+          createdByNemoClaw: true,
+          attachmentAddedByNemoClaw: true,
+        },
+      ],
       networkPolicy: { presets: [], entries: [] },
       agentRender: [],
       buildSteps: [],
@@ -255,7 +271,7 @@ describe("receipt-backed rebuild messaging policy authority", () => {
     testCase.expected
       ? expect(preflight).toThrow(testCase.expected)
       : expect(preflight).not.toThrow();
-    expect(mocks.runOpenshell).toHaveBeenCalledOnce();
+    expect(mocks.runOpenshell).toHaveBeenCalledTimes(testCase.expectedProbeCount);
   });
 
   it.each([

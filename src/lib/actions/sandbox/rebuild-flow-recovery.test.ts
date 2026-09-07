@@ -574,11 +574,33 @@ describe("rebuildSandbox flow: recovery", () => {
   });
 
   it("starts the active Teams host forward after a successful rebuild", async () => {
-    const plan = makeActiveTeamsMessagingPlan();
+    const providerOutput = [
+      "Id: teams-provider-id",
+      "Name: alpha-teams-bridge",
+      "Type: nemoclaw-mcp-v1",
+      "Credential keys: MSTEAMS_APP_PASSWORD",
+      "Config keys: <none>",
+    ].join("\n");
+    const plan = {
+      ...makeActiveTeamsMessagingPlan(),
+      providerReceipts: [
+        {
+          channelId: "teams",
+          providerName: "alpha-teams-bridge",
+          providerId: "teams-provider-id",
+          createdByNemoClaw: true,
+          attachmentAddedByNemoClaw: true,
+        },
+      ],
+    };
     const harness = createRebuildFlowHarness({
       applyPreset: () => true,
       buildMessagingRebuildPlan: () => plan,
       receiptMessagingChannelIds: ["teams"],
+      runOpenshell: (args) =>
+        args.join(" ") === "provider get alpha-teams-bridge"
+          ? { status: 0, output: providerOutput, stdout: providerOutput, stderr: "" }
+          : undefined,
     });
 
     await expect(

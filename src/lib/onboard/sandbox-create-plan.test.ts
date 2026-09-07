@@ -488,6 +488,7 @@ describe("resolveSandboxCreateIntent", () => {
         replaceExisting: true,
         allowedSandboxes: ["sandbox"],
         requireExactBindings: false,
+        requireOwnedExistingProvider: false,
       });
       plan.initialSandboxPolicy.cleanup?.();
     },
@@ -593,6 +594,7 @@ describe("resolveSandboxCreateIntent", () => {
       replaceExisting: true,
       allowedSandboxes: ["sandbox"],
       requireExactBindings: false,
+      requireOwnedExistingProvider: false,
     });
     expect(intent.reusableMessagingProviders).toEqual(["sandbox-discord-bridge"]);
     expect(plan.messagingProviders).toEqual(["sandbox-discord-bridge"]);
@@ -698,6 +700,7 @@ describe("resolveSandboxCreateIntent", () => {
           replaceExisting: true,
           allowedSandboxes: ["sandbox"],
           requireExactBindings: false,
+          requireOwnedExistingProvider: false,
         });
         return ["sandbox-telegram-bridge"];
       }),

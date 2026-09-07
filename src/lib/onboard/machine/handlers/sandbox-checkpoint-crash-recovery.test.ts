@@ -122,6 +122,7 @@ function fakeGatewayRunOpenshell() {
       ? {
           status: 0,
           stdout: [
+            `Id: ${name}-id`,
             `Name: ${name}`,
             `Type: ${provider.type}`,
             `Credential keys: ${provider.credentialEnv}`,
