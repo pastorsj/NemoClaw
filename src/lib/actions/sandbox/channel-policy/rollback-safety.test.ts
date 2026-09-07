@@ -466,8 +466,7 @@ describe("receipt-backed add rollback safety", () => {
                   targetSandbox: sandboxName,
                   targetGateway: "nemoclaw",
                   expectedProviderIds: { [providerName]: `${providerName}-id` },
-                  detachOnlyProviderNames:
-                    expectedProviderRollback === "detach" ? [providerName] : [],
+                  detachOnlyProviderNames: [],
                 },
               ];
         expect(observedProviderCleanup).toEqual(expectedProviderCleanup);

@@ -12,7 +12,7 @@ import {
 } from "../../../../test/helpers/rebuild-post-restore-fixture";
 import * as mutableConfigPerms from "../../sandbox/mutable-config-perms";
 import { runRebuildPostRestorePhase } from "./rebuild-post-restore-phase";
-import { installRebuildPostRestoreTestHooks } from "./rebuild-support";
+import { installRebuildPostRestoreTestHooks } from "../../../../test/helpers/rebuild-hooks";
 
 describe("rebuilt runtime posture", () => {
   let agentName: RebuildPostRestoreAgent;

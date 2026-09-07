@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+export type McpScenarioAgent = "openclaw" | "hermes" | "langchain-deepagents-code";
+
 export function buildSecretAbsenceProbe(paths: string[], secrets: string[]): string {
   return [
     "set -eu",

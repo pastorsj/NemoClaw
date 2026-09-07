@@ -120,7 +120,7 @@ async function onboardAgent(
   cleanup: CleanupRegistry,
   endpointUrl: string,
   options: {
-    agent: McpAgent;
+    agent: mcpScenario.McpScenarioAgent;
     sandboxName: string;
     artifactName: string;
     envOverlay?: NodeJS.ProcessEnv;
@@ -409,7 +409,7 @@ async function removeBridgeAndAssertEmpty(
   host: HostCliClient,
   sandbox: SandboxClient,
   options: {
-    agent: McpAgent;
+    agent: mcpScenario.McpScenarioAgent;
     adapter: McpAdapter;
     sandboxName: string;
     artifactPrefix: string;
@@ -544,7 +544,7 @@ async function assertRealAdapterToolCall(
   sandbox: SandboxClient,
   fakeMcp: Awaited<ReturnType<typeof startFakeMcpHttpsServer>>,
   options: {
-    agent: McpAgent;
+    agent: mcpScenario.McpScenarioAgent;
     sandboxName: string;
     resultToken: string;
     artifactName: string;

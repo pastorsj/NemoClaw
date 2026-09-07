@@ -3,29 +3,24 @@
 
 import { afterEach, beforeEach, vi } from "vitest";
 
-import {
-  createPostRestoreAgentAuthority,
-  createPostRestoreOnboardSession,
-  createPostRestoreRegistryEntry,
-} from "../../../../test/helpers/rebuild-post-restore-fixture";
-import * as sandboxAgent from "../../onboard/sandbox-agent";
-import * as mutableConfigPerms from "../../sandbox/mutable-config-perms";
-import * as onboardSession from "../../state/onboard-session";
-import * as registry from "../../state/registry";
-import * as sandboxVersion from "../../sandbox/version";
-import * as messagingHostForward from "./messaging-host-forward-lifecycle";
-import * as processRecovery from "./process-recovery";
-import * as rebuildConfigHash from "./rebuild-config-hash";
-import * as rebuildHermesPostRestore from "./rebuild-hermes-post-restore";
-import * as rebuildMcp from "./rebuild-mcp-phase";
-import * as rebuildMessaging from "./rebuild-messaging-phase";
-import * as sessionModels from "./reconcile-session-models";
-import * as restoredGatewayPairing from "./restore-gateway-pairing";
+import * as sandboxAgent from "../../src/lib/onboard/sandbox-agent";
+import * as mutableConfigPerms from "../../src/lib/sandbox/mutable-config-perms";
+import * as onboardSession from "../../src/lib/state/onboard-session";
+import * as registry from "../../src/lib/state/registry";
+import * as sandboxVersion from "../../src/lib/sandbox/version";
+import * as messagingHostForward from "../../src/lib/actions/sandbox/messaging-host-forward-lifecycle";
+import * as processRecovery from "../../src/lib/actions/sandbox/process-recovery";
+import * as rebuildConfigHash from "../../src/lib/actions/sandbox/rebuild-config-hash";
+import * as rebuildHermesPostRestore from "../../src/lib/actions/sandbox/rebuild-hermes-post-restore";
+import * as rebuildMcp from "../../src/lib/actions/sandbox/rebuild-mcp-phase";
+import * as rebuildMessaging from "../../src/lib/actions/sandbox/rebuild-messaging-phase";
+import * as sessionModels from "../../src/lib/actions/sandbox/reconcile-session-models";
+import * as restoredGatewayPairing from "../../src/lib/actions/sandbox/restore-gateway-pairing";
 
 interface RebuildPostRestoreTestContext {
-  readonly currentAgentAuthority: () => ReturnType<typeof createPostRestoreAgentAuthority>;
-  readonly currentOnboardSession: () => ReturnType<typeof createPostRestoreOnboardSession>;
-  readonly currentRegistryEntry: () => ReturnType<typeof createPostRestoreRegistryEntry>;
+  readonly currentAgentAuthority: () => ReturnType<typeof sandboxAgent.resolveSandboxAgent>;
+  readonly currentOnboardSession: () => ReturnType<typeof onboardSession.loadSession>;
+  readonly currentRegistryEntry: () => ReturnType<typeof registry.getSandbox>;
   readonly recordOrder: (event: string) => void;
   readonly reset: () => void;
 }

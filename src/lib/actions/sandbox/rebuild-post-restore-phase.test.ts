@@ -25,7 +25,7 @@ import {
   createPostRestoreRegistryEntry,
   type RebuildPostRestoreAgent,
 } from "../../../../test/helpers/rebuild-post-restore-fixture";
-import { installRebuildPostRestoreTestHooks } from "./rebuild-support";
+import { installRebuildPostRestoreTestHooks } from "../../../../test/helpers/rebuild-hooks";
 
 describe("rebuild post-restore phase", () => {
   let agentName: RebuildPostRestoreAgent;
