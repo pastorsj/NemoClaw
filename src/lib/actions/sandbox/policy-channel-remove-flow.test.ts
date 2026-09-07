@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } fr
 
 import * as openshellRuntime from "../../adapters/openshell/runtime";
 import * as defs from "../../agent/defs";
+import * as gatewayRuntime from "../../gateway-runtime-action";
 import {
   createBuiltInChannelManifestRegistry,
   createBuiltInMessagingHookRegistry,
@@ -126,6 +127,18 @@ describe("policy channel remove/enable flows", () => {
   });
 
   it("does not clean manifest state for an unsupported sandbox agent", async () => {
+    const missingGateway = {
+      state: "missing_named",
+      status: "",
+      gatewayInfo: "",
+      activeGateway: null,
+    } as const;
+    vi.spyOn(gatewayRuntime, "recoverNamedGatewayRuntime").mockResolvedValue({
+      recovered: false,
+      before: missingGateway,
+      after: missingGateway,
+      attempted: false,
+    });
     vi.spyOn(defs, "loadAgent").mockReturnValue({
       name: "custom-agent",
       configPaths: { dir: "/sandbox/.custom-agent" },

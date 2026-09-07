@@ -317,8 +317,7 @@ describe("agent base image provisioning", { timeout: testTimeout(60_000) }, () =
       write("host/messaging-adapter.cts", TEST_MESSAGING_ADAPTER_SOURCE);
       write("host/startup-adapter.cts", TEST_STARTUP_ADAPTER_SOURCE);
 
-      let sandboxContext: string | null = null;
-      let baseContext: string | null = null;
+      let buildContext: string | null = null;
       try {
         materializeHarnessPackageArtifact(sourceRoot, artifactRoot);
         const agent = makeAgent({
@@ -330,34 +329,24 @@ describe("agent base image provisioning", { timeout: testTimeout(60_000) }, () =
           dockerfilePath: path.join(artifactRoot, "Dockerfile"),
           dockerfileBasePath: path.join(artifactRoot, "Dockerfile.base"),
         });
-        const stagedSandbox = stageAgentComposedBuildContext(
-          agent,
-          agent.dockerfilePath!,
-          "Dockerfile",
+        const staged = stageAgentComposedBuildContext(agent, agent.dockerfilePath!, "Dockerfile");
+        buildContext = staged.buildCtx;
+        [path.join(artifactRoot, "Dockerfile"), path.join(artifactRoot, "Dockerfile.base")].forEach(
+          (dockerfilePath) => {
+            expect(missingDockerfileContextSources(dockerfilePath, staged.buildCtx)).toEqual([]);
+            expect(
+              fs
+                .readdirSync(path.join(staged.buildCtx, "packages"))
+                .filter((entry) => entry.startsWith("nemoclaw-"))
+                .sort(),
+            ).toEqual(["nemoclaw-context-probe", "nemoclaw-fabric"]);
+            expect(fs.existsSync(path.join(staged.buildCtx, "packages", "nemoclaw-openclaw"))).toBe(
+              false,
+            );
+          },
         );
-        sandboxContext = stagedSandbox.buildCtx;
-        const stagedBase = stageAgentComposedBuildContext(
-          agent,
-          agent.dockerfileBasePath!,
-          "Dockerfile.base",
-        );
-        baseContext = stagedBase.buildCtx;
-        [stagedSandbox, stagedBase].forEach((staged) => {
-          expect(missingDockerfileContextSources(staged.stagedDockerfile, staged.buildCtx)).toEqual(
-            [],
-          );
-          expect(
-            fs
-              .readdirSync(path.join(staged.buildCtx, "packages"))
-              .filter((entry) => entry.startsWith("nemoclaw-"))
-              .sort(),
-          ).toEqual(["nemoclaw-context-probe", "nemoclaw-fabric"]);
-          expect(fs.existsSync(path.join(staged.buildCtx, "packages", "nemoclaw-openclaw"))).toBe(
-            false,
-          );
-        });
       } finally {
-        removeFixtureDirectories([sandboxContext, baseContext, root]);
+        removeFixtureDirectories([buildContext, root]);
       }
     },
     testTimeout(60_000),
@@ -367,7 +356,7 @@ describe("agent base image provisioning", { timeout: testTimeout(60_000) }, () =
     "resolves every Dockerfile COPY source for each materialized harness package",
     () => {
       const root = fs.realpathSync(tmpDir());
-      const stagedContexts: string[] = [];
+      let buildContext: string | null = null;
       const packageIds = [
         "openclaw",
         "hermes",
@@ -377,7 +366,7 @@ describe("agent base image provisioning", { timeout: testTimeout(60_000) }, () =
         "deepseek-harness",
       ] as const;
       try {
-        packageIds.forEach((packageId) => {
+        const materializePackage = (packageId: (typeof packageIds)[number]) => {
           const sourceRoot = path.resolve(
             import.meta.dirname,
             `../../../packages/nemoclaw-${packageId}`,
@@ -393,32 +382,66 @@ describe("agent base image provisioning", { timeout: testTimeout(60_000) }, () =
             dockerfilePath: path.join(artifactRoot, "Dockerfile"),
             dockerfileBasePath: path.join(artifactRoot, "Dockerfile.base"),
           });
+          return { agent, artifactRoot, packageId };
+        };
+        const expectPackageSourcesResolve = (
+          packageId: (typeof packageIds)[number],
+          artifactRoot: string,
+          sharedBuildContext: string,
+        ) => {
           (["Dockerfile", "Dockerfile.base"] as const).forEach((dockerfileName) => {
-            const staged = stageAgentComposedBuildContext(
-              agent,
-              path.join(artifactRoot, dockerfileName),
-              dockerfileName,
-            );
-            stagedContexts.push(staged.buildCtx);
             expect(
-              missingDockerfileContextSources(staged.stagedDockerfile, staged.buildCtx),
+              missingDockerfileContextSources(
+                path.join(artifactRoot, dockerfileName),
+                sharedBuildContext,
+              ),
               `${packageId}/${dockerfileName}`,
             ).toEqual([]);
             const stagedHarnesses = fs
-              .readdirSync(path.join(staged.buildCtx, "packages"), { withFileTypes: true })
+              .readdirSync(path.join(sharedBuildContext, "packages"), { withFileTypes: true })
               .filter((entry) => entry.isDirectory() && entry.name.startsWith("nemoclaw-"))
               .map((entry) => entry.name)
               .sort();
             expect(stagedHarnesses).toEqual([`nemoclaw-${packageId}`, "nemoclaw-fabric"].sort());
           });
+        };
+        const firstPackage = materializePackage(packageIds[0]);
+        const staged = stageAgentComposedBuildContext(
+          firstPackage.agent,
+          path.join(firstPackage.artifactRoot, "Dockerfile"),
+          "Dockerfile",
+        );
+        buildContext = staged.buildCtx;
+        let currentStagedPackageRoot = path.join(
+          staged.buildCtx,
+          "packages",
+          `nemoclaw-${firstPackage.packageId}`,
+        );
+        expectPackageSourcesResolve(
+          firstPackage.packageId,
+          firstPackage.artifactRoot,
+          staged.buildCtx,
+        );
+        packageIds.slice(1).forEach((packageId) => {
+          const packageFixture = materializePackage(packageId);
+          fs.rmSync(currentStagedPackageRoot, { recursive: true, force: true });
+          currentStagedPackageRoot = path.join(
+            staged.buildCtx,
+            "packages",
+            `nemoclaw-${packageId}`,
+          );
+          fs.cpSync(packageFixture.artifactRoot, currentStagedPackageRoot, {
+            mode: fs.constants.COPYFILE_FICLONE,
+            recursive: true,
+          });
+          expectPackageSourcesResolve(packageId, packageFixture.artifactRoot, staged.buildCtx);
         });
       } finally {
-        removeFixtureDirectories([...stagedContexts, root]);
+        removeFixtureDirectories([buildContext, root]);
       }
     },
     testTimeout(120_000),
   );
-
   it(
     "stages exact receipt-selected package bytes and detects later digest drift",
     () => {
