@@ -8,6 +8,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { installHarnessPackage as installHarnessPackageIntoStore } from "../../../src/lib/agent-runtime/package/install.ts";
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../helpers/adapter-fixtures.ts";
 import type { HarnessPackageIdentity } from "../fixtures/harness-package.ts";
 import {
   deriveHarnessLifecycleVersion,
@@ -48,7 +53,20 @@ function createPackageArtifact(packageVersion = "1.2.3", temporaryRoot = os.tmpd
   const parent = fs.mkdtempSync(path.join(temporaryRoot, "nemoclaw-harness-lifecycle-"));
   temporaryDirectories.push(parent);
   const packageRoot = path.join(parent, "source");
+  fs.mkdirSync(path.join(packageRoot, "host"), { recursive: true });
   fs.mkdirSync(path.join(packageRoot, "runtime"), { recursive: true });
+  fs.writeFileSync(
+    path.join(packageRoot, "host", "config-adapter.cts"),
+    TEST_CONFIG_ADAPTER_SOURCE,
+  );
+  fs.writeFileSync(
+    path.join(packageRoot, "host", "messaging-adapter.cts"),
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  fs.writeFileSync(
+    path.join(packageRoot, "host", "startup-adapter.cts"),
+    TEST_STARTUP_ADAPTER_SOURCE,
+  );
   fs.writeFileSync(
     path.join(packageRoot, "nemoclaw-package.json"),
     `${JSON.stringify({

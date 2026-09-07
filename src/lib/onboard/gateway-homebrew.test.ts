@@ -21,7 +21,18 @@ describe("Homebrew gateway service", () => {
         ? brewResult(
             0,
             "",
-            JSON.stringify({ formulae: [{ name: "openshell", tap: "nvidia/openshell" }] }),
+            JSON.stringify({
+              formulae: [
+                {
+                  installed: [{ version: "0.0.106" }],
+                  name: "openshell",
+                  service: {
+                    run: "/opt/homebrew/opt/openshell/libexec/openshell-gateway-homebrew-service",
+                  },
+                  tap: "nvidia/openshell",
+                },
+              ],
+            }),
           )
         : brewResult();
     });
@@ -43,6 +54,6 @@ describe("Homebrew gateway service", () => {
         validatePortOwnerForServiceStart: () => events.push("validate-port"),
       }),
     ).toThrow("Use a non-default NEMOCLAW_GATEWAY_PORT for an isolated HOME");
-    expect(events).toEqual(["list --formula openshell", "info --json=v2 openshell"]);
+    expect(events).toEqual(["info --json=v2 openshell"]);
   });
 });
