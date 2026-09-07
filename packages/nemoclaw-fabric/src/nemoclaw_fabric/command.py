@@ -26,9 +26,12 @@ from nemoclaw_fabric.config import (
     load_fabric_config,
 )
 from nemoclaw_fabric.output import (
+    MAX_OUTPUT_VALUE_BYTES,
+    OutputNormalizationLimitError,
     collect_secret_values,
     error_payload,
     redact_diagnostic_text,
+    redact_output_value,
     render_plain_result,
     serialize_json_output,
 )
@@ -45,7 +48,7 @@ EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 EXIT_USAGE = 2
 MAX_PROMPT_BYTES = 1024 * 1024
-MAX_OUTPUT_BYTES = 1024 * 1024
+MAX_OUTPUT_BYTES = MAX_OUTPUT_VALUE_BYTES
 
 
 class PromptSourceError(ValueError):
@@ -184,13 +187,24 @@ def _require_bounded_output(text: str) -> str:
 
 
 def _doctor_plain_text(report: Any, secret_values: Sequence[str]) -> str:
-    lines = [f"Fabric doctor: {report.status}"]
-    for check in report.checks:
-        if check.status not in {"warn", "fail"}:
+    normalized = redact_output_value(_report_mapping(report), secret_values)
+    if not isinstance(normalized, Mapping):
+        raise OutputNormalizationLimitError(
+            "the Fabric doctor result must contain an output mapping"
+        )
+    lines = [f"Fabric doctor: {normalized.get('status', 'unknown')}"]
+    checks = normalized.get("checks", ())
+    if not isinstance(checks, Sequence) or isinstance(checks, (str, bytes, bytearray)):
+        raise OutputNormalizationLimitError(
+            "the Fabric doctor checks must contain an output sequence"
+        )
+    for check in checks:
+        if not isinstance(check, Mapping) or check.get("status") not in {"warn", "fail"}:
             continue
-        name = redact_diagnostic_text(check.name, secret_values)
-        message = redact_diagnostic_text(check.message, secret_values)
-        lines.append(f"{check.status}: {name}: {message}")
+        lines.append(
+            f"{check['status']}: {check.get('name', 'adapter')}: "
+            f"{check.get('message', 'check failed')}"
+        )
     return "\n".join(lines)
 
 
@@ -280,7 +294,7 @@ def _write_command_error(
         stage, code, exit_code = "input", "invalid_arguments", EXIT_USAGE
     elif isinstance(error, FabricInvocationUnavailableError):
         stage, code, exit_code = "config", "unsupported_configuration", EXIT_USAGE
-    elif isinstance(error, FabricOutputLimitError):
+    elif isinstance(error, (FabricOutputLimitError, OutputNormalizationLimitError)):
         stage, code, exit_code = "output", "output_limit_exceeded", EXIT_FAILURE
     elif isinstance(error, FabricConfigLoadError):
         stage, code, exit_code = "config", "invalid_config", EXIT_USAGE
@@ -293,16 +307,19 @@ def _write_command_error(
     code = redact_diagnostic_text(code, hidden_values)
     message = redact_diagnostic_text(str(error) or error.__class__.__name__, hidden_values)
     if json_output:
-        rendered = serialize_json_output(
-            error_payload(
-                stage=stage,
-                code=code,
-                message=message,
-                secret_values=hidden_values,
-            ),
-            hidden_values,
-        )
-        if len(rendered.encode("utf-8")) + 1 > MAX_OUTPUT_BYTES:
+        try:
+            rendered = serialize_json_output(
+                error_payload(
+                    stage=stage,
+                    code=code,
+                    message=message,
+                    secret_values=hidden_values,
+                ),
+                hidden_values,
+            )
+        except OutputNormalizationLimitError:
+            rendered = ""
+        if not rendered or len(rendered.encode("utf-8")) + 1 > MAX_OUTPUT_BYTES:
             rendered = serialize_json_output(
                 error_payload(
                     stage="output",
@@ -438,7 +455,7 @@ def run_cli(
             else:
                 rendered = _doctor_plain_text(error.report, secret_values)
                 _write_line(error_stream, _require_bounded_output(rendered))
-        except FabricOutputLimitError as output_error:
+        except (FabricOutputLimitError, OutputNormalizationLimitError) as output_error:
             return _write_command_error(
                 error=output_error,
                 json_output=bool(getattr(args, "json", False)),
@@ -469,6 +486,7 @@ def run_cli(
         FabricConfigLoadError,
         FabricInvocationUnavailableError,
         FabricOutputLimitError,
+        OutputNormalizationLimitError,
         FabricError,
     ) as error:
         return _write_command_error(

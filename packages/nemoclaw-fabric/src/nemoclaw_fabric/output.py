@@ -8,12 +8,16 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
 
 REDACTED = "<redacted>"
+MAX_OUTPUT_VALUE_BYTES = 1024 * 1024
+MAX_OUTPUT_VALUE_DEPTH = 64
+MAX_OUTPUT_VALUE_NODES = 10_000
 _SENSITIVE_NAME = re.compile(
     r"(?:^|_)(?:API_?KEY|KEY|TOKEN|SECRET|CREDENTIAL|PASSWORD|PASSWD|PASS)(?:$|_)",
     re.IGNORECASE,
@@ -100,6 +104,56 @@ _CREDENTIAL_PATTERNS = (
         r"[\"']?[^\s'\"]{10,}"
     ),
 )
+
+
+class OutputNormalizationLimitError(RuntimeError):
+    """A Fabric result cannot be normalized within the public output budget."""
+
+
+@dataclass(slots=True)
+class OutputTraversalBudget:
+    """Bound recursive work before a package-authored value reaches JSON encoding."""
+
+    nodes: int = 0
+    text_bytes: int = 0
+    active_containers: set[int] = field(default_factory=set)
+
+    def check_depth(self, depth: int) -> None:
+        if depth > MAX_OUTPUT_VALUE_DEPTH:
+            raise OutputNormalizationLimitError(
+                f"the Fabric result exceeds the {MAX_OUTPUT_VALUE_DEPTH}-level output limit"
+            )
+
+    def count_node(self) -> None:
+        self.nodes += 1
+        if self.nodes > MAX_OUTPUT_VALUE_NODES:
+            raise OutputNormalizationLimitError(
+                f"the Fabric result exceeds the {MAX_OUTPUT_VALUE_NODES}-node output limit"
+            )
+
+    def count_text(self, text: str) -> None:
+        remaining = MAX_OUTPUT_VALUE_BYTES - self.text_bytes
+        if len(text) > remaining:
+            raise OutputNormalizationLimitError(
+                f"the Fabric result exceeds the {MAX_OUTPUT_VALUE_BYTES}-byte output limit"
+            )
+        self.text_bytes += len(text.encode("utf-8"))
+        if self.text_bytes > MAX_OUTPUT_VALUE_BYTES:
+            raise OutputNormalizationLimitError(
+                f"the Fabric result exceeds the {MAX_OUTPUT_VALUE_BYTES}-byte output limit"
+            )
+
+    def enter_container(self, value: Any) -> int:
+        identity = id(value)
+        if identity in self.active_containers:
+            raise OutputNormalizationLimitError(
+                "the Fabric result contains a cyclic output value"
+            )
+        self.active_containers.add(identity)
+        return identity
+
+    def leave_container(self, identity: int) -> None:
+        self.active_containers.remove(identity)
 
 
 def normalize_field_name(field_name: str) -> str:
@@ -217,31 +271,83 @@ def redact_diagnostic_text(text: str, secret_values: Sequence[str] = ()) -> str:
     return redacted
 
 
-def redact_output_value(value: Any, secret_values: Sequence[str] = ()) -> Any:
-    """Convert a Fabric mapping to JSON values while redacting every string."""
-
+def _redact_output_value(
+    value: Any,
+    secret_values: Sequence[str],
+    *,
+    budget: OutputTraversalBudget,
+    depth: int,
+) -> Any:
+    budget.check_depth(depth)
+    budget.count_node()
     if value is None or isinstance(value, (bool, int, float)):
+        budget.count_text(str(value))
         return value
-    if isinstance(value, str):
-        return redact_diagnostic_text(value, secret_values)
-    if isinstance(value, Path):
-        return redact_diagnostic_text(str(value), secret_values)
+    if isinstance(value, (str, Path)):
+        text = str(value)
+        budget.count_text(text)
+        return redact_diagnostic_text(text, secret_values)
     if isinstance(value, Mapping):
-        redacted_mapping: dict[str, Any] = {}
-        for key, item in value.items():
-            key_text = str(key)
-            redacted_key = redact_diagnostic_text(key_text, secret_values)
-            redacted_mapping[redacted_key] = (
-                REDACTED
-                if field_name_looks_like_credential(key_text)
-                else redact_output_value(item, secret_values)
-            )
-        return redacted_mapping
+        identity = budget.enter_container(value)
+        try:
+            redacted_mapping: dict[str, Any] = {}
+            for key, item in value.items():
+                budget.count_node()
+                key_text = str(key)
+                budget.count_text(key_text)
+                redacted_key = redact_diagnostic_text(key_text, secret_values)
+                if field_name_looks_like_credential(key_text):
+                    budget.count_text(REDACTED)
+                    redacted_mapping[redacted_key] = REDACTED
+                else:
+                    redacted_mapping[redacted_key] = _redact_output_value(
+                        item,
+                        secret_values,
+                        budget=budget,
+                        depth=depth + 1,
+                    )
+            return redacted_mapping
+        finally:
+            budget.leave_container(identity)
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [redact_output_value(item, secret_values) for item in value]
+        identity = budget.enter_container(value)
+        try:
+            return [
+                _redact_output_value(
+                    item,
+                    secret_values,
+                    budget=budget,
+                    depth=depth + 1,
+                )
+                for item in value
+            ]
+        finally:
+            budget.leave_container(identity)
     if hasattr(value, "to_mapping"):
-        return redact_output_value(value.to_mapping(), secret_values)
-    return redact_diagnostic_text(str(value), secret_values)
+        identity = budget.enter_container(value)
+        try:
+            return _redact_output_value(
+                value.to_mapping(),
+                secret_values,
+                budget=budget,
+                depth=depth + 1,
+            )
+        finally:
+            budget.leave_container(identity)
+    text = str(value)
+    budget.count_text(text)
+    return redact_diagnostic_text(text, secret_values)
+
+
+def redact_output_value(value: Any, secret_values: Sequence[str] = ()) -> Any:
+    """Normalize and redact one Fabric value within finite public output limits."""
+
+    return _redact_output_value(
+        value,
+        secret_values,
+        budget=OutputTraversalBudget(),
+        depth=0,
+    )
 
 
 def serialize_json_output(value: Any, secret_values: Sequence[str] = ()) -> str:
@@ -262,7 +368,9 @@ def render_plain_result(result: Any, secret_values: Sequence[str] = ()) -> str:
     response = output.get("response") if isinstance(output, Mapping) else None
     selected = response if response is not None else output
     if isinstance(selected, str):
-        return redact_diagnostic_text(selected, secret_values)
+        rendered = redact_output_value(selected, secret_values)
+        assert isinstance(rendered, str)
+        return rendered
     return serialize_json_output(selected, secret_values)
 
 

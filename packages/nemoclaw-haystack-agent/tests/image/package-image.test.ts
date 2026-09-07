@@ -77,4 +77,23 @@ describe("Haystack Agent POC image", () => {
     expect(dockerfile).toContain(pinnedCurl);
     expect(dockerfile).toContain("test -x /usr/bin/curl");
   });
+
+  it("implements the generic source-build startup boundary", () => {
+    const dockerfile = fs.readFileSync(path.join(PACKAGE_ROOT, "Dockerfile"), "utf8");
+    const start = fs.readFileSync(path.join(PACKAGE_ROOT, "start.sh"), "utf8");
+
+    expect(dockerfile).toMatch(/^ARG NEMOCLAW_CORPORATE_CA_B64=$/mu);
+    expect(dockerfile).toContain("ARG NEMOCLAW_BUILD_ID=default");
+    expect(dockerfile).toContain("NEMOCLAW_BUILD_ID=${NEMOCLAW_BUILD_ID}");
+    expect(dockerfile).toContain("/usr/local/share/nemoclaw/haystack-proxy-host");
+    expect(dockerfile).toContain("/usr/local/share/nemoclaw/haystack-proxy-port");
+    expect(dockerfile).toContain("update-ca-certificates");
+    expect(dockerfile).toMatch(
+      /ARG NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER=root[\s\S]*USER \$\{NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER\}\nENTRYPOINT \["\/usr\/local\/bin\/nemoclaw-start"\]/u,
+    );
+    expect(start).toContain("setpriv --reuid=sandbox --regid=sandbox --init-groups");
+    expect(start).toContain(
+      'readonly MANAGED_PROXY_HOST_FILE="/usr/local/share/nemoclaw/haystack-proxy-host"',
+    );
+  });
 });

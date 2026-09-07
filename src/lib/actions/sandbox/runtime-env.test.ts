@@ -13,10 +13,10 @@ import {
 } from "./runtime-env";
 
 const BASH_WRAPPER_ARGV_PREFIX = ["--noprofile", "--norc", "-p", "-c"] as const;
-const RUNTIME_ENV_EXEC_SCRIPT =
-  'if [ -r "/tmp/nemoclaw-proxy-env.sh" ]; then builtin source "/tmp/nemoclaw-proxy-env.sh" || exit $?; fi; builtin unset OPENCLAW_GATEWAY_TOKEN; builtin exec -- "$@"';
-const OPENCLAW_AGENT_RUNTIME_ENV_EXEC_SCRIPT =
-  'if [ -r "/tmp/nemoclaw-proxy-env.sh" ]; then builtin source "/tmp/nemoclaw-proxy-env.sh" || exit $?; fi; builtin unset OPENCLAW_GATEWAY_TOKEN; builtin export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--disable-warning=UNDICI-EHPA"; builtin exec -- "$@"';
+const GATEWAY_CREDENTIAL_SCRUB =
+  'while IFS= read -r _nemoclaw_runtime_env_name; do case "$_nemoclaw_runtime_env_name" in GATEWAY_TOKEN|GATEWAY_PASSWORD|GATEWAY_SECRET|GATEWAY_CREDENTIAL|*_GATEWAY_TOKEN|*_GATEWAY_PASSWORD|*_GATEWAY_SECRET|*_GATEWAY_CREDENTIAL) builtin unset "$_nemoclaw_runtime_env_name" ;; esac; done < <(builtin compgen -e); builtin unset _nemoclaw_runtime_env_name';
+const RUNTIME_ENV_EXEC_SCRIPT = `if [ -r "/tmp/nemoclaw-proxy-env.sh" ]; then builtin source "/tmp/nemoclaw-proxy-env.sh" || exit $?; fi; ${GATEWAY_CREDENTIAL_SCRUB}; builtin exec -- "$@"`;
+const OPENCLAW_AGENT_RUNTIME_ENV_EXEC_SCRIPT = `if [ -r "/tmp/nemoclaw-proxy-env.sh" ]; then builtin source "/tmp/nemoclaw-proxy-env.sh" || exit $?; fi; ${GATEWAY_CREDENTIAL_SCRUB}; builtin export NODE_OPTIONS="\${NODE_OPTIONS:+\${NODE_OPTIONS} }--disable-warning=UNDICI-EHPA"; builtin exec -- "$@"`;
 
 function trustedRuntimeEnvArgv(
   command: readonly string[],
@@ -62,11 +62,7 @@ describe("wrapExecCommandWithRuntimeEnv", () => {
   });
 
   it("removes OPENCLAW_GATEWAY_TOKEN from the executed command environment (#6291)", () => {
-    const command = [
-      "/bin/sh",
-      "-c",
-      'printf "TOKEN=[%s]" "${OPENCLAW_GATEWAY_TOKEN:-}"',
-    ];
+    const command = ["/bin/sh", "-c", 'printf "TOKEN=[%s]" "${OPENCLAW_GATEWAY_TOKEN:-}"'];
     const wrapped = wrapExecCommandWithRuntimeEnv(command);
     const trustedArgv = trustedRuntimeEnvArgv(command);
     expect(wrapped).toEqual(["/bin/bash", ...trustedArgv]);
@@ -78,6 +74,28 @@ describe("wrapExecCommandWithRuntimeEnv", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe("TOKEN=[]");
     expect(result.stdout).not.toContain("super-secret-gateway-token");
+    expect(wrapped[5]).not.toContain("OPENCLAW_GATEWAY_TOKEN");
+  });
+
+  it("scrubs package-neutral gateway credentials while preserving unrelated provider keys", () => {
+    const command = [
+      "/bin/sh",
+      "-c",
+      'printf "%s|%s" "${FUTURE_GATEWAY_PASSWORD:-}" "${NVIDIA_API_KEY:-}"',
+    ];
+    const trustedArgv = trustedRuntimeEnvArgv(command);
+    const result = spawnSync("/bin/bash", trustedArgv, {
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        FUTURE_GATEWAY_PASSWORD: "internal-gateway-password",
+        NVIDIA_API_KEY: "provider-key",
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("|provider-key");
+    expect(result.stdout).not.toContain("internal-gateway-password");
   });
 
   it("preserves required non-credential proxy and gateway routing metadata", () => {
@@ -127,12 +145,7 @@ describe("wrapExecCommandWithRuntimeEnv", () => {
   });
 
   it("does not reinterpret a command-leading exec option (#4504)", () => {
-    const command = [
-      "-a",
-      "spoofed-argv-zero",
-      "/usr/bin/printf",
-      "SHOULD_NOT_RUN",
-    ];
+    const command = ["-a", "spoofed-argv-zero", "/usr/bin/printf", "SHOULD_NOT_RUN"];
     const wrapped = wrapExecCommandWithRuntimeEnv(command);
     const trustedArgv = trustedRuntimeEnvArgv(command);
     expect(wrapped).toEqual(["/bin/bash", ...trustedArgv]);

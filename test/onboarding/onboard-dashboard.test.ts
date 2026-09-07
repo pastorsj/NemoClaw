@@ -7,7 +7,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentDefinition } from "../../src/lib/agent/defs";
 import { loadAgent } from "../../src/lib/agent/defs";
 import { printDashboardUi } from "../../src/lib/agent/onboard";
-import type { OnboardDashboardDeps, OnboardDashboardHelpers } from "../../src/lib/onboard/dashboard";
+import type {
+  OnboardDashboardDeps,
+  OnboardDashboardHelpers,
+} from "../../src/lib/onboard/dashboard";
 
 const { getPortConflictServiceHints } = require("../../src/lib/onboard") as {
   getPortConflictServiceHints: (platform?: string) => string[];
@@ -81,11 +84,7 @@ describe("onboard dashboard helpers", () => {
     });
 
     expect(
-      helpers.buildAgentVerifyChain(
-        "http://127.0.0.1:18789",
-        "my-hermes",
-        loadAgent("hermes"),
-      ),
+      helpers.buildAgentVerifyChain("http://127.0.0.1:18789", "my-hermes", loadAgent("hermes")),
     ).toMatchObject({
       port: 18789,
       dashboardHealthEndpoint: "/api/status",
@@ -328,8 +327,9 @@ describe("onboard dashboard helpers", () => {
       sleep: vi.fn(),
       printAgentDashboardUi,
       listSandboxes: () => ({ sandboxes: [] }),
+      readSandboxAgentConfig: () => ({ gateway: { auth: { token: "secret-token" } } }),
     });
-    const agent = { dashboard: { auth: "url_token" } } as never;
+    const agent = loadAgent("openclaw");
 
     helpers.printDashboard("my-hermes", "gpt-oss:20b", "ollama", null, agent);
 
@@ -339,6 +339,62 @@ describe("onboard dashboard helpers", () => {
     expect(urls).toContain("http://127.0.0.1:8642/#token=secret-token");
     expect(urls.some((url) => url.startsWith("http://172.22.1.1:8642/"))).toBe(true);
     expect(urls.some((url) => url.includes(":18789"))).toBe(false);
+  });
+
+  it("reads a receipt dashboard token from the manifest-declared config path", () => {
+    const runOpenshell = vi.fn(() => ({ status: 0 }));
+    const readSandboxAgentConfig = vi.fn(() => ({ web: { token: "package-token" } }));
+    const printAgentDashboardUi = vi.fn();
+    const helpers = createOnboardDashboardHelpers({
+      runOpenshell,
+      runCaptureOpenshell: vi.fn(() => ""),
+      runCapture: vi.fn(() => ""),
+      openshellArgv: (args: string[]) => [process.execPath, "-e", "", ...args],
+      cliName: () => "nemoclaw",
+      agentProductName: () => "Future agent",
+      getProviderLabel: (provider: string) => provider,
+      nimStatus: vi.fn(() => ({ running: false, container: "nemoclaw-nim-test" })),
+      shouldShowNimLine: vi.fn(() => false),
+      note: vi.fn(),
+      isWsl: () => false,
+      redact: (value: unknown) => String(value),
+      sleep: vi.fn(),
+      printAgentDashboardUi,
+      listSandboxes: () => ({ sandboxes: [] }),
+      readSandboxAgentConfig,
+    });
+    const openclaw = loadAgent("openclaw");
+    const packageAgent = {
+      ...openclaw,
+      name: "future-agent",
+      configPaths: {
+        ...openclaw.configPaths,
+        dir: "/sandbox/.future-agent",
+        configFile: "runtime.json",
+      },
+      dashboard: {
+        ...openclaw.dashboard,
+        tokenPath: ["web", "token"],
+      },
+    } as AgentDefinition;
+
+    helpers.printDashboard("future-box", "model", "provider", null, packageAgent);
+
+    expect(readSandboxAgentConfig).toHaveBeenCalledWith("future-box", {
+      agentName: "future-agent",
+      configPath: "/sandbox/.future-agent/runtime.json",
+      configDir: "/sandbox/.future-agent",
+      format: packageAgent.configPaths.format,
+      configFile: "runtime.json",
+      sensitiveFiles: [],
+    });
+    expect(printAgentDashboardUi).toHaveBeenCalledWith(
+      "future-box",
+      "package-token",
+      packageAgent,
+      expect.any(Object),
+    );
+    expect(runOpenshell).not.toHaveBeenCalled();
   });
 
   it.each<[string, number, () => void]>([
@@ -356,50 +412,53 @@ describe("onboard dashboard helpers", () => {
         delete process.env.NEMOCLAW_DASHBOARD_PORT;
       },
     ],
-  ])("prints the effective Hermes dashboard URL selected by %s (#6277)", (_source, port, configurePort) => {
-    const previousChatUiUrl = process.env.CHAT_UI_URL;
-    const previousDashboardPort = process.env.NEMOCLAW_DASHBOARD_PORT;
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    const helpers = createOnboardDashboardHelpers({
-      runOpenshell: vi.fn(() => ({ status: 1 })),
-      runCaptureOpenshell: vi.fn(() => ""),
-      runCapture: vi.fn(() => ""),
-      openshellArgv: (args: string[]) => [process.execPath, "-e", "", ...args],
-      cliName: () => "nemohermes",
-      agentProductName: () => "NemoHermes",
-      getProviderLabel: (provider: string) => provider,
-      nimStatus: vi.fn(() => ({ running: false, container: "nemoclaw-nim-test" })),
-      shouldShowNimLine: vi.fn(() => false),
-      note: vi.fn(),
-      isWsl: () => false,
-      redact: (value: unknown) => String(value),
-      sleep: vi.fn(),
-      printAgentDashboardUi: printDashboardUi,
-      listSandboxes: () => ({ sandboxes: [] }),
-    });
+  ])(
+    "prints the effective Hermes dashboard URL selected by %s (#6277)",
+    (_source, port, configurePort) => {
+      const previousChatUiUrl = process.env.CHAT_UI_URL;
+      const previousDashboardPort = process.env.NEMOCLAW_DASHBOARD_PORT;
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+      const helpers = createOnboardDashboardHelpers({
+        runOpenshell: vi.fn(() => ({ status: 1 })),
+        runCaptureOpenshell: vi.fn(() => ""),
+        runCapture: vi.fn(() => ""),
+        openshellArgv: (args: string[]) => [process.execPath, "-e", "", ...args],
+        cliName: () => "nemohermes",
+        agentProductName: () => "NemoHermes",
+        getProviderLabel: (provider: string) => provider,
+        nimStatus: vi.fn(() => ({ running: false, container: "nemoclaw-nim-test" })),
+        shouldShowNimLine: vi.fn(() => false),
+        note: vi.fn(),
+        isWsl: () => false,
+        redact: (value: unknown) => String(value),
+        sleep: vi.fn(),
+        printAgentDashboardUi: printDashboardUi,
+        listSandboxes: () => ({ sandboxes: [] }),
+      });
 
-    let output = "";
-    try {
-      process.env.CHAT_UI_URL = `http://127.0.0.1:${String(port)}`;
-      configurePort();
-      helpers.printDashboard("my-hermes", "gpt-oss:20b", "ollama", null, loadAgent("hermes"));
-      output = logSpy.mock.calls.map(([line]) => String(line)).join("\n");
-    } finally {
-      previousChatUiUrl === undefined
-        ? delete process.env.CHAT_UI_URL
-        : (process.env.CHAT_UI_URL = previousChatUiUrl);
-      previousDashboardPort === undefined
-        ? delete process.env.NEMOCLAW_DASHBOARD_PORT
-        : (process.env.NEMOCLAW_DASHBOARD_PORT = previousDashboardPort);
-      logSpy.mockRestore();
-    }
+      let output = "";
+      try {
+        process.env.CHAT_UI_URL = `http://127.0.0.1:${String(port)}`;
+        configurePort();
+        helpers.printDashboard("my-hermes", "gpt-oss:20b", "ollama", null, loadAgent("hermes"));
+        output = logSpy.mock.calls.map(([line]) => String(line)).join("\n");
+      } finally {
+        previousChatUiUrl === undefined
+          ? delete process.env.CHAT_UI_URL
+          : (process.env.CHAT_UI_URL = previousChatUiUrl);
+        previousDashboardPort === undefined
+          ? delete process.env.NEMOCLAW_DASHBOARD_PORT
+          : (process.env.NEMOCLAW_DASHBOARD_PORT = previousDashboardPort);
+        logSpy.mockRestore();
+      }
 
-    expect(output).toContain("Hermes Agent Dashboard");
-    expect(output).toContain(`Port ${String(port)} must be forwarded before opening this URL.`);
-    expect(output).toContain(`http://127.0.0.1:${String(port)}/`);
-    expect(output).not.toContain("http://127.0.0.1:9119/");
-    expect(output).not.toContain("http://127.0.0.1:18789/");
-  });
+      expect(output).toContain("Hermes Agent Dashboard");
+      expect(output).toContain(`Port ${String(port)} must be forwarded before opening this URL.`);
+      expect(output).toContain(`http://127.0.0.1:${String(port)}/`);
+      expect(output).not.toContain("http://127.0.0.1:9119/");
+      expect(output).not.toContain("http://127.0.0.1:18789/");
+    },
+  );
 
   it("prints a token-free browser URL when the dashboard token is unavailable", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -474,6 +533,25 @@ describe("onboard dashboard helpers", () => {
       ].join("\n"),
     );
     expect(output).not.toContain("openclaw tui");
+  });
+
+  it("rejects a loaded OpenClaw-named definition without a declared interactive command", () => {
+    const openClaw = loadAgent("openclaw");
+    const commandlessPackage = {
+      ...openClaw,
+      runtime: {
+        ...openClaw.runtime,
+        interactive_command: undefined,
+        headless_command: undefined,
+      },
+    } as unknown as AgentDefinition;
+
+    expect(() =>
+      captureReadySummary(commandlessPackage, {
+        sandboxName: "my-gpt-claw",
+        cliName: "nemoclaw",
+      }),
+    ).toThrow('Cannot resolve an interactive command for unsupported agent "openclaw".');
   });
 
   it("prints the Deep Agents Code interactive command in the ready summary (#6006)", () => {

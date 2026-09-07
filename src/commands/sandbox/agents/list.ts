@@ -12,10 +12,10 @@ export default class SandboxAgentsListCommand extends NemoClawCommand {
   static id = "sandbox:agents:list";
   static customHelp = true;
   static strict = false;
-  static summary = "List OpenClaw agents configured in a sandbox";
+  static summary = "List agents configured by the installed harness";
   static description =
-    "Pass through to `openclaw agents list` in the sandbox. Runs the OpenClaw lister via `openshell sandbox exec`; all OpenClaw flags (e.g. `--json`, `--bindings`) are forwarded verbatim.";
-  static usage = ["<name> [openclaw-agents-list-flags...]"];
+    "Ask the installed harness package for its native agent-list command, then run that command through OpenShell. Additional arguments are forwarded verbatim through the typed adapter.";
+  static usage = ["<name> [harness-agents-list-flags...]"];
   static examples = [
     "<%= config.bin %> sandbox agents list alpha",
     "<%= config.bin %> sandbox agents list alpha --json",

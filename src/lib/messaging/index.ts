@@ -14,3 +14,4 @@ export * from "./persistence";
 export * from "./profile-authority";
 export { MESSAGING_CREDENTIAL_PROVIDER_TYPE } from "./provider-profile";
 export * from "./utils";
+export { hydrateMessagingRegistryEntriesForAuthority } from "../state/registry/messaging-authority";

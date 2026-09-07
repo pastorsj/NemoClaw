@@ -6,6 +6,11 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../test/helpers/adapter-fixtures";
 import { installHarnessPackage } from "../agent-runtime/package/install";
 import type {
   BundledHarnessPackageSourceIdentity,
@@ -67,7 +72,7 @@ function writeReviewedBundle(): void {
   fs.mkdirSync(bundledRoot, { recursive: true, mode: 0o700 });
   for (const declaration of REVIEWED_FIXTURES) {
     const packageRoot = path.join(bundledRoot, `nemoclaw-${declaration.id}`);
-    const manifestPath = `packages/nemoclaw-${declaration.id}/manifest.yaml`;
+    const manifestPath = "manifest.yaml";
     fs.mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
     writeFile(
       packageRoot,
@@ -86,7 +91,60 @@ function writeReviewedBundle(): void {
     writeFile(
       packageRoot,
       manifestPath,
-      `name: ${declaration.id}\ndisplay_name: ${JSON.stringify(declaration.displayName)}\ndescription: Reviewed migration fixture\n`,
+      [
+        `name: ${declaration.id}`,
+        `display_name: ${JSON.stringify(declaration.displayName)}`,
+        "description: Reviewed migration fixture",
+        "runtime:",
+        "  kind: terminal",
+        `  interactive_command: ${declaration.id}`,
+        `  headless_command: ${declaration.id} --prompt`,
+        "  prompt_transport: stdin",
+        "config:",
+        `  dir: /sandbox/.${declaration.id}`,
+        "  config_file: config.json",
+        "  format: json",
+        "inference:",
+        "  config_update:",
+        "    support: unsupported",
+        "    reason: The migration fixture has no mutable inference configuration.",
+        "messaging:",
+        "  support: disabled",
+        "policy:",
+        "  owned_presets: []",
+        "  automatic_presets: []",
+        "  baseline_exclusion_impacts: {}",
+        "state_lifecycle:",
+        "  backup_quiescence:",
+        "    kind: not-required",
+        "  snapshot_restore: []",
+        "  rebuild:",
+        "    managed_extensions:",
+        "      support: disabled",
+        "      reason: The migration fixture has no managed extensions.",
+        "    scheduled_work:",
+        "      support: disabled",
+        "      reason: The migration fixture has no scheduled work.",
+        "    post_restore:",
+        "      kind: not-required",
+        "",
+      ].join("\n"),
+    );
+    const hostDirectory = path.posix.join(path.posix.dirname(manifestPath), "host");
+    writeFile(
+      packageRoot,
+      path.posix.join(hostDirectory, "config-adapter.cts"),
+      TEST_CONFIG_ADAPTER_SOURCE,
+    );
+    writeFile(
+      packageRoot,
+      path.posix.join(hostDirectory, "messaging-adapter.cts"),
+      TEST_MESSAGING_ADAPTER_SOURCE,
+    );
+    writeFile(
+      packageRoot,
+      path.posix.join(hostDirectory, "startup-adapter.cts"),
+      TEST_STARTUP_ADAPTER_SOURCE,
     );
     writeFile(packageRoot, "runtime/payload.txt", `${declaration.id}\n`);
   }

@@ -67,6 +67,7 @@ import {
   OPENSHELL_PROBE_TIMEOUT_MS,
   runOpenshell,
 } from "../../adapters/openshell/runtime";
+
 import { D, G, R } from "../../cli/terminal-style";
 import {
   type DockerDriverRecoveryResult,

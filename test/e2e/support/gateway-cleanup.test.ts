@@ -11,6 +11,7 @@ import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
   cleanupIsolatedGateway,
   type IsolatedGatewayCleanupOptions,
+  requireIsolatedGatewayAvailable,
 } from "../fixtures/gateway-cleanup.ts";
 import type { ShellProbeResult, ShellProbeRunOptions } from "../fixtures/shell-probe.ts";
 
@@ -87,6 +88,35 @@ afterEach(() => {
 });
 
 describe("isolated gateway cleanup", () => {
+  it("claims only a bindable isolated port without changing registration or HOME", async () => {
+    const home = privateTestHome();
+    const { cleanupRegistration, command, host } = fakeHost([probeResult()]);
+
+    await requireIsolatedGatewayAvailable(host, cleanupOptions(home));
+
+    expect(command).toHaveBeenCalledExactlyOnceWith(
+      process.execPath,
+      expect.arrayContaining(["-e", String(GATEWAY_PORT), "0"]),
+      expect.objectContaining({
+        artifactName: "isolated-gateway-cleanup-initial-port-availability",
+      }),
+    );
+    expect(cleanupRegistration).not.toHaveBeenCalled();
+    expect(fs.existsSync(home)).toBe(true);
+  });
+
+  it("does not touch an existing listener when the isolated port is occupied", async () => {
+    const home = privateTestHome();
+    const { cleanupRegistration, host } = fakeHost([probeResult(1, "EADDRINUSE")]);
+
+    await expect(requireIsolatedGatewayAvailable(host, cleanupOptions(home))).rejects.toThrow(
+      "was already occupied; no listener was changed",
+    );
+
+    expect(cleanupRegistration).not.toHaveBeenCalled();
+    expect(fs.existsSync(home)).toBe(true);
+  });
+
   it("stops the owned runtime, proves the exact port is free, then removes registration and HOME", async () => {
     const home = privateTestHome();
     const calls: string[] = [];

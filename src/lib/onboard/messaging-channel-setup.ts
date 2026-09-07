@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "../agent/defs";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import { getCredential, normalizeCredentialValue } from "../credentials/store";
 import {
   type ChannelInputSpec,
   type ChannelManifest,
+  ChannelManifestRegistry,
   createBuiltInChannelManifestRegistry,
+  createChannelManifestRegistry,
   createBuiltInMessagingHookRegistry,
   createBuiltInRenderTemplateResolver,
   getMessagingManifestAvailabilityContext,
@@ -21,6 +24,11 @@ import {
 import type { GooglechatTunnelRuntimeDeps } from "../messaging/channels/googlechat/hooks/tunnel-runtime";
 import * as registry from "../state/registry";
 import type { RegistryMessagingAuthority } from "../messaging/plan-authority";
+import {
+  listMessagingChannelsForSandboxAuthority,
+  listMessagingChannelsForProfile,
+  resolveSandboxMessagingProfileAuthority,
+} from "../messaging/profile-authority";
 
 export { MessagingHostStateApplier };
 
@@ -56,6 +64,10 @@ export interface SetupMessagingChannelsDeps {
   readonly googlechatTunnelRuntime?: Omit<GooglechatTunnelRuntimeDeps, "sandboxName">;
   /** The channel selection is durable; do not reopen the selector on resume. */
   readonly selectionCompleted?: boolean;
+  /** Exact installed package whose adapter owns receipt-backed channel behavior. */
+  readonly harnessPackage?: HarnessPackageIdentity;
+  /** Exact composed manifests already resolved from receipt authority by orchestration. */
+  readonly messagingManifests?: readonly ChannelManifest[];
 }
 
 export interface CreateSetupMessagingChannelsDeps {
@@ -71,7 +83,11 @@ export function createSetupMessagingChannels(deps: CreateSetupMessagingChannelsD
     agent: AgentDefinition | null = null,
     existingChannels: string[] | null = null,
     sandboxName: string | null = null,
-    options: { readonly selectionCompleted?: boolean } = {},
+    options: {
+      readonly selectionCompleted?: boolean;
+      readonly harnessPackage?: HarnessPackageIdentity;
+      readonly messagingManifests?: readonly ChannelManifest[];
+    } = {},
   ): Promise<string[]> =>
     setupMessagingChannels(agent, existingChannels, {
       step: deps.step,
@@ -79,6 +95,8 @@ export function createSetupMessagingChannels(deps: CreateSetupMessagingChannelsD
       isNonInteractive: deps.isNonInteractive,
       sandboxName,
       selectionCompleted: options.selectionCompleted,
+      harnessPackage: options.harnessPackage,
+      messagingManifests: options.messagingManifests,
       googlechatTunnelRuntime: deps.googlechatTunnelRuntime
         ? { ...deps.googlechatTunnelRuntime, prompt: deps.prompt }
         : undefined,
@@ -107,13 +125,16 @@ const getMessagingInputValue = (input: ChannelInputSpec): string | null => {
  * authoritative. NEMOCLAW_POLICY_PRESETS is intentionally ignored — policy
  * presets are not messaging channel selection.
  */
-export function detectMessagingChannelsFromEnv(agent: AgentDefinition | null = null): string[] {
-  const manifestRegistry = createBuiltInChannelManifestRegistry();
-  const availabilityContext = getMessagingManifestAvailabilityContext(
-    agent,
-    manifestRegistry.list(),
+export function detectMessagingChannelsFromEnv(
+  agent: AgentDefinition | null = null,
+  manifests?: readonly ChannelManifest[],
+): string[] {
+  const manifestRegistry = manifests
+    ? createChannelManifestRegistry(manifests)
+    : createBuiltInChannelManifestRegistry();
+  const availableChannels = manifestRegistry.listAvailable(
+    getMessagingManifestAvailabilityContext(agent, manifestRegistry.list()),
   );
-  const availableChannels = manifestRegistry.listAvailable(availabilityContext);
   return availableChannels
     .filter((manifest) => hasMessagingManifestConfiguredInputs(manifest, getMessagingInputValue))
     .map((manifest) => manifest.id);
@@ -136,8 +157,11 @@ export function detectUnconfiguredMessagingChannels(
   planChannels: readonly string[],
   selectedChannels: readonly string[],
   agent: AgentDefinition | null = null,
+  manifests?: readonly ChannelManifest[],
 ): string[] {
-  const manifestRegistry = createBuiltInChannelManifestRegistry();
+  const manifestRegistry = manifests
+    ? createChannelManifestRegistry(manifests)
+    : createBuiltInChannelManifestRegistry();
   const availabilityContext = getMessagingManifestAvailabilityContext(
     agent,
     manifestRegistry.list(),
@@ -171,7 +195,28 @@ export async function setupMessagingChannels(
     deps.isNonInteractive ?? (() => process.env.NEMOCLAW_NON_INTERACTIVE === "1");
   const nonInteractive = isNonInteractive() || process.env.NEMOCLAW_NON_INTERACTIVE === "1";
 
-  const invalidConfigEnvValues = detectInvalidMessagingChannelConfigEnvValues();
+  const coreManifestRegistry = createBuiltInChannelManifestRegistry();
+  const exactManifests =
+    deps.messagingManifests ??
+    (deps.harnessPackage
+      ? listMessagingChannelsForProfile(
+          resolveSandboxMessagingProfileAuthority({
+            agent: agent?.name ?? deps.harnessPackage.id,
+            harnessPackage: deps.harnessPackage,
+          }),
+          coreManifestRegistry,
+        )
+      : undefined);
+  const manifestRegistry = exactManifests
+    ? createChannelManifestRegistry(exactManifests)
+    : coreManifestRegistry;
+  const availableChannels = manifestRegistry.listAvailable(
+    getMessagingManifestAvailabilityContext(agent, manifestRegistry.list()),
+  );
+  const invalidConfigEnvValues = detectInvalidMessagingChannelConfigEnvValues(
+    process.env,
+    exactManifests,
+  );
   for (const { key, rawValue, validValues } of invalidConfigEnvValues) {
     let expectedValues = "";
     for (const value of validValues) {
@@ -180,13 +225,6 @@ export async function setupMessagingChannels(
     console.error(`  Invalid ${key} value '${rawValue}' (expected one of: ${expectedValues})`);
   }
   if (invalidConfigEnvValues.length > 0) process.exit(1);
-
-  const manifestRegistry = createBuiltInChannelManifestRegistry();
-  const availabilityContext = getMessagingManifestAvailabilityContext(
-    agent,
-    manifestRegistry.list(),
-  );
-  const availableChannels = manifestRegistry.listAvailable(availabilityContext);
   const hasManifestConfiguredInputs = (manifest: ChannelManifest) =>
     hasMessagingManifestConfiguredInputs(manifest, getMessagingInputValue);
   const seedFromState = (includeAllExisting = false): string[] =>
@@ -328,7 +366,7 @@ export async function setupSelectedMessagingChannels(
   messagingChannels: readonly ChannelManifest[],
   options: SetupSelectedMessagingChannelsOptions = {},
 ): Promise<SandboxMessagingPlan | null> {
-  const registry = createBuiltInChannelManifestRegistry();
+  const registry = new ChannelManifestRegistry(messagingChannels);
   const supportedChannelIds = messagingChannels.map((channel) => channel.id);
   const selectedChannels = uniqueSelectedChannels(selected, supportedChannelIds, registry);
   if (selectedChannels.length === 0) {
@@ -475,9 +513,16 @@ export function getRegistrySandboxMessagingAuthority(
   if (!entry || registry.isRouteOnlySandboxReservation(entry)) {
     return { authoritative: false, plan: null };
   }
+  const receiptBacked = entry.harnessPackage != null || entry.harnessPackageMigration != null;
+  const manifests = receiptBacked
+    ? listMessagingChannelsForSandboxAuthority(entry, createBuiltInChannelManifestRegistry())
+    : undefined;
   return {
     authoritative: true,
-    plan: registry.getHydratedMessagingPlanFromEntry(entry),
+    plan: registry.getHydratedMessagingPlanFromEntry(
+      entry,
+      manifests === undefined ? {} : { manifests },
+    ),
   };
 }
 

@@ -2,6 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /** Messaging-specific compatibility decisions consumed by policy orchestration. */
+import { createBuiltInChannelManifestRegistry } from "../messaging/channels/built-ins";
+import { listMessagingChannelsForSandboxAuthority } from "../messaging/profile-authority";
+import type { SandboxEntry } from "../state/registry/types";
+
+export function listSandboxPolicyMessagingManifests(entry: SandboxEntry) {
+  return listMessagingChannelsForSandboxAuthority(entry, createBuiltInChannelManifestRegistry());
+}
+
 export {
   legacyUsesNpmPolicyCompatibility,
   legacyUsesTeamsOutlookSharedLogin,

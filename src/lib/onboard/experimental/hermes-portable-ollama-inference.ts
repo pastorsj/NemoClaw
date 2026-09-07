@@ -1345,6 +1345,8 @@ export function createHermesPortableOllamaInferenceResolver(
   options: HermesPortableOllamaInferenceResolverOptions,
 ): HostLocalInferenceStartupSelectionResolver {
   return (input: HostLocalInferenceStartupSelectionInput) => {
+    // Receipt-backed packages use the generic host-local route. This exact
+    // string gate is the explicit no-receipt Hermes Portable product lane.
     if (input.application !== "hermes") return null;
     if (input.provider !== "ollama-local") return null;
     if (!SAFE_CREDENTIAL_ENV.test(options.credentialEnv)) {

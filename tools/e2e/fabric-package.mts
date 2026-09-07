@@ -1,13 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  FABRIC_PACKAGE_LIVE_SELECTOR,
-  FABRIC_PACKAGE_LIVE_TEST_PATH,
   FABRIC_PACKAGE_REPOSITORY_ROOT,
+  type FabricPackageJourney,
   fabricPackageJourneyEnvironment,
   loadFabricPackageTarget,
 } from "./fabric-target.mts";
@@ -16,13 +14,14 @@ export * from "./fabric-target.mts";
 
 export interface FabricPackageCliOptions {
   readonly fixturePath: string;
-  readonly packageArtifact: string | undefined;
+  readonly journey: FabricPackageJourney;
+  readonly packageArtifact: string;
   readonly sandboxName: string | undefined;
   readonly upgradePackageArtifact: string | undefined;
 }
 
 const FABRIC_PACKAGE_USAGE =
-  "Usage: fabric-package.mts run --contract <fixture.json> [--package-artifact <built-directory>] [--upgrade-package-artifact <built-directory>] [--sandbox-name <name>]";
+  "Usage: fabric-package.mts run --contract <fixture.json> --package-artifact <built-directory> [--journey smoke|lifecycle] [--upgrade-package-artifact <built-directory>] [--sandbox-name <name>]";
 
 export function parseFabricPackageCliOptions(argv: readonly string[]): FabricPackageCliOptions {
   if (argv[0] !== "run") {
@@ -34,6 +33,7 @@ export function parseFabricPackageCliOptions(argv: readonly string[]): FabricPac
     const value = argv[index + 1];
     if (
       (option !== "--contract" &&
+        option !== "--journey" &&
         option !== "--package-artifact" &&
         option !== "--upgrade-package-artifact" &&
         option !== "--sandbox-name") ||
@@ -46,9 +46,19 @@ export function parseFabricPackageCliOptions(argv: readonly string[]): FabricPac
   }
   const fixturePath = values.get("--contract");
   if (!fixturePath) throw new Error("Fabric package journey requires --contract");
+  const packageArtifact = values.get("--package-artifact");
+  if (!packageArtifact) throw new Error("Fabric package journey requires --package-artifact");
+  const journey = values.get("--journey") ?? "smoke";
+  if (journey !== "smoke" && journey !== "lifecycle") {
+    throw new Error("Fabric package journey must be 'smoke' or 'lifecycle'");
+  }
+  if (journey === "smoke" && values.has("--upgrade-package-artifact")) {
+    throw new Error("Fabric package upgrade artifacts require --journey lifecycle");
+  }
   return {
     fixturePath,
-    packageArtifact: values.get("--package-artifact"),
+    journey,
+    packageArtifact,
     sandboxName: values.get("--sandbox-name"),
     upgradePackageArtifact: values.get("--upgrade-package-artifact"),
   };
@@ -57,29 +67,25 @@ export function parseFabricPackageCliOptions(argv: readonly string[]): FabricPac
 /** Run the shared install-to-destroy journey from a package-owned fixture. */
 export async function runFabricPackageJourney(options: FabricPackageCliOptions): Promise<number> {
   const target = loadFabricPackageTarget(options.fixturePath, {
-    ...(options.packageArtifact ? { packageArtifact: options.packageArtifact } : {}),
+    journey: options.journey,
+    packageArtifact: options.packageArtifact,
     ...(options.sandboxName ? { sandboxName: options.sandboxName } : {}),
     ...(options.upgradePackageArtifact
       ? { upgradePackageArtifact: options.upgradePackageArtifact }
       : {}),
   });
   Object.assign(process.env, fabricPackageJourneyEnvironment(target));
-  process.env.NEMOCLAW_CLI_BIN ??= path.join(FABRIC_PACKAGE_REPOSITORY_ROOT, "bin/nemoclaw.js");
-  const { runLiveVitestCommand } = await import("./live-vitest-invocation.mts");
+  const { executeFabricPackageJourney } = await import("./fabric-journey.mts");
   const previousDirectory = process.cwd();
   try {
     process.chdir(FABRIC_PACKAGE_REPOSITORY_ROOT);
-    return runLiveVitestCommand(
-      [
-        "run",
-        "--test-path",
-        FABRIC_PACKAGE_LIVE_TEST_PATH,
-        "--selector",
-        FABRIC_PACKAGE_LIVE_SELECTOR,
-      ],
-      undefined,
-      process.env,
+    await executeFabricPackageJourney(target, FABRIC_PACKAGE_REPOSITORY_ROOT);
+    return 0;
+  } catch {
+    process.stderr.write(
+      "Fabric package qualification failed; inspect the redacted E2E artifacts for details.\n",
     );
+    return 1;
   } finally {
     process.chdir(previousDirectory);
   }

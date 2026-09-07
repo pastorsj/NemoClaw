@@ -29,7 +29,7 @@ import type { SandboxEntry } from "../../src/lib/state/registry/types";
 const PACKAGE_ID = "future-terminal";
 const PACKAGE_ALIAS = "future";
 const PACKAGE_DIRECTORY = `nemoclaw-${PACKAGE_ID}`;
-const MANIFEST_PATH = `packages/${PACKAGE_DIRECTORY}/manifest.yaml`;
+const MANIFEST_PATH = "manifest.yaml";
 const FABRIC_CONFIG_PATH = "/sandbox/.future-terminal/fabric.json";
 const SOURCE_IDENTITY: BundledHarnessPackageSourceIdentity = Object.freeze({
   kind: "bundled",
@@ -64,6 +64,15 @@ function writeFutureAuthoringPackage(): void {
     `${JSON.stringify({
       name: `@fixture/${PACKAGE_DIRECTORY}`,
       version: "1.0.0",
+      files: [
+        "Dockerfile",
+        "Dockerfile.base",
+        "fabric/",
+        "host/",
+        "manifest.yaml",
+        "policy-additions.yaml",
+        "start.sh",
+      ],
       nemoclaw: {
         harnessManifest: "manifest.yaml",
         minimumNemoClawVersion: "0.0.113",
@@ -88,6 +97,7 @@ function writeFutureAuthoringPackage(): void {
       "  interactive_command: future-terminal",
       `  headless_command: nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config ${FABRIC_CONFIG_PATH}`,
       "  prompt_transport: stdin",
+      "  prompt_protocol: fabric-cli",
       "config:",
       "  dir: /sandbox/.future-terminal",
       "  config_file: fabric.json",
@@ -97,7 +107,9 @@ function writeFutureAuthoringPackage(): void {
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This package does not run scheduled work.",
@@ -123,6 +135,30 @@ function writeFutureAuthoringPackage(): void {
   writeAuthoringPackageFile("start.sh", "#!/bin/sh\nexec future-terminal\n", 0o700);
   writeAuthoringPackageFile("policy-additions.yaml", "version: 1\nnetwork_policies: {}\n");
   writeAuthoringPackageFile("fabric/future.fabric-adapter.json", '{"adapter":"future-terminal"}\n');
+  writeAuthoringPackageFile(
+    "host/config-adapter.cts",
+    [
+      '"use strict";',
+      "module.exports = {",
+      "  prepareConfigUpdate() {",
+      '    return { kind: "immutable", reason: "The fixture configuration is immutable." };',
+      "  },",
+      "};",
+      "",
+    ].join("\n"),
+  );
+  writeAuthoringPackageFile(
+    "host/messaging-adapter.cts",
+    [
+      '"use strict";',
+      "module.exports = {",
+      "  describeMessagingIntegration() {",
+      '    return { kind: "disabled", packageId: "future-terminal", reason: "Messaging is disabled." };',
+      "  },",
+      "};",
+      "",
+    ].join("\n"),
+  );
 }
 
 beforeEach(() => {

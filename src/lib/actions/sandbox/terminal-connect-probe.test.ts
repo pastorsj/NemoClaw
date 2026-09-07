@@ -20,6 +20,9 @@ const dcodeAgent = {
     },
     smoke_commands: ["dcode --version"],
   },
+  inference: {
+    route_probe: { terminal_connect: "required" },
+  },
 } as unknown as AgentDefinition;
 
 const otherTerminalAgent = {
@@ -90,6 +93,26 @@ describe("terminal-agent connect inference route", () => {
     expect(logSpy).toHaveBeenCalledWith(
       "  Probe complete: Other Terminal Agent terminal smoke checks passed (other-agent).",
     );
+  });
+
+  it("fails a synthetic package when its manifest requires terminal route health", () => {
+    const capture = vi.fn();
+    const ensureInferenceRoute = vi.fn(() => ({ routeHealthy: false }));
+    const futureAgent = {
+      ...otherTerminalAgent,
+      inference: { route_probe: { terminal_connect: "required" } },
+    } as unknown as AgentDefinition;
+
+    expect(() =>
+      runTerminalAgentConnectProbe({
+        agent: futureAgent,
+        agentName: "Future Terminal",
+        capture: capture as never,
+        ensureInferenceRoute,
+        sandboxName: "future-box",
+      }),
+    ).toThrow("process.exit(1)");
+    expect(capture).not.toHaveBeenCalled();
   });
 
   it("lets dcode continue to terminal smoke checks when its route probe is inconclusive (#6191)", () => {

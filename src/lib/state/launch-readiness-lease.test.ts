@@ -560,6 +560,38 @@ describe("launch readiness lease storage", () => {
     expect(readLaunchReadinessLease(SANDBOX, GATEWAY_PORT, options()).kind).toBe("malformed");
   });
 
+  it("stores a receipt-backed package session as an exact credential-free digest", () => {
+    const packageIdentity: LaunchReadinessIdentity = {
+      ...identity(),
+      session: {
+        schemaVersion: 1,
+        kind: "package-session",
+        packageId: "future-harness",
+        stateSha256: DIGEST,
+      },
+    };
+    const fence = fenceLaunchReadinessLease(SANDBOX, GATEWAY_PORT, options());
+    publishLaunchReadinessLease(
+      SANDBOX,
+      GATEWAY_PORT,
+      fence.epochId,
+      packageIdentity,
+      options(),
+    );
+    expect(readLaunchReadinessLease(SANDBOX, GATEWAY_PORT, options())).toMatchObject({
+      kind: "valid",
+      lease: { identity: { session: packageIdentity.session } },
+    });
+
+    const receiptPath = launchReadinessReceiptPath(SANDBOX, GATEWAY_PORT, home);
+    const value = JSON.parse(fs.readFileSync(receiptPath, "utf8")) as {
+      identity: { session: Record<string, unknown> };
+    };
+    value.identity.session.nativeCredential = "must-not-be-stored";
+    fs.writeFileSync(receiptPath, JSON.stringify(value), { mode: 0o600 });
+    expect(readLaunchReadinessLease(SANDBOX, GATEWAY_PORT, options()).kind).toBe("malformed");
+  });
+
   it("requires an exact bounded private runtime-authority record", () => {
     publish();
     const authorityPath = launchReadinessAuthorityPath(SANDBOX, runtimeRoot);

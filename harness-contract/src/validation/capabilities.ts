@@ -5,7 +5,9 @@ import {
   CONTROL_CHARACTER_PATTERN,
   DISPLAY_CONTROL_PATTERN,
   fail,
+  isCanonicalAbsolutePath,
   isCanonicalRelativePath,
+  isCanonicalSandboxPath,
   type ManifestRecord,
   requireCanonicalId,
   requireExactFields,
@@ -69,6 +71,168 @@ function validateMcp(manifest: ManifestRecord): void {
   }
   if (mcp.reason !== undefined && typeof mcp.reason !== "string") {
     fail("mcp.reason", "must be a string");
+  }
+}
+
+function validateAgentRoster(manifest: ManifestRecord): void {
+  if (manifest.agent_roster === undefined) return;
+  const roster = requireRecord(manifest.agent_roster, "agent_roster");
+  requireExactFields(
+    roster,
+    new Set(["adapter", "onboarding_environment", "support"]),
+    "agent_roster",
+  );
+  if (roster.support !== "managed") {
+    fail("agent_roster.support", "must be managed");
+  }
+  if (roster.adapter !== "agent-roster") {
+    fail("agent_roster.adapter", "must be agent-roster");
+  }
+  if (roster.onboarding_environment !== "NEMOCLAW_EXTRA_AGENTS_JSON") {
+    fail("agent_roster.onboarding_environment", "must be NEMOCLAW_EXTRA_AGENTS_JSON");
+  }
+}
+
+function validatePolicy(manifest: ManifestRecord): void {
+  const policy = requireRecord(manifest.policy, "policy");
+  requireKnownFields(
+    policy,
+    new Set(["automatic_presets", "baseline_exclusion_impacts", "context_target", "owned_presets"]),
+    new Set(["automatic_presets", "baseline_exclusion_impacts", "owned_presets"]),
+    "policy",
+  );
+  if (policy.context_target !== undefined) {
+    const contextTarget = requireString(policy.context_target, "policy.context_target");
+    if (
+      !isCanonicalAbsolutePath(contextTarget) ||
+      !contextTarget.startsWith("/sandbox/") ||
+      contextTarget.length > 512 ||
+      contextTarget
+        .split("/")
+        .some((segment) => segment !== "" && !SAFE_PATH_SEGMENT_PATTERN.test(segment))
+    ) {
+      fail(
+        "policy.context_target",
+        "must be a bounded canonical /sandbox path containing only safe path segments",
+      );
+    }
+  }
+  if (
+    !Array.isArray(policy.owned_presets) ||
+    policy.owned_presets.length > 64 ||
+    new Set(policy.owned_presets).size !== policy.owned_presets.length ||
+    policy.owned_presets.some(
+      (entry) => typeof entry !== "string" || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(entry),
+    )
+  ) {
+    fail("policy.owned_presets", "must contain unique canonical policy preset names");
+  }
+  if (!Array.isArray(policy.automatic_presets) || policy.automatic_presets.length > 16) {
+    fail("policy.automatic_presets", "must be an array with at most 16 entries");
+  }
+  const automaticNames = new Set<string>();
+  policy.automatic_presets.forEach((entry, index) => {
+    const field = `policy.automatic_presets[${String(index)}]`;
+    const rule = requireRecord(entry, field);
+    requireExactFields(
+      rule,
+      new Set(["activation", "apply_during_create", "name", "suppress_in_tiers"]),
+      field,
+    );
+    const name = requireString(rule.name, `${field}.name`);
+    if (
+      !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(name) ||
+      automaticNames.has(name) ||
+      !(policy.owned_presets as unknown[]).includes(name)
+    ) {
+      fail(`${field}.name`, "must uniquely reference a package-owned preset");
+    }
+    automaticNames.add(name);
+    if (typeof rule.apply_during_create !== "boolean") {
+      fail(`${field}.apply_during_create`, "must be a boolean");
+    }
+    if (
+      !Array.isArray(rule.suppress_in_tiers) ||
+      rule.suppress_in_tiers.length > 8 ||
+      new Set(rule.suppress_in_tiers).size !== rule.suppress_in_tiers.length ||
+      rule.suppress_in_tiers.some(
+        (tier) => typeof tier !== "string" || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(tier),
+      )
+    ) {
+      fail(`${field}.suppress_in_tiers`, "must contain unique canonical policy tier names");
+    }
+    const activation = requireRecord(rule.activation, `${field}.activation`);
+    if (activation.kind === "always" || activation.kind === "observability-enabled") {
+      requireExactFields(activation, new Set(["kind"]), `${field}.activation`);
+      return;
+    }
+    if (activation.kind !== "local-endpoint-enabled") {
+      fail(
+        `${field}.activation.kind`,
+        "must be always, observability-enabled, or local-endpoint-enabled",
+      );
+    }
+    requireExactFields(
+      activation,
+      new Set([
+        "default_endpoint",
+        "enabled_environment",
+        "endpoint_environment",
+        "kind",
+        "local_origin",
+      ]),
+      `${field}.activation`,
+    );
+    for (const key of ["enabled_environment", "endpoint_environment"] as const) {
+      const value = requireString(activation[key], `${field}.activation.${key}`);
+      if (!/^[A-Z][A-Z0-9_]{0,127}$/u.test(value)) {
+        fail(`${field}.activation.${key}`, "must be a canonical environment variable name");
+      }
+    }
+    const defaultEndpoint = requireString(
+      activation.default_endpoint,
+      `${field}.activation.default_endpoint`,
+    );
+    const localOrigin = requireString(activation.local_origin, `${field}.activation.local_origin`);
+    try {
+      const endpoint = new URL(defaultEndpoint);
+      const origin = new URL(localOrigin);
+      if (
+        (endpoint.protocol !== "http:" && endpoint.protocol !== "https:") ||
+        origin.origin !== localOrigin ||
+        endpoint.origin !== localOrigin
+      ) {
+        throw new Error("invalid local endpoint");
+      }
+    } catch {
+      fail(
+        `${field}.activation`,
+        "must declare an HTTP default endpoint whose origin exactly matches local_origin",
+      );
+    }
+  });
+  const impacts = requireRecord(
+    policy.baseline_exclusion_impacts,
+    "policy.baseline_exclusion_impacts",
+  );
+  const entries = Object.entries(impacts);
+  if (entries.length > 64) {
+    fail("policy.baseline_exclusion_impacts", "must contain at most 64 entries");
+  }
+  for (const [key, value] of entries) {
+    const field = `policy.baseline_exclusion_impacts.${key}`;
+    if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u.test(key)) {
+      fail(field, "must use a canonical baseline policy key");
+    }
+    const text = requireString(value, field);
+    if (
+      text.trim().length === 0 ||
+      text !== text.trim() ||
+      DISPLAY_CONTROL_PATTERN.test(text) ||
+      utf8ByteLength(text) > 512
+    ) {
+      fail(field, "must be trimmed single-line text of at most 512 bytes");
+    }
   }
 }
 
@@ -136,12 +300,53 @@ function validateWebSearch(manifest: ManifestRecord): void {
   if (
     !Array.isArray(webSearch.providers) ||
     webSearch.providers.length === 0 ||
-    webSearch.providers.length > 2 ||
-    new Set(webSearch.providers).size !== webSearch.providers.length ||
-    webSearch.providers.some((provider) => provider !== "brave" && provider !== "tavily")
+    webSearch.providers.length > 2
   ) {
-    fail("web_search.providers", "must contain unique brave or tavily entries");
+    fail("web_search.providers", "must contain 1 through 2 provider bindings");
   }
+  const providerNames = new Set<string>();
+  webSearch.providers.forEach((entry, index) => {
+    const field = `web_search.providers[${String(index)}]`;
+    const binding = requireRecord(entry, field);
+    requireExactFields(
+      binding,
+      new Set([
+        "config_verification",
+        "credential_env",
+        "egress_verification",
+        "profile_type",
+        "provider",
+      ]),
+      field,
+    );
+    if (binding.provider !== "brave" && binding.provider !== "tavily") {
+      fail(`${field}.provider`, "must be brave or tavily");
+    }
+    if (providerNames.has(binding.provider)) {
+      fail(`${field}.provider`, "must be unique within web_search.providers");
+    }
+    providerNames.add(binding.provider);
+    const credentialEnv = requireString(binding.credential_env, `${field}.credential_env`);
+    const expectedCredentialEnv = binding.provider === "brave" ? "BRAVE_API_KEY" : "TAVILY_API_KEY";
+    if (credentialEnv !== expectedCredentialEnv) {
+      fail(
+        `${field}.credential_env`,
+        `must be ${expectedCredentialEnv} for the selected core credential`,
+      );
+    }
+    const profileType = requireCanonicalId(binding.profile_type, `${field}.profile_type`);
+    if (profileType.length > 64) {
+      fail(`${field}.profile_type`, "must contain at most 64 characters");
+    }
+    validateWebSearchConfigVerification(
+      binding.config_verification,
+      `${field}.config_verification`,
+    );
+    validateWebSearchEgressVerification(
+      binding.egress_verification,
+      `${field}.egress_verification`,
+    );
+  });
   if (webSearch.tool_gateway_conflicts === undefined) return;
   if (
     !Array.isArray(webSearch.tool_gateway_conflicts) ||
@@ -161,11 +366,147 @@ function validateWebSearch(manifest: ManifestRecord): void {
     requireCanonicalId(conflict.tool_gateway, `${field}.tool_gateway`);
     const key = `${String(conflict.provider)}\0${String(conflict.tool_gateway)}`;
     if (seen.has(key)) fail(field, "must not duplicate another conflict");
-    if (!(webSearch.providers as unknown[]).includes(conflict.provider)) {
+    if (!providerNames.has(String(conflict.provider))) {
       fail(`${field}.provider`, "must also appear in web_search.providers");
     }
     seen.add(key);
   });
+}
+
+function validateWebSearchPath(value: unknown, field: string): void {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > 8 ||
+    value.some(
+      (segment) =>
+        typeof segment !== "string" ||
+        segment.length === 0 ||
+        segment.length > 128 ||
+        CONTROL_CHARACTER_PATTERN.test(segment),
+    )
+  ) {
+    fail(field, "must contain 1 through 8 bounded object-path segments");
+  }
+}
+
+function validateWebSearchConfigVerification(value: unknown, field: string): void {
+  const config = requireRecord(value, field);
+  requireExactFields(config, new Set(["assertions", "credential_paths", "format", "path"]), field);
+  const configPath = requireString(config.path, `${field}.path`);
+  if (!isCanonicalSandboxPath(configPath)) {
+    fail(`${field}.path`, "must be a canonical absolute path below /sandbox");
+  }
+  if (config.format !== "json" && config.format !== "yaml") {
+    fail(`${field}.format`, "must be json or yaml");
+  }
+  if (
+    !Array.isArray(config.assertions) ||
+    config.assertions.length === 0 ||
+    config.assertions.length > 16
+  ) {
+    fail(`${field}.assertions`, "must contain 1 through 16 assertions");
+  }
+  config.assertions.forEach((entry, index) => {
+    const assertionField = `${field}.assertions[${String(index)}]`;
+    const assertion = requireRecord(entry, assertionField);
+    requireExactFields(assertion, new Set(["equals", "path"]), assertionField);
+    validateWebSearchPath(assertion.path, `${assertionField}.path`);
+    if (typeof assertion.equals !== "string" && typeof assertion.equals !== "boolean") {
+      fail(`${assertionField}.equals`, "must be a string or boolean");
+    }
+    if (
+      typeof assertion.equals === "string" &&
+      (assertion.equals.length > 256 || CONTROL_CHARACTER_PATTERN.test(assertion.equals))
+    ) {
+      fail(`${assertionField}.equals`, "must be bounded text without control characters");
+    }
+  });
+  if (!Array.isArray(config.credential_paths) || config.credential_paths.length > 8) {
+    fail(`${field}.credential_paths`, "must be an array with at most 8 object paths");
+  }
+  config.credential_paths.forEach((entry, index) => {
+    validateWebSearchPath(entry, `${field}.credential_paths[${String(index)}]`);
+  });
+}
+
+function validateWebSearchEgressVerification(value: unknown, field: string): void {
+  const egress = requireRecord(value, field);
+  requireExactFields(
+    egress,
+    new Set(["credential", "method", "parameters", "result_array_path", "url"]),
+    field,
+  );
+  if (egress.method !== "GET" && egress.method !== "POST") {
+    fail(`${field}.method`, "must be GET or POST");
+  }
+  const url = requireString(egress.url, `${field}.url`);
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    fail(`${field}.url`, "must be a valid HTTPS URL");
+  }
+  if (
+    url.length > 2048 ||
+    parsedUrl.protocol !== "https:" ||
+    parsedUrl.username !== "" ||
+    parsedUrl.password !== "" ||
+    parsedUrl.search !== "" ||
+    parsedUrl.hash !== "" ||
+    parsedUrl.port !== "" ||
+    !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/u.test(parsedUrl.hostname)
+  ) {
+    fail(
+      `${field}.url`,
+      "must be a bounded public HTTPS URL without credentials, port, query, or fragment",
+    );
+  }
+  if (!Array.isArray(egress.parameters) || egress.parameters.length > 16) {
+    fail(`${field}.parameters`, "must contain at most 16 request parameters");
+  }
+  const parameterNames = new Set<string>();
+  egress.parameters.forEach((entry, index) => {
+    const parameterField = `${field}.parameters[${String(index)}]`;
+    const parameter = requireRecord(entry, parameterField);
+    requireExactFields(parameter, new Set(["name", "value"]), parameterField);
+    const name = requireString(parameter.name, `${parameterField}.name`);
+    if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/u.test(name) || parameterNames.has(name)) {
+      fail(`${parameterField}.name`, "must be a unique bounded parameter name");
+    }
+    parameterNames.add(name);
+    if (
+      (typeof parameter.value !== "string" && typeof parameter.value !== "number") ||
+      (typeof parameter.value === "string" &&
+        (parameter.value.length > 256 || CONTROL_CHARACTER_PATTERN.test(parameter.value))) ||
+      (typeof parameter.value === "number" && !Number.isFinite(parameter.value))
+    ) {
+      fail(`${parameterField}.value`, "must be a bounded string or finite number");
+    }
+  });
+  const credential = requireRecord(egress.credential, `${field}.credential`);
+  if (credential.kind === "header") {
+    requireExactFields(credential, new Set(["kind", "name", "prefix"]), `${field}.credential`);
+    const name = requireString(credential.name, `${field}.credential.name`);
+    if (!/^[A-Za-z][A-Za-z0-9-]{0,63}$/u.test(name)) {
+      fail(`${field}.credential.name`, "must be a bounded HTTP header name");
+    }
+    if (credential.prefix !== "none" && credential.prefix !== "bearer") {
+      fail(`${field}.credential.prefix`, "must be none or bearer");
+    }
+  } else if (credential.kind === "json-body") {
+    requireExactFields(credential, new Set(["kind", "name"]), `${field}.credential`);
+    const name = requireString(credential.name, `${field}.credential.name`);
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(name)) {
+      fail(`${field}.credential.name`, "must be a bounded JSON field name");
+    }
+    if (egress.method !== "POST") {
+      fail(`${field}.credential.kind`, "json-body credentials require POST");
+    }
+  } else {
+    fail(`${field}.credential.kind`, "must be header or json-body");
+  }
+  validateWebSearchPath(egress.result_array_path, `${field}.result_array_path`);
 }
 
 function validateProviderBroker(manifest: ManifestRecord): void {
@@ -190,7 +531,13 @@ function validateProviderBroker(manifest: ManifestRecord): void {
   if (broker.adapter !== "provider-broker") {
     fail("provider_broker.adapter", "must be provider-broker");
   }
-  const expected = ["describe-provider", "register-refresh-provider", "ensure-broker"];
+  const expected = [
+    "describe-provider",
+    "register-refresh-provider",
+    "ensure-broker",
+    "inspect-broker",
+    "teardown-broker",
+  ];
   const operations = broker.operations;
   if (
     !Array.isArray(operations) ||
@@ -198,8 +545,175 @@ function validateProviderBroker(manifest: ManifestRecord): void {
     new Set(operations).size !== operations.length ||
     expected.some((operation) => !operations.includes(operation))
   ) {
-    fail("provider_broker.operations", "must contain the three provider-broker operations");
+    fail("provider_broker.operations", "must contain the five provider-broker operations");
   }
+}
+
+function validateToolGateways(manifest: ManifestRecord): void {
+  if (manifest.tool_gateways === undefined) return;
+  const capability = requireRecord(manifest.tool_gateways, "tool_gateways");
+  if (capability.support === "disabled") {
+    requireExactFields(capability, new Set(["reason", "support"]), "tool_gateways");
+    const reason = requireString(capability.reason, "tool_gateways.reason");
+    if (
+      reason.trim() !== reason ||
+      reason.length === 0 ||
+      DISPLAY_CONTROL_PATTERN.test(reason) ||
+      utf8ByteLength(reason) > 512
+    ) {
+      fail("tool_gateways.reason", "must be trimmed single-line text of at most 512 bytes");
+    }
+    return;
+  }
+  if (capability.support !== "managed") {
+    fail("tool_gateways.support", "must be managed or disabled");
+  }
+  requireExactFields(
+    capability,
+    new Set([
+      "gateways",
+      "incompatible_auth_message",
+      "request_environment",
+      "selection_label",
+      "selection_prompt",
+      "support",
+    ]),
+    "tool_gateways",
+  );
+  for (const key of ["selection_label", "selection_prompt", "incompatible_auth_message"] as const) {
+    const text = requireString(capability[key], `tool_gateways.${key}`);
+    if (
+      text.trim() !== text ||
+      text.length === 0 ||
+      DISPLAY_CONTROL_PATTERN.test(text) ||
+      utf8ByteLength(text) > 512
+    ) {
+      fail(`tool_gateways.${key}`, "must be trimmed single-line text of at most 512 bytes");
+    }
+  }
+  if (
+    !Array.isArray(capability.request_environment) ||
+    capability.request_environment.length === 0 ||
+    capability.request_environment.length > 8 ||
+    new Set(capability.request_environment).size !== capability.request_environment.length ||
+    capability.request_environment.some(
+      (value) => typeof value !== "string" || !/^[A-Z][A-Z0-9_]{0,127}$/u.test(value),
+    )
+  ) {
+    fail(
+      "tool_gateways.request_environment",
+      "must contain 1 through 8 unique canonical environment names",
+    );
+  }
+  if (
+    !Array.isArray(capability.gateways) ||
+    capability.gateways.length === 0 ||
+    capability.gateways.length > 32
+  ) {
+    fail("tool_gateways.gateways", "must contain 1 through 32 gateway declarations");
+  }
+
+  const providerAuth = requireRecord(manifest.provider_auth, "provider_auth");
+  if (providerAuth.support !== "managed") {
+    fail("tool_gateways", "requires provider_auth.support: managed");
+  }
+  const providerBroker = requireRecord(manifest.provider_broker, "provider_broker");
+  if (providerBroker.support !== "managed") {
+    fail("tool_gateways", "requires provider_broker.support: managed");
+  }
+  const authMethodIds = new Set(
+    Array.isArray(providerAuth.methods)
+      ? providerAuth.methods.flatMap((entry) => {
+          if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return [];
+          const id = (entry as ManifestRecord).id;
+          return typeof id === "string" ? [id] : [];
+        })
+      : [],
+  );
+  const policy = requireRecord(manifest.policy, "policy");
+  const ownedPresets = new Set(Array.isArray(policy.owned_presets) ? policy.owned_presets : []);
+  const gatewayIds = new Set<string>();
+  const selectionNames = new Set<string>();
+  capability.gateways.forEach((value, index) => {
+    const field = `tool_gateways.gateways[${String(index)}]`;
+    const gateway = requireRecord(value, field);
+    requireExactFields(
+      gateway,
+      new Set([
+        "aliases",
+        "authentication_methods",
+        "default_selected",
+        "description",
+        "id",
+        "label",
+        "policy_presets",
+      ]),
+      field,
+    );
+    const id = requireCanonicalId(gateway.id, `${field}.id`);
+    if (gatewayIds.has(id) || selectionNames.has(id)) {
+      fail(`${field}.id`, "must be unique across gateway ids and aliases");
+    }
+    gatewayIds.add(id);
+    selectionNames.add(id);
+    for (const key of ["label", "description"] as const) {
+      const text = requireString(gateway[key], `${field}.${key}`);
+      if (
+        text.trim() !== text ||
+        text.length === 0 ||
+        DISPLAY_CONTROL_PATTERN.test(text) ||
+        utf8ByteLength(text) > 512
+      ) {
+        fail(`${field}.${key}`, "must be trimmed single-line text of at most 512 bytes");
+      }
+    }
+    if (typeof gateway.default_selected !== "boolean") {
+      fail(`${field}.default_selected`, "must be a boolean");
+    }
+    if (
+      !Array.isArray(gateway.aliases) ||
+      gateway.aliases.length > 16 ||
+      new Set(gateway.aliases).size !== gateway.aliases.length ||
+      gateway.aliases.some(
+        (alias) => typeof alias !== "string" || !/^[a-z][a-z0-9-]{0,63}$/u.test(alias),
+      )
+    ) {
+      fail(`${field}.aliases`, "must contain at most 16 unique canonical aliases");
+    }
+    for (const alias of gateway.aliases as string[]) {
+      if (selectionNames.has(alias))
+        fail(`${field}.aliases`, "must be unique across gateway ids and aliases");
+      selectionNames.add(alias);
+    }
+    if (
+      !Array.isArray(gateway.authentication_methods) ||
+      gateway.authentication_methods.length === 0 ||
+      gateway.authentication_methods.length > 8 ||
+      new Set(gateway.authentication_methods).size !== gateway.authentication_methods.length ||
+      gateway.authentication_methods.some(
+        (method) => typeof method !== "string" || !authMethodIds.has(method),
+      )
+    ) {
+      fail(
+        `${field}.authentication_methods`,
+        "must reference 1 through 8 unique provider authentication methods",
+      );
+    }
+    if (
+      !Array.isArray(gateway.policy_presets) ||
+      gateway.policy_presets.length === 0 ||
+      gateway.policy_presets.length > 8 ||
+      new Set(gateway.policy_presets).size !== gateway.policy_presets.length ||
+      gateway.policy_presets.some(
+        (preset) => typeof preset !== "string" || !ownedPresets.has(preset),
+      )
+    ) {
+      fail(
+        `${field}.policy_presets`,
+        "must reference 1 through 8 unique package-owned policy presets",
+      );
+    }
+  });
 }
 
 function hasCanonicalSegments(value: string): boolean {
@@ -288,10 +802,13 @@ function validateSkills(manifest: ManifestRecord): void {
 
 /** Validate independently consumable MCP, session, messaging, and skill declarations. */
 export function validateHarnessCapabilities(manifest: ManifestRecord): void {
+  validateAgentRoster(manifest);
+  validatePolicy(manifest);
   validateMcp(manifest);
   validateSessions(manifest);
   validateMessaging(manifest);
   validateWebSearch(manifest);
   validateSkills(manifest);
   validateProviderBroker(manifest);
+  validateToolGateways(manifest);
 }

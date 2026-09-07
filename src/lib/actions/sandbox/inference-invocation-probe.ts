@@ -7,6 +7,7 @@ import { getSandboxInferenceConfig } from "../../inference/config";
 import { validateInferenceResponseBody } from "../../inference/health";
 import { MIN_PROBE_REPLY_TOKENS, resolveMaxTokensField } from "../../inference/max-tokens-field";
 import { shellQuote } from "../../runner";
+import type { AgentSmokeBoundary } from "../../agent-runtime/runtime/manifest";
 import { DCODE_MANAGED_EXEC_LAUNCHER } from "./connect-inference-route-probe";
 import {
   executeSandboxExecCommand,
@@ -23,6 +24,8 @@ export type SandboxInferenceInvocationInput = {
   provider: string;
   model: string;
   preferredInferenceApi: string | null;
+  /** Receipt-derived sandbox execution boundary. */
+  probeBoundary?: AgentSmokeBoundary;
 };
 
 export type SandboxInferenceInvocationResult =
@@ -113,6 +116,28 @@ export function buildSandboxInferenceInvocationCommand(
 export function buildDcodeSandboxInferenceInvocationArgs(
   input: SandboxInferenceInvocationInput,
 ): string[] {
+  return buildManagedSandboxInferenceInvocationArgs(input, {
+    kind: "managed-launcher",
+    launcher: DCODE_MANAGED_EXEC_LAUNCHER,
+    home: "/usr/local/lib/nemoclaw",
+  });
+}
+
+function legacyDcodeProbeBoundary(agentName: string | null | undefined): AgentSmokeBoundary {
+  return agentName === DCODE_AGENT_NAME
+    ? {
+        kind: "managed-launcher",
+        launcher: DCODE_MANAGED_EXEC_LAUNCHER,
+        home: "/usr/local/lib/nemoclaw",
+      }
+    : { kind: "login-shell" };
+}
+
+/** Build a protected invocation from a package-declared managed launcher. */
+function buildManagedSandboxInferenceInvocationArgs(
+  input: SandboxInferenceInvocationInput,
+  boundary: Extract<AgentSmokeBoundary, { kind: "managed-launcher" }>,
+): string[] {
   return [
     "sandbox",
     "exec",
@@ -121,48 +146,17 @@ export function buildDcodeSandboxInferenceInvocationArgs(
     ...(input.gatewayName ? ["-g", input.gatewayName] : []),
     "--no-tty",
     "--env",
-    "HOME=/usr/local/lib/nemoclaw",
+    `HOME=${boundary.home}`,
     "--env",
     "BASH_ENV=",
     "--env",
     "ENV=",
     "--",
-    DCODE_MANAGED_EXEC_LAUNCHER,
+    boundary.launcher,
     "/bin/sh",
     "-c",
     buildSandboxInferenceInvocationCommand(input),
   ];
-}
-
-function executeDcodeSandboxInferenceInvocation(
-  input: SandboxInferenceInvocationInput,
-  deps: SandboxInferenceInvocationDeps,
-  timeoutMs: number,
-): SandboxCommandResult | null {
-  const runOpenshell = deps.runOpenshell ?? runOpenshellProviderCommand;
-  try {
-    const result = runOpenshell(buildDcodeSandboxInferenceInvocationArgs(input), {
-      ignoreError: true,
-      ...(input.runtimeSelection ? { runtimeSelection: input.runtimeSelection } : {}),
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: timeoutMs,
-    });
-    if (
-      result.error ||
-      typeof result.stdout !== "string" ||
-      typeof result.stderr !== "string" ||
-      result.stderr.trim()
-    ) {
-      return null;
-    }
-    return {
-      status: result.status ?? 1,
-      stdout: result.stdout,
-      stderr: result.stderr,
-    };
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -177,8 +171,31 @@ export function probeSandboxInferenceInvocation(
   timeoutMs: number = REBUILD_INFERENCE_INVOCATION_TIMEOUT_MS,
 ): SandboxInferenceInvocationResult {
   let result: SandboxCommandResult | null;
-  if (input.agentName === DCODE_AGENT_NAME) {
-    result = executeDcodeSandboxInferenceInvocation(input, deps, timeoutMs);
+  const boundary = input.probeBoundary ?? legacyDcodeProbeBoundary(input.agentName);
+  if (boundary.kind === "managed-launcher") {
+    const runOpenshell = deps.runOpenshell ?? runOpenshellProviderCommand;
+    try {
+      const command = buildManagedSandboxInferenceInvocationArgs(input, boundary);
+      const invocation = runOpenshell(command, {
+        ignoreError: true,
+        ...(input.runtimeSelection ? { runtimeSelection: input.runtimeSelection } : {}),
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: timeoutMs,
+      });
+      result =
+        invocation.error ||
+        typeof invocation.stdout !== "string" ||
+        typeof invocation.stderr !== "string" ||
+        invocation.stderr.trim()
+          ? null
+          : {
+              status: invocation.status ?? 1,
+              stdout: invocation.stdout,
+              stderr: invocation.stderr,
+            };
+    } catch {
+      result = null;
+    }
   } else {
     const execute = deps.execute ?? executeSandboxExecCommand;
     const execOptions: SandboxExecCommandOptions = {

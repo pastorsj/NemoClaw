@@ -105,8 +105,8 @@ ADD --checksum=sha256:66d2759d1921838256a05a3f80ad7e724936f083e35be5abb5e16eed6b
 COPY packages/nemoclaw-hermes/runtime/managed_policy.py /opt/nemoclaw-hermes-config/managed_policy.py
 COPY packages/nemoclaw-hermes/host/managed-route.cts /opt/nemoclaw-hermes-config/host/managed-route.cts
 COPY packages/nemoclaw-hermes/host/tool-matrix.json /opt/nemoclaw-hermes-config/host/tool-matrix.json
-COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
 COPY packages/nemoclaw-hermes/messaging/messaging-build.mts /usr/local/lib/nemoclaw/messaging-build.mts
+COPY packages/nemoclaw-hermes/messaging/profile.json packages/nemoclaw-hermes/messaging/runtime-profile.json /usr/local/share/nemoclaw/messaging/
 
 FROM scratch AS hermes-runtime-payload
 
@@ -483,7 +483,6 @@ RUN chmod -R a+rX /opt/nemoclaw-hermes-plugin/ \
 # read-only.
 RUN find /opt/nemoclaw-hermes-config -type d -exec chmod 755 {} + \
     && find /opt/nemoclaw-hermes-config -type f -exec chmod 444 {} + \
-    && chmod 444 /src/lib/tool-disclosure.ts \
     && chmod 555 /usr/local/lib/nemoclaw/messaging-build.mts \
     && chmod 444 /scripts/lib/reviewed-npm-archive.mts /scripts/lib/bundled-npm-package.mts \
         /scripts/patch-bundled-npm-brace-expansion.mts /scripts/lib/patch-bundled-npm-ip-address.mts \
@@ -955,7 +954,7 @@ RUN case "$NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION" in \
 # Bake reduced messaging runtime metadata for the entrypoint. Hermes runtime
 # config refresh consumes generic manifest-owned aliases from this artifact.
 # hadolint ignore=DL3059
-RUN node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --agent hermes --phase runtime-setup \
+RUN node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --profile /usr/local/share/nemoclaw/messaging/runtime-profile.json --agent hermes --phase runtime-setup \
     && runtime_plan=/usr/local/share/nemoclaw/messaging-runtime-plan.json \
     && { [ ! -f "$runtime_plan" ] || { test ! -L "$runtime_plan" \
     && node -e "const fs=require('fs'); const path=process.argv[1]; const st=fs.statSync(path); if (!st.isFile() || st.uid !== 0 || st.gid !== 0 || (st.mode & 0o022) !== 0) throw new Error('unsafe runtime plan file metadata'); const p=JSON.parse(fs.readFileSync(path,'utf8')); for (const k of ['agentRender','buildSteps','stateUpdates','healthChecks']) if (Object.hasOwn(p,k)) throw new Error('runtime plan contains unreduced key '+k); const runtimeSetup=p.runtimeSetup; const isObject=(v)=>v && typeof v === 'object' && !Array.isArray(v); if (!isObject(runtimeSetup) || !Array.isArray(runtimeSetup.nodePreloads) || !Array.isArray(runtimeSetup.envAliases) || !Array.isArray(runtimeSetup.secretScans) || !runtimeSetup.nodePreloads.every(isObject) || !runtimeSetup.envAliases.every(isObject) || !runtimeSetup.secretScans.every(isObject)) throw new Error('runtime plan missing reduced runtimeSetup shape');" "$runtime_plan"; }; }
@@ -971,7 +970,7 @@ RUN unset SSL_CERT_FILE REQUESTS_CA_BUNDLE; \
       export SSL_CERT_FILE=/usr/local/share/nemoclaw/corporate-ca.pem; \
       export REQUESTS_CA_BUNDLE=/usr/local/share/nemoclaw/corporate-ca.pem; \
     fi; \
-    node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --agent hermes --phase agent-install
+    node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --profile /usr/local/share/nemoclaw/messaging/runtime-profile.json --agent hermes --phase agent-install
 
 # Managed images have no serialized messaging plan. Install their complete
 # reviewed package union from the selected wheel stage. Portable Podman uses the
@@ -983,7 +982,7 @@ COPY --from=hermes-managed-teams-wheels / /opt/nemoclaw-hermes-teams-wheels/
 RUN if [ "$NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION" = "1" ]; then \
         UV_OFFLINE=true UV_FIND_LINKS=/opt/nemoclaw-hermes-teams-wheels \
         node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts \
-            --agent hermes --phase managed-image-capability-union; \
+            --profile /usr/local/share/nemoclaw/messaging/runtime-profile.json --agent hermes --phase managed-image-capability-union; \
     fi \
     && /opt/hermes/.venv/bin/python -I -c \
         "from importlib.metadata import version; expected = {'aiohttp': '3.14.3', 'cryptography': '50.0.0'}; actual = {name: version(name) for name in expected}; assert actual == expected, actual" \
@@ -1206,7 +1205,7 @@ USER sandbox
 
 # Apply messaging render and post-agent-install build-file hooks after agent/plugin installation.
 # hadolint ignore=DL3059
-RUN node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --agent hermes --phase post-agent-install
+RUN node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --profile /usr/local/share/nemoclaw/messaging/runtime-profile.json --agent hermes --phase post-agent-install
 
 # Write the default SOUL.md (agent identity) for the sandboxed agent.
 # This is the stock Hermes default soul (hermes_cli/default_soul.py,

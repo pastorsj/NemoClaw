@@ -55,6 +55,60 @@ describe("onboard runtime control flow", () => {
     expect(session.agent).toBe("langchain-deepagents-code");
   });
 
+  it("preserves observability for an unknown receipt-backed package that declares it", () => {
+    const session = createSession({
+      agent: "future-harness",
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "future-harness",
+        packageVersion: "1.0.0-test",
+        contentDigest: "f".repeat(64),
+      },
+      observabilityEnabled: true,
+    });
+
+    expect(
+      updateSessionAgent(session, "future-harness", {
+        error: vi.fn(),
+        exitProcess: vi.fn(() => {
+          throw new Error("exit 1");
+        }),
+        getRegisteredAgent: () =>
+          ({
+            name: "future-harness",
+            sandbox_create: { startup_controls: ["observability"] },
+          }) as never,
+      }),
+    ).toBe(session);
+    expect(session.agent).toBe("future-harness");
+  });
+
+  it("rejects receipt-backed observability when the package omits the control", () => {
+    const session = createSession({
+      agent: "future-harness",
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "future-harness",
+        packageVersion: "1.0.0-test",
+        contentDigest: "f".repeat(64),
+      },
+      observabilityEnabled: true,
+    });
+    const error = vi.fn();
+    const exitProcess = vi.fn(() => {
+      throw new Error("exit 1");
+    });
+
+    expect(() =>
+      updateSessionAgent(session, "future-harness", {
+        error,
+        exitProcess,
+        getRegisteredAgent: () => ({ name: "future-harness" }) as never,
+      }),
+    ).toThrow("exit 1");
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("declares the observability"));
+  });
+
   it("rejects enabled observability for a non-DCode agent", () => {
     const session = createSession({
       agent: "langchain-deepagents-code",

@@ -6,17 +6,21 @@ import fs from "node:fs";
 import path from "node:path";
 
 import {
-  VOICE_GATEWAY_DEPLOYMENT_CREDENTIAL_FD,
-  VOICE_GATEWAY_FEATURE_ENV,
-  VOICE_GATEWAY_OPENCLAW_CREDENTIAL_FD,
-} from "./contracts";
+  buildOpenShellSubprocessEnv,
+  resolveOpenshellBinaryOrNull,
+} from "../adapters/openshell/resolve-shared";
+import { VOICE_GATEWAY_DEPLOYMENT_CREDENTIAL_FD, VOICE_GATEWAY_FEATURE_ENV } from "./contracts";
 import { validatePrivateCredentialDescriptor } from "./credential-file";
+import {
+  encodeSemanticTurnBinding,
+  resolveSandboxSemanticTurnAuthority,
+  semanticTurnBinding,
+  type SandboxSemanticTurnAuthority,
+} from "./sandbox-authority";
 
 /** Trusted source paths and fixed runtime fields for one voice-gateway launch. */
 export interface VoiceGatewayLaunchOptions {
   readonly deploymentCredentialPath: string;
-  readonly openClawCredentialPath: string;
-  readonly gatewayUrl: string;
   readonly runtimeIdentity: string;
   readonly runtimeProfile: string;
   readonly sandbox: string;
@@ -29,6 +33,19 @@ export interface VoiceGatewayLaunchContract {
   readonly command: string;
   readonly args: readonly string[];
   readonly env: Readonly<Record<string, string>>;
+}
+
+export interface VoiceGatewayProcessAuthority {
+  readonly openshellBinary: string;
+  readonly semanticTurn: SandboxSemanticTurnAuthority;
+  readonly sourceEnv: NodeJS.ProcessEnv;
+}
+
+export interface VoiceGatewayLauncherDependencies {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly resolveOpenShell?: (env: NodeJS.ProcessEnv) => string | null;
+  readonly resolveSemanticTurnAuthority?: (sandboxName: string) => SandboxSemanticTurnAuthority;
+  readonly spawnChild?: typeof spawn;
 }
 
 /** Cleanup failure that retains the only handle to a child whose exit was not observed. */
@@ -49,29 +66,69 @@ const CLI = path.resolve(__dirname, "../../../bin/nemoclaw.js");
 /** Build the path- and value-free child process contract for the voice gateway. */
 export function buildVoiceGatewayLaunchContract(
   options: VoiceGatewayLaunchOptions,
+  authority: VoiceGatewayProcessAuthority,
 ): VoiceGatewayLaunchContract {
+  if (!path.isAbsolute(authority.openshellBinary)) {
+    throw new Error("Voice gateway requires an absolute OpenShell executable path.");
+  }
+  const binding = semanticTurnBinding(authority.semanticTurn);
+  if (binding.sandboxName !== options.sandbox) {
+    throw new Error("Voice gateway sandbox authority does not match the requested sandbox.");
+  }
   const args = [
     CLI,
     "internal",
     "voice-gateway",
     "serve",
-    "--gateway-url",
-    options.gatewayUrl,
     "--runtime-identity",
     options.runtimeIdentity,
     "--runtime-profile",
     options.runtimeProfile,
     "--sandbox",
     options.sandbox,
+    "--sandbox-authority",
+    encodeSemanticTurnBinding(binding),
     "--agent",
     options.agent,
+    "--turn-timeout-ms",
+    String(authority.semanticTurn.declaration.timeout_seconds * 1000),
   ];
   if (options.listenPort !== undefined) args.push("--listen-port", String(options.listenPort));
+  const env = buildOpenShellSubprocessEnv(authority.sourceEnv);
+  const home = authority.sourceEnv.HOME || "/tmp";
+  if (!path.isAbsolute(home)) throw new Error("Voice gateway HOME must be an absolute path.");
+  for (const name of ["XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "OPENSHELL_WORKSPACE"] as const) {
+    const value = authority.sourceEnv[name];
+    if (value !== undefined && value !== "") env[name] = value;
+  }
   return {
     command: process.execPath,
     args,
-    env: { [VOICE_GATEWAY_FEATURE_ENV]: "1" },
+    env: {
+      ...env,
+      HOME: home,
+      NEMOCLAW_GATEWAY_PORT: String(binding.gatewayPort),
+      NEMOCLAW_OPENSHELL_BIN: authority.openshellBinary,
+      [VOICE_GATEWAY_FEATURE_ENV]: "1",
+    },
   };
+}
+
+function captureProcessAuthority(
+  options: VoiceGatewayLaunchOptions,
+  dependencies: VoiceGatewayLauncherDependencies,
+): VoiceGatewayProcessAuthority {
+  const sourceEnv = dependencies.env ?? process.env;
+  const semanticTurn = (
+    dependencies.resolveSemanticTurnAuthority ?? resolveSandboxSemanticTurnAuthority
+  )(options.sandbox);
+  const openshellBinary = (
+    dependencies.resolveOpenShell ?? ((env) => resolveOpenshellBinaryOrNull(env))
+  )(sourceEnv);
+  if (!openshellBinary || !path.isAbsolute(openshellBinary)) {
+    throw new Error("Voice gateway could not resolve an absolute OpenShell executable.");
+  }
+  return Object.freeze({ openshellBinary, semanticTurn, sourceEnv: { ...sourceEnv } });
 }
 
 /** Open and validate one trusted credential source without exposing its path downstream. */
@@ -150,9 +207,10 @@ async function terminateChild(child: ChildProcess): Promise<boolean> {
   });
 }
 
-/** Launch the real gateway with only the two selected credential objects inherited. */
+/** Launch the real gateway with only the selected deployment credential inherited. */
 export async function launchVoiceGateway(
   options: VoiceGatewayLaunchOptions,
+  dependencies: VoiceGatewayLauncherDependencies = {},
 ): Promise<ChildProcess> {
   const descriptors: number[] = [];
   let child: ChildProcess | undefined;
@@ -163,22 +221,13 @@ export async function launchVoiceGateway(
       "Voice gateway deployment credential",
     );
     descriptors.push(deployment);
-    const openClaw = openCredential(
-      options.openClawCredentialPath,
-      "Voice gateway OpenClaw credential",
+    const contract = buildVoiceGatewayLaunchContract(
+      options,
+      captureProcessAuthority(options, dependencies),
     );
-    descriptors.push(openClaw);
-    const deploymentStat = fs.fstatSync(deployment);
-    const openClawStat = fs.fstatSync(openClaw);
-    if (deploymentStat.dev === openClawStat.dev && deploymentStat.ino === openClawStat.ino) {
-      throw new Error("Voice gateway credential sources must refer to different files.");
-    }
-
-    const contract = buildVoiceGatewayLaunchContract(options);
     const stdio: Array<"ignore" | "pipe" | number> = ["ignore", "pipe", "pipe"];
     stdio[VOICE_GATEWAY_DEPLOYMENT_CREDENTIAL_FD] = deployment;
-    stdio[VOICE_GATEWAY_OPENCLAW_CREDENTIAL_FD] = openClaw;
-    child = spawn(contract.command, contract.args, {
+    child = (dependencies.spawnChild ?? spawn)(contract.command, contract.args, {
       env: contract.env,
       stdio,
     });

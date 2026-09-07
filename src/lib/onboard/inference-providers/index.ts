@@ -10,6 +10,8 @@
 // isolation. See issue #767 for the broader provider extraction plan.
 
 export { setupHermesProviderInference } from "./hermes";
+export { setupPackageProviderInference } from "./package-auth";
+export type { PackageProviderAuthDeps } from "./package-auth";
 export { setupOllamaLocalInference } from "./ollama-local";
 export { setupRemoteProviderInference } from "./remote";
 export { setupRoutedInference } from "./routed";

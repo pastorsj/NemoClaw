@@ -13,6 +13,7 @@ import { normalizePendingSandboxCreateIdentity } from "./registry/pending-create
 import type { SandboxEntry } from "./registry/types";
 
 export { normalizePendingSandboxCreateIdentity };
+export { parseSandboxProviderBrokerOwnership } from "./registry/provider-broker";
 
 const SHA256_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 

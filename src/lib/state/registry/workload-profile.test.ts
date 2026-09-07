@@ -28,6 +28,23 @@ const HARNESS_PACKAGE = {
 function packageWorkload(
   profilePackage: HarnessPackageIdentity = HARNESS_PACKAGE,
 ): Extract<SandboxWorkloadReceipt, { kind: "managed-image" }> {
+  const packageStartupProfile = packageStartupProfileReceipt(profilePackage);
+  return {
+    schemaVersion: 1,
+    kind: "managed-image",
+    reference: `registry.example/team/future-harness@sha256:${"b".repeat(64)}`,
+    platform: "linux/amd64",
+    release: "v0.0.100",
+    sourceRevision: "c".repeat(40),
+    sourceCohort: "build-2026.09.05",
+    capabilityContractVersion: 1,
+    startupProfileContractVersion: 1,
+    ...packageStartupProfile,
+    shared: true,
+  };
+}
+
+function packageStartupProfileReceipt(profilePackage: HarnessPackageIdentity = HARNESS_PACKAGE) {
   const piSettings = managedStartupSettingsFromProfile(managedStartupE2eProfile("pi"));
   const encodedProfile = encodeManagedStartupDurableProfile({
     schemaVersion: 1,
@@ -43,19 +60,21 @@ function packageWorkload(
     corporateCa: { bundleSha256: null },
   });
   return {
-    schemaVersion: 1,
-    kind: "managed-image",
-    reference: `registry.example/team/future-harness@sha256:${"b".repeat(64)}`,
-    platform: "linux/amd64",
-    release: "v0.0.100",
-    sourceRevision: "c".repeat(40),
-    sourceCohort: "build-2026.09.05",
-    capabilityContractVersion: 1,
-    startupProfileContractVersion: 1,
     encodedProfile,
     startupProfileSha256: createHash("sha256").update(encodedProfile, "utf8").digest("hex"),
     credentialProxyReplayRequired: false,
-    shared: true,
+  };
+}
+
+function packageDockerfileWorkload(
+  profilePackage: HarnessPackageIdentity = HARNESS_PACKAGE,
+): Extract<SandboxWorkloadReceipt, { kind: "legacy-dockerfile" }> {
+  return {
+    schemaVersion: 1,
+    kind: "legacy-dockerfile",
+    reference: "nemoclaw-future-harness:local",
+    packageStartupProfile: packageStartupProfileReceipt(profilePackage),
+    shared: false,
   };
 }
 
@@ -94,6 +113,54 @@ describe("sandbox registry package startup profile", () => {
     expect(cloneSandboxWorkloadReceipt(workload)).toEqual(workload);
     expect(cloneSandboxWorkloadReceipt(workload, { harnessPackage: null })).toBeUndefined();
   });
+
+  it("round-trips a package-bound profile on a Dockerfile workload receipt", async () => {
+    const registry = await loadRegistryDocument({ sandboxes: {}, defaultSandbox: null });
+    const workload = packageDockerfileWorkload();
+
+    registry.registerSandbox({
+      name: "dockerfile-package",
+      agent: HARNESS_PACKAGE.id,
+      harnessPackage: HARNESS_PACKAGE,
+      imageTag: workload.reference,
+      workload,
+    });
+    registry.save(registry.load());
+
+    expect(registry.getSandbox("dockerfile-package")?.workload).toEqual(workload);
+  });
+
+  it("fails closed when a Dockerfile profile transport is tampered", () => {
+    const workload = packageDockerfileWorkload();
+    const packageStartupProfile = workload.packageStartupProfile!;
+
+    expect(
+      cloneSandboxWorkloadReceipt(
+        {
+          ...workload,
+          packageStartupProfile: {
+            ...packageStartupProfile,
+            encodedProfile: `${packageStartupProfile.encodedProfile}A`,
+          },
+        },
+        { harnessPackage: HARNESS_PACKAGE },
+      ),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    ["absence", null],
+    ["ID", { ...HARNESS_PACKAGE, id: "other-harness" }],
+    ["version", { ...HARNESS_PACKAGE, packageVersion: "1.2.4" }],
+    ["digest", { ...HARNESS_PACKAGE, contentDigest: "d".repeat(64) }],
+  ] as const)(
+    "rejects a Dockerfile profile bound to a different package %s",
+    (_case, authority) => {
+      expect(
+        cloneSandboxWorkloadReceipt(packageDockerfileWorkload(), { harnessPackage: authority }),
+      ).toBeUndefined();
+    },
+  );
 
   it("fails closed for a receipt created before desired state was durable", () => {
     const oldProfile = {

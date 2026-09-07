@@ -4,6 +4,7 @@
 import { MessagingHookRegistry } from "../hooks";
 import { hydrateDerivedSandboxMessagingPlanFields } from "../hydration";
 import type {
+  ChannelManifest,
   ChannelManifestRegistry,
   MessagingAgentId,
   MessagingChannelId,
@@ -62,7 +63,7 @@ export class MessagingWorkflowPlanner {
   async buildChannelAddPlanFromSandboxEntry(
     context: MessagingWorkflowPlannerChannelAddContext,
   ): Promise<SandboxMessagingPlan> {
-    const existingPlan = readSandboxEntryPlan(context);
+    const existingPlan = readSandboxEntryPlan(context, this.registry.list());
     const compiledPlan = await this.buildPlan({
       sandboxName: context.sandboxName,
       agent: context.agent,
@@ -123,7 +124,10 @@ export class MessagingWorkflowPlanner {
   async buildRebuildPlanFromSandboxEntry(
     context: MessagingWorkflowPlannerSandboxRebuildContext,
   ): Promise<SandboxMessagingPlan | null> {
-    const existingPlan = readSandboxEntryPlan({ ...context, supportedChannelIds: null });
+    const existingPlan = readSandboxEntryPlan(
+      { ...context, supportedChannelIds: null },
+      this.registry.list(),
+    );
     if (!existingPlan) return null;
 
     const filteredPlan = this.filterPlanChannelsToSupportedAllowlist(existingPlan, context);
@@ -189,7 +193,7 @@ export class MessagingWorkflowPlanner {
     context: MessagingWorkflowPlannerChannelMutationContext,
     workflow: MessagingCompilerWorkflow,
   ): Promise<SandboxMessagingPlan | null> {
-    const existingPlan = readSandboxEntryPlan(context);
+    const existingPlan = readSandboxEntryPlan(context, this.registry.list());
     if (existingPlan) return { ...clonePlan(existingPlan), workflow };
     return null;
   }
@@ -201,7 +205,7 @@ export class MessagingWorkflowPlanner {
     >,
     channelIds: readonly MessagingChannelId[],
   ): MessagingCompilerCredentialAvailability | undefined {
-    const plan = readSandboxEntryPlan(context);
+    const plan = readSandboxEntryPlan(context, this.registry.list());
     if (!plan) return undefined;
 
     const availability: Record<string, boolean> = {};
@@ -272,13 +276,15 @@ function readSandboxEntryPlan(
     MessagingWorkflowPlannerSandboxContext,
     "agent" | "sandboxEntry" | "sandboxName" | "supportedChannelIds"
   >,
+  manifests: readonly ChannelManifest[],
 ): SandboxMessagingPlan | null {
   const plan = parseSandboxMessagingPlan(context.sandboxEntry?.messaging?.plan, {
     sandboxName: context.sandboxName,
     agent: context.agent,
     supportedChannelIds: context.supportedChannelIds,
+    manifests,
   });
-  return plan ? hydrateDerivedSandboxMessagingPlanFields(plan) : null;
+  return plan ? hydrateDerivedSandboxMessagingPlanFields(plan, { manifests }) : null;
 }
 
 function disabledChannelsFromSandboxEntry(

@@ -70,6 +70,7 @@ export function packageManagedSandbox(
     openshellDriver: "docker",
     provider: "nvidia-nim",
     model: "nvidia/model-a",
+    ...(harnessPackage.id === "hermes" ? { secondaryForwardPort: 8642 } : {}),
   };
 }
 

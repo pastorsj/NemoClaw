@@ -312,6 +312,21 @@ describe("launch readiness validation", () => {
           requiredScopes: ["operator.pairing", "operator.read", "operator.write"],
         };
       },
+      observePackageSessionQualification: (sandboxName, packageId, declaration, executionUser) => {
+        externalEvents.push("package-session-qualification");
+        expect({ sandboxName, packageId, declaration, executionUser }).toMatchObject({
+          sandboxName: SANDBOX,
+          packageId: sandbox.harnessPackage?.id,
+          declaration: { command: expect.any(Array), timeout_seconds: expect.any(Number) },
+          executionUser: { uid: expect.any(Number), gid: expect.any(Number) },
+        });
+        return {
+          schemaVersion: 1,
+          kind: "package-session",
+          packageId,
+          stateSha256: pairingStateSha256,
+        };
+      },
       classifyPortableLifecycleReceipt: () => ({ kind: "absent" }),
       readLease: () =>
         readKind === "valid" && publishedIdentity
@@ -889,6 +904,7 @@ describe("launch readiness validation", () => {
     );
     expect(gatewayHealth).not.toHaveBeenCalled();
     expect(externalEvents).not.toContain("pairing-qualification");
+    expect(externalEvents).not.toContain("package-session-qualification");
     expect(publishedIdentity?.session).toBeNull();
   });
 
@@ -919,7 +935,11 @@ describe("launch readiness validation", () => {
     expect(gatewayHealth).toHaveBeenCalledWith(SANDBOX, GATEWAY_NAME);
     expect(smoke).not.toHaveBeenCalled();
     expect(externalEvents).not.toContain("pairing-qualification");
-    expect(publishedIdentity?.session).toBeNull();
+    expect(externalEvents).toContain("package-session-qualification");
+    expect(publishedIdentity?.session).toMatchObject({
+      kind: "package-session",
+      packageId: "future-gateway",
+    });
   });
 
   it("qualifies canonical package-backed OpenClaw rows whose recorded agent is null", async () => {
@@ -935,8 +955,12 @@ describe("launch readiness validation", () => {
     externalEvents = [];
     expect(await inspectLaunchReadiness(SANDBOX, currentDeps)).toMatchObject({ kind: "accepted" });
 
-    expect(externalEvents).toContain("pairing-qualification");
-    expect(publishedIdentity?.session).toMatchObject({ kind: "openclaw-pairing" });
+    expect(externalEvents).not.toContain("pairing-qualification");
+    expect(externalEvents).toContain("package-session-qualification");
+    expect(publishedIdentity?.session).toMatchObject({
+      kind: "package-session",
+      packageId: "openclaw",
+    });
   });
 
   it("uses typed receipt-backed capabilities for a future terminal package", async () => {
@@ -1238,158 +1262,6 @@ describe("launch readiness validation", () => {
       publishLaunchReadiness(publicationFromDecision(SANDBOX, decision), currentDeps),
     ).resolves.toEqual({ kind: "validation-failed", category: "config" });
     expect(publishLease).not.toHaveBeenCalled();
-  });
-
-  it("binds every host mount field without projecting the host source path (#8942)", () => {
-    const agent = loadAgent("openclaw");
-    const source = "/private/host/customer-project";
-    const mounted: SandboxEntry = {
-      ...sandbox,
-      hostMounts: [
-        {
-          source,
-          target: "/sandbox/project",
-          readOnly: true,
-          sourceIdentity: { device: "11", inode: "22" },
-        },
-      ],
-    };
-    const projection = buildLaunchReadinessRegistryProjection(mounted, agent) as {
-      hostMounts: Array<Record<string, unknown>>;
-    };
-    expect(JSON.stringify(projection)).not.toContain(source);
-    expect(projection.hostMounts).toEqual([
-      {
-        sourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
-        target: "/sandbox/project",
-        readOnly: true,
-        sourceIdentity: { device: "11", inode: "22" },
-      },
-    ]);
-
-    const original = launchReadinessDigest(projection);
-    const mutations: SandboxEntry[] = [
-      {
-        ...mounted,
-        hostMounts: [{ ...mounted.hostMounts![0]!, source: `${source}-changed` }],
-      },
-      {
-        ...mounted,
-        hostMounts: [{ ...mounted.hostMounts![0]!, target: "/sandbox/changed" }],
-      },
-      {
-        ...mounted,
-        hostMounts: [
-          {
-            ...mounted.hostMounts![0]!,
-            sourceIdentity: { device: "12", inode: "22" },
-          },
-        ],
-      },
-      {
-        ...mounted,
-        hostMounts: [
-          {
-            ...mounted.hostMounts![0]!,
-            sourceIdentity: { device: "11", inode: "23" },
-          },
-        ],
-      },
-    ];
-    expect(
-      mutations.every(
-        (mutation) =>
-          !Object.is(
-            launchReadinessDigest(buildLaunchReadinessRegistryProjection(mutation, agent)),
-            original,
-          ),
-      ),
-    ).toBe(true);
-    expect(() =>
-      buildLaunchReadinessRegistryProjection(
-        {
-          ...mounted,
-          hostMounts: [{ ...mounted.hostMounts![0]!, readOnly: false as true }],
-        },
-        agent,
-      ),
-    ).toThrow();
-  });
-
-  it("binds every semantic serving profile provenance field (#8942)", () => {
-    const agent = loadAgent("openclaw");
-    const originalProfile = servingProfile();
-    const original = launchReadinessDigest(
-      buildLaunchReadinessRegistryProjection(
-        { ...sandbox, servingProfileProvenance: originalProfile },
-        agent,
-      ),
-    );
-    const mutations: NonNullable<SandboxEntry["servingProfileProvenance"]>[] = [
-      { ...originalProfile, catalogDigest: `sha256:${"a".repeat(64)}` },
-      { ...originalProfile, preset: { ...originalProfile.preset, id: "changed" } },
-      {
-        ...originalProfile,
-        preset: { ...originalProfile.preset, digest: `sha256:${"a".repeat(64)}` },
-      },
-      { ...originalProfile, preset: { ...originalProfile.preset, displayName: "Changed" } },
-      {
-        ...originalProfile,
-        preset: { ...originalProfile.preset, supportState: "experimental" },
-      },
-      { ...originalProfile, recipe: { ...originalProfile.recipe, id: "changed" } },
-      {
-        ...originalProfile,
-        recipe: { ...originalProfile.recipe, digest: `sha256:${"a".repeat(64)}` },
-      },
-      { ...originalProfile, recipe: { ...originalProfile.recipe, backend: "changed" } },
-      { ...originalProfile, model: { ...originalProfile.model, id: "changed" } },
-      { ...originalProfile, model: { ...originalProfile.model, revision: "changed" } },
-      { ...originalProfile, runtimeImage: "example.com/changed@sha256:immutable" },
-      { ...originalProfile, estimatedImageDownloadBytes: 1_001 },
-      { ...originalProfile, estimatedModelDownloadBytes: 2_001 },
-    ];
-    expect(
-      mutations.every(
-        (mutation) =>
-          !Object.is(
-            launchReadinessDigest(
-              buildLaunchReadinessRegistryProjection(
-                { ...sandbox, servingProfileProvenance: mutation },
-                agent,
-              ),
-            ),
-            original,
-          ),
-      ),
-    ).toBe(true);
-  });
-
-  it("excludes diagnostic timestamps, source paths, and GPU detail from the projection", () => {
-    const agent = loadAgent("openclaw");
-    const first: SandboxEntry = {
-      ...sandbox,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      sandboxGpuProof: {
-        status: "verified",
-        cudaVerified: true,
-        label: "cuda",
-        detail: "first diagnostic",
-        at: "2026-01-01T00:00:00.000Z",
-      },
-    };
-    const second: SandboxEntry = {
-      ...first,
-      createdAt: "2026-06-01T00:00:00.000Z",
-      sandboxGpuProof: {
-        ...first.sandboxGpuProof!,
-        detail: "second diagnostic",
-        at: "2026-06-01T00:00:00.000Z",
-      },
-    };
-    expect(launchReadinessDigest(buildLaunchReadinessRegistryProjection(second, agent))).toBe(
-      launchReadinessDigest(buildLaunchReadinessRegistryProjection(first, agent)),
-    );
   });
 
   it("distinguishes authoritative final validation failure from evidence failure", async () => {

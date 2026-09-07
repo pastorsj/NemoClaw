@@ -83,6 +83,7 @@ export interface OnboardMachineContext {
   preferredInferenceApi?: string | null;
   reasoningEffort?: "low" | "medium" | "high" | "endpoint-default" | null;
   hermesAuthMethod?: "oauth" | "api_key" | null;
+  toolGatewaySelections?: string[] | null;
   hermesToolGateways?: string[] | null;
   messagingChannels?: string[] | null;
   gpuPassthrough?: boolean;

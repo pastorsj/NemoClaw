@@ -7,7 +7,7 @@ import {
   parseHarnessPackageContentDigest,
   parseHarnessPackageId,
 } from "../../lib/agent-runtime/package/receipt";
-import { activateHarnessPackage } from "../../lib/agent-runtime/package/store";
+import { activateHarnessPackage } from "../../lib/agent-runtime/package/activation";
 import type { HarnessPackageIdentity } from "../../lib/agent-runtime/package/types";
 import { NemoClawCommand } from "../../lib/cli/nemoclaw-oclif-command";
 

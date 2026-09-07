@@ -24,6 +24,12 @@
       "require": "./dist/src/manifest-validator.js",
       "default": "./dist/src/manifest-validator.js"
     },
+    "./provider-profile": {
+      "types": "./src/provider-profile.ts",
+      "import": "./dist/src/provider-profile.js",
+      "require": "./dist/src/provider-profile.js",
+      "default": "./dist/src/provider-profile.js"
+    },
     "./build-adapters": {
       "types": "./build-adapters.d.mts",
       "import": "./dist/build-adapters.mjs"
@@ -50,8 +56,11 @@
     "build-adapters.d.mts",
     "build-package.d.mts",
     "runtime/*",
+    "!runtime/__pycache__/**",
+    "!runtime/**/*.pyc",
     "dist/*.mjs",
     "dist/src/manifest-validator.js",
+    "dist/src/provider-profile.js",
     "dist/src/validation/*.js"
   ],
   "dependencies": {

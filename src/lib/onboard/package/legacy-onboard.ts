@@ -43,6 +43,16 @@ export function legacyMessagingRouteRefreshRequired(agent: NamedAgent): boolean 
   return legacyAgentName(agent) === "openclaw";
 }
 
+/** Preserve the historical DCode provider-key credential bridge only without package authority. */
+export function legacyAcceptsHostedInferenceProviderKeyAlias(
+  agent: NamedAgent,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const selectedName =
+    typeof agent?.name === "string" && agent.name.trim() ? agent.name : env.NEMOCLAW_AGENT;
+  return legacyAgentName({ name: selectedName }) === "langchain-deepagents-code";
+}
+
 /** Apply the historical OpenClaw pairing rule after package authority is absent. */
 export function legacyDevicePairingRequired(agent: NamedAgent): boolean {
   return legacyAgentName(agent) === "openclaw";

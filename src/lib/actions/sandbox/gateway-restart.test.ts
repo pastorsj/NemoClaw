@@ -43,11 +43,14 @@ describe("gateway restart failure markers", () => {
     "classifies supervisor failure marker %s as %s",
     (marker, layer) => {
       expect(
-        classifyGatewayRestartFailure({
-          status: 1,
-          stdout: marker,
-          stderr: "",
-        }),
+        classifyGatewayRestartFailure(
+          {
+            status: 1,
+            stdout: marker,
+            stderr: "",
+          },
+          { allowLegacyHarnessMarkers: true },
+        ),
       ).toMatchObject({ layer });
     },
   );
@@ -55,8 +58,21 @@ describe("gateway restart failure markers", () => {
 
 describe("gateway restart failure classification precedence", () => {
   function classify(stdout: string, stderr = "") {
-    return classifyGatewayRestartFailure({ status: 1, stdout, stderr });
+    return classifyGatewayRestartFailure(
+      { status: 1, stdout, stderr },
+      { allowLegacyHarnessMarkers: true },
+    );
   }
+
+  it("does not interpret a legacy harness marker on the generic package path", () => {
+    expect(
+      classifyGatewayRestartFailure({
+        status: 1,
+        stdout: "HERMES_CONFIG_HASH_MISMATCH",
+        stderr: "",
+      }),
+    ).toMatchObject({ layer: "launch failure" });
+  });
 
   it.each([
     ["SUPERVISOR_NOT_RUNNING", "supervisor not running"],

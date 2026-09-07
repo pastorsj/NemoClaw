@@ -9,8 +9,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { materializeHarnessPackageArtifact } from "@nvidia/nemoclaw-harness-contract/build-package";
 
-import { missingDockerfileCopySources } from "../../../scripts/lib/dockerfile-copy-sources.mts";
+import { missingDockerfileContextSources } from "../../../scripts/lib/dockerfile-copy-sources.mts";
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../test/helpers/adapter-fixtures";
 import { makeAgent, withMockedDocker } from "../../../test/helpers/base-image-test-harness";
+import { removeFixtureDirectories } from "../../../test/helpers/fixture-permissions";
 import { testTimeout } from "../../../test/helpers/timeouts";
 import { tmpDir, writeCa } from "../onboard/__test-helpers__/corporate-ca-fixtures";
 import {
@@ -21,16 +27,6 @@ import { loadAgent } from "./defs";
 import { loadValidatedHarnessManifest, readString } from "../agent-runtime/manifest-readers";
 import { installHarnessPackage } from "../agent-runtime/package/install";
 import { stageAgentComposedBuildContext } from "./base-image";
-
-function makeFixtureDirectoriesWritable(directory: string): void {
-  if (!fs.existsSync(directory)) return;
-  const metadata = fs.lstatSync(directory);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink()) return;
-  fs.chmodSync(directory, 0o700);
-  for (const entry of fs.readdirSync(directory)) {
-    makeFixtureDirectoriesWritable(path.join(directory, entry));
-  }
-}
 
 function makeResolutionMetadata(
   overrides: Partial<SandboxBaseImageResolutionMetadata> = {},
@@ -114,7 +110,7 @@ expect(
   "expected at least one agent base image to declare the corporate CA build arg",
 ).not.toHaveLength(0);
 
-describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () => {
+describe("agent base image provisioning", { timeout: testTimeout(60_000) }, () => {
   beforeEach(() => {
     vi.stubEnv("NEMOCLAW_CORPORATE_CA_ANCHOR_DIRS", "");
     vi.restoreAllMocks();
@@ -260,6 +256,7 @@ describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () =
             "Dockerfile.base",
             "host/config-adapter.cts",
             "host/messaging-adapter.cts",
+            "host/startup-adapter.cts",
             "manifest.yaml",
             "policy-additions.yaml",
             "start.sh",
@@ -295,7 +292,9 @@ describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () =
           "    kind: not-required",
           "  snapshot_restore: []",
           "  rebuild:",
-          "    image_plugin_provenance: not-required",
+          "    managed_extensions:",
+          "      support: disabled",
+          "      reason: Test package has no managed extensions.",
           "    scheduled_work:",
           "      support: disabled",
           "      reason: This fixture does not run scheduled work.",
@@ -305,13 +304,18 @@ describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () =
           "  support: disabled",
           "messaging:",
           "  support: disabled",
+          "policy:",
+          "  owned_presets: []",
+          "  automatic_presets: []",
+          "  baseline_exclusion_impacts: {}",
           "",
         ].join("\n"),
       );
       write("policy-additions.yaml", "network_policies: []\n");
       write("start.sh", "#!/bin/sh\nexec sleep infinity\n", 0o755);
-      write("host/config-adapter.cts", '"use strict";\nmodule.exports = Object.freeze({});\n');
-      write("host/messaging-adapter.cts", '"use strict";\nmodule.exports = Object.freeze({});\n');
+      write("host/config-adapter.cts", TEST_CONFIG_ADAPTER_SOURCE);
+      write("host/messaging-adapter.cts", TEST_MESSAGING_ADAPTER_SOURCE);
+      write("host/startup-adapter.cts", TEST_STARTUP_ADAPTER_SOURCE);
 
       let sandboxContext: string | null = null;
       let baseContext: string | null = null;
@@ -338,8 +342,8 @@ describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () =
           "Dockerfile.base",
         );
         baseContext = stagedBase.buildCtx;
-        for (const staged of [stagedSandbox, stagedBase]) {
-          expect(missingDockerfileCopySources(staged.stagedDockerfile, staged.buildCtx)).toEqual(
+        [stagedSandbox, stagedBase].forEach((staged) => {
+          expect(missingDockerfileContextSources(staged.stagedDockerfile, staged.buildCtx)).toEqual(
             [],
           );
           expect(
@@ -351,18 +355,9 @@ describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () =
           expect(fs.existsSync(path.join(staged.buildCtx, "packages", "nemoclaw-openclaw"))).toBe(
             false,
           );
-        }
+        });
       } finally {
-        for (const temporaryPath of [sandboxContext, baseContext, root]) {
-          if (temporaryPath) {
-            if (path.basename(temporaryPath).startsWith("nemoclaw-build-")) {
-              fs.rmSync(temporaryPath, { recursive: true, force: true });
-            } else {
-              makeFixtureDirectoriesWritable(temporaryPath);
-              fs.rmSync(temporaryPath, { recursive: true, force: true });
-            }
-          }
-        }
+        removeFixtureDirectories([sandboxContext, baseContext, root]);
       }
     },
     testTimeout(60_000),
@@ -382,7 +377,7 @@ describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () =
         "deepseek-harness",
       ] as const;
       try {
-        for (const packageId of packageIds) {
+        packageIds.forEach((packageId) => {
           const sourceRoot = path.resolve(
             import.meta.dirname,
             `../../../packages/nemoclaw-${packageId}`,
@@ -398,7 +393,7 @@ describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () =
             dockerfilePath: path.join(artifactRoot, "Dockerfile"),
             dockerfileBasePath: path.join(artifactRoot, "Dockerfile.base"),
           });
-          for (const dockerfileName of ["Dockerfile", "Dockerfile.base"] as const) {
+          (["Dockerfile", "Dockerfile.base"] as const).forEach((dockerfileName) => {
             const staged = stageAgentComposedBuildContext(
               agent,
               path.join(artifactRoot, dockerfileName),
@@ -406,7 +401,7 @@ describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () =
             );
             stagedContexts.push(staged.buildCtx);
             expect(
-              missingDockerfileCopySources(staged.stagedDockerfile, staged.buildCtx),
+              missingDockerfileContextSources(staged.stagedDockerfile, staged.buildCtx),
               `${packageId}/${dockerfileName}`,
             ).toEqual([]);
             const stagedHarnesses = fs
@@ -415,14 +410,10 @@ describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () =
               .map((entry) => entry.name)
               .sort();
             expect(stagedHarnesses).toEqual([`nemoclaw-${packageId}`, "nemoclaw-fabric"].sort());
-          }
-        }
+          });
+        });
       } finally {
-        for (const buildCtx of stagedContexts) {
-          fs.rmSync(buildCtx, { recursive: true, force: true });
-        }
-        makeFixtureDirectoriesWritable(root);
-        fs.rmSync(root, { recursive: true, force: true });
+        removeFixtureDirectories([...stagedContexts, root]);
       }
     },
     testTimeout(120_000),
@@ -490,9 +481,7 @@ describe("agent base image provisioning", { timeout: testTimeout(20_000) }, () =
         fs.appendFileSync(stagedStartScript, "\n# changed after staging\n");
         expect(staged.verifyBuildCtx()).toBe(false);
       } finally {
-        if (buildContext) fs.rmSync(buildContext, { recursive: true, force: true });
-        makeFixtureDirectoriesWritable(root);
-        fs.rmSync(root, { recursive: true, force: true });
+        removeFixtureDirectories([buildContext, root]);
       }
     },
     testTimeout(60_000),

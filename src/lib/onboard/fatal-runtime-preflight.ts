@@ -416,7 +416,6 @@ async function collectAdmittedReadinessPair(
     gateway = projectGatewayReadiness(collectedGateway.snapshot, {
       now: () => evaluatedAt,
     });
-    assertOnboardGatewayReadiness(gateway, exitProcess);
     host = projectCollectedHostReadiness(host, evaluatedAt);
   }
 

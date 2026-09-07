@@ -29,6 +29,15 @@ const writer: HostLocalInferenceReceiptWriter = {
   writeExact: (value) => value,
 };
 
+function packageIdentity(id: string) {
+  return {
+    kind: "agent-runtime" as const,
+    id,
+    packageVersion: "1.0.0-test",
+    contentDigest: "9".repeat(64),
+  };
+}
+
 function receipt(service: "ollama" | "nim" | "vllm"): HostLocalInferenceReceipt {
   return {
     schemaVersion: 2,
@@ -236,7 +245,7 @@ describe("provider-neutral host-local inference startup routing", () => {
         },
         requireToolCalling: true,
         publishedRoute: true,
-  });
+      });
 
       expect(route.gatewayProvider).toBe("llama-cpp-local");
       expect(route.gatewayProviderBaseUrl).toBe("http://host.openshell.internal:8081/v1");
@@ -306,6 +315,35 @@ describe("provider-neutral host-local inference startup routing", () => {
     ).toThrow("Unsupported host-local inference application");
     expect(providerRuntime.qualifyOllama).not.toHaveBeenCalled();
     expect(providerRuntime.startManaged).not.toHaveBeenCalled();
+  });
+
+  it.each(["openclaw", "hermes", "future-harness"])(
+    "authorizes receipt-backed %s without an application allowlist",
+    (id) => {
+      const providerRuntime = runtime();
+      const route = prepareHostLocalInferenceStartup(operation(providerRuntime), {
+        application: packageIdentity(id),
+        service: "ollama",
+        endpoint,
+        receiptWriter: writer,
+      });
+
+      expect(route.applicationBaseUrl).toBe("https://inference.local/v1");
+      expect(providerRuntime.qualifyOllama).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("rejects malformed package authority before starting host-local inference", () => {
+    const providerRuntime = runtime();
+    expect(() =>
+      prepareHostLocalInferenceStartup(operation(providerRuntime), {
+        application: { ...packageIdentity("future-harness"), contentDigest: "not-a-digest" },
+        service: "ollama",
+        endpoint,
+        receiptWriter: writer,
+      }),
+    ).toThrow("application package authority is invalid");
+    expect(providerRuntime.qualifyOllama).not.toHaveBeenCalled();
   });
 
   it("fails closed on service and runtime authority drift", () => {

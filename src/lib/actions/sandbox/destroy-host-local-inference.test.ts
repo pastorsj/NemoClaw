@@ -680,6 +680,42 @@ describe("sandbox destroy host-local inference transaction", () => {
     expect(stopInferenceResources).not.toHaveBeenCalled();
   });
 
+  it("allows explicit force to discard a receipt-backed provider-broker registry reference", async () => {
+    const runtimeProvider = provider();
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "c".repeat(64),
+    };
+    const entry = sandbox("alpha", receipt(), {
+      hostLocalInferenceReceipt: undefined,
+      harnessPackage,
+      providerBroker: {
+        schemaVersion: 1,
+        harnessPackage,
+        providerName: "alpha-future-tools",
+        providerType: "generic",
+        credentialEnv: "FUTURE_TOOL_TOKEN",
+      },
+    });
+
+    const { result } = await runDestroy(runtimeProvider, {
+      entry,
+      deleteResult: {
+        status: 1,
+        stdout: "",
+        stderr: "tcp connect error: Connection refused (os error 61)",
+      },
+      force: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      forcedLocalCleanup: true,
+    });
+  });
+
   it("reconciles retained authority only after stable sandbox absence", async () => {
     const destroy = vi
       .fn((value: HostLocalInferenceReceipt): HostLocalInferenceDestroyResult => ({

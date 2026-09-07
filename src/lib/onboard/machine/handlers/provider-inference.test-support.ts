@@ -30,6 +30,11 @@ export type Agent = {
   name: string;
   inference?: {
     provider_type?: string;
+    providerApiOverrides?: readonly { provider: string; api: string }[];
+    contextWindowRequirements?: readonly {
+      provider: "ollama-local";
+      minimumTokens: number;
+    }[];
     refresh_route_for_messaging_providers?: readonly string[];
   };
 } | null;

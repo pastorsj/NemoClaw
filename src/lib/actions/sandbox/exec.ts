@@ -29,7 +29,6 @@ import type { GatewaySelectResult } from "./gateway-select";
 import {
   isLegacyGoogleChatPairingApproval,
   legacyAgentOwnsGoogleChatApproval,
-  resolveLegacyGoogleChatApprovalAgent,
 } from "./exec-legacy";
 import { wrapExecCommandWithRuntimeEnv } from "./runtime-env";
 
@@ -104,6 +103,32 @@ export type SandboxExecCompletion = {
   invocationError?: string;
   cleanupError?: string;
 };
+
+type SandboxExecRegistryLookup =
+  | {
+      kind: "read";
+      entry: Pick<SandboxEntry, "agent" | "harnessPackage"> | null;
+    }
+  | { kind: "error"; detail: string };
+
+function readSandboxForExec(
+  sandboxName: string,
+  deps: SandboxExecCleanupDeps,
+): SandboxExecRegistryLookup {
+  try {
+    return { kind: "read", entry: deps.getSandbox(sandboxName) };
+  } catch (error) {
+    return {
+      kind: "error",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function legacyExecPostEffectAgent(lookup: SandboxExecRegistryLookup): string | null {
+  if (lookup.kind === "error" || !lookup.entry || lookup.entry.harnessPackage) return null;
+  return lookup.entry.agent ?? "openclaw";
+}
 
 /**
  * Compatibility argv surface for buffered and interactive consumers tracked
@@ -184,13 +209,20 @@ export function cleanupMutableConfigAfterExec(
   sandboxName: string,
   deps: SandboxExecCleanupDeps,
 ): string | null {
-  let entry: Pick<SandboxEntry, "agent" | "harnessPackage"> | null;
-  try {
-    entry = deps.getSandbox(sandboxName);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    return `sandbox registry lookup failed: ${detail}`;
-  }
+  return cleanupMutableConfigAfterExecLookup(
+    sandboxName,
+    deps,
+    readSandboxForExec(sandboxName, deps),
+  );
+}
+
+function cleanupMutableConfigAfterExecLookup(
+  sandboxName: string,
+  deps: SandboxExecCleanupDeps,
+  lookup: SandboxExecRegistryLookup,
+): string | null {
+  if (lookup.kind === "error") return `sandbox registry lookup failed: ${lookup.detail}`;
+  const { entry } = lookup;
   if (!entry) return null;
   if (!entry.harnessPackage && !legacyAgentOwnsGoogleChatApproval(entry.agent ?? "openclaw")) {
     return null;
@@ -322,7 +354,7 @@ export async function runSandboxExecChild(
 }
 
 export function cleanupFailureMessage(commandCode: number, detail: string): string {
-  return `  OpenClaw permission cleanup failed (command exit ${commandCode}; cleanup exit 1): ${detail}`;
+  return `  Sandbox configuration permission cleanup failed (command exit ${commandCode}; cleanup exit 1): ${detail}`;
 }
 
 function defaultSelectGateway(sandboxName: string): GatewaySelectResult {
@@ -354,6 +386,7 @@ async function runSandboxExecRequest(
   executor: OpenShellSandboxCommandExecutor,
   request: OpenShellSandboxCommandRequest,
   cleanupDeps: SandboxExecCleanupDeps,
+  registryLookup: SandboxExecRegistryLookup,
 ): Promise<SandboxExecCompletion> {
   let completed: Awaited<ReturnType<OpenShellSandboxCommandExecutor["runStreaming"]>>;
   try {
@@ -374,7 +407,9 @@ async function runSandboxExecRequest(
     const commandCode = completed.outcome.kind === "completed" ? completed.outcome.exitCode : 1;
     const invocationError =
       completed.outcome.kind === "failed" ? completed.outcome.error.message : undefined;
-    const cleanupError = cleanupOpenClawAfterExec(request.sandboxName, cleanupDeps) ?? undefined;
+    const cleanupError =
+      cleanupMutableConfigAfterExecLookup(request.sandboxName, cleanupDeps, registryLookup) ??
+      undefined;
     return {
       code: cleanupError ? 1 : commandCode,
       commandCode,
@@ -392,13 +427,6 @@ function defaultRestartGateway(sandboxName: string): { ok: boolean } {
   const { defaultInferenceGatewayRestart } =
     require("../inference-set-gateway-restart") as typeof import("../inference-set-gateway-restart");
   return defaultInferenceGatewayRestart(sandboxName);
-}
-
-function defaultResolveSandboxAgent(sandboxName: string): string | null {
-  const entry = (
-    require("../../state/registry") as typeof import("../../state/registry")
-  ).getSandbox(sandboxName);
-  return resolveLegacyGoogleChatApprovalAgent(entry);
 }
 
 function googleChatPairingActivationFailureMessage(cliName: string, sandboxName: string): string {
@@ -451,6 +479,27 @@ export async function execSandbox(
     gatewaySelection.outcome === "selected" ? gatewaySelection.gatewayName : undefined;
   const target = gatewayName ? namedOpenShellGateway(gatewayName) : selectedOpenShellGateway();
   const commandExecutor = deps.commandExecutor ?? createCliOpenShellSandboxCommandExecutor();
+  const cleanupDeps =
+    deps.cleanupDeps ??
+    ({
+      getSandbox: (name) =>
+        (require("../../state/registry") as typeof import("../../state/registry")).getSandbox(name),
+      inspectMutableConfigPerms: (name) =>
+        (
+          require("../../sandbox/mutable-config-perms") as typeof import("../../sandbox/mutable-config-perms")
+        ).inspectMutableConfigPerms(name),
+      repairMutableConfigPerms: (name) =>
+        (
+          require("../../sandbox/mutable-config-perms") as typeof import("../../sandbox/mutable-config-perms")
+        ).repairMutableConfigPerms(name),
+    } satisfies SandboxExecCleanupDeps);
+  // Package receipts are the authority boundary for package-owned command
+  // semantics. Read it before dispatch so a valid receipt can never activate
+  // the historical OpenClaw scope or pairing post-effects merely by choosing
+  // stock-looking argv.
+  const registryLookup = readSandboxForExec(sandboxName, cleanupDeps);
+  const legacyPostEffectAgent = legacyExecPostEffectAgent(registryLookup);
+  const legacyOpenClawPostEffects = legacyAgentOwnsGoogleChatApproval(legacyPostEffectAgent);
   if (options.workdir) {
     let workdir: Awaited<ReturnType<OpenShellSandboxCommandExecutor["probeDirectory"]>>;
     try {
@@ -476,6 +525,7 @@ export async function execSandbox(
     command,
     deps.policyHint,
     gatewayName,
+    legacyOpenClawPostEffects,
   );
   const completion = await runSandboxExecRequest(
     commandExecutor,
@@ -490,18 +540,8 @@ export async function execSandbox(
       stdinInput: options.stdinInput,
       environment: options.environment,
     },
-    deps.cleanupDeps ?? {
-      getSandbox: (name) =>
-        (require("../../state/registry") as typeof import("../../state/registry")).getSandbox(name),
-      inspectMutableConfigPerms: (name) =>
-        (
-          require("../../sandbox/mutable-config-perms") as typeof import("../../sandbox/mutable-config-perms")
-        ).inspectMutableConfigPerms(name),
-      repairMutableConfigPerms: (name) =>
-        (
-          require("../../sandbox/mutable-config-perms") as typeof import("../../sandbox/mutable-config-perms")
-        ).repairMutableConfigPerms(name),
-    },
+    cleanupDeps,
+    registryLookup,
   );
   if (completion.invocationError) {
     console.error(`  Failed to invoke openshell: ${completion.invocationError}`);
@@ -513,7 +553,9 @@ export async function execSandbox(
   await emitPolicyDenialHint(completion);
   let exitCode = completion.code;
   const googleChatApprovalCommitted =
-    completion.commandCode === 0 && isGoogleChatPairingApproval(command);
+    legacyOpenClawPostEffects &&
+    completion.commandCode === 0 &&
+    isGoogleChatPairingApproval(command);
   const managedGoogleChatApproval =
     googleChatApprovalCommitted && gatewaySelection.outcome === "selected";
   if (googleChatApprovalCommitted && completion.cleanupError) {
@@ -524,9 +566,9 @@ export async function execSandbox(
     );
   }
   if (exitCode === 0 && managedGoogleChatApproval) {
-    let recordedAgent: string | null = null;
+    let recordedAgent = legacyPostEffectAgent;
     try {
-      recordedAgent = (deps.resolveSandboxAgent ?? defaultResolveSandboxAgent)(sandboxName);
+      if (deps.resolveSandboxAgent) recordedAgent = deps.resolveSandboxAgent(sandboxName);
     } catch (error) {
       console.error(
         `  Pairing activation authority is unavailable: ${error instanceof Error ? error.message : String(error)}`,

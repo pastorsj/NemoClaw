@@ -4,8 +4,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { HarnessAgentRosterJsonObject } from "@nvidia/nemoclaw-harness-contract";
+
+import type { AgentDefinition } from "../agent-runtime/manifest-types";
 import { isObjectRecord } from "../core/json-types";
-import { isOpenclawAgent } from "./openclaw-otel-policy-presets";
 
 // Load YAML lazily via require to match the rest of the onboard pipeline
 // (see src/lib/sandbox/config.ts and src/lib/policy/index.ts). Importing
@@ -16,20 +18,13 @@ function loadYaml(): YamlLoader {
   return require("yaml") as YamlLoader;
 }
 
-const ALLOWED_TOP_KEYS = new Set<string>(["agents", "defaults", "main"]);
-const AGENT_DATA_ROOT = "/sandbox/.openclaw";
+const AGENTS_MANIFEST_MAX_BYTES = 64 * 1024;
 
-// Defence-in-depth credential-name denylist: the authoritative reject lives
-// at the build-time validator (packages/nemoclaw-openclaw/config/generate-config.mts) which
-// only permits a small allowlist of nested keys. Even so, the host writes
-// `NEMOCLAW_EXTRA_AGENTS_JSON` and the Dockerfile patcher base64-bakes the
-// payload into `NEMOCLAW_EXTRA_AGENTS_JSON_B64` before the build runs. A
-// pre-transport scan keeps obvious credential-named values from ever
-// reaching the staged Dockerfile/build context if an operator accidentally
-// drops `apiKey`, `token`, `clientSecret`, etc. into the YAML. We normalise
-// the field name (lower-case, strip separators) so composite/camelCase
-// variants such as `accessToken` or `private_key` are caught alongside the
-// exact names.
+// The host transports this data through the package build boundary. Reject
+// obvious credential-named values before they can reach that boundary; a
+// package then applies its own native schema. Normalising names catches
+// composite forms such as `accessToken` and `private_key` as well as exact
+// credential names.
 const CREDENTIAL_NAME_SUBSTRINGS = [
   "apikey",
   "apitoken",
@@ -78,43 +73,29 @@ function assertNoCredentialFields(value: unknown, label: string): void {
   }
 }
 
-function expectedAgentPath(kind: "workspace" | "agentDir", id: string): string {
-  const segment = kind === "workspace" ? `workspace-${id}` : `agents/${id}`;
-  return `${AGENT_DATA_ROOT}/${segment}`;
+export type AgentsManifestPayload = HarnessAgentRosterJsonObject;
+
+export class AgentRosterUnsupportedError extends Error {
+  override readonly name = "AgentRosterUnsupportedError";
 }
 
-function fillAgentDefaults(entry: Record<string, unknown>): Record<string, unknown> {
-  const id = entry.id;
-  if (typeof id !== "string" || !id) {
-    return entry;
-  }
-  const out: Record<string, unknown> = { ...entry };
-  if (out.workspace === undefined) {
-    out.workspace = expectedAgentPath("workspace", id);
-  }
-  if (out.agentDir === undefined) {
-    out.agentDir = expectedAgentPath("agentDir", id);
-  }
-  return out;
+type AgentRosterDefinition = Pick<
+  AgentDefinition,
+  "agentRosterCapability" | "displayName" | "name"
+>;
+
+/** Require the selected package to explicitly own roster onboarding. */
+export function assertAgentsManifestCapability(agent: AgentRosterDefinition | null): void {
+  if (agent?.agentRosterCapability?.support === "managed") return;
+  const displayName = agent?.displayName ?? agent?.name ?? "selected harness";
+  throw new AgentRosterUnsupportedError(
+    `--agents is not supported by ${displayName}; its package does not declare managed agent roster support.`,
+  );
 }
 
-export interface AgentsManifestPayload {
-  agents: unknown[];
-  defaults?: unknown;
-  main?: unknown;
-}
-
-/** Validate the OpenClaw-only option and return its canonical source path. */
-export function resolveAgentsManifestPath(
-  requestedPath: string | undefined,
-  agent: string | null,
-): string | null {
+/** Resolve one operator-supplied roster manifest without selecting a harness implementation. */
+export function resolveAgentsManifestPath(requestedPath: string | undefined): string | null {
   if (requestedPath === undefined) return null;
-  if (!isOpenclawAgent(agent)) {
-    throw new Error(
-      `--agents is OpenClaw-specific and cannot be used with --agent ${agent}; the declarative manifest only drives OpenClaw secondary agents.`,
-    );
-  }
   const resolved = path.resolve(requestedPath);
   if (!fs.existsSync(resolved)) throw new Error(`--agents path not found: ${resolved}`);
   if (!fs.statSync(resolved).isFile()) {
@@ -124,13 +105,8 @@ export function resolveAgentsManifestPath(
 }
 
 /**
- * Load and shallow-shape-check the agents manifest YAML. Heavy validation
- * (shape of each agent entry, model-ref/provider match, allowlists) lives
- * at the build-time validator in packages/nemoclaw-openclaw/config/generate-config.mts so
- * the build is the single source of truth for structured errors. We only
- * surface obvious early errors (missing file, top-level shape) and
- * auto-fill canonical workspace/agentDir paths from the agent id so the
- * caller can write a terse YAML.
+ * Load a bounded, credential-free mapping. The selected package adapter owns
+ * its native schema, path defaults, and detailed validation.
  */
 export function loadAgentsManifest(filePath: string): AgentsManifestPayload {
   const resolved = path.resolve(filePath);
@@ -151,6 +127,9 @@ export function loadAgentsManifest(filePath: string): AgentsManifestPayload {
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(`--agents read error: ${reason}`);
   }
+  if (Buffer.byteLength(raw, "utf8") > AGENTS_MANIFEST_MAX_BYTES) {
+    throw new Error("--agents manifest exceeds the 64 KiB input boundary");
+  }
   let parsed: unknown;
   try {
     parsed = loadYaml().parse(raw);
@@ -164,30 +143,7 @@ export function loadAgentsManifest(filePath: string): AgentsManifestPayload {
   if (!isObjectRecord(parsed)) {
     throw new Error("agents manifest must be a YAML mapping (object) at the top level");
   }
-  for (const key of Object.keys(parsed)) {
-    if (!ALLOWED_TOP_KEYS.has(key)) {
-      const allowed = [...ALLOWED_TOP_KEYS].sort().join(", ");
-      throw new Error(
-        `agents manifest contains unsupported top-level field "${key}". Allowed: ${allowed}`,
-      );
-    }
-  }
-  const agentsRaw = parsed.agents;
-  let agents: unknown[];
-  if (agentsRaw === undefined || agentsRaw === null) {
-    agents = [];
-  } else if (!Array.isArray(agentsRaw)) {
-    throw new Error("agents manifest 'agents' must be a list when present");
-  } else {
-    agents = agentsRaw.map((entry) => (isObjectRecord(entry) ? fillAgentDefaults(entry) : entry));
-  }
-  const out: AgentsManifestPayload = { agents };
-  if (parsed.defaults !== undefined) {
-    out.defaults = parsed.defaults;
-  }
-  if (parsed.main !== undefined) {
-    out.main = parsed.main;
-  }
+  const out = (Object.keys(parsed).length === 0 ? { agents: [] } : parsed) as AgentsManifestPayload;
   assertNoCredentialFields(out, "agents-manifest");
   return out;
 }
@@ -195,9 +151,9 @@ export function loadAgentsManifest(filePath: string): AgentsManifestPayload {
 /**
  * Read the manifest at `filePath` and set `NEMOCLAW_EXTRA_AGENTS_JSON` so
  * the downstream Dockerfile patcher can base64-encode and bake it. The
- * patcher does not parse or shape-check the payload (that is the build
- * validator's job), so structured errors raised here would mask the
- * authoritative build-time errors; we keep host-side checks light.
+ * patcher does not parse or shape-check the payload. The selected package
+ * owns detailed schema validation, so core keeps host-side checks bounded
+ * and intentionally shallow.
  */
 export function applyAgentsManifestEnv(
   filePath: string,

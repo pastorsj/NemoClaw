@@ -126,7 +126,11 @@ const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.stdout.write(existingDirs.join("\\n") + "\\n");
   process.exit(0);
 }

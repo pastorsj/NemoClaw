@@ -11,7 +11,6 @@ import type { SandboxMessagingPlan } from "../../../src/lib/messaging/manifest";
 import { readManagedWorkloadAuthority } from "../../../src/lib/onboard/workload/authority.ts";
 import { readSandboxBaseImageResolutionMetadata } from "../../../src/lib/sandbox-base-image";
 import { createSession } from "../../../src/lib/state/onboard-session.ts";
-import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-target.mts";
 import type { SandboxEntry } from "../../../src/lib/state/registry/types.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
 import { trackGuardedSandboxNameDelete } from "../fixtures/cleanup.ts";
@@ -80,7 +79,6 @@ import {
   REBUILD_HERMES_STATE,
 } from "./rebuild-hermes-state-fixture.ts";
 import { buildRebuildHermesTimingSummary, describeRunnerClass } from "./rebuild-hermes-timing.ts";
-import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 // Protected PR E2E checks out the PR commit while the trusted controller runs
 // the base workflow. Older controller revisions therefore cannot provide the
 // newly introduced CLI build and OpenShell install steps. Keep the test pinned
@@ -94,7 +92,6 @@ process.env.NEMOCLAW_CLI_BIN ??= CLI_ENTRYPOINT;
 // Literal interactive issue #3025 reproduction paths (`hermes rebuild`, modal
 // prompt, and `Y` confirmation) remain outside this Vitest migration.
 const OLD_HERMES_VERSION = `v${REBUILD_HERMES_OLD_BASE_FIXTURE.hermesCalver}`;
-const HERMES_FABRIC_CONTRACT = readBundledFabricHarnessE2eFixture("hermes");
 const OLD_HERMES_REGISTRY_VERSION = OLD_HERMES_VERSION.slice(1);
 const STALE_BASE_REBUILD = process.env.NEMOCLAW_HERMES_STALE_BASE_REBUILD_E2E === "1";
 const TEST_SANDBOX_PREFIX = STALE_BASE_REBUILD ? "e2e-rebuild-base" : "e2e-rebuild-hermes";
@@ -513,7 +510,6 @@ test(
         "OpenShell provider create/update and sandbox create/exec/list",
         "curated local ~/.nemoclaw registry and onboard-session rebuild metadata",
         "real nemoclaw <sandbox> rebuild --yes --verbose without host inference credentials",
-        "public nemoclaw sandbox agent Fabric turn after rebuild",
         "a direct OpenShell policy edit survives the rebuild transaction",
         "Hermes messaging placeholders plus script-backed cron restore and dispatch gating",
         "backup credential leak scan under ~/.nemoclaw/rebuild-backups",
@@ -1311,18 +1307,6 @@ test(
       resolutionMetadata: readSandboxBaseImageResolutionMetadata(rebuiltImageRef),
       ...finalBaseEvidence,
     });
-    await runPublicFabricTurn({
-      artifacts,
-      contract: HERMES_FABRIC_CONTRACT,
-      env: testEnv(apiKey),
-      host,
-      lifecyclePhase: "after-rebuild",
-      redactionValues,
-      sandbox,
-      sandboxName: SANDBOX_NAME,
-      scanPrivateState: false,
-    });
-
     const inferencePayload = JSON.stringify({
       model: HOSTED_MODEL,
       messages: [{ role: "user", content: "Reply with exactly one word: PONG" }],

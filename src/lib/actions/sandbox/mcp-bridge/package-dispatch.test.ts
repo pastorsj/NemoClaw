@@ -192,10 +192,10 @@ describe("MCP package mutation dispatch", () => {
     });
     const legacyEntry = entry("openclaw", "mcporter");
 
-    for (const action of [
+    [
       () => registerAgentAdapter("alpha", "mcporter", legacyEntry, runtimeSelection),
       () => unregisterAgentAdapter("alpha", "mcporter", legacyEntry, runtimeSelection),
-    ]) {
+    ].forEach((action) => {
       try {
         action();
         throw new Error("expected package authority refusal");
@@ -204,7 +204,7 @@ describe("MCP package mutation dispatch", () => {
         expect((error as McpBridgeError).reasonCode).toBe("package-authority-required");
         expect((error as Error).message).toMatch(/Re-run the NemoClaw installer/u);
       }
-    }
+    });
 
     expect(mocks.registerInstalled).not.toHaveBeenCalled();
     expect(mocks.unregisterInstalled).not.toHaveBeenCalled();

@@ -3,8 +3,18 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { buildOpenshellExecArgs, wrapOpenClawAgentCommandWithRuntimeEnv } from "../exec";
-import { runAgentJsonPassthrough } from "./passthrough-json";
+import {
+  buildOpenshellExecArgs,
+  wrapExecCommandWithRuntimeEnv,
+  wrapOpenClawAgentCommandWithRuntimeEnv,
+} from "../exec";
+import { runAgentJsonPassthrough, runStructuredTurnJsonPassthrough } from "./passthrough-json";
+
+const FUTURE_STRUCTURED_TURN_DECLARATION = {
+  argv: ["future-agent", "run"],
+  output_mode: "bounded-text",
+  output_interpretation: "structured-turn-envelope",
+} as const;
 
 describe("runAgentJsonPassthrough", () => {
   function makeProc() {
@@ -24,6 +34,102 @@ describe("runAgentJsonPassthrough", () => {
       stdout,
     };
   }
+
+  it("applies generic runtime wrapping and incomplete-turn safety to a declared envelope", async () => {
+    const payload = JSON.stringify({
+      status: "ok",
+      result: {
+        payloads: [{ text: "partial" }],
+        meta: { error: { kind: "incomplete_turn" } },
+      },
+    });
+    const runDispatch = vi.fn(async () => ({
+      status: 0,
+      signal: null,
+      stdout: payload,
+      stderr: "",
+    }));
+    const { exit, proc, stderr } = makeProc();
+    const command = ["future-agent", "run", "--json"];
+
+    await expect(
+      runStructuredTurnJsonPassthrough(
+        FUTURE_STRUCTURED_TURN_DECLARATION,
+        "future",
+        command,
+        proc,
+        {
+          getGatewayName: () => null,
+          getOpenshellBinary: () => "openshell",
+          stdinIsTty: () => false,
+          runDispatch,
+        },
+      ),
+    ).rejects.toThrow("__exit:1");
+
+    expect(runDispatch).toHaveBeenCalledWith(
+      "openshell",
+      buildOpenshellExecArgs("future", wrapExecCommandWithRuntimeEnv(command), { tty: false }),
+      { stdinIsTty: false },
+    );
+    expect(stderr.join("")).toContain("error.kind=incomplete_turn");
+    expect(stderr.join("")).not.toContain("sessions export");
+    expect(stderr.join("")).not.toContain("models.providers");
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  it("fails closed before JSON dispatch when the declaration does not own the command", async () => {
+    const runDispatch = vi.fn(async () => ({
+      status: 0,
+      signal: null,
+      stdout: "{}",
+      stderr: "",
+    }));
+    const { proc, stderr } = makeProc();
+
+    await expect(
+      runStructuredTurnJsonPassthrough(
+        FUTURE_STRUCTURED_TURN_DECLARATION,
+        "future",
+        ["other-agent", "run"],
+        proc,
+        { getOpenshellBinary: () => "openshell", runDispatch },
+      ),
+    ).rejects.toThrow("__exit:2");
+
+    expect(runDispatch).not.toHaveBeenCalled();
+    expect(stderr.join("")).toContain("not authorized");
+  });
+
+  it("uses package-neutral timeout guidance for a declared receipt envelope", async () => {
+    const payload = JSON.stringify({
+      status: "timeout",
+      result: { payloads: [{ text: "partial" }], meta: { timeoutPhase: "provider" } },
+    });
+    const runDispatch = vi.fn(async () => ({
+      status: 0,
+      signal: null,
+      stdout: payload,
+      stderr: "",
+    }));
+    const { proc, stderr } = makeProc();
+
+    await expect(
+      runStructuredTurnJsonPassthrough(
+        FUTURE_STRUCTURED_TURN_DECLARATION,
+        "future",
+        ["future-agent", "run", "--json"],
+        proc,
+        { getOpenshellBinary: () => "openshell", runDispatch },
+      ),
+    ).rejects.toThrow("__exit:1");
+
+    const diagnostic = stderr.join("");
+    expect(diagnostic).toContain("package's documented deadline setting");
+    expect(diagnostic).not.toContain("sessions export");
+    expect(diagnostic).not.toContain("models.providers");
+    expect(diagnostic).not.toContain("OpenClaw");
+  });
 
   it("preserves OpenClaw JSON stdout and appends failed-tool provenance to stderr", async () => {
     const payload = JSON.stringify({

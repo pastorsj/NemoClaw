@@ -306,7 +306,7 @@ describe("reconcileInstallerHarnesses", () => {
 
   it("rejects a receipt-less external owner before package-store mutation", () => {
     const harness = new InstallerStateHarness(null, [
-      registryEntry("future-owner", "future-harness"),
+      registryEntry("external-owner", "external-harness"),
     ]);
     const initialStore = fs.readdirSync(fixture.storeRoot);
 

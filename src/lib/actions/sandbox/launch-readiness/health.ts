@@ -23,6 +23,7 @@ import {
 import { areSandboxLaunchForwardsHealthy } from "../forward-recovery";
 import {
   isDcodeOpenRouterModelsRoute404,
+  isModelsRoute404InvocationFallback,
   runSandboxInferenceInvocationProbe,
 } from "../inference-route-health";
 import { isSandboxGatewayRunningForStatus } from "../process-recovery";
@@ -225,6 +226,7 @@ export async function requireLaunchSemanticHealth(
   inferenceConfigured: boolean,
   deps: LaunchReadinessHealthDeps,
 ): Promise<void> {
+  const receiptBacked = entry.harnessPackage != null || entry.harnessPackageMigration != null;
   if (isTerminalAgent(agent)) {
     const smoke = (deps.smoke ?? runAgentSmokeCommands)(
       sandboxName,
@@ -301,10 +303,18 @@ export async function requireLaunchSemanticHealth(
     if (strictRouteHealth) return;
     const openRouterDcodeModelsRouteUnsupported =
       inference.healthy &&
-      isDcodeOpenRouterModelsRoute404(
-        { agentName, provider: entry.provider ?? null },
-        inference.httpStatus,
-      );
+      (receiptBacked
+        ? isModelsRoute404InvocationFallback(
+            {
+              models404: agent.inference?.route_probe?.models_404 ?? null,
+              provider: entry.provider ?? null,
+            },
+            inference.httpStatus,
+          )
+        : isDcodeOpenRouterModelsRoute404(
+            { agentName, provider: entry.provider ?? null },
+            inference.httpStatus,
+          ));
     if (openRouterDcodeModelsRouteUnsupported) {
       const provider = normalizedString(entry.provider);
       const model = normalizedString(entry.model);
@@ -321,6 +331,13 @@ export async function requireLaunchSemanticHealth(
           provider,
           model,
           preferredInferenceApi: normalizedString(entry.preferredInferenceApi),
+          ...(receiptBacked
+            ? {
+                probeBoundary: agent.runtime?.smoke_boundary ?? {
+                  kind: "login-shell" as const,
+                },
+              }
+            : {}),
         });
       } catch (error) {
         recordLaunchReadinessObservationFailure(deps, "inference-route");

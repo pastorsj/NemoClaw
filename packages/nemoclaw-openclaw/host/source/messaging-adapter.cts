@@ -27,6 +27,14 @@ const messagingAdapter: HarnessMessagingAdapterModule = {
       build: {
         configRoot: "~/.openclaw",
         packageManagers: ["node-package"],
+        packageInstallers: {
+          "node-package": {
+            kind: "verified-archive-command",
+            command: ["openclaw", "plugins", "install", "{{archive}}"],
+            archiveArgumentPrefix: "npm-pack:",
+            packageVersionEnvironment: "OPENCLAW_VERSION",
+          },
+        },
         renderFinalizers: ["allow-rendered-plugins"],
         postRenderRepair: {
           command: ["openclaw", "doctor", "--fix", "--non-interactive"],

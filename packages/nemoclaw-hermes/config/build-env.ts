@@ -3,7 +3,7 @@
 
 import { Buffer } from "node:buffer";
 
-import { readToolDisclosureEnv } from "../../../src/lib/tool-disclosure.ts";
+import { readToolDisclosureEnv } from "./tool-disclosure.ts";
 
 export type HermesWebSearchProvider = "tavily";
 

@@ -531,6 +531,59 @@ describe("sandbox workload source resolution", () => {
     },
   );
 
+  it("uses a receipt-backed candidate package Dockerfile when no package image is published", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "pi",
+      packageVersion: "1.2.3",
+      contentDigest: "9d".repeat(32),
+    } as const satisfies HarnessPackageIdentity;
+    const managedImage = {
+      repository: "registry.example/team/pi",
+      architectures: [MANAGED_IMAGE_PLATFORM],
+      runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+    } as const satisfies HarnessManagedImageDeclaration;
+
+    expect(
+      resolveSandboxWorkloadSource({
+        agentName: "pi",
+        harnessPackage,
+        managedImage,
+        legacyDockerfilePath: "/installed/nemoclaw-pi/Dockerfile",
+        runtime: managedRuntime("docker"),
+        catalog: {},
+      }),
+    ).toEqual({
+      kind: "legacy-dockerfile",
+      dockerfilePath: "/installed/nemoclaw-pi/Dockerfile",
+      reason: "contract-unavailable",
+    });
+  });
+
+  it("allows an explicit Dockerfile for a receipt-backed candidate package", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "pi",
+      packageVersion: "1.2.3",
+      contentDigest: "9d".repeat(32),
+    } as const satisfies HarnessPackageIdentity;
+
+    expect(
+      resolveSandboxWorkloadSource({
+        agentName: "pi",
+        harnessPackage,
+        legacyDockerfilePath: "/installed/nemoclaw-pi/Dockerfile",
+        customDockerfilePath: "/workspace/custom/Dockerfile",
+        runtime: managedRuntime("docker"),
+        catalog: {},
+      }),
+    ).toEqual({
+      kind: "legacy-dockerfile",
+      dockerfilePath: "/workspace/custom/Dockerfile",
+      reason: "custom-dockerfile",
+    });
+  });
+
   it.each(CANDIDATE_MANAGED_IMAGE_AGENTS)(
     "selects the exact candidate digest for %s behind the gate (#7927)",
     (agent) => {

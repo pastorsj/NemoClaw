@@ -7,6 +7,8 @@ import fs from "node:fs";
 import { TextDecoder } from "node:util";
 
 import yaml from "js-yaml";
+import type { HarnessSecondaryForwardAllocationDeclaration } from "@nvidia/nemoclaw-harness-contract";
+import { isCanonicalSandboxPath } from "@nvidia/nemoclaw-harness-contract/manifest-validator";
 
 import { isPlainObject } from "../shared/object-record.ts";
 import { isSafeModelId } from "../validation.ts";
@@ -247,6 +249,37 @@ export function readStringMap(record: ManifestRecord, key: string): StringMap | 
   return result;
 }
 
+function readSecondaryForwardAllocation(
+  healthProbe: ManifestRecord,
+): HarnessSecondaryForwardAllocationDeclaration | undefined {
+  const value = readObject(healthProbe, "secondary_forward");
+  if (!value) return undefined;
+  const environmentVariable = value.environment_variable;
+  const preferredPort = value.preferred_port;
+  const rangeStart = value.range_start;
+  const rangeEnd = value.range_end;
+  const label = value.label;
+  const remedy = value.remedy;
+  if (
+    typeof environmentVariable !== "string" ||
+    typeof label !== "string" ||
+    typeof remedy !== "string" ||
+    !isValidPort(preferredPort, 1024) ||
+    !isValidPort(rangeStart, 1024) ||
+    !isValidPort(rangeEnd, 1024)
+  ) {
+    throw new Error("Agent manifest field 'health_probe.secondary_forward' is invalid");
+  }
+  return {
+    environment_variable: environmentVariable,
+    preferred_port: preferredPort,
+    range_start: rangeStart,
+    range_end: rangeEnd,
+    label,
+    remedy,
+  };
+}
+
 export function readHealthProbe(record: ManifestRecord): AgentHealthProbe | undefined {
   const healthProbe = readObject(record, "health_probe");
   if (!healthProbe) return undefined;
@@ -254,11 +287,42 @@ export function readHealthProbe(record: ManifestRecord): AgentHealthProbe | unde
   const url = readString(healthProbe, "url");
   const port = healthProbe.port;
   const timeoutSeconds = healthProbe.timeout_seconds;
+  const successStatuses = healthProbe.success_statuses;
+  const portResolution = healthProbe.port_resolution;
+  const secondaryForward = readSecondaryForwardAllocation(healthProbe);
 
   if (port !== undefined && !isValidPort(port)) {
     throw new Error(
       "Agent manifest field 'health_probe.port' must be an integer TCP port between 1 and 65535",
     );
+  }
+  if (portResolution !== undefined && portResolution !== "sandbox-secondary-forward") {
+    throw new Error(
+      "Agent manifest field 'health_probe.port_resolution' must be sandbox-secondary-forward",
+    );
+  }
+  if (portResolution === "sandbox-secondary-forward" && !secondaryForward) {
+    throw new Error(
+      "Agent manifest field 'health_probe.secondary_forward' is required for sandbox-secondary-forward",
+    );
+  }
+  if (portResolution === undefined && secondaryForward !== undefined) {
+    throw new Error(
+      "Agent manifest field 'health_probe.secondary_forward' requires sandbox-secondary-forward",
+    );
+  }
+  if (
+    successStatuses !== undefined &&
+    (!Array.isArray(successStatuses) ||
+      successStatuses.length === 0 ||
+      successStatuses.length > 16 ||
+      successStatuses.some(
+        (status) =>
+          !Number.isInteger(status) || (status as number) < 100 || (status as number) > 599,
+      ) ||
+      new Set(successStatuses).size !== successStatuses.length)
+  ) {
+    throw new Error("Agent manifest field 'health_probe.success_statuses' is invalid");
   }
 
   if (
@@ -267,7 +331,18 @@ export function readHealthProbe(record: ManifestRecord): AgentHealthProbe | unde
     typeof timeoutSeconds === "number" &&
     Number.isFinite(timeoutSeconds)
   ) {
-    return { url, port, timeout_seconds: timeoutSeconds };
+    return {
+      url,
+      port,
+      timeout_seconds: timeoutSeconds,
+      success_statuses: (successStatuses as readonly number[] | undefined) ?? [200],
+      ...(portResolution ? { port_resolution: portResolution } : {}),
+      ...(secondaryForward
+        ? {
+            secondary_forward: secondaryForward,
+          }
+        : {}),
+    };
   }
 
   return undefined;
@@ -390,6 +465,56 @@ export function readInference(record: ManifestRecord): AgentInference | undefine
     throw new Error("Agent manifest field 'inference.default_model' must be a safe model ID");
   }
 
+  const providerKeyCredentialAlias = inference.provider_key_credential_alias;
+  if (
+    providerKeyCredentialAlias !== undefined &&
+    providerKeyCredentialAlias !== "hosted-inference"
+  ) {
+    throw new Error(
+      "Agent manifest field 'inference.provider_key_credential_alias' must be hosted-inference",
+    );
+  }
+
+  const rawContextWindowRequirements = inference.context_window_requirements;
+  let contextWindowRequirements: AgentInference["contextWindowRequirements"];
+  if (rawContextWindowRequirements !== undefined) {
+    if (
+      !Array.isArray(rawContextWindowRequirements) ||
+      rawContextWindowRequirements.length < 1 ||
+      rawContextWindowRequirements.length > 8
+    ) {
+      throw new Error(
+        "Agent manifest field 'inference.context_window_requirements' must contain 1 through 8 entries",
+      );
+    }
+    const seenProviders = new Set<string>();
+    contextWindowRequirements = Object.freeze(
+      rawContextWindowRequirements.map((value, index) => {
+        const field = `inference.context_window_requirements[${String(index)}]`;
+        if (!isManifestRecord(value)) {
+          throw new Error(`Agent manifest field '${field}' must be an object`);
+        }
+        if (
+          Object.keys(value).length !== 2 ||
+          !Object.hasOwn(value, "provider") ||
+          !Object.hasOwn(value, "minimum_tokens") ||
+          value.provider !== "ollama-local" ||
+          seenProviders.has(value.provider) ||
+          !Number.isInteger(value.minimum_tokens) ||
+          (value.minimum_tokens as number) < 16_384 ||
+          (value.minimum_tokens as number) > 4_194_304
+        ) {
+          throw new Error(`Agent manifest field '${field}' is invalid`);
+        }
+        seenProviders.add(value.provider);
+        return Object.freeze({
+          provider: "ollama-local" as const,
+          minimumTokens: value.minimum_tokens as number,
+        });
+      }),
+    );
+  }
+
   const refreshRouteProviders = inference.refresh_route_for_messaging_providers;
   if (
     refreshRouteProviders !== undefined &&
@@ -422,7 +547,7 @@ export function readInference(record: ManifestRecord): AgentInference | undefine
       !Object.hasOwn(smoke, "config_path") ||
       smoke.kind !== "compatible-endpoint" ||
       typeof smoke.config_path !== "string" ||
-      !smoke.config_path.startsWith("/sandbox/")
+      !isCanonicalSandboxPath(smoke.config_path)
     ) {
       throw new Error(
         "Agent manifest field 'inference.sandbox_smoke' must declare compatible-endpoint and a config path below /sandbox",
@@ -434,10 +559,70 @@ export function readInference(record: ManifestRecord): AgentInference | undefine
     });
   }
 
+  const routeProbe = inference.route_probe;
+  let parsedRouteProbe: AgentInference["route_probe"];
+  if (routeProbe !== undefined) {
+    if (routeProbe === null || typeof routeProbe !== "object" || Array.isArray(routeProbe)) {
+      throw new Error("Agent manifest field 'inference.route_probe' must be an object");
+    }
+    const probe = routeProbe as ManifestRecord;
+    if (
+      Object.keys(probe).some((key) => key !== "terminal_connect" && key !== "models_404") ||
+      (probe.terminal_connect !== undefined && probe.terminal_connect !== "required") ||
+      (probe.models_404 !== undefined && probe.models_404 !== "inference-invocation")
+    ) {
+      throw new Error(
+        "Agent manifest field 'inference.route_probe' must use the supported core-owned probe modes",
+      );
+    }
+    parsedRouteProbe = Object.freeze({
+      ...(probe.terminal_connect ? { terminal_connect: "required" as const } : {}),
+      ...(probe.models_404 ? { models_404: "inference-invocation" as const } : {}),
+    });
+  }
+
+  const configUpdate = readObject(inference, "config_update");
+  const rawProviderApiOverrides = configUpdate?.provider_api_overrides;
+  let providerApiOverrides: AgentInference["providerApiOverrides"];
+  if (rawProviderApiOverrides !== undefined) {
+    if (!Array.isArray(rawProviderApiOverrides) || rawProviderApiOverrides.length > 32) {
+      throw new Error(
+        "Agent manifest field 'inference.config_update.provider_api_overrides' must be an array with at most 32 entries",
+      );
+    }
+    const seenProviders = new Set<string>();
+    providerApiOverrides = Object.freeze(
+      rawProviderApiOverrides.map((entry, index) => {
+        const field = `inference.config_update.provider_api_overrides[${String(index)}]`;
+        if (!isManifestRecord(entry)) {
+          throw new Error(`Agent manifest field '${field}' must be an object`);
+        }
+        const provider = readString(entry, "provider");
+        const api = readString(entry, "api");
+        if (
+          !provider ||
+          !/^[A-Za-z0-9._-]+$/u.test(provider) ||
+          seenProviders.has(provider) ||
+          (api !== "openai-completions" &&
+            api !== "anthropic-messages" &&
+            api !== "openai-responses")
+        ) {
+          throw new Error(`Agent manifest field '${field}' is invalid`);
+        }
+        seenProviders.add(provider);
+        return Object.freeze({ provider, api });
+      }),
+    );
+  }
+
   return {
     provider_type: providerType,
     provider_options: providerOptionList,
     default_model: typeof defaultModel === "string" ? defaultModel.trim() : undefined,
+    ...(providerKeyCredentialAlias
+      ? { provider_key_credential_alias: providerKeyCredentialAlias }
+      : {}),
+    ...(contextWindowRequirements ? { contextWindowRequirements } : {}),
     ...(refreshRouteProviders
       ? {
           refresh_route_for_messaging_providers: Object.freeze([
@@ -446,6 +631,8 @@ export function readInference(record: ManifestRecord): AgentInference | undefine
         }
       : {}),
     ...(parsedSandboxSmoke ? { sandbox_smoke: parsedSandboxSmoke } : {}),
+    ...(parsedRouteProbe ? { route_probe: parsedRouteProbe } : {}),
+    ...(providerApiOverrides ? { providerApiOverrides } : {}),
   };
 }
 

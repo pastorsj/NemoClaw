@@ -38,6 +38,7 @@ const BASE_INTENT: OnboardRecreateTargetIntent = {
   gatewayName: "nemoclaw-9090",
   gatewayPort: 9090,
   toolDisclosure: "progressive",
+  approvalMode: null,
   dcodeAutoApprovalMode: null,
   observabilityEnabled: false,
 };
@@ -61,6 +62,7 @@ describe("non-resumed replacement target fingerprint (#7735)", () => {
     { observabilityEnabled: true },
     { toolDisclosure: "direct" },
     { sandboxGpuConfig: { sandboxGpuEnabled: true, mode: "all" } },
+    { approvalMode: "thread-opt-in" },
     { dcodeAutoApprovalMode: "thread-opt-in" },
   ])("changes when a recorded replacement input changes [case %#]", (drift) => {
     expect(fingerprintOnboardRecreateTargetIntent({ ...BASE_INTENT, ...drift })).not.toBe(

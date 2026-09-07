@@ -15,6 +15,7 @@ export interface OnboardSessionUpdateInput {
   servingProfileProvenance?: ServingProfileProvenance | null;
   endpointUrl?: string | null;
   credentialEnv?: string | null;
+  providerAuthMethod?: string | null;
   hermesAuthMethod?: HermesAuthMethod | string | null;
   preferredInferenceApi?: string | null;
   compatibleEndpointReasoning?: string | null;
@@ -24,6 +25,7 @@ export interface OnboardSessionUpdateInput {
   toolDisclosure?: ToolDisclosure | string;
   observabilityEnabled?: boolean;
   messagingPlan?: SandboxMessagingPlan | null;
+  toolGatewaySelections?: string[] | null;
   hermesToolGateways?: string[] | null;
   /** Ephemeral vLLM checkpoint proof consumed by Station provider binding; never persisted. */
   stationExpressModelIdentity?: string;
@@ -39,6 +41,15 @@ function toNullableString(value: string | null | undefined): string | null | und
 
 function normalizeHermesAuthMethod(value: string | null | undefined): HermesAuthMethod | null {
   return value === "oauth" || value === "api_key" ? value : null;
+}
+
+function normalizeProviderAuthMethod(value: string | null | undefined): string | null {
+  return typeof value === "string" && /^[a-z][a-z0-9-]{0,63}$/u.test(value) ? value : null;
+}
+
+/** Preserve the nullable provider-auth state expected by inference selection. */
+export function readProviderAuthMethod(value: string | null | undefined): string | null {
+  return value || null;
 }
 
 // The recorded reasoning effort follows the same nullable contract, and an
@@ -63,6 +74,9 @@ export function toSessionUpdates(updates: OnboardSessionUpdateInput = {}): Sessi
     normalized.endpointUrl = toNullableString(updates.endpointUrl);
   if (updates.credentialEnv !== undefined)
     normalized.credentialEnv = toNullableString(updates.credentialEnv);
+  if (updates.providerAuthMethod !== undefined) {
+    normalized.providerAuthMethod = normalizeProviderAuthMethod(updates.providerAuthMethod);
+  }
   if (updates.hermesAuthMethod !== undefined)
     normalized.hermesAuthMethod = normalizeHermesAuthMethod(updates.hermesAuthMethod);
   if (updates.preferredInferenceApi !== undefined) {
@@ -87,6 +101,9 @@ export function toSessionUpdates(updates: OnboardSessionUpdateInput = {}): Sessi
     normalized.observabilityEnabled = updates.observabilityEnabled;
   }
   if (updates.messagingPlan !== undefined) normalized.messagingPlan = updates.messagingPlan;
+  if (updates.toolGatewaySelections !== undefined) {
+    normalized.toolGatewaySelections = updates.toolGatewaySelections;
+  }
   if (updates.hermesToolGateways !== undefined)
     normalized.hermesToolGateways = updates.hermesToolGateways;
   if (updates.stationExpressModelIdentity !== undefined) {

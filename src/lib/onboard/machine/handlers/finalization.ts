@@ -27,6 +27,7 @@ export interface FinalizationStateOptions<Agent, VerifyChain, VerificationResult
   agent: Agent;
   hermesAuthMethod: string | null;
   hermesToolGateways: string[];
+  toolGatewaySelections?: readonly string[];
   stagedLegacyKeys: readonly string[];
   migratedLegacyKeys: ReadonlySet<string>;
   webSearchEnabled: boolean;
@@ -98,6 +99,7 @@ export interface FinalizationStateOptions<Agent, VerifyChain, VerificationResult
       sandboxName: string,
       agent: Agent,
       provider: WebSearchVerifyProvider,
+      receiptBackedPackage?: boolean,
     ): boolean;
     printDashboard(
       sandboxName: string,
@@ -278,6 +280,7 @@ export async function handlePostVerifyState<Agent, VerifyChain, VerificationResu
   agent,
   hermesAuthMethod,
   hermesToolGateways,
+  toolGatewaySelections = [],
   webSearchEnabled,
   webSearchProvider,
   portableProfileSelected,
@@ -289,6 +292,9 @@ export async function handlePostVerifyState<Agent, VerifyChain, VerificationResu
   VerifyChain,
   VerificationResult
 >): Promise<PostVerifyStateResult> {
+  const managedToolGatewayUpdates = receiptBackedPackage
+    ? { toolGatewaySelections, hermesToolGateways: [] }
+    : { hermesToolGateways };
   const manageDashboard = shouldManageDashboardForAgent(agent as DashboardRuntimeAgent);
   const portableAgent = portableAgentDisposition(
     sandboxName,
@@ -326,7 +332,7 @@ export async function handlePostVerifyState<Agent, VerifyChain, VerificationResu
         provider,
         model,
         hermesAuthMethod,
-        hermesToolGateways,
+        ...managedToolGatewayUpdates,
       });
       return {
         stateResult: pauseOnboardMachine(sessionUpdates, {
@@ -358,7 +364,7 @@ export async function handlePostVerifyState<Agent, VerifyChain, VerificationResu
         provider,
         model,
         hermesAuthMethod,
-        hermesToolGateways,
+        ...managedToolGatewayUpdates,
       });
       return {
         stateResult: pauseOnboardMachine(sessionUpdates, {
@@ -384,7 +390,7 @@ export async function handlePostVerifyState<Agent, VerifyChain, VerificationResu
         provider,
         model,
         hermesAuthMethod,
-        hermesToolGateways,
+        ...managedToolGatewayUpdates,
       });
       return {
         stateResult: pauseOnboardMachine(sessionUpdates, {
@@ -409,7 +415,12 @@ export async function handlePostVerifyState<Agent, VerifyChain, VerificationResu
     const webSearchCredentialBoundarySafe =
       !webSearchEnabled ||
       (webSearchProvider !== null &&
-        deps.verifyWebSearchInsideSandbox(sandboxName, agent, webSearchProvider));
+        deps.verifyWebSearchInsideSandbox(
+          sandboxName,
+          agent,
+          webSearchProvider,
+          receiptBackedPackage === true,
+        ));
     // Confirm the delivered sandbox is reachable before printing the live dashboard (#2342).
     const verifyChain = deps.buildVerifyChain(deps.getChatUiUrl(), sandboxName);
     const verificationResult = await deps.verifyDeployment(sandboxName, verifyChain);
@@ -428,7 +439,7 @@ export async function handlePostVerifyState<Agent, VerifyChain, VerificationResu
     provider,
     model,
     hermesAuthMethod,
-    hermesToolGateways,
+    ...managedToolGatewayUpdates,
   });
   const stateResult = deploymentHealthy
     ? completeOnboardMachine(sessionUpdates, { state: "post_verify" })

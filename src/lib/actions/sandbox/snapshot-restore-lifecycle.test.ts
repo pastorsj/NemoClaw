@@ -124,6 +124,47 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     );
   });
 
+  it("restarts a same-ID Hermes package runtime after restoring its snapshot state", async () => {
+    const source = packageManagedSandbox("alpha", HERMES_PACKAGE);
+    configureCloneRegistry(source);
+    f.getLatestBackupMock.mockReturnValue(packageManagedSnapshot(HERMES_PACKAGE));
+    f.buildAgentDefinitionMock.mockImplementation(({ manifest, packageRoot }) => {
+      const definition = f.snapshotAgentDefinition(String(manifest.name), packageRoot);
+      return {
+        ...definition,
+        runtime: {
+          kind: "gateway",
+          process_lifecycle: {
+            support: "managed",
+            command: ["/usr/local/bin/nemoclaw-gateway-control"],
+            revalidate_running_gateway: true,
+          },
+        },
+        stateLifecycle: {
+          ...definition.stateLifecycle,
+          snapshot_restore: ["restart-runtime"],
+        },
+      } as never;
+    });
+    const { runSandboxSnapshot } = await import("./snapshot");
+
+    await runSandboxSnapshot("alpha", { kind: "restore" });
+
+    expect(f.restartSandboxGatewayMock).toHaveBeenCalledTimes(1);
+    expect(f.restartSandboxGatewayMock).toHaveBeenCalledWith("alpha", {
+      quiet: true,
+      agentDefinition: expect.objectContaining({
+        name: HERMES_PACKAGE.id,
+        runtime: expect.objectContaining({
+          process_lifecycle: expect.objectContaining({ support: "managed" }),
+        }),
+      }),
+    });
+    expect(
+      f.mutationLockMock.withMcpLifecycleLockSyncMock.mock.invocationCallOrder[0],
+    ).toBeLessThan(f.restartSandboxGatewayMock.mock.invocationCallOrder[0] as number);
+  });
+
   it("repairs an empty managed projection but leaves custom-image MCP state to the image (#10756)", async () => {
     f.getLatestBackupMock.mockReturnValue(packageManagedSnapshot(DCODE_PACKAGE));
     const { runSandboxSnapshot } = await import("./snapshot");

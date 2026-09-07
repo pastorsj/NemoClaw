@@ -32,12 +32,6 @@ function validateBearer(value: string, label: string): void {
   }
 }
 
-/** Trusted launcher's fixed bearer-descriptor role mapping. */
-export interface PrivateBearerDescriptors {
-  readonly deployment: number;
-  readonly openClaw: number;
-}
-
 /** Read one credential descriptor once and validate its complete contents. */
 function readBearer(descriptor: number, label: string): string {
   const buffer = Buffer.alloc(MAX_CREDENTIAL_BYTES + 2);
@@ -68,48 +62,23 @@ function validateDescriptor(descriptor: number, label: string): fs.Stats {
   }
 }
 
-/** Read and close the two fixed startup descriptors before the gateway can accept traffic. */
-export function readPrivateBearerDescriptors(descriptors: PrivateBearerDescriptors): {
-  deploymentCredential: string;
-  openClawCredential: string;
-} {
-  const uniqueDescriptors = [...new Set([descriptors.deployment, descriptors.openClaw])];
-  let result: { deploymentCredential: string; openClawCredential: string } | undefined;
+/** Read and close the fixed deployment descriptor before the gateway can accept traffic. */
+export function readPrivateBearerDescriptor(descriptor: number): string {
+  let result: string | undefined;
   let operationError: { readonly value: unknown } | undefined;
   try {
-    const deploymentStat = validateDescriptor(
-      descriptors.deployment,
-      "Voice gateway deployment credential",
-    );
-    const openClawStat = validateDescriptor(
-      descriptors.openClaw,
-      "Voice gateway OpenClaw credential",
-    );
-    if (
-      descriptors.deployment === descriptors.openClaw ||
-      (deploymentStat.dev === openClawStat.dev && deploymentStat.ino === openClawStat.ino)
-    ) {
-      throw new Error("Voice gateway credential descriptors must refer to different files.");
-    }
-    result = {
-      deploymentCredential: readBearer(
-        descriptors.deployment,
-        "Voice gateway deployment credential",
-      ),
-      openClawCredential: readBearer(descriptors.openClaw, "Voice gateway OpenClaw credential"),
-    };
+    validateDescriptor(descriptor, "Voice gateway deployment credential");
+    result = readBearer(descriptor, "Voice gateway deployment credential");
   } catch (error) {
     operationError = { value: error };
   }
 
   let cleanupError: unknown;
-  for (const descriptor of uniqueDescriptors) {
-    try {
-      fs.closeSync(descriptor);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EBADF" && cleanupError === undefined) {
-        cleanupError = error;
-      }
+  try {
+    fs.closeSync(descriptor);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EBADF") {
+      cleanupError = error;
     }
   }
 

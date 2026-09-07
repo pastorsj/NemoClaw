@@ -17,6 +17,7 @@ import {
   findAvailableDashboardPort,
   findDashboardForwardOwner,
   getRegistryOccupiedDashboardPorts,
+  getRegistryOccupiedSecondaryForwardPorts,
   preflightDashboardPortRangeAvailability,
   reserveCreateSandboxDashboardPort,
   reserveDashboardPort,
@@ -594,6 +595,19 @@ describe("getRegistryOccupiedDashboardPorts", () => {
         }),
       /registry locked/,
     );
+  });
+});
+
+describe("getRegistryOccupiedSecondaryForwardPorts", () => {
+  it("collects neutral receipt-backed ports without knowing a harness id", () => {
+    const occupied = getRegistryOccupiedSecondaryForwardPorts("future-b", () => ({
+      sandboxes: [
+        { name: "future-a", secondaryForwardPort: 9310 },
+        { name: "future-b", secondaryForwardPort: 9311 },
+      ],
+    }));
+
+    expect(occupied).toEqual(new Map([["9310", "future-a"]]));
   });
 });
 

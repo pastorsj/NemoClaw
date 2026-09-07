@@ -18,6 +18,8 @@ from typing import Any, Protocol
 
 from nemo_fabric import Fabric, FabricConfig, FabricConfigError, FabricError, RunRequest, RunResult
 
+from nemoclaw_fabric.output import OutputTraversalBudget
+
 
 class FabricClient(Protocol):
     """The released Fabric methods used by the headless runner."""
@@ -246,34 +248,67 @@ def use_private_fabric_artifacts(
 _OMIT_EPHEMERAL_PATH = object()
 
 
-def _remove_ephemeral_paths(value: Any, invocation_root: Path) -> Any:
+def _remove_ephemeral_paths(
+    value: Any,
+    invocation_root: Path,
+    *,
+    budget: OutputTraversalBudget | None = None,
+    depth: int = 0,
+) -> Any:
     """Remove references to files that disappear when one Fabric run ends."""
 
+    selected_budget = budget or OutputTraversalBudget()
+    selected_budget.check_depth(depth)
+    selected_budget.count_node()
     root_text = str(invocation_root)
     if isinstance(value, Path):
         value = str(value)
     if isinstance(value, str):
+        selected_budget.count_text(value)
         if value == root_text or value.startswith(f"{root_text}{os.sep}"):
             return _OMIT_EPHEMERAL_PATH
         return value.replace(root_text, "<ephemeral-artifacts>")
     if isinstance(value, Mapping):
-        cleaned: dict[str, Any] = {}
-        for key, item in value.items():
-            cleaned_key = _remove_ephemeral_paths(str(key), invocation_root)
-            selected = _remove_ephemeral_paths(item, invocation_root)
-            if (
-                cleaned_key is not _OMIT_EPHEMERAL_PATH
-                and selected is not _OMIT_EPHEMERAL_PATH
-            ):
-                cleaned[str(cleaned_key)] = selected
-        return cleaned
+        identity = selected_budget.enter_container(value)
+        try:
+            cleaned: dict[str, Any] = {}
+            for key, item in value.items():
+                cleaned_key = _remove_ephemeral_paths(
+                    str(key),
+                    invocation_root,
+                    budget=selected_budget,
+                    depth=depth + 1,
+                )
+                selected = _remove_ephemeral_paths(
+                    item,
+                    invocation_root,
+                    budget=selected_budget,
+                    depth=depth + 1,
+                )
+                if (
+                    cleaned_key is not _OMIT_EPHEMERAL_PATH
+                    and selected is not _OMIT_EPHEMERAL_PATH
+                ):
+                    cleaned[str(cleaned_key)] = selected
+            return cleaned
+        finally:
+            selected_budget.leave_container(identity)
     if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
-        cleaned_items = []
-        for item in value:
-            selected = _remove_ephemeral_paths(item, invocation_root)
-            if selected is not _OMIT_EPHEMERAL_PATH:
-                cleaned_items.append(selected)
-        return cleaned_items
+        identity = selected_budget.enter_container(value)
+        try:
+            cleaned_items = []
+            for item in value:
+                selected = _remove_ephemeral_paths(
+                    item,
+                    invocation_root,
+                    budget=selected_budget,
+                    depth=depth + 1,
+                )
+                if selected is not _OMIT_EPHEMERAL_PATH:
+                    cleaned_items.append(selected)
+            return cleaned_items
+        finally:
+            selected_budget.leave_container(identity)
     return value
 
 

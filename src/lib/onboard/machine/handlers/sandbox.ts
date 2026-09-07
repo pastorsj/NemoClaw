@@ -18,6 +18,10 @@ import {
   webSearchProviderForConfig,
 } from "../../../inference/web-search";
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
+import type {
+  HarnessToolGatewayCapability,
+  HarnessWebSearchCapability,
+} from "../../../agent-runtime/manifest-types";
 import {
   decisionValue,
   isDecisionSelected,
@@ -67,8 +71,8 @@ import {
 import { withDashboardPortReservationLock as withHostDashboardPortReservationLock } from "../../dashboard-port";
 import { type DashboardRuntimeAgent, shouldManageDashboardForAgent } from "../../dashboard-runtime";
 import {
+  hasRegisteredDcodeAutoApprovalDrift,
   type DcodeAutoApprovalMode,
-  DEFAULT_DCODE_AUTO_APPROVAL_MODE,
 } from "../../dcode-auto-approval";
 import { resolveSandboxGatewayName } from "../../gateway-binding";
 import {
@@ -77,10 +81,16 @@ import {
   resolveManagedSandboxFeature,
 } from "../../managed-sandbox-feature";
 import {
-  DCODE_OBSERVABILITY_FEATURE,
-  hasDcodeObservabilityDrift,
-  isDcodeAgent,
-} from "../../observability-policy-presets";
+  DEFAULT_SANDBOX_APPROVAL_MODE,
+  hasSandboxApprovalModeDrift,
+  hasSandboxObservabilityDrift,
+  resolveSandboxApprovalMode,
+  sandboxObservabilityFeature,
+  type SandboxApprovalMode,
+  packageWebSearchProviderBinding,
+  normalizeHarnessToolGatewaySelections,
+  selectedAgentSupportsStartupControl,
+} from "./sandbox-controls";
 import type { SandboxCreateIntent as ResolvedSandboxCreateIntent } from "../../sandbox-create-intent-types";
 import {
   advanceSandboxRecreateTransaction,
@@ -108,12 +118,13 @@ import {
   reconcileReusedSandboxMessaging,
   reconcileSandboxMessaging,
   resolveMessagingPlanAuthority,
+  resolveSessionMessagingManifests,
   sameRegistryMessagingAuthority,
 } from "./sandbox-messaging";
 import {
   decideSandboxResume,
   hasCompatibleEndpointReasoningDrift,
-  hasHermesCompatibleAnthropicInferenceRouteDrift,
+  hasCompatibleEndpointInferenceApiDrift,
   hasHostMountConfigDrift,
   mcpRegistryRemovalBlockReason,
   replacesSameNameSandbox,
@@ -231,6 +242,7 @@ export interface SandboxStateOptions<
   gpu: Gpu;
   preferredInferenceApi: string | null;
   sandboxGpuConfig: SandboxGpuConfig;
+  toolGatewaySelections?: string[];
   hermesToolGateways: string[];
   hermesAuthMethod: HermesAuthMethod | null;
   controlUiPort: number | null;
@@ -306,6 +318,7 @@ export interface SandboxStateOptions<
       agent: Agent,
       dockerfilePathOverride: string | null,
       packageRoot: string,
+      receiptBackedPackage?: boolean,
     ): Promise<WebSearchConfig | null>;
     startRecordedStep(
       stepName: string,
@@ -363,7 +376,9 @@ export interface SandboxStateOptions<
       extraProviders: readonly string[];
       staleExtraProviders: readonly string[];
       policyTier?: string | null;
+      observabilityEnabled?: boolean;
       reuseRegisteredCredentials?: boolean;
+      receiptBackedPackage?: boolean;
       hostMounts?: readonly import("../../../state/registry/types").SandboxHostMount[];
     }): Promise<ResolvedSandboxCreateIntent>;
     createSandbox(
@@ -425,6 +440,7 @@ export interface SandboxStateResult<WebSearchConfig> {
   sandboxName: string;
   webSearchConfig: WebSearchConfig | null;
   webSearchConfigChanged: boolean;
+  toolGatewaySelections: string[];
   hermesToolGateways: string[];
   selectedMessagingChannels: string[];
   webSearchSupported: boolean;
@@ -475,6 +491,14 @@ function hasReceiptBackedPackage(session: Session | null): boolean {
   return session?.harnessPackage != null;
 }
 
+function managedToolGatewayCapability(
+  agent: unknown,
+): Extract<HarnessToolGatewayCapability, { readonly support: "managed" }> | null {
+  const capability = (agent as { toolGatewayCapability?: HarnessToolGatewayCapability } | null)
+    ?.toolGatewayCapability;
+  return capability?.support === "managed" ? capability : null;
+}
+
 function effectiveToolGatewaysForWebSearch<Agent>(
   agent: Agent,
   session: Session | null,
@@ -499,15 +523,20 @@ function effectiveToolGatewaysForWebSearch<Agent>(
 function requiredWebSearchProviderBindings(
   sandboxName: string,
   webSearchConfig: SharedWebSearchConfig | null,
-  agent: { name?: string } | null,
+  agent: { name?: string; web_search?: HarnessWebSearchCapability } | null,
+  receiptBackedPackage: boolean,
 ): CheckpointProviderBinding[] {
   if (webSearchConfig?.fetchEnabled !== true) return [];
   const provider = webSearchProviderForConfig(webSearchConfig);
+  const binding = receiptBackedPackage ? packageWebSearchProviderBinding(agent, provider) : null;
+  if (receiptBackedPackage && !binding) {
+    throw new Error(`The selected harness package does not declare ${provider} web search.`);
+  }
   return [
     {
       name: `${sandboxName}-${provider}-search`,
-      type: requiredWebSearchProviderType(provider, agent),
-      credentialEnv: webSearchEnvFor(provider),
+      type: requiredWebSearchProviderType(provider, agent, receiptBackedPackage),
+      credentialEnv: binding?.credential_env ?? webSearchEnvFor(provider),
     },
   ];
 }
@@ -526,6 +555,21 @@ function deferredSandboxEffectsIntent(enabled: boolean): {
   readonly deferSandboxEffectsUntilIdentityVerification?: true;
 } {
   return enabled ? { deferSandboxEffectsUntilIdentityVerification: true } : {};
+}
+
+function sandboxApprovalCreateIntentFields<Agent>(
+  agent: Agent,
+  receiptBackedPackage: boolean,
+  fromDockerfile: string | null,
+  approvalModeSupported: boolean,
+  approvalMode: SandboxApprovalMode,
+): Pick<SandboxCreateIntent, "approvalMode" | "dcodeAutoApprovalMode"> {
+  if (receiptBackedPackage) {
+    return approvalModeSupported ? { approvalMode } : {};
+  }
+  return selectedAgentSupportsStartupControl(agent, false, fromDockerfile, "approval-mode")
+    ? { dcodeAutoApprovalMode: approvalMode as DcodeAutoApprovalMode }
+    : {};
 }
 
 type SandboxCreationDecision = Exclude<SandboxResumeDecision, { readonly kind: "reuse" }>;
@@ -565,14 +609,26 @@ type SandboxRecreatePreparation = {
 
 function observabilityRequestValidationError(
   issue: ManagedSandboxFeatureIssue | null,
+  receiptBackedPackage: boolean,
 ): string | null {
   if (issue === "unsupported-request") {
-    return "  --observability is supported only with --agent langchain-deepagents-code.";
+    return receiptBackedPackage
+      ? "  The selected harness package does not declare the observability startup control."
+      : "  --observability is supported only with --agent langchain-deepagents-code.";
   }
   if (issue === "recorded-state-on-unsupported-agent") {
-    return "  Recorded observability belongs to the existing Deep Agents Code sandbox. Pass --no-observability explicitly when switching agents.";
+    return receiptBackedPackage
+      ? "  Recorded observability belongs to a different harness. Pass --no-observability explicitly when switching harnesses."
+      : "  Recorded observability belongs to the existing Deep Agents Code sandbox. Pass --no-observability explicitly when switching agents.";
   }
   return null;
+}
+
+function recordedApprovalMode(entry: SandboxEntry | null, receiptBackedPackage: boolean): unknown {
+  if (!receiptBackedPackage) return entry?.dcodeAutoApprovalMode;
+  // Early receipt-backed POC rows used the legacy field. Normalize them once
+  // at this read boundary, then write only approvalMode for current packages.
+  return entry?.approvalMode ?? entry?.dcodeAutoApprovalMode;
 }
 
 function checkpointIdentityForResumeTarget(
@@ -637,7 +693,7 @@ class SandboxStateFlow<
   SandboxGpuConfig,
   ResourceProfile,
 > {
-  private dcodeAutoApprovalMode: DcodeAutoApprovalMode = DEFAULT_DCODE_AUTO_APPROVAL_MODE;
+  private approvalMode: SandboxApprovalMode = DEFAULT_SANDBOX_APPROVAL_MODE;
 
   constructor(
     private readonly options: SandboxStateOptions<
@@ -668,6 +724,12 @@ class SandboxStateFlow<
     );
   }
 
+  private get selectedToolGateways(): readonly string[] {
+    return hasReceiptBackedPackage(this.options.session)
+      ? (this.options.toolGatewaySelections ?? [])
+      : this.options.hermesToolGateways;
+  }
+
   private assertProviderlessApfInput(): void {
     if (this.options.apfInterceptorRequested !== true) return;
     const explicitWebSearch = parseExplicitWebSearchProvider(
@@ -679,7 +741,7 @@ class SandboxStateFlow<
       this.options.webSearchConfig !== null ||
       explicitWebSearch !== null ||
       this.options.selectedMessagingChannels.length > 0 ||
-      this.options.hermesToolGateways.length > 0 ||
+      this.selectedToolGateways.length > 0 ||
       Boolean(this.options.session?.messagingPlan);
     if (!hasProviderIntent) return;
     throw new Error(
@@ -762,39 +824,58 @@ class SandboxStateFlow<
     return this.checkpointSandboxName(state, explicitName);
   }
 
+  private recordedToolGatewaysForResume(
+    state: SandboxStepState<WebSearchConfig>,
+    registryEntry: SandboxEntry | null,
+  ): string[] {
+    if (!state.sandboxName) return [];
+    const packageCapability = managedToolGatewayCapability(this.options.agent);
+    if (hasReceiptBackedPackage(state.session) && packageCapability) {
+      return normalizeHarnessToolGatewaySelections(
+        packageCapability,
+        registryEntry?.toolGatewaySelections,
+      );
+    }
+    return this.deps.normalizeHermesToolGatewaySelections(
+      this.deps.getSandboxHermesToolGateways(state.sandboxName),
+    );
+  }
+
   private resolveResumeDecision(state: SandboxStepState<WebSearchConfig>): SandboxResumeDecision {
     const storedMessagingConfig = this.deps.getStoredMessagingChannelConfig(
       state.sandboxName,
       state.session,
     );
     const effectiveMessagingConfig = this.deps.hydrateMessagingChannelConfig(storedMessagingConfig);
-    const recordedToolGateways = state.sandboxName
-      ? this.deps.normalizeHermesToolGatewaySelections(
-          this.deps.getSandboxHermesToolGateways(state.sandboxName),
-        )
-      : [];
+    const registryEntry = state.sandboxName
+      ? this.deps.getSandboxRegistryEntry(state.sandboxName)
+      : null;
+    const recordedToolGateways = this.recordedToolGatewaysForResume(state, registryEntry);
     const effectiveToolGateways = effectiveToolGatewaysForWebSearch(
       this.options.agent,
       state.session,
       state.webSearchConfig as unknown as SharedWebSearchConfig | null,
-      this.options.hermesToolGateways,
+      this.selectedToolGateways,
       this.deps.filterSelectedAgentWebSearchToolGateways,
     );
-    const registryEntry = state.sandboxName
-      ? this.deps.getSandboxRegistryEntry(state.sandboxName)
-      : null;
     const messagingAuthority = state.sandboxName
       ? this.resolveSandboxMessagingAuthority(state.sandboxName, state.session)
       : { source: "none" as const, plan: null };
     const toolDisclosureSignals = resolveToolDisclosureResumeSignals(registryEntry, state.session);
     const sandboxReuseState = this.deps.getSandboxReuseState(state.sandboxName);
+    const receiptBackedPackage = hasReceiptBackedPackage(state.session);
     const dcodeResumeSignals = dcodeResume.resolveSignals(
       this.options,
       state,
       sandboxReuseState,
       registryEntry,
-      this.dcodeAutoApprovalMode,
       this.deps,
+    );
+    const approvalModeSupported = selectedAgentSupportsStartupControl(
+      this.options.agent,
+      receiptBackedPackage,
+      this.options.fromDockerfile,
+      "approval-mode",
     );
     const messagingCredentialChanged = hasMessagingCredentialDrift(
       messagingAuthority.plan,
@@ -807,8 +888,9 @@ class SandboxStateFlow<
         ? checkpointProvesSandboxStepComplete(state.session)
         : state.session?.steps?.sandbox?.status === "complete",
       sandboxReuseState,
-      inferenceRouteConfigChanged: hasHermesCompatibleAnthropicInferenceRouteDrift({
+      inferenceRouteConfigChanged: hasCompatibleEndpointInferenceApiDrift({
         agentName: (this.options.agent as { name?: string } | null)?.name,
+        receiptBackedPackage,
         provider: this.options.provider,
         model: this.options.model,
         preferredInferenceApi: this.options.preferredInferenceApi,
@@ -848,13 +930,35 @@ class SandboxStateFlow<
         recordedToolGateways,
         effectiveToolGateways,
       ),
-      observabilityChanged: hasDcodeObservabilityDrift({
+      observabilityChanged: hasSandboxObservabilityDrift({
+        supported: selectedAgentSupportsStartupControl(
+          this.options.agent,
+          receiptBackedPackage,
+          this.options.fromDockerfile,
+          "observability",
+        ),
         liveExists: sandboxReuseState === "ready",
-        managedDcodeAgent: isDcodeAgent((this.options.agent as { name?: string } | null)?.name),
         hasRegistryEntry: registryEntry !== null,
-        recordedObservabilityEnabled: registryEntry?.observabilityEnabled,
-        requestedObservabilityEnabled: state.session?.observabilityEnabled,
+        recordedEnabled: registryEntry?.observabilityEnabled,
+        requestedEnabled: state.session?.observabilityEnabled,
       }),
+      approvalModeChanged:
+        receiptBackedPackage &&
+        hasSandboxApprovalModeDrift({
+          supported: approvalModeSupported,
+          liveExists: sandboxReuseState === "ready",
+          hasRegistryEntry: registryEntry !== null,
+          recordedMode: recordedApprovalMode(registryEntry, true),
+          requestedMode: this.approvalMode,
+        }),
+      dcodeAutoApprovalChanged:
+        !receiptBackedPackage &&
+        hasRegisteredDcodeAutoApprovalDrift(
+          sandboxReuseState === "ready",
+          approvalModeSupported,
+          registryEntry,
+          this.approvalMode,
+        ),
       ...toolDisclosureSignals,
       ...dcodeResumeSignals,
     });
@@ -865,6 +969,7 @@ class SandboxStateFlow<
     const managedDcodeDecision = dcodeResume.preserveManagedDcodeRegistryEntry(
       this.options,
       credentialValidatedDecision,
+      receiptBackedPackage,
     );
     return this.resolveCheckpointCrashRecovery(managedDcodeDecision, state, sandboxReuseState);
   }
@@ -941,7 +1046,7 @@ class SandboxStateFlow<
       ),
       this.options.fromDockerfile ?? "",
       JSON.stringify(this.options.sandboxGpuConfig ?? null),
-      [...this.options.hermesToolGateways].sort().join(","),
+      [...this.selectedToolGateways].sort().join(","),
     ].join("|");
     if (!createIntent) return lightFingerprint;
     // Extra providers are live gateway attachments, not durable build intent.
@@ -1099,7 +1204,16 @@ class SandboxStateFlow<
       : null;
     const selectedAgent = (this.options.agent as { name?: string } | null)?.name;
     const requested = this.options.requestedObservabilityEnabled;
-    const resolution = resolveManagedSandboxFeature(DCODE_OBSERVABILITY_FEATURE, {
+    const receiptBackedPackage = hasReceiptBackedPackage(state.session);
+    const feature = sandboxObservabilityFeature(
+      selectedAgentSupportsStartupControl(
+        this.options.agent,
+        receiptBackedPackage,
+        this.options.fromDockerfile,
+        "observability",
+      ),
+    );
+    const resolution = resolveManagedSandboxFeature(feature, {
       agent: selectedAgent,
       requested,
       resume: this.options.resume,
@@ -1107,14 +1221,17 @@ class SandboxStateFlow<
       sessionRequestedExplicitly: state.session?.observabilityRequestedExplicitly,
       registryValue: registryEntry?.observabilityEnabled,
     });
-    const validationError = observabilityRequestValidationError(resolution.issue);
+    const validationError = observabilityRequestValidationError(
+      resolution.issue,
+      receiptBackedPackage,
+    );
     if (validationError) {
       this.deps.error(validationError);
       return this.deps.exitProcess(1);
     }
     if (
       !managedSandboxFeatureNeedsSessionUpdate(
-        DCODE_OBSERVABILITY_FEATURE,
+        feature,
         state.session?.observabilityEnabled,
         state.session?.observabilityRequestedExplicitly,
         resolution,
@@ -1255,6 +1372,7 @@ class SandboxStateFlow<
         this.options.agent,
         this.deps,
         state.session?.messagingPlan ?? null,
+        resolveSessionMessagingManifests(state.session, this.options.agent),
       );
       if (messaging.changed) {
         this.deps.updateSession((current) => {
@@ -1332,7 +1450,10 @@ class SandboxStateFlow<
     if (existing?.hermesAuthMethod === undefined && this.options.hermesAuthMethod) {
       fidelity.hermesAuthMethod = this.options.hermesAuthMethod;
     }
-    Object.assign(fidelity, dcodeResume.selectionFidelity(this.options, existing));
+    Object.assign(
+      fidelity,
+      dcodeResume.selectionFidelity(this.options, existing, hasReceiptBackedPackage(state.session)),
+    );
     if (Object.keys(fidelity).length > 0) {
       this.deps.updateSandboxRegistry(state.sandboxName, fidelity);
     }
@@ -1396,8 +1517,24 @@ class SandboxStateFlow<
     const provider = webSearchProviderForConfig(
       state.webSearchConfig as unknown as SharedWebSearchConfig,
     );
+    const receiptBackedPackage = hasReceiptBackedPackage(state.session);
+    const webSearchAgent = this.options.agent as {
+      name?: string;
+      web_search?: HarnessWebSearchCapability;
+    } | null;
+    const binding = receiptBackedPackage
+      ? packageWebSearchProviderBinding(webSearchAgent, provider)
+      : null;
+    if (receiptBackedPackage && !binding) {
+      throw new Error(`The selected harness package does not declare ${provider} web search.`);
+    }
     const label = webSearchLabelFor(provider);
-    const credentialEnv = webSearchEnvFor(provider);
+    const credentialEnv = binding?.credential_env ?? webSearchEnvFor(provider);
+    const providerType = requiredWebSearchProviderType(
+      provider,
+      webSearchAgent,
+      receiptBackedPackage,
+    );
     const localCredential = this.options.env[credentialEnv]?.trim();
     if (
       this.resumesSandboxPrompts &&
@@ -1407,7 +1544,7 @@ class SandboxStateFlow<
       this.ownsGatewayWebSearchProvider(state, `${state.sandboxName}-${provider}-search`) &&
       this.deps.providerMatchesGatewayCredential(
         `${state.sandboxName}-${provider}-search`,
-        provider,
+        providerType,
         credentialEnv,
       )
     ) {
@@ -1440,6 +1577,7 @@ class SandboxStateFlow<
         this.options.agent,
         state.webSearchSupportProbePath,
         this.options.rootDir,
+        hasReceiptBackedPackage(state.session),
       );
     }
     const checkpointedValue = checkpoint
@@ -1782,6 +1920,13 @@ class SandboxStateFlow<
     deferSandboxEffectsUntilIdentityVerification: boolean,
   ): Promise<CompleteSandboxCreateIntent> {
     const reuseRegisteredCredentials = this.resumesSandboxPrompts && this.options.resume;
+    const receiptBackedPackage = hasReceiptBackedPackage(state.session);
+    const approvalModeSupported = selectedAgentSupportsStartupControl(
+      this.options.agent,
+      receiptBackedPackage,
+      this.options.fromDockerfile,
+      "approval-mode",
+    );
     const resolved = await this.deps.resolveSandboxCreateIntent({
       sandboxName,
       inferenceProvider: this.options.provider,
@@ -1789,12 +1934,14 @@ class SandboxStateFlow<
       enabledChannels: state.selectedMessagingChannels,
       webSearchConfig: state.webSearchConfig,
       agent: this.options.agent,
+      receiptBackedPackage,
       sandboxGpuConfig: this.options.sandboxGpuConfig,
       resourceProfile,
       hermesToolGateways,
       extraProviders,
       staleExtraProviders,
       hostMounts: this.options.hostMounts,
+      observabilityEnabled: state.session?.observabilityEnabled === true,
       ...(reuseRegisteredCredentials ? { reuseRegisteredCredentials: true } : {}),
     });
     return {
@@ -1810,10 +1957,13 @@ class SandboxStateFlow<
       ...(state.session?.observabilityRequestedExplicitly === true
         ? { observabilityRequestedExplicitly: true as const }
         : {}),
-      ...(!this.options.fromDockerfile &&
-      isDcodeAgent((this.options.agent as { name?: string } | null)?.name)
-        ? { dcodeAutoApprovalMode: this.dcodeAutoApprovalMode }
-        : {}),
+      ...sandboxApprovalCreateIntentFields(
+        this.options.agent,
+        receiptBackedPackage,
+        this.options.fromDockerfile,
+        approvalModeSupported,
+        this.approvalMode,
+      ),
       ...deferredSandboxEffectsIntent(deferSandboxEffectsUntilIdentityVerification),
       ...(this.options.rebuildPreservedEnv
         ? { rebuildPreservedEnv: this.options.rebuildPreservedEnv }
@@ -1837,6 +1987,7 @@ class SandboxStateFlow<
       resolved.reusableMessagingProviders.length > 0 ||
       resolved.extraProviders.length > 0 ||
       resolved.staleExtraProviders.length > 0 ||
+      (resolved.toolGatewaySelections?.length ?? 0) > 0 ||
       resolved.hermesToolGateways.length > 0;
     if (!hasProviderPlan) return;
     throw new Error(
@@ -2221,7 +2372,7 @@ class SandboxStateFlow<
       this.options.agent,
       state.session,
       state.webSearchConfig as unknown as SharedWebSearchConfig | null,
-      this.options.hermesToolGateways,
+      this.selectedToolGateways,
       this.deps.filterSelectedAgentWebSearchToolGateways,
     );
     const extraProviderPlan = this.deps.planRegisteredExtraProviders(this.options.gatewayName);
@@ -2380,7 +2531,9 @@ class SandboxStateFlow<
           nimContainer: this.options.nimContainer,
           webSearchConfig: state.webSearchConfig,
           messagingPlan,
-          hermesToolGateways: effectiveHermesToolGateways,
+          ...(hasReceiptBackedPackage(state.session)
+            ? { toolGatewaySelections: effectiveHermesToolGateways, hermesToolGateways: [] }
+            : { hermesToolGateways: effectiveHermesToolGateways }),
         }),
       );
       const recordedSession = this.recordSandboxCreateEffects(
@@ -2526,6 +2679,7 @@ class SandboxStateFlow<
       requestedSandboxName,
       nextState.webSearchConfig as unknown as SharedWebSearchConfig | null,
       this.options.agent as { name?: string } | null,
+      hasReceiptBackedPackage(nextState.session),
     );
     const registryMessagingAuthority =
       this.deps.getRegistrySandboxMessagingAuthority(requestedSandboxName);
@@ -2600,20 +2754,20 @@ class SandboxStateFlow<
       this.deps.error("  Onboarding state is incomplete after sandbox setup.");
       return this.deps.exitProcess(1);
     }
-    const hermesToolGateways = effectiveToolGatewaysForWebSearch(
+    const effectiveToolGateways = effectiveToolGatewaysForWebSearch(
       this.options.agent,
       state.session,
       state.webSearchConfig as unknown as SharedWebSearchConfig | null,
-      this.options.hermesToolGateways,
+      this.selectedToolGateways,
       this.deps.filterSelectedAgentWebSearchToolGateways,
     );
-    if (
-      this.options.hermesToolGateways.includes("nous-web") &&
-      !hermesToolGateways.includes("nous-web")
-    ) {
+    const removedToolGateways = this.selectedToolGateways.filter(
+      (id) => !effectiveToolGateways.includes(id),
+    );
+    if (removedToolGateways.length > 0) {
       this.deps.note(
         hasReceiptBackedPackage(state.session)
-          ? "  Tavily Search removes the package-declared conflicting nous-web tool gateway."
+          ? `  Selected web search removes conflicting package managed tools: ${removedToolGateways.join(", ")}.`
           : "  Tavily Search replaces Hermes managed Web search/extract and removes the conflicting nous-web selection.",
       );
     }
@@ -2626,7 +2780,8 @@ class SandboxStateFlow<
       sandboxName: state.sandboxName,
       webSearchConfig: state.webSearchConfig,
       webSearchConfigChanged: state.webSearchConfigChanged,
-      hermesToolGateways,
+      toolGatewaySelections: hasReceiptBackedPackage(state.session) ? effectiveToolGateways : [],
+      hermesToolGateways: hasReceiptBackedPackage(state.session) ? [] : effectiveToolGateways,
       selectedMessagingChannels: state.selectedMessagingChannels,
       webSearchSupported: state.webSearchSupported,
       session: state.session,
@@ -2637,16 +2792,55 @@ class SandboxStateFlow<
     };
   }
 
+  private resolveRequestedApprovalMode(
+    registryEntry: SandboxEntry | null,
+    receiptBackedPackage: boolean,
+  ): void {
+    const approvalModeSupported = selectedAgentSupportsStartupControl(
+      this.options.agent,
+      receiptBackedPackage,
+      this.options.fromDockerfile,
+      "approval-mode",
+    );
+    try {
+      const approval = resolveSandboxApprovalMode({
+        supported: approvalModeSupported,
+        requestedMode: this.options.requestedDcodeAutoApprovalMode,
+        recordedMode: recordedApprovalMode(registryEntry, receiptBackedPackage),
+      });
+      if (approval.issue === "unsupported-request") {
+        this.deps.error(
+          receiptBackedPackage
+            ? "  The selected harness package does not declare the approval-mode startup control."
+            : "  --dcode-auto-approval thread-opt-in is supported only with the managed --agent langchain-deepagents-code image.",
+        );
+        this.deps.exitProcess(1);
+      }
+      if (approval.issue === "recorded-state-on-unsupported-agent") {
+        this.deps.error(
+          receiptBackedPackage
+            ? "  Recorded approval mode belongs to a different harness. Select disabled explicitly before switching harnesses."
+            : "  Recorded DCode auto-approval belongs to the existing Deep Agents Code sandbox. Pass --dcode-auto-approval disabled explicitly when switching agents.",
+        );
+        this.deps.exitProcess(1);
+      }
+      this.approvalMode = approval.value;
+    } catch (error) {
+      this.deps.error(`  ${error instanceof Error ? error.message : String(error)}`);
+      this.deps.exitProcess(1);
+    }
+  }
+
   async run(): Promise<SandboxStateResult<WebSearchConfig>> {
     this.assertProviderlessApfInput();
     if (this.options.session?.checkpoint) {
       this.replayableCheckpointProviderBindings(this.options.session.checkpoint);
     }
-    this.dcodeAutoApprovalMode = dcodeResume.resolveAutoApprovalMode(
-      this.options,
-      this.options.sandboxName,
-      this.deps,
-    );
+    const registryEntry = this.options.sandboxName
+      ? this.deps.getSandboxRegistryEntry(this.options.sandboxName)
+      : null;
+    const receiptBackedPackage = hasReceiptBackedPackage(this.options.session);
+    this.resolveRequestedApprovalMode(registryEntry, receiptBackedPackage);
     const initialState = this.checkpointChangedExplicitSandboxName(
       this.applyObservabilityRequest(this.prepareWebSearchSupport()),
     );

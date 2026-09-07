@@ -1,16 +1,26 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { HarnessInferenceConfigDeclaration } from "./config.js";
+import type {
+  HarnessInferenceConfigDeclaration,
+  HarnessInferenceContextWindowRequirement,
+} from "./config.js";
 import type {
   HarnessDevicePairingSettlementDeclaration,
+  HarnessGatewayRuntimeCommandDeclaration,
   HarnessRuntimeCommandDeclaration,
+  HarnessSessionQualificationDeclaration,
+  HarnessTerminalRuntimeCommandDeclaration,
 } from "./command.js";
 import type { HarnessMcpCapability } from "./mcp.js";
+import type { HarnessAgentRosterCapability } from "./agent-roster.js";
 import type { HarnessMessagingCapability } from "./messaging.js";
 import type { HarnessSessionCapability } from "./session.js";
 import type { HarnessStateLifecycleDeclaration } from "./state.js";
 import type { HarnessProviderBrokerCapability } from "./provider-broker.js";
+import type { HarnessProviderAuthCapability } from "./provider-auth.js";
+import type { HarnessToolGatewayCapability } from "./tool-gateway.js";
+import type { HarnessPolicyCapability } from "./policy.js";
 
 /** Package identity, declared capabilities, and managed-image requirements. */
 export interface HarnessPackageEnvelope {
@@ -38,6 +48,16 @@ export interface HarnessOnboardingDeclaration {
 
 export type HarnessSandboxDriver = "docker" | "podman";
 
+/** Operator controls that core can project into the package-owned startup profile. */
+export type HarnessSandboxStartupControl = "approval-mode" | "observability";
+
+/** One Docker process limit required by every process in the package's managed image. */
+export interface HarnessSandboxDockerUlimitDeclaration {
+  readonly name: string;
+  readonly soft: number;
+  readonly hard: number;
+}
+
 /** One bounded tmpfs mount that a package needs when OpenShell creates its sandbox. */
 export interface HarnessSandboxTmpfsMountDeclaration {
   readonly type: "tmpfs";
@@ -52,6 +72,8 @@ export interface HarnessSandboxTmpfsMountDeclaration {
 export interface HarnessSandboxCreateDeclaration {
   readonly generated_image_build?: "local-buildkit-required";
   readonly driver_mounts?: readonly HarnessSandboxTmpfsMountDeclaration[];
+  readonly startup_controls?: readonly HarnessSandboxStartupControl[];
+  readonly docker_ulimits?: readonly HarnessSandboxDockerUlimitDeclaration[];
 }
 
 export type HarnessWebSearchProvider = "brave" | "tavily";
@@ -61,11 +83,58 @@ export interface HarnessWebSearchToolGatewayConflict {
   readonly tool_gateway: string;
 }
 
-/** Web-search providers and tool-gateway conflicts declared by one package. */
+export interface HarnessWebSearchConfigAssertion {
+  readonly path: readonly string[];
+  readonly equals: string | boolean;
+}
+
+/** Package-native config evidence that core reads without knowing the harness schema. */
+export interface HarnessWebSearchConfigVerification {
+  readonly path: `/sandbox/${string}`;
+  readonly format: "json" | "yaml";
+  readonly assertions: readonly HarnessWebSearchConfigAssertion[];
+  /** First present string is used as the egress credential placeholder. Empty means derive it. */
+  readonly credential_paths: readonly (readonly string[])[];
+}
+
+export interface HarnessWebSearchRequestParameter {
+  readonly name: string;
+  readonly value: string | number;
+}
+
+export type HarnessWebSearchCredentialPlacement =
+  | {
+      readonly kind: "header";
+      readonly name: string;
+      readonly prefix: "none" | "bearer";
+    }
+  | {
+      readonly kind: "json-body";
+      readonly name: string;
+    };
+
+/** One finite HTTPS request whose response proves the selected search provider is usable. */
+export interface HarnessWebSearchEgressVerification {
+  readonly method: "GET" | "POST";
+  readonly url: `https://${string}`;
+  readonly parameters: readonly HarnessWebSearchRequestParameter[];
+  readonly credential: HarnessWebSearchCredentialPlacement;
+  readonly result_array_path: readonly string[];
+}
+
+export interface HarnessWebSearchProviderBinding {
+  readonly provider: HarnessWebSearchProvider;
+  readonly credential_env: string;
+  readonly profile_type: string;
+  readonly config_verification: HarnessWebSearchConfigVerification;
+  readonly egress_verification: HarnessWebSearchEgressVerification;
+}
+
+/** Web-search bindings and tool-gateway conflicts declared by one package. */
 export type HarnessWebSearchCapability =
   | {
       readonly support: "providers";
-      readonly providers: readonly HarnessWebSearchProvider[];
+      readonly providers: readonly HarnessWebSearchProviderBinding[];
       readonly tool_gateway_conflicts?: readonly HarnessWebSearchToolGatewayConflict[];
       readonly reason?: never;
     }
@@ -77,15 +146,49 @@ export type HarnessWebSearchCapability =
     };
 
 export interface HarnessPackageRegistryDeclaration {
+  /** Informational egress inventory only; core never installs or authorizes from this list. */
   readonly hosts: readonly string[];
+  /** Package-manager executable used by the package itself, not a NemoClaw install command. */
   readonly binary: string;
 }
 
-export interface HarnessHealthProbeDeclaration {
+export interface HarnessSecondaryForwardAllocationDeclaration {
+  /** Non-secret environment value that receives the selected port inside the sandbox. */
+  readonly environment_variable: string;
+  /** First port selected when it is available. This must match the declared health-probe port. */
+  readonly preferred_port: number;
+  readonly range_start: number;
+  readonly range_end: number;
+  /** Short package-owned resource name used in allocation diagnostics. */
+  readonly label: string;
+  /** Bounded package-owned recovery guidance used when the allocation range is exhausted. */
+  readonly remedy: string;
+}
+
+interface HarnessHealthProbeBaseDeclaration {
   readonly url: string;
   readonly port: number;
   readonly timeout_seconds: number;
+  /** Exact HTTP statuses that prove this package's gateway is alive. Defaults to 200. */
+  readonly success_statuses?: readonly number[];
 }
+
+/**
+ * A health probe either uses its fixed manifest port or owns one bounded secondary-forward
+ * allocation. Keeping the allocation beside the probe lets core allocate, persist, and recover
+ * the port without learning the harness identity.
+ */
+export type HarnessHealthProbeDeclaration = HarnessHealthProbeBaseDeclaration &
+  (
+    | {
+        readonly port_resolution: "sandbox-secondary-forward";
+        readonly secondary_forward: HarnessSecondaryForwardAllocationDeclaration;
+      }
+    | {
+        readonly port_resolution?: never;
+        readonly secondary_forward?: never;
+      }
+  );
 
 export interface HarnessDashboardDeclaration {
   readonly kind?: "ui" | "api";
@@ -156,9 +259,22 @@ export interface HarnessStateFileDeclaration {
 }
 
 export interface HarnessDashboardUiDeclaration {
+  /** Operator-facing name used in forward and recovery diagnostics. */
+  readonly label?: string;
+  /** Browser path appended to the forwarded loopback origin. */
+  readonly path?: `/${string}`;
+  /** Default public port before core allocates the sandbox's effective dashboard port. */
   readonly port: number;
+  /** Package-owned opt-in environment value. */
   readonly enable_env: string;
+  /** Package-owned compatibility alias for the selected public port. */
   readonly port_env: string;
+  /** Private in-sandbox listener used behind the public forward. */
+  readonly internal_port: number;
+  /** Package-owned environment value that receives the private listener port. */
+  readonly internal_port_env: string;
+  /** Optional package-owned environment value that enables a native terminal UI. */
+  readonly tui_env?: string;
 }
 
 export type HarnessSkillActivation =
@@ -273,18 +389,27 @@ export interface HarnessManagedImageDeclaration {
 
 export interface HarnessInferenceManifest {
   readonly config_update: HarnessInferenceConfigDeclaration;
+  /** Requirements applied by core-owned local inference runtimes during package onboarding. */
+  readonly context_window_requirements?: readonly HarnessInferenceContextWindowRequirement[];
   readonly provider_type?: string;
   readonly provider_options?: readonly string[];
   readonly default_model?: string;
   readonly base_url_config_key?: string;
   readonly model_config_key?: string;
   readonly proxy_support?: "implicit" | "explicit";
+  /** Enables the core-owned compatibility bridge from NEMOCLAW_PROVIDER_KEY to hosted inference. */
+  readonly provider_key_credential_alias?: "hosted-inference";
   /** Gateway providers whose route must be refreshed when messaging is active. */
   readonly refresh_route_for_messaging_providers?: readonly string[];
   /** Selects a core-owned sandbox proof without identifying the package. */
   readonly sandbox_smoke?: {
     readonly kind: "compatible-endpoint";
     readonly config_path: `/sandbox/${string}`;
+  };
+  /** Finite core-owned route checks required by this harness. */
+  readonly route_probe?: {
+    readonly terminal_connect?: "required";
+    readonly models_404?: "inference-invocation";
   };
 }
 
@@ -302,6 +427,7 @@ interface HarnessAgentManifestFields {
   readonly aliases?: readonly string[];
   readonly alias_summary?: string;
   readonly onboarding?: HarnessOnboardingDeclaration;
+  /** Package-owned upstream compatibility metadata; exact runtime qualification uses expected_version. */
   readonly version_constraint?: string;
   readonly language?: string;
   readonly license?: string;
@@ -311,18 +437,22 @@ interface HarnessAgentManifestFields {
   readonly version_command?: string;
   readonly expected_version?: string;
   readonly version_scheme?: "semver" | "calendar";
+  /** Non-authoritative package-manager inventory; it is neither discovery nor an egress grant. */
   readonly package_registry?: HarnessPackageRegistryDeclaration;
-  readonly gateway_command?: string;
   readonly sandbox_create?: HarnessSandboxCreateDeclaration;
-  readonly health_probe?: HarnessHealthProbeDeclaration;
   readonly dashboard?: HarnessDashboardDeclaration;
   readonly dashboard_ui?: HarnessDashboardUiDeclaration;
   readonly forward_ports?: readonly number[];
   readonly config: HarnessConfigDeclaration;
   readonly inference: HarnessInferenceManifest;
   readonly mcp?: HarnessMcpCapability;
+  readonly agent_roster?: HarnessAgentRosterCapability;
   readonly messaging: HarnessMessagingCapability;
   readonly provider_broker?: HarnessProviderBrokerCapability;
+  readonly provider_auth?: HarnessProviderAuthCapability;
+  readonly tool_gateways?: HarnessToolGatewayCapability;
+  /** Explicit package policy surface. Empty arrays and records declare that no additions apply. */
+  readonly policy: HarnessPolicyCapability;
   readonly web_search?: HarnessWebSearchCapability;
   readonly sessions?: HarnessSessionCapability;
   readonly skills?: HarnessSkillCapability;
@@ -331,6 +461,7 @@ interface HarnessAgentManifestFields {
   readonly state_files?: readonly (string | HarnessStateFileDeclaration)[];
   readonly user_managed_files?: readonly string[];
   readonly managed_image?: HarnessManagedImageDeclaration;
+  /** Informational upstream-host inventory; policy files remain the egress authority. */
   readonly phone_home_hosts?: readonly string[];
   readonly web_auth_method?: "device_pairing" | "bearer_token" | "none";
   readonly web_auth_env?: string;
@@ -339,16 +470,31 @@ interface HarnessAgentManifestFields {
 type HarnessDevicePairingManifestDeclaration =
   | {
       readonly device_pairing: true;
-      readonly runtime: HarnessRuntimeCommandDeclaration & {
+      readonly runtime: HarnessGatewayRuntimeCommandDeclaration & {
         readonly device_pairing_settlement: HarnessDevicePairingSettlementDeclaration;
+        readonly session_qualification: HarnessSessionQualificationDeclaration;
       };
     }
   | {
       readonly device_pairing?: false;
       readonly runtime: HarnessRuntimeCommandDeclaration & {
         readonly device_pairing_settlement?: never;
+        readonly session_qualification?: never;
       };
     };
 
+type HarnessRuntimeManifestDeclaration =
+  | {
+      readonly runtime: HarnessGatewayRuntimeCommandDeclaration;
+      readonly gateway_command: string;
+      readonly health_probe: HarnessHealthProbeDeclaration;
+    }
+  | {
+      readonly runtime: HarnessTerminalRuntimeCommandDeclaration;
+      readonly gateway_command?: never;
+      readonly health_probe?: never;
+    };
+
 export type HarnessAgentManifest = HarnessAgentManifestFields &
-  HarnessDevicePairingManifestDeclaration;
+  HarnessDevicePairingManifestDeclaration &
+  HarnessRuntimeManifestDeclaration;

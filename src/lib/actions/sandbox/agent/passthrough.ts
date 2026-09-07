@@ -88,8 +88,8 @@
 //
 // Regression tests: `passthrough.test.ts` covers the Hermes redirect, gateway
 // headless dispatch, forwarded argv, SIGTERM exit status, the registry-miss
-// fallback to OpenClaw, registry and package-resolution fail-closed paths, receipt-pinned terminal
-// commands, quoted manifest command rejection, the enforced `--no-tty` argv
+// executable refusal and read-only help path, registry and package-resolution
+// fail-closed paths, receipt-pinned terminal commands, quoted manifest command rejection, the enforced `--no-tty` argv
 // shape, the non-Ready phase recovery path, the unparseable phase fail-closed
 // path, the OpenClaw no-selector rejection, and the `--flag=value`
 // selector-acceptance branch, plus the OpenClaw JSON
@@ -109,16 +109,18 @@
 //   - Drop Ollama pre-dispatch recovery when supported daemon restarts preserve
 //     loaded runners or NemoClaw manages and warms the daemon lifecycle.
 
-import { type AgentDefinition, isTerminalAgent } from "../../../agent/defs";
+import type { AgentDefinition } from "../../../agent-runtime/manifest-types";
+import { isTerminalAgent } from "../../../agent-runtime/runtime/manifest";
 import { CLI_NAME } from "../../../cli/branding";
 import { isStdinTty } from "../../../core/stdin";
 import { resolveSandboxHermesApiPort } from "../../../onboard/hermes-api-port";
-import { resolveLifecycleEligibleSandboxAgent } from "../../../onboard/package/package-authority";
+import { resolveLifecycleEligibleSandboxAgent } from "../authority/package";
 import * as registry from "../../../state/registry";
 import {
   buildOpenshellExecArgs,
   computeExitCode,
   execSandbox,
+  wrapExecCommandWithRuntimeEnv,
   wrapOpenClawAgentCommandWithRuntimeEnv,
 } from "../exec";
 import { ensureLiveSandboxOrExit } from "../gateway-state";
@@ -133,11 +135,20 @@ import {
   SILENT_AGENT_DISPATCH_EXIT_CODE,
   TIMED_OUT_AGENT_TURN_EXIT_CODE,
 } from "./passthrough-dispatch";
-import { buildPackageAgentCommandPlan } from "./command-plan";
+import {
+  buildPackageAgentCommandPlan,
+  declarationAuthorizesStructuredTurnEnvelope,
+  type StructuredTurnEnvelopeDeclaration,
+} from "./command-plan";
 import { buildLegacyOpenClawCommandPlan, isLegacyOpenClawSandbox } from "./legacy-openclaw";
+import {
+  type PackageAgentCapturedProcess,
+  runPackageAgentCapturedPassthrough,
+} from "./passthrough-captured";
 import {
   hasAgentPassthroughHelpToken,
   printAgentPassthroughHelp,
+  writeDeclaredAgentTurnTimeoutFailure,
   writeSilentAgentDispatchFailure,
   writeTimedOutAgentTurnFailure,
 } from "./passthrough-help";
@@ -145,6 +156,7 @@ import {
   type AgentJsonPassthroughProcess,
   defaultGetOpenshellBinary,
   runAgentJsonPassthrough,
+  runStructuredTurnJsonPassthrough,
 } from "./passthrough-json";
 import { OLLAMA_LOCAL_PROVIDER, runOllamaRestartRecovery } from "./passthrough-ollama-recovery";
 
@@ -156,7 +168,10 @@ export { hasAgentPassthroughHelpToken, printAgentPassthroughHelp } from "./passt
 // the reporter-observed `[agent/embedded]` line prefix (#8100). Removal condition:
 // OpenClaw provides a supported machine-readable gateway-only result or removes
 // embedded-fallback mode.
-const OPENCLAW_EMBEDDED_FALLBACK_PATTERN =
+// Receipt-backed commands reach these finite markers only when their exact
+// typed agent_command declaration opts into `structured-turn-envelope`; the
+// authorization check also binds that declaration to the command prefix.
+const STRUCTURED_TURN_EMBEDDED_FALLBACK_PATTERN =
   /EMBEDDED FALLBACK|\[agent\/embedded\]|fallbackFrom[": ]+gateway|transport[": ]+embedded/i;
 
 export type AgentNonJsonPassthroughDeps = {
@@ -165,9 +180,12 @@ export type AgentNonJsonPassthroughDeps = {
   runDispatch?: AgentDispatchRunner;
   stdinIsTty?: () => boolean;
   timeoutSeconds?: number;
+  wrapCommand?: (command: readonly string[]) => string[];
+  runtimeLabel?: string;
+  legacyOpenClawDiagnostics?: boolean;
 };
 
-export async function runAgentNonJsonPassthrough(
+async function runStructuredTextPassthrough(
   sandboxName: string,
   command: readonly string[],
   proc: NonNullable<AgentPassthroughDeps["process"]>,
@@ -178,10 +196,10 @@ export async function runAgentNonJsonPassthrough(
     binary,
     buildOpenshellExecArgs(
       sandboxName,
-      wrapOpenClawAgentCommandWithRuntimeEnv(command),
+      (deps.wrapCommand ?? wrapExecCommandWithRuntimeEnv)(command),
       {
         tty: false,
-        timeoutSeconds: deps.timeoutSeconds ?? agentDispatchDeadlineSeconds(command),
+        timeoutSeconds: deps.timeoutSeconds,
       },
       (deps.getGatewayName ?? getKnownSandboxTargetGatewayName)(sandboxName) ?? undefined,
     ),
@@ -196,9 +214,10 @@ export async function runAgentNonJsonPassthrough(
     return proc.exit(SILENT_AGENT_DISPATCH_EXIT_CODE);
   }
 
-  if (OPENCLAW_EMBEDDED_FALLBACK_PATTERN.test(`${stdout}\n${stderr}`)) {
+  if (STRUCTURED_TURN_EMBEDDED_FALLBACK_PATTERN.test(`${stdout}\n${stderr}`)) {
+    const runtimeLabel = deps.runtimeLabel ?? "Agent runtime";
     proc.stderr.write(
-      `  OpenClaw is running in embedded-fallback mode in sandbox '${sandboxName}': gateway pairing is broken or missing.\n`,
+      `  ${runtimeLabel} is running in embedded-fallback mode in sandbox '${sandboxName}': gateway pairing is broken or missing.\n`,
     );
     proc.stderr.write("  Documented recovery paths:\n");
     proc.stderr.write(
@@ -225,10 +244,47 @@ export async function runAgentNonJsonPassthrough(
   // fired must not exit 0 just because the transport did. An upstream non-zero
   // code is preserved as-is.
   if (code === 0 && isTimedOutAgentDispatch(stdout, stderr)) {
-    writeTimedOutAgentTurnFailure(proc, sandboxName);
+    if (deps.legacyOpenClawDiagnostics) {
+      writeTimedOutAgentTurnFailure(proc, sandboxName);
+    } else {
+      writeDeclaredAgentTurnTimeoutFailure(proc, sandboxName);
+    }
     return proc.exit(TIMED_OUT_AGENT_TURN_EXIT_CODE);
   }
   return proc.exit(code);
+}
+
+/** Interpret a receipt-declared structured turn text stream. */
+export async function runStructuredTurnTextPassthrough(
+  declaration: StructuredTurnEnvelopeDeclaration,
+  sandboxName: string,
+  command: readonly string[],
+  proc: NonNullable<AgentPassthroughDeps["process"]>,
+  deps: AgentNonJsonPassthroughDeps = {},
+): Promise<never> {
+  if (!declarationAuthorizesStructuredTurnEnvelope(declaration, command)) {
+    proc.stderr.write(
+      "  The package command is not authorized for structured-turn envelope interpretation.\n",
+    );
+    return proc.exit(2);
+  }
+  return runStructuredTextPassthrough(sandboxName, command, proc, deps);
+}
+
+/** Compatibility wrapper for no-receipt OpenClaw sandboxes. */
+export async function runAgentNonJsonPassthrough(
+  sandboxName: string,
+  command: readonly string[],
+  proc: NonNullable<AgentPassthroughDeps["process"]>,
+  deps: AgentNonJsonPassthroughDeps = {},
+): Promise<never> {
+  return runStructuredTextPassthrough(sandboxName, command, proc, {
+    ...deps,
+    legacyOpenClawDiagnostics: true,
+    timeoutSeconds: deps.timeoutSeconds ?? agentDispatchDeadlineSeconds(command),
+    wrapCommand: deps.wrapCommand ?? wrapOpenClawAgentCommandWithRuntimeEnv,
+    runtimeLabel: deps.runtimeLabel ?? "OpenClaw",
+  });
 }
 
 export interface AgentPassthroughOptions {
@@ -242,6 +298,11 @@ export interface AgentPassthroughDeps {
   exec?: typeof execSandbox;
   execJson?: typeof runAgentJsonPassthrough;
   execNonJson?: typeof runAgentNonJsonPassthrough;
+  execCaptured?: (
+    sandboxName: string,
+    command: readonly string[],
+    proc: PackageAgentCapturedProcess,
+  ) => Promise<never>;
   runOllamaRestartRecovery?: typeof runOllamaRestartRecovery;
   /** Exit only after the public command can unwind its sandbox lifecycle lock. */
   deferredLifecycleExit?: (code: number) => never;
@@ -272,6 +333,7 @@ type AgentPassthroughInvocation = {
   stdinInput?: string;
   environment?: Readonly<Record<string, string>>;
   outputMode?: "direct" | "bounded-text" | "bounded-json";
+  structuredTurnEnvelope?: StructuredTurnEnvelopeDeclaration;
   requestedTimeoutSeconds?: number | null;
   missingSelectors?: readonly string[];
   legacyOpenClaw?: boolean;
@@ -320,6 +382,20 @@ function rejectNonOpenclawAgent(
   return proc.exit(2);
 }
 
+function rejectPackageAgentCommandUnavailable(
+  sandboxName: string,
+  agent: string,
+  proc: NonNullable<AgentPassthroughDeps["process"]>,
+): never {
+  proc.stderr.write(
+    `  The installed harness package '${agent}' does not declare an agent command for sandbox '${sandboxName}'.\n`,
+  );
+  proc.stderr.write(
+    "  The package must declare runtime.agent_command or a runnable runtime.headless_command.\n",
+  );
+  return proc.exit(2);
+}
+
 function rejectAgentResolutionError(
   sandboxName: string,
   agent: string,
@@ -331,6 +407,17 @@ function rejectAgentResolutionError(
   );
   proc.stderr.write(`  Agent resolution error: ${message}\n`);
   proc.stderr.write("  Refusing to dispatch because the sandbox agent guard cannot fail closed.\n");
+  return proc.exit(2);
+}
+
+function rejectMissingSandboxRegistration(
+  sandboxName: string,
+  proc: NonNullable<AgentPassthroughDeps["process"]>,
+): never {
+  proc.stderr.write(`  No local sandbox registration exists for '${sandboxName}'.\n`);
+  proc.stderr.write(
+    "  Refusing executable agent dispatch because no registered package or legacy sandbox owns this name.\n",
+  );
   return proc.exit(2);
 }
 
@@ -417,6 +504,7 @@ function buildManifestInvocation(
   headlessCommand: readonly string[],
   nativeCommand: ManifestCommandResult,
   promptTransport: "argv" | "stdin" | undefined,
+  promptProtocol: "fabric-cli" | "raw-stdin" | undefined,
   headlessEnvironment: Readonly<Record<string, string>> | undefined,
   extraArgs: readonly string[],
   proc: NonNullable<AgentPassthroughDeps["process"]>,
@@ -428,6 +516,19 @@ function buildManifestInvocation(
     };
   }
 
+  if (promptProtocol === undefined || promptProtocol === "raw-stdin") {
+    if (extraArgs.length !== 1 || !extraArgs[0]?.trim()) {
+      proc.stderr.write(
+        `  The package-managed raw-stdin command for sandbox '${sandboxName}' requires exactly one non-empty prompt argument.\n`,
+      );
+      return proc.exit(2);
+    }
+    return {
+      command: [...headlessCommand],
+      stdinInput: extraArgs[0],
+      ...(headlessEnvironment ? { environment: headlessEnvironment } : {}),
+    };
+  }
   const fabricArguments = parseFabricPromptArguments(extraArgs);
   if (fabricArguments.kind === "invalid") {
     rejectFabricInvocationArguments(sandboxName, proc);
@@ -467,21 +568,7 @@ function getPassthroughCommand(
       printAgentPassthroughHelp();
       return null;
     }
-    const legacyPlan = buildLegacyOpenClawCommandPlan(extraArgs);
-    if (legacyPlan.kind === "help") return null;
-    if (legacyPlan.kind === "missing-selector") {
-      return {
-        command: [...legacyPlan.argv],
-        missingSelectors: legacyPlan.selectors,
-        legacyOpenClaw: true,
-      };
-    }
-    return {
-      command: [...legacyPlan.argv],
-      outputMode: legacyPlan.outputMode,
-      requestedTimeoutSeconds: legacyPlan.requestedTimeoutSeconds,
-      legacyOpenClaw: true,
-    };
+    rejectMissingSandboxRegistration(sandboxName, proc);
   }
 
   // Rendering the wrapper's OpenClaw help does not dispatch into a sandbox.
@@ -515,7 +602,7 @@ function getPassthroughCommand(
   } catch (error) {
     rejectAgentResolutionError(
       sandboxName,
-      lookup.agent ?? "openclaw",
+      lookup.entry.harnessPackage?.id ?? lookup.agent ?? "registered-package",
       (error as Error).message,
       proc,
     );
@@ -529,16 +616,15 @@ function getPassthroughCommand(
     (!isPlainPromptInvocation(extraArgs) || !agent.runtime?.headless_command)
   ) {
     const plan = buildPackageAgentCommandPlan(agent.runtime.agent_command, extraArgs);
-    if (plan.kind === "help") {
-      printAgentPassthroughHelp();
-      return null;
-    }
     if (plan.kind === "missing-selector") {
       return { command: [...plan.argv], missingSelectors: plan.selectors };
     }
     return {
       command: [...plan.argv],
       outputMode: plan.outputMode,
+      ...(plan.structuredTurnEnvelope
+        ? { structuredTurnEnvelope: plan.structuredTurnEnvelope }
+        : {}),
       requestedTimeoutSeconds: plan.requestedTimeoutSeconds,
     };
   }
@@ -550,6 +636,9 @@ function getPassthroughCommand(
     rejectAgentResolutionError(sandboxName, agentName, manifestCommand.message, proc);
   }
   if (manifestCommand.argv.length === 0) {
+    if (authority.harnessPackage) {
+      rejectPackageAgentCommandUnavailable(sandboxName, agentName, proc);
+    }
     rejectNonOpenclawAgent(sandboxName, agentName, proc);
   }
   return buildManifestInvocation(
@@ -558,6 +647,7 @@ function getPassthroughCommand(
     manifestCommand.argv,
     getNativePassthroughCommand(agent),
     agent.runtime?.prompt_transport,
+    agent.runtime?.prompt_protocol,
     agent.runtime?.headless_environment,
     extraArgs,
     proc,
@@ -574,7 +664,7 @@ function rejectRegistryReadError(
   );
   proc.stderr.write(`  Registry read error: ${message}\n`);
   proc.stderr.write(
-    "  Refusing to forward to `openclaw agent` because the agent guard cannot fail closed.\n",
+    "  Refusing to forward an agent command because the package authority guard cannot fail closed.\n",
   );
   return proc.exit(2);
 }
@@ -679,6 +769,25 @@ export async function runAgentPassthrough(
   const timeoutSeconds = agentDispatchDeadlineFromRequest(
     invocation.requestedTimeoutSeconds ?? null,
   );
+  if (
+    !invocation.legacyOpenClaw &&
+    !invocation.structuredTurnEnvelope &&
+    (invocation.outputMode === "bounded-json" || invocation.outputMode === "bounded-text")
+  ) {
+    const passthroughProcess = {
+      exit: proc.exit.bind(proc),
+      stdout: proc.stdout ?? process.stdout,
+      stderr: proc.stderr,
+    } satisfies PackageAgentCapturedProcess;
+    if (deps.execCaptured) {
+      await deps.execCaptured(sandboxName, command, passthroughProcess);
+    } else {
+      await runPackageAgentCapturedPassthrough(sandboxName, command, passthroughProcess, {
+        timeoutSeconds,
+      });
+    }
+    return;
+  }
   if (invocation.outputMode === "bounded-json") {
     const passthroughProcess = {
       exit: proc.exit.bind(proc),
@@ -687,6 +796,14 @@ export async function runAgentPassthrough(
     } satisfies AgentJsonPassthroughProcess;
     if (deps.execJson) {
       await deps.execJson(sandboxName, command, passthroughProcess);
+    } else if (invocation.structuredTurnEnvelope) {
+      await runStructuredTurnJsonPassthrough(
+        invocation.structuredTurnEnvelope,
+        sandboxName,
+        command,
+        passthroughProcess,
+        { timeoutSeconds },
+      );
     } else {
       await runAgentJsonPassthrough(sandboxName, command, passthroughProcess, { timeoutSeconds });
     }
@@ -695,6 +812,14 @@ export async function runAgentPassthrough(
   if (invocation.outputMode === "bounded-text") {
     if (deps.execNonJson) {
       await deps.execNonJson(sandboxName, command, proc);
+    } else if (invocation.structuredTurnEnvelope) {
+      await runStructuredTurnTextPassthrough(
+        invocation.structuredTurnEnvelope,
+        sandboxName,
+        command,
+        proc,
+        { timeoutSeconds },
+      );
     } else {
       await runAgentNonJsonPassthrough(sandboxName, command, proc, { timeoutSeconds });
     }

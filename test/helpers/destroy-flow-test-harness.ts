@@ -7,6 +7,7 @@ import { expect, type MockInstance, vi } from "vitest";
 import type { SandboxDestroyExecutionResult } from "../../src/lib/actions/sandbox/destroy-execution";
 import type { PreparedManagedLlamaCppRuntimeCleanup } from "../../src/lib/inference/local-model-profile/cleanup";
 import type { ManagedAgentStateVolumeCleanupResult } from "../../src/lib/onboard/managed-workload/hermes-state-volume";
+import type { PreparedManagedAgentStateVolumeCleanup } from "../../src/lib/onboard/managed-workload/agent-state-volume";
 import type { Session } from "../../src/lib/state/onboard-session";
 import type { RetainedSandboxRecoveryRecord } from "../../src/lib/state/onboard-session/retained-sandbox-recovery";
 import type { SandboxEntry, SandboxWorkloadReceipt } from "../../src/lib/state/registry";
@@ -41,10 +42,14 @@ export type DestroyHarness = {
   prepareMcpBridgesForAbsentSandboxDestroySpy: MockInstance;
   prepareMcpBridgesForDestroySpy: MockInstance;
   prepareManagedLlamaCppRuntimeCleanupSpy: MockInstance;
+  prepareManagedAgentStateVolumeCleanupSpy: MockInstance;
+  prepareReceiptProviderCleanupSpy: MockInstance;
   cleanupManagedLlamaCppRuntimeForSandboxSpy: MockInstance;
   preparePortableDestroyAuthoritySpy: MockInstance;
   promptSpy: MockInstance;
   removeManagedAgentStateVolumesSpy: MockInstance;
+  removePreparedManagedAgentStateVolumesSpy: MockInstance;
+  removePreparedReceiptProvidersSpy: MockInstance;
   removeSandboxSpy: MockInstance;
   resolveRetainedSandboxRecoverySpy: MockInstance;
   retireRemovedImmutabilityStateRecordSpy: MockInstance;
@@ -102,6 +107,7 @@ type DestroyHarnessOptions = {
   hostLocalInferenceProvenance?: SandboxEntry["hostLocalInferenceProvenance"];
   liveListOutput?: string;
   managedAgentStateVolumeCleanupResults?: readonly ManagedAgentStateVolumeCleanupResult[];
+  managedAgentStateVolumeRoots?: string[];
   onPrepareManagedLlamaCppRuntimeCleanup?: () => void;
   preparedManagedLlamaCppRuntimeCleanup?: PreparedManagedLlamaCppRuntimeCleanup | null;
   mcpAddState?: "prepared";
@@ -120,6 +126,8 @@ type DestroyHarnessOptions = {
   prepareMcpBridgeError?: string;
   promptResponses?: string[];
   provider?: string;
+  providerDeleteOutput?: string;
+  providerDeleteStatus?: number | null;
   registryEntryPresent?: boolean;
   registryEntryOverrides?: Partial<SandboxEntry>;
   registeredSandboxCount?: number;
@@ -127,8 +135,12 @@ type DestroyHarnessOptions = {
   replaceSessionAfterRegistryRemoval?: boolean;
   removeSandboxResult?: boolean;
   restoreMcpError?: string;
+  receiptProviderCleanupError?: string;
+  sandboxListOutput?: string;
+  sandboxListStatus?: number | null;
   sandboxPresent?: boolean;
   sessionRouterPid?: number;
+  skipForwardPortVerification?: boolean;
   stopInferenceError?: string;
   workload?: SandboxWorkloadReceipt;
   wipeError?: Error;
@@ -213,6 +225,20 @@ export function createDestroyHarness(options: DestroyHarnessOptions = {}): Destr
   const destroyGateway = requireSource("./destroy-gateway.js");
   const credentialStore = requireSource("../../credentials/store.js");
   const sandboxProviderCleanup = requireSource("../../onboard/sandbox-provider-cleanup.js");
+  const providerAuthority = requireSource("./authority/providers.js");
+  const prepareReceiptProviderCleanupSpy = vi.spyOn(
+    providerAuthority,
+    "prepareReceiptProviderCleanup",
+  );
+  if (options.receiptProviderCleanupError) {
+    prepareReceiptProviderCleanupSpy.mockImplementation(() => {
+      throw new Error(options.receiptProviderCleanupError);
+    });
+  }
+  const removePreparedReceiptProvidersSpy = vi.spyOn(
+    providerAuthority,
+    "removePreparedReceiptProviders",
+  );
   const nim = requireSource("../../inference/nim.js");
   const ollamaProxy = requireSource("../../inference/ollama/proxy.js");
   const gatewayRouteMutationLock = requireSource("../../inference/gateway-route-mutation-lock.js");
@@ -241,6 +267,10 @@ export function createDestroyHarness(options: DestroyHarnessOptions = {}): Destr
     return removeExactDockerContainers(...args);
   });
   const destroyExecution = requireSource("./destroy-execution.js");
+  const forwardRecovery = requireSource("./forward-recovery.js");
+  if (options.skipForwardPortVerification) {
+    vi.spyOn(forwardRecovery, "teardownSandboxDashboardForward").mockReturnValue(true);
+  }
   const destroyCommand = requireSource("../../../commands/sandbox/destroy.js").default;
   const destroyPreflight = requireSource("./destroy-preflight.js");
   const sandboxSession = requireSource("../../state/sandbox-session.js");
@@ -463,12 +493,21 @@ export function createDestroyHarness(options: DestroyHarnessOptions = {}): Destr
           stderr: "",
           ...(options.wipeError ? { error: options.wipeError } : {}),
         };
+      case "provider:delete":
+        return {
+          status: options.providerDeleteStatus === undefined ? 0 : options.providerDeleteStatus,
+          stdout: "",
+          stderr: options.providerDeleteOutput ?? "",
+        };
       case "sandbox:list":
         gatewayPinsAtSandboxList.push(process.env.OPENSHELL_GATEWAY);
         return {
-          status: 0,
-          stdout: sandboxListJson(sandboxPresent ? ["alpha"] : []),
-          stderr: "",
+          status: options.sandboxListStatus === undefined ? 0 : options.sandboxListStatus,
+          stdout:
+            options.sandboxListStatus === undefined || options.sandboxListStatus === 0
+              ? sandboxListJson(sandboxPresent ? ["alpha"] : [])
+              : "",
+          stderr: options.sandboxListOutput ?? "",
         };
       case "sandbox:delete":
         events.push("delete");
@@ -583,6 +622,19 @@ export function createDestroyHarness(options: DestroyHarnessOptions = {}): Destr
   const removeManagedAgentStateVolumesSpy = vi
     .spyOn(sandboxProviderCleanup, "removeManagedAgentStateVolumes")
     .mockReturnValue(options.managedAgentStateVolumeCleanupResults ?? []);
+  const prepareManagedAgentStateVolumeCleanupSpy = vi
+    .spyOn(sandboxProviderCleanup, "prepareManagedAgentStateVolumeCleanup")
+    .mockImplementation((...args: unknown[]) => {
+      const context = args[0] as PreparedManagedAgentStateVolumeCleanup["context"];
+      return {
+        context,
+        receiptBacked: context.harnessPackage !== undefined,
+        roots: options.managedAgentStateVolumeRoots ?? [],
+      };
+    });
+  const removePreparedManagedAgentStateVolumesSpy = vi
+    .spyOn(sandboxProviderCleanup, "removePreparedManagedAgentStateVolumes")
+    .mockReturnValue(options.managedAgentStateVolumeCleanupResults ?? []);
   const stopNimByNameSpy = vi.spyOn(nim, "stopNimContainerByName").mockImplementation(() => {
     if (options.stopInferenceError !== undefined) {
       throw new Error(options.stopInferenceError);
@@ -676,12 +728,16 @@ export function createDestroyHarness(options: DestroyHarnessOptions = {}): Destr
     prepareMcpBridgesForAbsentSandboxDestroySpy,
     prepareMcpBridgesForDestroySpy,
     prepareManagedLlamaCppRuntimeCleanupSpy,
+    prepareManagedAgentStateVolumeCleanupSpy,
+    prepareReceiptProviderCleanupSpy,
     cleanupManagedLlamaCppRuntimeForSandboxSpy,
     preparePortableDestroyAuthoritySpy,
     portableDestroyRevalidateSpy,
     portableDestroyVerifyAbsentSpy,
     promptSpy,
     removeManagedAgentStateVolumesSpy,
+    removePreparedManagedAgentStateVolumesSpy,
+    removePreparedReceiptProvidersSpy,
     removeSandboxSpy,
     resolveRetainedSandboxRecoverySpy,
     retireRemovedImmutabilityStateRecordSpy,

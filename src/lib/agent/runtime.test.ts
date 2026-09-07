@@ -6,6 +6,11 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../test/helpers/adapter-fixtures";
 import { installHarnessPackage } from "../agent-runtime/package/install";
 import { HarnessPackageStoreIntegrityError } from "../agent-runtime/package/store";
 import * as onboardSession from "../state/onboard-session";
@@ -43,12 +48,17 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
     },
     inferenceProviderOptions: [],
     mcpCapability: { support: "disabled", reason: "test fixture" },
+    agentRosterCapability: null,
+    policyCapability: { owned_presets: [], automatic_presets: [], baseline_exclusion_impacts: {} },
     skillCapability: { support: "disabled", reason: "test fixture" },
     stateLifecycle: {
       backup_quiescence: { kind: "not-required" },
       snapshot_restore: [],
       rebuild: {
-        image_plugin_provenance: "not-required",
+        managed_extensions: {
+          support: "disabled",
+          reason: "Test package has no managed extensions.",
+        },
         scheduled_work: {
           support: "disabled",
           reason: "This package does not run scheduled work.",
@@ -84,11 +94,18 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
 }
 
 const minimalAgent = makeAgent();
-const hermesAgent = makeAgent({
-  name: "hermes",
-  displayName: "Hermes Agent",
-  binary_path: "/usr/local/bin/hermes",
-  gateway_command: "hermes gateway run",
+const managedGatewayAgent = makeAgent({
+  name: "future-managed-agent",
+  displayName: "Future Managed Agent",
+  binary_path: "/usr/local/bin/future-agent",
+  gateway_command: "future-agent gateway run",
+  runtime: {
+    kind: "gateway",
+    process_lifecycle: {
+      support: "managed",
+      command: ["/usr/local/bin/future-agent-control"],
+    },
+  },
   healthProbe: { url: "http://localhost:8642/health", port: 8642, timeout_seconds: 90 },
   forwardPort: 8642,
   configPaths: {
@@ -159,12 +176,18 @@ function installRuntimePackageFixture(
       "  support: disabled",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This package does not run scheduled work.",
@@ -172,6 +195,21 @@ function installRuntimePackageFixture(
       "      kind: not-required",
       "",
     ].join("\n"),
+  );
+  writePackageFile(
+    sourceRoot,
+    `packages/${packageDirectory}/host/config-adapter.cts`,
+    TEST_CONFIG_ADAPTER_SOURCE,
+  );
+  writePackageFile(
+    sourceRoot,
+    `packages/${packageDirectory}/host/messaging-adapter.cts`,
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  writePackageFile(
+    sourceRoot,
+    `packages/${packageDirectory}/host/startup-adapter.cts`,
+    TEST_STARTUP_ADAPTER_SOURCE,
   );
   writePackageFile(sourceRoot, "runtime/payload.txt", "future harness package\n");
   return installHarnessPackage(
@@ -303,8 +341,8 @@ describe("buildRecoveryScript", () => {
     expect(buildRecoveryScript(null, 18789)).toBeNull();
   });
 
-  it("returns null for Hermes because PID 1 owns Hermes recovery", () => {
-    expect(buildRecoveryScript(hermesAgent, 8642)).toBeNull();
+  it("returns null when a package-managed controller owns recovery", () => {
+    expect(buildRecoveryScript(managedGatewayAgent, 8642)).toBeNull();
   });
 
   it("embeds the port in the gateway launch command (#1925)", () => {

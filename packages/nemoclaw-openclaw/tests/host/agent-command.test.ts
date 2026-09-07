@@ -18,6 +18,7 @@ describe("OpenClaw agent command declaration", () => {
     const expected = {
       argv: ["openclaw", "agent"],
       output_mode: "bounded-text",
+      output_interpretation: "structured-turn-envelope",
       selector_options: ["--agent", "--session-id", "--session-key", "--to"],
       selector_required: true,
       value_options: [

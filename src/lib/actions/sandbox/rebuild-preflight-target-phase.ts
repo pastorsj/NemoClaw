@@ -342,7 +342,8 @@ export async function prepareRebuildTargetPreflights(args: {
     return null;
   }
 
-  const rebuildsDcodeSandbox = isDcodeRebuildAgent(rebuildAgent);
+  const rebuildsDcodeSandbox =
+    agentAuthority.harnessPackage === null && isDcodeRebuildAgent(rebuildAgent);
   const rebuildsManagedWorkload = recreateOptions.managedWorkloadRebuild !== undefined;
   const baseImagePreflight =
     rebuildsDcodeSandbox || rebuildsManagedWorkload

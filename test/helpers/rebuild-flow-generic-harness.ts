@@ -5,9 +5,17 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
+
+import type {
+  HarnessStartupJsonObject,
+  HarnessStartupSettings,
+} from "@nvidia/nemoclaw-harness-contract";
 import { vi } from "vitest";
+
 import { makePreparedRecoveryManifest } from "../../src/lib/actions/sandbox/rebuild-flow-test-fixtures";
 import type { RebuildRecreateOnboardOpts } from "../../src/lib/actions/sandbox/rebuild-gpu-opt-out";
+import { encodeManagedStartupDurableProfile } from "../../src/lib/onboard/managed-startup/profile";
+import type { HarnessPackageFixtureId } from "./harness-packages";
 import {
   agentDefs,
   agentOnboard,
@@ -45,6 +53,7 @@ import {
   purgeRebuildModule,
   type RebuildFlowHarness,
   type RebuildFlowOverrides,
+  rebuildAuthority,
   rebuildCustomImagePreflight,
   rebuildFlowHelpers,
   rebuildInference,
@@ -60,10 +69,12 @@ import {
   registerHarnessRebuildBackup,
   resolve,
   restoreGatewayPairing,
+  sandboxAgent,
   sandboxList,
   sandboxSession,
   sandboxState,
   sandboxVersion,
+  snapshotRestoreAuthority,
   sourceSandboxGateway,
 } from "./rebuild-flow-harness";
 
@@ -79,6 +90,74 @@ export {
 } from "./rebuild-flow-harness";
 export { makePreparedRecoveryManifest };
 export type { RebuildFlowHarness, RebuildFlowOverrides } from "./rebuild-flow-harness";
+
+function packageStartupWorkload(
+  agent: string,
+  harnessPackage: NonNullable<ReturnType<typeof installRebuildHarnessPackage>>,
+) {
+  const desiredState: HarnessStartupSettings = {
+    configuration: { agent },
+    inference: {
+      routeProvider: "ollama-local",
+      upstreamProvider: "ollama-local",
+      model: "nvidia/nemotron",
+      routedBaseUrl: "http://inference.local/v1",
+      upstreamEndpointUrl: null,
+      api: "openai-completions",
+      primaryModelRef: null,
+      compatibility: null,
+      inputModalities: null,
+    },
+    proxy: {
+      managedHost: "inference.local",
+      managedPort: 80,
+      hostHttpUrl: null,
+      hostHttpsUrl: null,
+      hostNoProxy: [],
+    },
+    dashboard: { agent, mode: "disabled" },
+    tools: { disclosure: "progressive", enabledGateways: [] },
+    messaging: { plan: null },
+    tuning: {
+      contextWindow: null,
+      maxTokens: null,
+      reasoning: null,
+      reasoningEffort: null,
+    },
+    corporateCa: { bundleSha256: null },
+  };
+  const encodedProfile = encodeManagedStartupDurableProfile({
+    schemaVersion: 1,
+    profileKind: "package",
+    agent,
+    harnessPackage,
+    desiredState,
+    packageConfig: { settings: desiredState as unknown as HarnessStartupJsonObject },
+    corporateCa: desiredState.corporateCa,
+  });
+  return {
+    schemaVersion: 1 as const,
+    kind: "legacy-dockerfile" as const,
+    reference: null,
+    packageStartupProfile: {
+      encodedProfile,
+      startupProfileSha256: createHash("sha256").update(encodedProfile, "utf8").digest("hex"),
+      credentialProxyReplayRequired: false,
+    },
+    shared: false as const,
+  };
+}
+
+function canBuildPackageStartupWorkload(
+  value: ReturnType<typeof installRebuildHarnessPackage>,
+): value is NonNullable<ReturnType<typeof installRebuildHarnessPackage>> {
+  return (
+    value?.kind === "agent-runtime" &&
+    typeof value.id === "string" &&
+    typeof value.packageVersion === "string" &&
+    /^[a-f0-9]{64}$/u.test(value.contentDigest)
+  );
+}
 
 function expectPolicyCaptureOptions() {
   return {
@@ -168,6 +247,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     deepagents: "terminal",
     "deepagents-code": "terminal",
     pi: "terminal",
+    "future-harness": "gateway",
     nemocua: "terminal",
   };
   const agentDef = {
@@ -178,11 +258,62 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     dockerfileBasePath: "/tmp/Dockerfile.base",
     runtime: { kind: runtimeKindByAgent[agentName] },
   };
-  const harnessPackage = Object.hasOwn(overrides, "harnessPackage")
-    ? (overrides.harnessPackage ?? null)
-    : installRebuildHarnessPackage(agentDef.name, {
-        agentPolicyAdditionsContent: overrides.agentPolicyAdditionsContent,
-      });
+  const legacyNoReceiptAgentAuthority = overrides.legacyNoReceiptAgentAuthority === true;
+  const harnessPackage = legacyNoReceiptAgentAuthority
+    ? null
+    : Object.hasOwn(overrides, "harnessPackage")
+      ? (overrides.harnessPackage ?? null)
+      : installRebuildHarnessPackage(agentDef.name, {
+          agentPolicyAdditionsContent: overrides.agentPolicyAdditionsContent,
+          postRestoreMutableConfig: overrides.receiptPostRestoreMutableConfig,
+          providerAuth: overrides.receiptProviderAuth,
+          webSearchProviders: overrides.receiptWebSearchProviders,
+          ...((overrides.receiptMessagingChannelIds?.length ?? 0) > 0 ||
+          overrides.receiptMessagingAdapterFailure === true
+            ? {
+                messaging: {
+                  packageId: agentDef.name as HarnessPackageFixtureId,
+                  ...(overrides.receiptMessagingChannelIds
+                    ? { channelIds: overrides.receiptMessagingChannelIds }
+                    : {}),
+                  ...(overrides.receiptMessagingAdapterFailure === true
+                    ? { failAdapter: true }
+                    : {}),
+                },
+              }
+            : {}),
+        });
+  if (legacyNoReceiptAgentAuthority) {
+    const legacyStateLifecycle = Object.freeze({
+      backup_quiescence: Object.freeze({ kind: "not-required" as const }),
+      snapshot_restore: Object.freeze([]),
+      rebuild: Object.freeze([]),
+    });
+    const legacyAgentDefinition = Object.freeze({
+      ...agentDef,
+      packageRoot: `/tmp/nemoclaw-legacy-${agentName}`,
+      stateLifecycle: legacyStateLifecycle,
+    });
+    const legacyRecordedAgent = agentDef.name === "openclaw" ? null : agentDef.name;
+    const legacyAuthority = Object.freeze({
+      recordedAgent: legacyRecordedAgent,
+      effectiveAgentId: agentDef.name,
+      definition: legacyAgentDefinition,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
+    vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((entry: unknown) => {
+      const recordedAgent = (entry as { agent?: unknown }).agent;
+      if ((recordedAgent ?? null) !== legacyRecordedAgent) {
+        throw new Error("Legacy no-receipt fixture received an unexpected sandbox agent");
+      }
+      return legacyAuthority as never;
+    });
+    vi.spyOn(sandboxAgent, "resolveLegacyBackupRecoveryOwner").mockReturnValue(legacyRecordedAgent);
+    vi.spyOn(rebuildAuthority, "checkPinnedAgentAuthority").mockReturnValue(null);
+    vi.spyOn(rebuildAuthority, "verifyRecreatedAgentAuthority").mockReturnValue(null);
+    vi.spyOn(rebuildAuthority, "verifyCurrentAgentAuthority").mockReturnValue(null);
+  }
   session.agent = agentDef.name === "openclaw" ? null : agentDef.name;
   session.harnessPackage = harnessPackage;
   session.harnessPackageMigration = null;
@@ -451,6 +582,9 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     gatewayName: "nemoclaw",
     gatewayPort: 8080,
     ...(harnessPackage ? { harnessPackage } : {}),
+    ...(canBuildPackageStartupWorkload(harnessPackage)
+      ? { workload: packageStartupWorkload(agentName, harnessPackage) }
+      : {}),
     ...customOpenClawPluginProvenance,
     ...(overrides.sandboxEntry ?? {}),
   };
@@ -782,6 +916,14 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
         }))
       )();
     });
+  if (legacyNoReceiptAgentAuthority) {
+    vi.spyOn(
+      snapshotRestoreAuthority,
+      "restoreRecreatedSandboxStateWithManagedAuthority",
+    ).mockImplementation((...args: unknown[]) =>
+      sandboxState.restoreRecreatedSandboxState(args[0], args[1], args[2]),
+    );
+  }
   const deletedSourceGateways = new Set<string>();
   const runOpenshellSpy = vi
     .spyOn(openshellRuntime, "runOpenshell")
@@ -804,6 +946,23 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
           stdout: "",
           stderr: "sandbox alpha not found",
         };
+      }
+      if (argv[0] === "provider" && argv[1] === "get" && argv[2] === "hermes-provider") {
+        if (!hermesProviderExists) {
+          return {
+            status: 1,
+            output: "",
+            stdout: "",
+            stderr: "provider not found",
+          };
+        }
+        const output = [
+          "Name: hermes-provider",
+          "Type: openai",
+          `Credential keys: ${(hermesCredentialKeys ?? []).join(", ")}`,
+          "Config keys: OPENAI_BASE_URL",
+        ].join("\n");
+        return { status: 0, output, stdout: output, stderr: "" };
       }
       return argv[0] === "provider" && argv[1] === "get"
         ? {

@@ -17,7 +17,9 @@ import {
   readMessagingBuildPlanFromEnv,
 } from "../../../../src/lib/messaging/applier/build/messaging-build-applier.mts";
 import { withLegacyMessagingPlanEnvDirect } from "../../../../test/messaging-plan-test-helper";
+import type { HarnessMessagingAdapterModule } from "@nvidia/nemoclaw-harness-contract";
 import { baseOpenClawGenerationEnv, buildOpenClawTestEnv } from "../helpers/env-fixture";
+import { loadPackageHostModule } from "../helpers/host-module";
 const OPENCLAW_PACKAGE = path.resolve(import.meta.dirname, "../..");
 const SCRIPT_PATH = path.join(OPENCLAW_PACKAGE, "config/generate-config.mts");
 const SCRIPT_ARGS = ["--experimental-strip-types", SCRIPT_PATH];
@@ -32,8 +34,34 @@ const buildTestEnv = (envOverrides: Record<string, string> = {}): Record<string,
   buildOpenClawTestEnv(tmpDir, BASE_ENV, envOverrides);
 
 const CHANNELS_ENV = "NEMOCLAW_MESSAGING_CHANNELS_B64";
+const OPENCLAW_MESSAGING_INTEGRATION = loadPackageHostModule<HarnessMessagingAdapterModule>(
+  "messaging-adapter.cts",
+).describeMessagingIntegration({ packageId: "openclaw" });
+if (OPENCLAW_MESSAGING_INTEGRATION.kind !== "channels") {
+  throw new Error("OpenClaw messaging test fixture must be enabled");
+}
+const OPENCLAW_MESSAGING_BUILD_PROFILE = OPENCLAW_MESSAGING_INTEGRATION.build;
+
+function withOpenClawMessagingBuildProfile(env: Record<string, string>): Record<string, string> {
+  const encodedPlan = env.NEMOCLAW_MESSAGING_PLAN_B64;
+  if (!encodedPlan) return env;
+  const plan = JSON.parse(Buffer.from(encodedPlan, "base64").toString("utf8")) as Record<
+    string,
+    unknown
+  >;
+  return {
+    ...env,
+    NEMOCLAW_MESSAGING_PLAN_B64: Buffer.from(
+      JSON.stringify({ ...plan, packageBuild: OPENCLAW_MESSAGING_BUILD_PROFILE }),
+    ).toString("base64"),
+  };
+}
+
 const messagingEnv = (channels: string, env: Record<string, string> = {}) =>
-  withLegacyMessagingPlanEnvDirect(buildTestEnv({ ...env, [CHANNELS_ENV]: channels }), "openclaw");
+  withLegacyMessagingPlanEnvDirect(
+    buildTestEnv({ ...env, [CHANNELS_ENV]: channels }),
+    "openclaw",
+  ).then(withOpenClawMessagingBuildProfile);
 
 function runConfigScriptRaw(envOverrides: Record<string, string> = {}) {
   const env = buildTestEnv(envOverrides);

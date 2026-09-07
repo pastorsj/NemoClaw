@@ -1,18 +1,47 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { LlamaCppDgxSparkAgentQualificationPlan } from "../../../scripts/checks/llama-cpp-dgx-spark-qualification-contract.mts";
-import type {
-  ManagedImageOpenShellE2eProbeContext,
-  ManagedImageOpenShellE2eProbeResult,
-} from "../../../scripts/checks/run-managed-image-openshell-e2e.ts";
+export type LlamaCppOpenClawQualificationPlan = Readonly<{
+  agent: "openclaw";
+  bounds: Readonly<{
+    commandTimeoutSeconds: number;
+    maxResponseBytes: number;
+    maxStreamEvents: number;
+    maxTokens: number;
+  }>;
+  execution: "disabled" | "enabled";
+  expectations: Readonly<{ normal: string }>;
+  fixture: Readonly<{ path: string; value: string }>;
+  prompts: Readonly<{ continuation: string; normal: string; tool: string }>;
+  route: Readonly<{ routedBaseUrl: string }>;
+  sandbox: Readonly<{ name: string }>;
+  sessions: Readonly<{ normal: string; tool: string }>;
+  tool: Readonly<{ name: string }>;
+}>;
+
+export type OpenClawSandboxProbeResult = Readonly<{
+  status: number | null;
+  stderr: string;
+  stdout: string;
+}>;
+
+export type OpenClawSandboxProbeContext = Readonly<{
+  input: Readonly<{
+    agent: string;
+    gpu?: true;
+    localProvider?: string;
+    model?: string;
+    sandbox: string;
+  }>;
+  runSandbox: (argv: readonly string[], timeoutMilliseconds?: number) => OpenClawSandboxProbeResult;
+}>;
 
 export type LlamaCppOpenClawAgentQualificationEvidence = {
   readonly agentMultiTurn: true;
   readonly agentNormalTurn: true;
   readonly agentToolCall: {
     readonly argumentsValid: true;
-    readonly name: LlamaCppDgxSparkAgentQualificationPlan["tool"]["name"];
+    readonly name: LlamaCppOpenClawQualificationPlan["tool"]["name"];
   };
   readonly agentToolResultContinuation: true;
   readonly streamingChat: {
@@ -23,7 +52,7 @@ export type LlamaCppOpenClawAgentQualificationEvidence = {
 };
 
 function requireSuccess(
-  result: ManagedImageOpenShellE2eProbeResult,
+  result: OpenClawSandboxProbeResult,
   label: string,
   maximumBytes: number,
 ): void {
@@ -125,8 +154,8 @@ function parseJson(value: string, label: string): Record<string, unknown> {
 }
 
 export async function runLlamaCppOpenClawAgentQualification(
-  config: LlamaCppDgxSparkAgentQualificationPlan,
-  context: ManagedImageOpenShellE2eProbeContext,
+  config: LlamaCppOpenClawQualificationPlan,
+  context: OpenClawSandboxProbeContext,
 ): Promise<LlamaCppOpenClawAgentQualificationEvidence> {
   if (
     config.execution !== "enabled" ||

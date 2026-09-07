@@ -23,7 +23,6 @@
     "handleVllmSelection.queryVllmModels": 1,
     "preflightAuthoritativeRebuildTarget": 1,
     "runOnboard": 8,
-    "runOnboard.providerInference.deps.needsBedrockRuntimeAdapter": 1,
-    "selectAndValidateOllamaModel": 19
+    "runOnboard.providerInference.deps.needsBedrockRuntimeAdapter": 1
   }
 }

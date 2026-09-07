@@ -8,9 +8,7 @@ import type {
   MessagingHookHandler,
   MessagingHookRegistration,
 } from "../../../hooks/types";
-import { getActiveMessagingHostForward } from "../../../host-forward";
 import type { MessagingSerializableValue } from "../../../manifest";
-import { parseSandboxMessagingPlan } from "../../../plan-validation";
 
 export const TEAMS_HOST_FORWARD_PORT_CONFLICT_HOOK_HANDLER_ID = "teams.hostForwardPortConflict";
 export const TEAMS_HOST_FORWARD_PORT_STATUS_HOOK_HANDLER_ID = "teams.hostForwardPortStatus";
@@ -137,8 +135,7 @@ export function findTeamsHostForwardPortConflicts(
 ): TeamsHostForwardPortConflict[] {
   return entries.flatMap((entry) => {
     if (entry.name === currentSandbox) return [];
-    const plan = parseSandboxMessagingPlan(entry.messaging?.plan);
-    const forward = getActiveMessagingHostForward(plan);
+    const forward = getPrehydratedActiveHostForward(entry.messaging?.plan);
     if (!forward || forward.port !== port) return [];
     return [
       {
@@ -155,8 +152,7 @@ export function detectAllTeamsHostForwardPortOverlaps(
 ): TeamsHostForwardPortOverlap[] {
   const byPort = new Map<number, string[]>();
   for (const entry of entries) {
-    const plan = parseSandboxMessagingPlan(entry.messaging?.plan);
-    const forward = getActiveMessagingHostForward(plan);
+    const forward = getPrehydratedActiveHostForward(entry.messaging?.plan);
     if (!forward || forward.channelId !== "teams") continue;
     const names = byPort.get(forward.port) ?? [];
     names.push(entry.name);
@@ -173,6 +169,53 @@ export function detectAllTeamsHostForwardPortOverlaps(
     }
   }
   return overlaps;
+}
+
+/**
+ * Read only the host-forward fields already established at the shared receipt
+ * authority boundary. Re-parsing here would discard them from a compact
+ * receipt plan unless this channel-specific hook loaded package state itself.
+ */
+function getPrehydratedActiveHostForward(value: unknown) {
+  if (
+    !isObjectRecord(value) ||
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.channels) ||
+    !Array.isArray(value.disabledChannels) ||
+    !value.disabledChannels.every((channelId) => typeof channelId === "string")
+  ) {
+    return null;
+  }
+  const disabled = new Set(value.disabledChannels);
+  for (const candidate of value.channels) {
+    if (
+      !isObjectRecord(candidate) ||
+      typeof candidate.channelId !== "string" ||
+      candidate.active !== true ||
+      candidate.disabled === true ||
+      disabled.has(candidate.channelId)
+    ) {
+      continue;
+    }
+    const forward = candidate.hostForward;
+    if (
+      !isObjectRecord(forward) ||
+      forward.channelId !== candidate.channelId ||
+      typeof forward.port !== "number" ||
+      !Number.isInteger(forward.port) ||
+      forward.port < 1 ||
+      forward.port > 65535 ||
+      typeof forward.label !== "string"
+    ) {
+      continue;
+    }
+    return {
+      channelId: forward.channelId,
+      port: forward.port,
+      label: forward.label,
+    };
+  }
+  return null;
 }
 
 export function formatTeamsHostForwardPortConflictMessage({

@@ -33,16 +33,8 @@ const spawnSyncMock = vi.hoisted(() =>
     stderr: Buffer.alloc(0),
   })),
 );
-const listManagedChannelNamesMock = vi.hoisted(() =>
-  vi.fn((_agentName: string) => ["managed-channel"]),
-);
-
 vi.mock("node:child_process", () => ({
   spawnSync: spawnSyncMock,
-}));
-vi.mock("./managed-channels", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./managed-channels")>()),
-  listManagedChannelNames: listManagedChannelNamesMock,
 }));
 
 const OWNERSHIP: StateFilePackageConfigRestoreOwnership = { merge: "package-config" };
@@ -53,7 +45,7 @@ function contextFor(result: HarnessConfigRestoreResult): PackageConfigRestoreCon
   const adapter: HarnessConfigRestoreHostModule = {
     mergeConfigState: vi.fn(() => result),
   };
-  return { agentName: "future-harness", adapter };
+  return { adapter, managedChannelNames: ["managed-channel"] };
 }
 
 function restoreWithContext(
@@ -78,7 +70,7 @@ afterEach(() => {
 });
 
 describe("package configuration state restore", () => {
-  it("derives managed channel names from the package agent identity", () => {
+  it("passes managed channel names from the exact package profile", () => {
     const mergeConfigState = vi.fn((): HarnessConfigRestoreResult => ({
       kind: "merged",
       content: '{"merged":true}\n',
@@ -86,14 +78,43 @@ describe("package configuration state restore", () => {
     }));
 
     const { restored } = restoreWithContext({
-      agentName: "future-harness",
       adapter: { mergeConfigState },
+      managedChannelNames: ["receipt-channel"],
     });
 
     expect(restored).toBe(true);
-    expect(listManagedChannelNamesMock).toHaveBeenCalledWith("future-harness");
     expect(mergeConfigState).toHaveBeenCalledWith(
-      expect.objectContaining({ managedChannelNames: ["managed-channel"] }),
+      expect.objectContaining({
+        managedChannelNames: ["receipt-channel"],
+        previousManagedExtensions: null,
+        freshManagedExtensions: null,
+      }),
+    );
+  });
+
+  it("passes both receipt-backed extension baselines to the package adapter", () => {
+    const previousManagedExtensions = [
+      { id: "future-v1", directory: "future-v1", configPaths: ["/opt/future-v1"] },
+    ];
+    const freshManagedExtensions = [
+      { id: "future-v2", directory: "future-v2", configPaths: ["/opt/future-v2"] },
+    ];
+    const mergeConfigState = vi.fn((): HarnessConfigRestoreResult => ({
+      kind: "merged",
+      content: '{"merged":true}\n',
+      write: { kind: "atomic" },
+    }));
+
+    const { restored } = restoreWithContext({
+      adapter: { mergeConfigState },
+      managedChannelNames: ["managed-channel"],
+      previousManagedExtensions,
+      freshManagedExtensions,
+    });
+
+    expect(restored).toBe(true);
+    expect(mergeConfigState).toHaveBeenCalledWith(
+      expect.objectContaining({ previousManagedExtensions, freshManagedExtensions }),
     );
   });
 
@@ -148,7 +169,10 @@ describe("package configuration state restore", () => {
         throw failure;
       }),
     };
-    const { log, restored } = restoreWithContext({ agentName: "future-harness", adapter });
+    const { log, restored } = restoreWithContext({
+      adapter,
+      managedChannelNames: ["managed-channel"],
+    });
 
     expect(restored).toBe(false);
     expect(spawnSyncMock).toHaveBeenCalledTimes(1);

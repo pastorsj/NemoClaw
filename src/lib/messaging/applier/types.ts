@@ -34,6 +34,7 @@ export interface MessagingHookApplyRequest {
   readonly inputKeys?: readonly string[];
   readonly inputs: MessagingHookInputMap;
   readonly outputs?: readonly ChannelHookOutputSpec[];
+  readonly packageOperation?: import("@nvidia/nemoclaw-harness-contract").HarnessMessagingHookOperation;
   readonly onFailure?: ChannelHookFailureMode;
 }
 

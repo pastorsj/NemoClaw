@@ -6,6 +6,7 @@ import type {
   HarnessStateCommandDeclaration,
   HarnessStateLifecycleDeclaration,
 } from "@nvidia/nemoclaw-harness-contract";
+import { isImmutableSandboxCommandPath } from "@nvidia/nemoclaw-harness-contract/manifest-validator";
 
 import type { AgentDefinition } from "../../agent/defs";
 import type { RuntimeProviderPrivilegedSandboxCommandResult } from "../../onboard/runtime-provider/contract";
@@ -70,6 +71,12 @@ export function buildBackupQuiescencePlan(
   }
   const declaration = agent.stateLifecycle.backup_quiescence;
   if (declaration.kind === "not-required") return Object.freeze({ kind: "not-required" });
+  if (!isImmutableSandboxCommandPath(declaration.command[0] as string)) {
+    return Object.freeze({
+      kind: "unsupported",
+      reason: "the package backup quiescence command is not stored in the immutable image",
+    });
+  }
   return Object.freeze({
     kind: "command",
     command: Object.freeze([...declaration.command]),
@@ -199,4 +206,20 @@ export function packageRequestsSnapshotRestoreAction(
   action: HarnessSnapshotRestoreAction,
 ): boolean {
   return declaration.snapshot_restore.includes(action);
+}
+
+/** Select an ordinary snapshot action only from matching immutable package authority. */
+export function receiptBackedPackageRequestsSnapshotRestoreAction(
+  owner: ReceiptBackedStateOwner,
+  agent: AgentDefinition | null,
+  action: HarnessSnapshotRestoreAction,
+): boolean {
+  const receipt = owner.harnessPackage;
+  return Boolean(
+    receipt &&
+    agent &&
+    agent.name === receipt.id &&
+    (owner.agent === null || owner.agent === undefined || owner.agent === receipt.id) &&
+    packageRequestsSnapshotRestoreAction(agent.stateLifecycle, action),
+  );
 }

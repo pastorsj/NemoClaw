@@ -6,6 +6,7 @@ import { DEFAULT_SANDBOX_LOG_LINES } from "./log-options";
 
 export const DEFAULT_LOGS_PROBE_TIMEOUT_MS = 5000;
 export const LOGS_PROBE_TIMEOUT_ENV = "NEMOCLAW_LOGS_PROBE_TIMEOUT_MS";
+export const LEGACY_MANAGED_GATEWAY_LOG_PATH = "/tmp/gateway.log";
 
 export type LogProbeResult = {
   status: number | null;
@@ -60,15 +61,16 @@ export function buildEnableSandboxAuditLogsArgs(
   return args;
 }
 
-export function buildSandboxOpenclawGatewayLogsArgs(
+export function buildSandboxManagedGatewayLogsArgs(
   sandboxName: string,
   options: SandboxLogsOptions,
+  gatewayLogPath: string = LEGACY_MANAGED_GATEWAY_LOG_PATH,
 ): string[] {
   const args = ["sandbox", "exec", "-n", sandboxName, "--", "tail", "-n", options.lines];
   if (options.follow) {
     args.push("-f");
   }
-  args.push("/tmp/gateway.log");
+  args.push(gatewayLogPath);
   return args;
 }
 
@@ -128,7 +130,7 @@ export function parseLineTimestamp(line: string): number | null {
 }
 
 /**
- * Source tag written in front of OpenClaw gateway-log lines unless the text
+ * Source tag written in front of managed gateway-log lines unless the text
  * after a recognised leading timestamp already starts with `[gateway]`.
  * The gateway log uses this token for its own structured lines, and the
  * NemoClaw plugin writes it in front of its registration banner (#7322).
@@ -145,7 +147,7 @@ function leadingTimestampLength(line: string): number {
 }
 
 /**
- * Attribute one line read from the OpenClaw gateway log to its source.
+ * Attribute one line read from the managed gateway log to its source.
  *
  * `/tmp/gateway.log` is both stdout and stderr of `openclaw gateway run`, so it
  * carries raw process output — box-drawing banners, Node warnings, stack traces

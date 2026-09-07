@@ -20,10 +20,12 @@ const TOOL_SOURCES = Object.freeze([
 ]);
 const RUNTIME_SOURCES = Object.freeze([
   "src/manifest-validator.ts",
+  "src/provider-profile.ts",
   "src/validation/capabilities.ts",
   "src/validation/config.ts",
   "src/validation/identity.ts",
   "src/validation/managed-image.ts",
+  "src/validation/provider-auth.ts",
   "src/validation/runtime.ts",
   "src/validation/sandbox-create.ts",
   "src/validation/shared.ts",

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   configureDcodeSession,
+  createLegacyDcodeRebuildHarness,
   expectNoDcodeMutation,
   makeDcodeSandboxEntry,
   setGatewayProviderMetadata,
@@ -24,8 +25,7 @@ describe("rebuildSandbox DCode recovered provider", () => {
     delete process.env.COMPATIBLE_API_KEY;
 
     try {
-      const harness = createRebuildFlowHarness({
-        agentName: "langchain-deepagents-code",
+      const harness = createLegacyDcodeRebuildHarness({
         sandboxEntry: makeDcodeSandboxEntry(),
         dcodeRouteResults: [{ ok: true }, { ok: true }],
       });
@@ -91,10 +91,8 @@ describe("rebuildSandbox DCode recovered provider", () => {
       ).rejects.toThrow("Unsafe gateway credential reuse");
 
       expect(harness.preflightDcodeRouteSpy).not.toHaveBeenCalled();
-      expect(harness.prepareManagedDcodeRebuildImageSpy).toHaveBeenCalledOnce();
-      expect(harness.disposePreparedDcodeRebuildImageSpy).toHaveBeenCalledWith(
-        harness.preparedDcodeBuildContext,
-      );
+      expect(harness.prepareManagedDcodeRebuildImageSpy).not.toHaveBeenCalled();
+      expect(harness.disposePreparedDcodeRebuildImageSpy).not.toHaveBeenCalled();
       expectNoDcodeMutation(harness);
     } finally {
       restoreEnv();

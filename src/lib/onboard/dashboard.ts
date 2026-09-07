@@ -14,12 +14,17 @@ import { DASHBOARD_PORT } from "../core/ports";
 import { buildChain, buildControlUiUrls, buildFallbackControlUiUrls } from "../dashboard/contract";
 import * as nim from "../inference/nim";
 import { runCapture as defaultRunCapture } from "../runner";
+import { readSandboxConfig as defaultReadSandboxConfig } from "../sandbox/config";
 import {
   ensureAgentDashboardForward as ensureAgentDashboardForwardForAgent,
   replaceUrlPort,
   resolveSandboxHealthPort,
 } from "./agent-dashboard-forward";
-import { fetchAgentWebAuthTokenFromSandbox as fetchAgentWebAuthToken } from "./agent-web-auth-token";
+import {
+  fetchAgentDashboardTokenFromSandbox as fetchAgentDashboardToken,
+  fetchAgentWebAuthTokenFromSandbox as fetchAgentWebAuthToken,
+  type ReadSandboxAgentConfig,
+} from "./agent-web-auth-token";
 import * as dashboardAccess from "./dashboard-access";
 import {
   type DashboardForwardOptions,
@@ -61,6 +66,8 @@ export interface OnboardDashboardDeps {
   isWsl(): boolean;
   redact(value: unknown): string;
   sleep(seconds: number): void;
+  /** Package-aware config reader used for manifest-declared dashboard tokens. */
+  readSandboxAgentConfig?: ReadSandboxAgentConfig;
   productionForwardService?: boolean;
   /** Environment used to detect an SSH session for the port-forward hint. */
   env?: NodeJS.ProcessEnv;
@@ -77,7 +84,9 @@ export interface OnboardDashboardDeps {
         gatewayName?: string | null;
         gatewayPort?: number | null;
         dashboardPort?: number | null;
+        secondaryForwardPort?: number | null;
         hermesApiPort?: number | null;
+        harnessPackage?: unknown;
         hermesDashboardPort?: number | null;
         lifecycleLiveIdentityFingerprint?: string;
         pendingRouteReservation?: true;
@@ -351,9 +360,11 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
       if (!gatewayName) {
         throw new Error(`ForwardTcp authority is unavailable for '${sandbox.name}'`);
       }
-      const ports = [sandbox.dashboardPort, sandbox.hermesApiPort].filter((port): port is number =>
-        Number.isInteger(port),
-      );
+      const ports = [
+        sandbox.dashboardPort,
+        sandbox.secondaryForwardPort,
+        sandbox.hermesApiPort,
+      ].filter((port): port is number => Number.isInteger(port));
       forwardService?.retireLegacy?.(sandbox.name, gatewayName, ports);
     }
   }
@@ -546,20 +557,27 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
 
   function ensureAgentDashboardForward(
     sandboxName: string,
-    agent: { forwardPort?: number | null; forward_ports?: number[] | null },
+    agent: {
+      forwardPort?: number | null;
+      forward_ports?: number[] | null;
+      healthProbe?: import("../agent/defs").AgentHealthProbe | null;
+    },
     options: {
       beforeForwardPort?: (port: number) => Promise<void> | void;
       revalidateSandboxIdentity?: (operation: string) => void;
     } = {},
   ): Promise<number> {
     const chatUiUrl = process.env.CHAT_UI_URL;
+    const sandbox = getSandbox?.(sandboxName);
     return ensureAgentDashboardForwardForAgent({
       sandboxName,
       agent,
       ensureDashboardForward,
       chatUiUrl,
       controlUiPort: chatUiUrl ? Number(getDashboardForwardPort(chatUiUrl)) : undefined,
-      hermesApiPort: getSandbox?.(sandboxName)?.hermesApiPort,
+      secondaryForwardPort: sandbox?.secondaryForwardPort,
+      hermesApiPort: sandbox?.hermesApiPort,
+      receiptBackedPackage: sandbox?.harnessPackage != null,
       beforeForwardPort: options.beforeForwardPort,
       revalidateSandboxIdentity: options.revalidateSandboxIdentity,
     });
@@ -567,7 +585,12 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
 
   function ensureFinalizationAgentDashboardForward(
     sandboxName: string,
-    agent: { name: string; forwardPort?: number | null; forward_ports?: number[] | null } | null,
+    agent: {
+      name: string;
+      forwardPort?: number | null;
+      forward_ports?: number[] | null;
+      healthProbe?: import("../agent/defs").AgentHealthProbe | null;
+    } | null,
     revalidateSandboxIdentity?: (operation: string) => void,
     portReservation?: {
       releaseBeforeForward(agentName: string, port: number): Promise<void> | void;
@@ -627,6 +650,21 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
     agent: AgentDefinition,
   ): string | null {
     return fetchAgentWebAuthToken(deps.runCaptureOpenshell, sandboxName, agent);
+  }
+
+  function fetchDeclaredDashboardTokenFromSandbox(
+    sandboxName: string,
+    agent: AgentDefinition,
+  ): string | null {
+    try {
+      return fetchAgentDashboardToken(
+        deps.readSandboxAgentConfig ?? defaultReadSandboxConfig,
+        sandboxName,
+        agent,
+      );
+    } catch {
+      return null;
+    }
   }
 
   function fetchGatewayAuthTokenFromSandbox(sandboxName: string): string | null {
@@ -690,9 +728,10 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
     const showNim = shouldShowNimLine(nimContainer, nimStat.running);
     const nimLabel = nimStat.running ? "running" : "not running";
     const providerLabel = deps.getProviderLabel(provider);
-    const token =
-      !agent || agent.dashboard.auth === "url_token"
-        ? fetchGatewayAuthTokenFromSandbox(sandboxName)
+    const token = !agent
+      ? fetchGatewayAuthTokenFromSandbox(sandboxName)
+      : agent.dashboard.auth === "url_token"
+        ? fetchDeclaredDashboardTokenFromSandbox(sandboxName, agent)
         : null;
     const chatUiUrl = process.env.CHAT_UI_URL || `http://127.0.0.1:${CONTROL_UI_PORT}`;
     const chain = buildChain({

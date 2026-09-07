@@ -14,6 +14,7 @@ import type { VersionCheckResult } from "../../src/lib/sandbox/version";
 import type { PreservedEnvFile } from "../../src/lib/state/preserved-env";
 import type { SandboxRemovalReceipt } from "../../src/lib/state/registry";
 import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/types";
+import type { HarnessPackageProviderAuthFixture } from "./harness-packages";
 
 export type RebuildSandbox =
   (typeof import("../../src/lib/actions/sandbox/rebuild"))["rebuildSandbox"];
@@ -37,6 +38,8 @@ export type RebuildFlowSession = Record<string, unknown> & {
 };
 export type RebuildFlowOverrides = {
   agentName?: string;
+  /** Exercise the retained pre-package DCode compatibility path explicitly. */
+  legacyNoReceiptAgentAuthority?: boolean;
   sessionAgentName?: string | null;
   entryUpdatesAfterVersionCheck?: Record<string, unknown>;
   applyPreset?: (presetName: string) => boolean;
@@ -76,6 +79,11 @@ export type RebuildFlowOverrides = {
   };
   restoreMcpBridgesAfterRebuild?: () => Promise<void>;
   buildMessagingRebuildPlan?: () => Promise<unknown> | unknown;
+  receiptMessagingChannelIds?: readonly string[];
+  receiptMessagingAdapterFailure?: boolean;
+  receiptPostRestoreMutableConfig?: "repair" | "verify";
+  receiptWebSearchProviders?: readonly ("brave" | "tavily")[];
+  receiptProviderAuth?: HarnessPackageProviderAuthFixture;
   agentPolicyAdditionsContent?: string;
   preflightWithProductionBaselineResolver?: boolean;
   preflightAuthoritativeRebuildTarget?: (options: Record<string, unknown>) => Promise<void> | void;

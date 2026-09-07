@@ -9,6 +9,7 @@ import {
   executeReceiptBackedStateCommand,
   inspectReceiptBackedBackupQuiescence,
   packageRequestsSnapshotRestoreAction,
+  receiptBackedPackageRequestsSnapshotRestoreAction,
 } from "./state-lifecycle";
 
 const RECEIPT = Object.freeze({
@@ -34,7 +35,10 @@ function futureHarness(
       backup_quiescence: backupQuiescence,
       snapshot_restore: options.snapshotRestore ?? [],
       rebuild: options.rebuild ?? {
-        image_plugin_provenance: "not-required",
+        managed_extensions: {
+          support: "disabled",
+          reason: "Test package has no managed extensions.",
+        },
         scheduled_work: { support: "disabled", reason: "No scheduled work." },
         post_restore: { kind: "not-required" },
       },
@@ -72,7 +76,7 @@ describe("receipt-backed state lifecycle", () => {
       { agent: RECEIPT.id, harnessPackage: RECEIPT },
       futureHarness({
         kind: "command",
-        command: ["/opt/future/state-ready", "--capture"],
+        command: ["/usr/local/lib/nemoclaw/future-state-ready", "--capture"],
         timeout_seconds: 19,
       }),
       { executeCommand },
@@ -81,7 +85,7 @@ describe("receipt-backed state lifecycle", () => {
     expect(result).toEqual({ kind: "ready" });
     expect(executeCommand).toHaveBeenCalledWith(
       "future-box",
-      ["/opt/future/state-ready", "--capture"],
+      ["/usr/local/lib/nemoclaw/future-state-ready", "--capture"],
       {
         sanitizeEnvironment: true,
         timeout: 19_000,
@@ -99,12 +103,33 @@ describe("receipt-backed state lifecycle", () => {
         { agent: RECEIPT.id, harnessPackage: RECEIPT },
         futureHarness({
           kind: "command",
-          command: ["/opt/future/state-ready"],
+          command: ["/usr/local/lib/nemoclaw/future-state-ready"],
           timeout_seconds: 10,
         }),
         { executeCommand },
       ),
     ).toEqual({ kind: "busy" });
+  });
+
+  it("fails closed before privileged execution for a mutable backup command", () => {
+    const executeCommand = vi.fn(() => commandResult(0));
+
+    expect(
+      inspectReceiptBackedBackupQuiescence(
+        "future-box",
+        { agent: RECEIPT.id, harnessPackage: RECEIPT },
+        futureHarness({
+          kind: "command",
+          command: ["/sandbox/state-ready"],
+          timeout_seconds: 10,
+        }),
+        { executeCommand },
+      ),
+    ).toEqual({
+      kind: "unverified",
+      detail: "the package backup quiescence command is not stored in the immutable image",
+    });
+    expect(executeCommand).not.toHaveBeenCalled();
   });
 
   it("fails closed before execution when exact receipt authority is unavailable", () => {
@@ -132,6 +157,35 @@ describe("receipt-backed state lifecycle", () => {
         futureHarness({ kind: "not-required" }),
       ),
     ).toEqual({ kind: "legacy" });
+  });
+
+  it("selects a finite snapshot action only for matching receipt-backed package authority", () => {
+    const declaration = futureHarness(
+      { kind: "not-required" },
+      { snapshotRestore: ["restart-runtime"] },
+    );
+
+    expect(
+      receiptBackedPackageRequestsSnapshotRestoreAction(
+        { agent: RECEIPT.id, harnessPackage: RECEIPT },
+        declaration,
+        "restart-runtime",
+      ),
+    ).toBe(true);
+    expect(
+      receiptBackedPackageRequestsSnapshotRestoreAction(
+        { agent: "different-harness", harnessPackage: RECEIPT },
+        declaration,
+        "restart-runtime",
+      ),
+    ).toBe(false);
+    expect(
+      receiptBackedPackageRequestsSnapshotRestoreAction(
+        { agent: RECEIPT.id, harnessPackage: null },
+        declaration,
+        "restart-runtime",
+      ),
+    ).toBe(false);
   });
 
   it("executes an unknown package's fixed state command with its receipt-pinned identity", () => {

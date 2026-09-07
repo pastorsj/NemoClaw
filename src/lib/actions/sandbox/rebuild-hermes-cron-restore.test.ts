@@ -323,6 +323,20 @@ describe("Hermes cron rebuild restore contract", () => {
     );
   });
 
+  it("fails closed before privileged execution for a mutable scheduled-work controller", () => {
+    expect(() =>
+      beginScheduledWorkRestore("future-box", {
+        support: "managed",
+        controller: { command: ["/sandbox/restore-control"], timeout_seconds: 47 },
+        jobs_path: "tasks/schedule.json",
+        scripts_path: "task-scripts",
+        profiles_path: "worker-profiles",
+        runtime_root: "/sandbox/.future",
+      }),
+    ).toThrow("Scheduled-work controller command is not stored in the immutable image");
+    expect(processMocks.executePrivilegedSandboxCommand).not.toHaveBeenCalled();
+  });
+
   it("passes an untrusted drain token as one argv value", () => {
     const untrustedToken = "restore-token'; touch /tmp/advisor-owned; #";
     processMocks.executePrivilegedSandboxCommand.mockImplementation(

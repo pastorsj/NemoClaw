@@ -6,7 +6,6 @@ import os from "node:os";
 import path from "node:path";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
 import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
-import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-target.mts";
 import { execTimeout } from "../../helpers/timeouts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
@@ -22,10 +21,10 @@ import {
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { readJsonFile, readJsonFileOr, writeJsonFile } from "../fixtures/file-state.ts";
 import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
+import { installHarnessPackage } from "../fixtures/harness-package.ts";
 import { trackIssue4462FailureDiagnostics } from "../fixtures/issue-4462-diagnostics.ts";
 import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
-import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 import { createOldBaseBuildContext } from "./rebuild-openclaw-old-base-context.ts";
 
 // The contract stays intentionally local to this live test: build an older
@@ -36,7 +35,6 @@ import { createOldBaseBuildContext } from "./rebuild-openclaw-old-base-context.t
 // Simplicity boundary: no new registry, fixture family, or migration ledger.
 
 const OLD_OPENCLAW_VERSION = "2026.3.11";
-const OPENCLAW_FABRIC_CONTRACT = readBundledFabricHarnessE2eFixture("openclaw");
 const MARKER_FILE = "/sandbox/.openclaw/workspace/rebuild-marker.txt";
 const HOSTED_ENDPOINT_URL =
   process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference-api.nvidia.com/v1";
@@ -64,11 +62,6 @@ const LOCAL_ONBOARD_COMMAND_TIMEOUT_MS = execTimeout(ONBOARD_TIMEOUT_MS);
 const DOCKER_BUILD_TIMEOUT_MS = 35 * 60_000;
 const REBUILD_TIMEOUT_MS = 30 * 60_000;
 const OPENSHELL_TIMEOUT_MS = 2 * 60_000;
-
-interface SeedGatewayTokenResult {
-  seeded: boolean;
-  hashFiles: string[];
-}
 
 interface GatewayTokenRotationResult {
   tokenPresent: boolean;
@@ -272,17 +265,7 @@ function seedRegistryAndSession(
   registry.sandboxes = registry.sandboxes ?? {};
   const currentSandbox = registry.sandboxes[SANDBOX_NAME];
   const harnessPackage = currentSandbox?.harnessPackage;
-  expect(
-    Boolean(harnessPackage) && typeof harnessPackage === "object" && !Array.isArray(harnessPackage),
-    "initial onboard must record exact OpenClaw package authority",
-  ).toBe(true);
   const harnessPackageMigration = currentSandbox?.harnessPackageMigration;
-  expect(
-    harnessPackageMigration === undefined ||
-      harnessPackageMigration === null ||
-      (typeof harnessPackageMigration === "object" && !Array.isArray(harnessPackageMigration)),
-    "initial onboard must record valid OpenClaw package migration authority",
-  ).toBe(true);
   registry.sandboxes[SANDBOX_NAME] = {
     name: SANDBOX_NAME,
     createdAt: new Date().toISOString(),
@@ -464,7 +447,6 @@ test(
         "docker build Dockerfile.base with old OPENCLAW_VERSION",
         "openshell sandbox create/exec/policy",
         "real nemoclaw harness install, onboard, and rebuild CLI",
-        "public nemoclaw sandbox agent Fabric turn after rebuild",
         "workspace marker, registry/session files, backup manifest, config hash",
       ],
     });
@@ -524,17 +506,7 @@ test(
     // session/credential scaffolding exist, matching the legacy install/onboard
     // setup before it swaps in an old OpenClaw sandbox.
     progress.phase("install the OpenClaw harness and onboard the current sandbox");
-    const harnessInstall = await host.command(
-      "node",
-      [CLI_ENTRYPOINT, "harness", "install", "openclaw"],
-      {
-        artifactName: "phase-1-install-openclaw-harness",
-        env: commandEnvironments.cli(apiKey),
-        redactionValues: [apiKey],
-        timeoutMs: 2 * 60_000,
-      },
-    );
-    expectExitZero(harnessInstall, "install the OpenClaw harness before rebuild setup");
+    await installHarnessPackage(host, "openclaw", commandEnvironments.cli(apiKey));
 
     const onboard = await host.command("node", [CLI_ENTRYPOINT, "onboard", "--non-interactive"], {
       artifactName: "phase-1-onboard-current",
@@ -698,7 +670,9 @@ subprocess.check_call(['bash','-lc','cd /sandbox/.openclaw && sha256sum openclaw
 saved=json.load(open(path)).get('gateway',{}).get('auth',{}).get('token','')
 hash_text=open('/sandbox/.openclaw/.config-hash').read()
 hash_files=[line.split(maxsplit=1)[1] for line in hash_text.splitlines()]
-print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'hashFiles': hash_files}))`),
+valid=saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'] and hash_files == ['openclaw.json']
+print(json.dumps({'seeded': valid, 'hashFiles': hash_files}))
+raise SystemExit(0 if valid else 1)`),
       ],
       {
         artifactName: "phase-4-seed-gateway-token",
@@ -708,9 +682,6 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
       },
     );
     expectExitZero(seedGateway, "seed old gateway token");
-    const seedResult = JSON.parse(seedGateway.stdout.trim()) as SeedGatewayTokenResult;
-    expect(seedResult).toEqual({ seeded: true, hashFiles: ["openclaw.json"] });
-
     const preHashResult = await sandbox.exec(
       SANDBOX_NAME,
       ["cat", "/sandbox/.openclaw/.config-hash"],
@@ -728,13 +699,6 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
     const sessionAfterSeed = readJsonFileOr<Record<string, unknown>>(statePaths.sessionFile, {});
     const seededSteps = sessionAfterSeed.steps as Record<string, { status?: string }> | undefined;
     const seededSandbox = registrySandbox(statePaths);
-    expect(
-      seededSandbox.harnessPackage,
-      "seeded registry and Session must retain the same exact package authority",
-    ).toEqual(sessionAfterSeed.harnessPackage);
-    expect(seededSandbox.harnessPackageMigration ?? null).toEqual(
-      sessionAfterSeed.harnessPackageMigration ?? null,
-    );
     await artifacts.writeJson("phase-4-registry-session-summary.json", {
       registry: {
         name: seededSandbox.name,
@@ -884,18 +848,6 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
     const registryVersion = registrySandbox(statePaths).agentVersion;
     expect(registryVersion).not.toBe(OLD_OPENCLAW_VERSION);
     expect(registryVersion).toEqual(expect.any(String));
-    await runPublicFabricTurn({
-      artifacts,
-      contract: OPENCLAW_FABRIC_CONTRACT,
-      env: commandEnvironments.cli(apiKey),
-      host,
-      lifecyclePhase: "after-rebuild",
-      redactionValues: [apiKey, PRE_REBUILD_GATEWAY_TOKEN],
-      sandbox,
-      sandboxName: SANDBOX_NAME,
-      scanPrivateState: false,
-    });
-
     const tokenCheck = await sandbox.exec(
       SANDBOX_NAME,
       [

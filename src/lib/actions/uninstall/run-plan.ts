@@ -86,12 +86,22 @@ import {
 } from "../../state/gateway-registry";
 import { enforceRemovedImmutabilityMigrationBoundary } from "../../state/migrations/removed-immutability";
 import {
-  managedHermesStateVolumeContext,
-  type ManagedHermesStateVolumeRuntime,
-  type ManagedHermesStateVolumeContext,
-  removeManagedHermesStateVolumes,
-  requiresManagedHermesStateVolume,
-} from "./hermes-uninstall-cleanup";
+  allOpenShellSandboxesAreAbsent,
+  destroySandboxForUninstall,
+  exactOpenShellProviderIsAbsent,
+  getHarnessPackageStoreRoot,
+  managedAgentStateVolumeContext,
+  type ManagedAgentStateVolumeRuntime,
+  type ManagedAgentStateVolumeContext,
+  prepareManagedAgentStateVolumeCleanups,
+  prepareProviderBrokerCleanup,
+  type PreparedManagedAgentStateVolumeCleanup,
+  type PreparedProviderBrokerCleanup,
+  type ReceiptSandboxDestroyResult,
+  removeManagedAgentStateVolumesForUninstall,
+  removePreparedProviderBroker,
+  requiresManagedAgentStateVolumeCleanup,
+} from "./receipt-cleanup";
 import {
   stopBedrockRuntimeAdapter,
   stopHttpsPinRuntimeAdapter,
@@ -146,12 +156,14 @@ export interface UninstallRunDeps {
   log?: (message: string) => void;
   openRegularFile?: typeof openRegularFileNoFollow;
   platform?: NodeJS.Platform;
+  prepareProviderBrokerCleanup?: typeof prepareProviderBrokerCleanup;
   readProcessArgv?: (pid: number) => readonly string[] | null;
   readProcessExecutable?: (pid: number) => string | null;
   readProcessEnvironment?: (pid: number) => Record<string, string> | null;
   realpathSync?: (target: string) => string;
   readProcessIdentity?: (pid: number, fresh?: boolean) => string | null;
   readLine?: () => string | null;
+  removePreparedProviderBroker?: typeof removePreparedProviderBroker;
   requireCompleteGatewayProcessCleanup?: boolean;
   resolveGatewayTeardownAuthority?: GatewayTeardownAuthorityResolver;
   retainedGatewayPorts?: readonly number[];
@@ -162,7 +174,11 @@ export interface UninstallRunDeps {
   runHuggingFaceCacheDataCleanup?: (options?: SpawnSyncOptions) => RunResult;
   runLocalModelRuntimeCleanup?: (options?: SpawnSyncOptions) => RunResult;
   runManagedLlamaCppRuntimeCleanup?: (sandboxName: string, gatewayPort: number) => RunResult;
-  runtimeProviders?: ManagedHermesStateVolumeRuntime["runtimeProviders"];
+  destroySandboxForUninstall?: (
+    sandboxName: string,
+    expectedSandbox: GatewayRegistryEntry,
+  ) => Promise<ReceiptSandboxDestroyResult>;
+  runtimeProviders?: ManagedAgentStateVolumeRuntime["runtimeProviders"];
   sleep?: (milliseconds: number) => void;
   hasPortableRuntimeCleanup?: (stateDir: string) => boolean;
   runPortableRuntimeCleanupTransaction?: (
@@ -521,12 +537,14 @@ interface UninstallRuntime {
   log: (message: string) => void;
   openRegularFile: typeof openRegularFileNoFollow;
   platform: NodeJS.Platform;
+  prepareProviderBrokerCleanup: typeof prepareProviderBrokerCleanup;
   readProcessArgv: ((pid: number) => readonly string[] | null) | undefined;
   readProcessExecutable: ((pid: number) => string | null) | undefined;
   readProcessEnvironment: ((pid: number) => Record<string, string> | null) | undefined;
   realpathSync: (target: string) => string;
   readProcessIdentity: ((pid: number, fresh?: boolean) => string | null) | undefined;
   readLine: () => string | null;
+  removePreparedProviderBroker: typeof removePreparedProviderBroker;
   requireCompleteGatewayProcessCleanup: boolean;
   resolveGatewayTeardownAuthority: GatewayTeardownAuthorityResolver;
   retainedGatewayPorts: readonly number[];
@@ -537,7 +555,7 @@ interface UninstallRuntime {
   runHuggingFaceCacheDataCleanup: (options?: SpawnSyncOptions) => RunResult;
   runLocalModelRuntimeCleanup: (options?: SpawnSyncOptions) => RunResult;
   runManagedLlamaCppRuntimeCleanup: (sandboxName: string, gatewayPort: number) => RunResult;
-  runtimeProviders: ManagedHermesStateVolumeRuntime["runtimeProviders"];
+  runtimeProviders: ManagedAgentStateVolumeRuntime["runtimeProviders"];
   sleep: (milliseconds: number) => void;
   hasPortableRuntimeCleanup: (stateDir: string) => boolean;
   runPortableRuntimeCleanupTransaction: (
@@ -580,12 +598,14 @@ function buildRuntime(deps: UninstallRunDeps): UninstallRuntime {
     log: deps.log ?? ((message) => console.log(message)),
     openRegularFile: deps.openRegularFile ?? openRegularFileNoFollow,
     platform: deps.platform ?? process.platform,
+    prepareProviderBrokerCleanup: deps.prepareProviderBrokerCleanup ?? prepareProviderBrokerCleanup,
     readProcessArgv: deps.readProcessArgv,
     readProcessExecutable: deps.readProcessExecutable,
     readProcessEnvironment: deps.readProcessEnvironment,
     realpathSync: deps.realpathSync ?? fs.realpathSync.native,
     readProcessIdentity: deps.readProcessIdentity,
     readLine: deps.readLine ?? readLineFromStdin,
+    removePreparedProviderBroker: deps.removePreparedProviderBroker ?? removePreparedProviderBroker,
     requireCompleteGatewayProcessCleanup: deps.requireCompleteGatewayProcessCleanup ?? false,
     resolveGatewayTeardownAuthority:
       deps.resolveGatewayTeardownAuthority ?? resolveGatewayTeardownAuthority,
@@ -1402,7 +1422,8 @@ function removeNemoclawOpenShellGatewayEnv(
 
 interface SelectedRegistrySandboxState {
   backupNames: string[];
-  managedHermesStateVolumes: ManagedHermesStateVolumeContext[];
+  managedAgentStateVolumes: PreparedManagedAgentStateVolumeCleanup[];
+  providerBrokers: PreparedProviderBrokerCleanup[];
   names: string[];
   registrations: Record<string, GatewayRegistryEntry>;
 }
@@ -1415,14 +1436,26 @@ function selectedRegistrySandboxState(
   const home = path.dirname(sharedRoot);
   const registryFile = path.join(paths.nemoclawStateDir, "sandboxes.json");
   if (!pathEntryExists(registryFile, runtime)) {
-    return { backupNames: [], managedHermesStateVolumes: [], names: [], registrations: {} };
+    return {
+      backupNames: [],
+      managedAgentStateVolumes: [],
+      providerBrokers: [],
+      names: [],
+      registrations: {},
+    };
   }
   const registry = readGatewayRegistryFile(home, registryFile);
   if (!registry) {
-    return { backupNames: [], managedHermesStateVolumes: [], names: [], registrations: {} };
+    return {
+      backupNames: [],
+      managedAgentStateVolumes: [],
+      providerBrokers: [],
+      names: [],
+      registrations: {},
+    };
   }
   const backupNames: string[] = [];
-  const managedHermesStateVolumes: ManagedHermesStateVolumeContext[] = [];
+  const managedAgentStateVolumeContexts: ManagedAgentStateVolumeContext[] = [];
   const names: string[] = [];
   const registrations: Record<string, GatewayRegistryEntry> = {};
   for (const [name, entry] of Object.entries(registry.sandboxes)) {
@@ -1438,18 +1471,33 @@ function selectedRegistrySandboxState(
       );
     }
     names.push(name);
-    const managedHermesStateVolume = managedHermesStateVolumeContext(name, entry);
-    if (managedHermesStateVolume.runtimeProviderId !== "podman") {
+    const managedAgentStateVolume = managedAgentStateVolumeContext(name, entry);
+    if (managedAgentStateVolume.runtimeProviderId !== "podman") {
       backupNames.push(name);
     }
     registrations[name] = entry;
-    managedHermesStateVolumes.push(managedHermesStateVolume);
+    managedAgentStateVolumeContexts.push(managedAgentStateVolume);
   }
+  const managedAgentStateVolumes = prepareManagedAgentStateVolumeCleanups(
+    managedAgentStateVolumeContexts,
+    runtime,
+  );
+  const brokerRunOpenshell = (args: string[], options: Record<string, unknown> = {}) =>
+    runtime.run("openshell", args, { ...options, env: runtime.env });
+  const providerBrokers = names.flatMap((name) => {
+    const prepared = runtime.prepareProviderBrokerCleanup(name, registrations[name] ?? null, {
+      getSandbox: (sandboxName) => registrations[sandboxName] ?? null,
+      runOpenshell: brokerRunOpenshell,
+      storeRoot: getHarnessPackageStoreRoot(home),
+    });
+    return prepared ? [prepared] : [];
+  });
   return {
     backupNames: backupNames.sort(),
-    managedHermesStateVolumes: managedHermesStateVolumes.sort((left, right) =>
-      left.sandboxName.localeCompare(right.sandboxName),
+    managedAgentStateVolumes: [...managedAgentStateVolumes].sort((left, right) =>
+      left.context.sandboxName.localeCompare(right.context.sandboxName),
     ),
+    providerBrokers,
     names: names.sort(),
     registrations,
   };
@@ -1553,7 +1601,7 @@ function finishScopedOpenShellCleanup(
   );
 }
 
-function removeOpenShellResources(
+function removeOpenShellSandboxes(
   paths: UninstallPaths,
   options: UninstallRunOptions,
   runtime: UninstallRuntime,
@@ -1566,7 +1614,6 @@ function removeOpenShellResources(
     return false;
   }
   const gatewayLabel = options.gatewayName || resolveGatewayName(GATEWAY_PORT);
-  const externallySupervised = isExternallySupervised(teardownAuthority);
   if (scopedToSelectedGateway) {
     let removedSelectedResources = true;
     for (const sandboxName of sandboxNames) {
@@ -1595,26 +1642,53 @@ function removeOpenShellResources(
   }
   // #6520 sub-bug: a no-op delete must not print `Deleted … skipped`;
   // wording lives in domain/uninstall/messaging.ts.
-  runOptional(
-    runtime,
-    "Deleted all OpenShell sandboxes",
-    "openshell",
-    ["sandbox", "delete", "--all"],
-    {
-      onSkip: OPENSHELL_SANDBOXES_DELETE_SKIP_MESSAGE,
-    },
-  );
-  for (const provider of NEMOCLAW_PROVIDERS) {
-    runOptional(
-      runtime,
-      `Deleted provider '${provider}'`,
-      "openshell",
-      ["provider", "delete", provider],
-      { onSkip: providerDeleteSkipMessage(provider) },
+  const sandboxDelete = runtime.run("openshell", ["sandbox", "delete", "--all"], {
+    env: runtime.env,
+    stdio: "ignore",
+  });
+  if (sandboxDelete.status === 0) {
+    runtime.log("Deleted all OpenShell sandboxes");
+  } else if (allOpenShellSandboxesAreAbsent(runtime)) {
+    runtime.warn(OPENSHELL_SANDBOXES_DELETE_SKIP_MESSAGE);
+  } else {
+    runtime.warn(OPENSHELL_SANDBOXES_DELETE_SKIP_MESSAGE);
+    runtime.warn(
+      "OpenShell did not confirm deletion of every sandbox; preserving NemoClaw registry and package state for retry.",
     );
+    return false;
   }
-  removeGatewayRegistration(runtime, gatewayLabel, !externallySupervised);
   return true;
+}
+
+function removeSharedOpenShellResources(
+  options: UninstallRunOptions,
+  runtime: UninstallRuntime,
+  teardownAuthority: GatewayOwner,
+): boolean {
+  const gatewayLabel = options.gatewayName || resolveGatewayName(GATEWAY_PORT);
+  const externallySupervised = isExternallySupervised(teardownAuthority);
+  for (const provider of NEMOCLAW_PROVIDERS) {
+    const providerDelete = runtime.run("openshell", ["provider", "delete", provider], {
+      env: runtime.env,
+      stdio: "ignore",
+    });
+    if (providerDelete.status === 0) {
+      runtime.log(`Deleted provider '${provider}'`);
+    } else if (exactOpenShellProviderIsAbsent(runtime, provider)) {
+      runtime.warn(providerDeleteSkipMessage(provider));
+    } else {
+      runtime.warn(providerDeleteSkipMessage(provider));
+      runtime.warn(
+        `OpenShell did not confirm deletion of provider '${provider}'; preserving NemoClaw registry and package state for retry.`,
+      );
+      return false;
+    }
+  }
+  if (removeGatewayRegistration(runtime, gatewayLabel, !externallySupervised)) return true;
+  runtime.warn(
+    `OpenShell did not confirm removal of gateway '${gatewayLabel}'; preserving NemoClaw registry and package state for retry.`,
+  );
+  return false;
 }
 
 function normalizeGatewayProcessExecutable(
@@ -2926,7 +3000,9 @@ function executeOpenShellResourceCleanup(
   runtime: UninstallRuntime,
   scopedToSelectedGateway: boolean,
   sandboxNames: readonly string[],
-  managedHermesStateVolumes: readonly ManagedHermesStateVolumeContext[],
+  managedAgentStateVolumes: readonly PreparedManagedAgentStateVolumeCleanup[],
+  providerBrokers: readonly PreparedProviderBrokerCleanup[],
+  registrations: Readonly<Record<string, GatewayRegistryEntry>>,
   teardownAuthority: GatewayOwner,
   portableRuntimeCleanup: boolean,
 ): boolean {
@@ -2963,7 +3039,7 @@ function executeOpenShellResourceCleanup(
       return false;
     }
   } else if (
-    !removeOpenShellResources(
+    !removeOpenShellSandboxes(
       paths,
       options,
       runtime,
@@ -2974,11 +3050,32 @@ function executeOpenShellResourceCleanup(
   ) {
     return false;
   }
+  const brokerRunOpenshell = (args: string[], commandOptions: Record<string, unknown> = {}) =>
+    runtime.run("openshell", args, { ...commandOptions, env: runtime.env });
+  try {
+    for (const prepared of providerBrokers) {
+      runtime.removePreparedProviderBroker(prepared, {
+        getSandbox: (sandboxName) => registrations[sandboxName] ?? null,
+        runOpenshell: brokerRunOpenshell,
+        storeRoot: getHarnessPackageStoreRoot(runtime.env.HOME || os.homedir()),
+      });
+    }
+  } catch (error) {
+    runtime.warn(`Provider-broker cleanup failed: ${formatError(error)}`);
+    return false;
+  }
+  if (
+    !portableRuntimeCleanup &&
+    !scopedToSelectedGateway &&
+    !removeSharedOpenShellResources(options, runtime, teardownAuthority)
+  ) {
+    return false;
+  }
   if (
     !portableRuntimeCleanup &&
     !externallySupervised &&
     !scopedToSelectedGateway &&
-    managedHermesStateVolumes.some((context) => requiresManagedHermesStateVolume(context)) &&
+    managedAgentStateVolumes.some((prepared) => requiresManagedAgentStateVolumeCleanup(prepared)) &&
     dockerIsAvailable(runtime)
   ) {
     // An unreachable gateway can leave a stopped sandbox container attached to the state volume.
@@ -2987,7 +3084,7 @@ function executeOpenShellResourceCleanup(
   if (
     !portableRuntimeCleanup &&
     !externallySupervised &&
-    !removeManagedHermesStateVolumes(managedHermesStateVolumes, runtime)
+    !removeManagedAgentStateVolumesForUninstall(managedAgentStateVolumes, runtime)
   ) {
     return false;
   }
@@ -3195,7 +3292,9 @@ function executePlan(
   sharedRegistryMustBePreserved: boolean,
   otherGatewayPorts: readonly number[],
   sandboxNames: readonly string[],
-  managedHermesStateVolumes: readonly ManagedHermesStateVolumeContext[],
+  managedAgentStateVolumes: readonly PreparedManagedAgentStateVolumeCleanup[],
+  providerBrokers: readonly PreparedProviderBrokerCleanup[],
+  registrations: Readonly<Record<string, GatewayRegistryEntry>>,
   teardownAuthority: GatewayOwner,
   portableRuntimeCleanup: boolean,
   portableRetirementEntries: ReturnType<typeof portableRetirementPreservationEntries>,
@@ -3221,7 +3320,9 @@ function executePlan(
       sharedRegistryMustBePreserved,
       otherGatewayPorts,
       sandboxNames,
-      managedHermesStateVolumes,
+      managedAgentStateVolumes,
+      providerBrokers,
+      registrations,
       teardownAuthority,
       portableRuntimeCleanup,
       portableRetirementEntries,
@@ -3242,7 +3343,9 @@ function executePreparedPlan(
   sharedRegistryMustBePreserved: boolean,
   otherGatewayPorts: readonly number[],
   sandboxNames: readonly string[],
-  managedHermesStateVolumes: readonly ManagedHermesStateVolumeContext[],
+  managedAgentStateVolumes: readonly PreparedManagedAgentStateVolumeCleanup[],
+  providerBrokers: readonly PreparedProviderBrokerCleanup[],
+  registrations: Readonly<Record<string, GatewayRegistryEntry>>,
   teardownAuthority: GatewayOwner,
   portableRuntimeCleanup: boolean,
   portableRetirementEntries: ReturnType<typeof portableRetirementPreservationEntries>,
@@ -3367,7 +3470,9 @@ function executePreparedPlan(
           runtime,
           scopedToSelectedGateway,
           sandboxNames,
-          managedHermesStateVolumes,
+          managedAgentStateVolumes,
+          providerBrokers,
+          registrations,
           teardownAuthority,
           false,
         )
@@ -3549,6 +3654,8 @@ function completePortablePlan(
       scoped,
       sandboxNames,
       [],
+      [],
+      {},
       authority,
       true,
     )
@@ -3625,12 +3732,80 @@ interface PreparedUninstallRun {
   plan: UninstallPlan;
   portableRetirementEntries: ReturnType<typeof portableRetirementPreservationEntries>;
   portableRuntimeCleanup: boolean;
+  preparedProviderBrokers: readonly PreparedProviderBrokerCleanup[];
   preserveUnderStateDir: readonly string[];
+  providerBrokerRegistrations: Readonly<Record<string, GatewayRegistryEntry>>;
   resolvedOptions: UninstallRunOptions;
   runtime: UninstallRuntime;
   scopedToSelectedGateway: boolean;
   selectedSandboxState: SelectedRegistrySandboxState;
   teardownAuthority: GatewayOwner;
+}
+
+function receiptBackedSandboxNames(state: SelectedRegistrySandboxState): string[] {
+  return state.names.filter((sandboxName) => {
+    const entry = state.registrations[sandboxName];
+    return entry !== undefined && entry.harnessPackage !== undefined;
+  });
+}
+
+async function destroyReceiptBackedSandboxes(
+  prepared: PreparedUninstallRun,
+  deps: UninstallRunDeps,
+): Promise<boolean> {
+  const destroyReceiptSandbox = deps.destroySandboxForUninstall ?? destroySandboxForUninstall;
+
+  for (const sandboxName of receiptBackedSandboxNames(prepared.selectedSandboxState)) {
+    const expectedSandbox = prepared.selectedSandboxState.registrations[sandboxName];
+    if (!expectedSandbox) {
+      prepared.runtime.error(
+        `Receipt-backed sandbox '${sandboxName}' lost its registry authority before uninstall cleanup.`,
+      );
+      return false;
+    }
+    let result: ReceiptSandboxDestroyResult;
+    try {
+      result = await destroyReceiptSandbox(sandboxName, expectedSandbox);
+    } catch (error) {
+      prepared.runtime.error(
+        `Confirmed cleanup failed for receipt-backed sandbox '${sandboxName}': ${formatError(error)}`,
+      );
+      return false;
+    }
+    if (!result.ok) {
+      prepared.runtime.error(
+        `Confirmed cleanup failed for receipt-backed sandbox '${sandboxName}' (exit ${String(result.exitCode)}). Its registry and package authority were preserved for retry.`,
+      );
+      return false;
+    }
+
+    let current: SelectedRegistrySandboxState;
+    try {
+      current = selectedRegistrySandboxState(prepared.paths, prepared.runtime);
+    } catch (error) {
+      prepared.runtime.error(
+        `Could not confirm registry retirement for receipt-backed sandbox '${sandboxName}': ${formatError(error)}`,
+      );
+      return false;
+    }
+    if (current.registrations[sandboxName] !== undefined) {
+      prepared.runtime.error(
+        `Confirmed cleanup for receipt-backed sandbox '${sandboxName}' returned without retiring its exact registry row. Uninstall stopped before package or state removal.`,
+      );
+      return false;
+    }
+    for (const [peerName, peer] of Object.entries(prepared.selectedSandboxState.registrations)) {
+      if (peerName === sandboxName) continue;
+      if (!isDeepStrictEqual(current.registrations[peerName], peer)) {
+        prepared.runtime.error(
+          `Sandbox registry authority changed while '${sandboxName}' was being destroyed. Uninstall stopped before package or state removal.`,
+        );
+        return false;
+      }
+    }
+    prepared.selectedSandboxState = current;
+  }
+  return true;
 }
 
 type UninstallRunPreparation =
@@ -3684,7 +3859,8 @@ function prepareUninstallRun(
   let { otherGatewayEnvironmentsRemain: scopedToSelectedGateway } = gatewayInspection;
   let selectedSandboxState: SelectedRegistrySandboxState = {
     backupNames: [],
-    managedHermesStateVolumes: [],
+    managedAgentStateVolumes: [],
+    providerBrokers: [],
     names: [],
     registrations: {},
   };
@@ -3766,7 +3942,9 @@ function prepareUninstallRun(
       plan,
       portableRetirementEntries,
       portableRuntimeCleanup,
+      preparedProviderBrokers: selectedSandboxState.providerBrokers,
       preserveUnderStateDir,
+      providerBrokerRegistrations: selectedSandboxState.registrations,
       resolvedOptions,
       runtime,
       scopedToSelectedGateway,
@@ -3782,7 +3960,9 @@ function executePreparedUninstall(prepared: PreparedUninstallRun): UninstallRunO
     plan,
     portableRetirementEntries,
     portableRuntimeCleanup,
+    preparedProviderBrokers,
     preserveUnderStateDir,
+    providerBrokerRegistrations,
     resolvedOptions,
     runtime,
     scopedToSelectedGateway,
@@ -3801,7 +3981,9 @@ function executePreparedUninstall(prepared: PreparedUninstallRun): UninstallRunO
       prepared.gatewayInspection.sharedRegistryMustBePreserved,
       prepared.gatewayInspection.otherGatewayPorts,
       selectedSandboxState.names,
-      selectedSandboxState.managedHermesStateVolumes,
+      selectedSandboxState.managedAgentStateVolumes,
+      preparedProviderBrokers,
+      providerBrokerRegistrations,
       teardownAuthority,
       portableRuntimeCleanup,
       portableRetirementEntries,
@@ -3832,7 +4014,10 @@ function shouldBackUpCurrentSandboxState(prepared: PreparedUninstallRun): boolea
   );
 }
 
-function revalidatePreparedUninstallAfterBackup(prepared: PreparedUninstallRun): boolean {
+function revalidatePreparedUninstallRegistrations(
+  prepared: PreparedUninstallRun,
+  changeWindow: "while acquiring mutation locks" | "during the pre-uninstall backup",
+): boolean {
   const currentInspection = inspectOtherGatewayEnvironments(prepared.paths, prepared.runtime);
   if (!prepared.scopedToSelectedGateway && currentInspection.otherGatewayEnvironmentsRemain) {
     prepared.gatewayInspection = currentInspection;
@@ -3859,12 +4044,18 @@ function revalidatePreparedUninstallAfterBackup(prepared: PreparedUninstallRun):
     )
   ) {
     prepared.runtime.error(
-      "Sandbox registrations changed during the pre-uninstall backup. Uninstall stopped before cleanup; rerun it to capture current sandbox state.",
+      `Sandbox registrations changed ${changeWindow}. Uninstall stopped before cleanup; rerun it to capture current sandbox state.`,
     );
     return false;
   }
   prepared.selectedSandboxState = currentSandboxState;
+  prepared.preparedProviderBrokers = currentSandboxState.providerBrokers;
+  prepared.providerBrokerRegistrations = currentSandboxState.registrations;
   return true;
+}
+
+function revalidatePreparedUninstallAfterBackup(prepared: PreparedUninstallRun): boolean {
+  return revalidatePreparedUninstallRegistrations(prepared, "during the pre-uninstall backup");
 }
 
 function failedPreparedUninstall(prepared: PreparedUninstallRun): UninstallRunOutcome {
@@ -3938,17 +4129,17 @@ async function withSelectedSandboxMutationLocks<T>(
   }
 }
 
-async function backUpAndExecutePreparedUninstall(
+async function backUpPreparedUninstall(
   prepared: PreparedUninstallRun,
   deps: UninstallRunDeps,
-): Promise<UninstallRunOutcome> {
+): Promise<boolean> {
   prepared.runtime.log("Backing up current sandbox state before uninstall...");
   const backupAllBeforeUninstall = deps.backupAllBeforeUninstall;
   if (!backupAllBeforeUninstall) {
     prepared.runtime.error(
       "Pre-uninstall backup is unavailable; uninstall stopped before sandbox deletion.",
     );
-    return failedPreparedUninstall(prepared);
+    return false;
   }
   try {
     await backupAllBeforeUninstall(prepared.selectedSandboxState.backupNames);
@@ -3956,12 +4147,12 @@ async function backUpAndExecutePreparedUninstall(
     prepared.runtime.error(
       `Pre-uninstall backup failed; uninstall stopped before sandbox deletion: ${formatError(error)}`,
     );
-    return failedPreparedUninstall(prepared);
+    return false;
   }
   if (!revalidatePreparedUninstallAfterBackup(prepared)) {
-    return failedPreparedUninstall(prepared);
+    return false;
   }
-  return executePreparedUninstall(prepared);
+  return true;
 }
 
 export function runUninstallPlan(
@@ -3971,6 +4162,12 @@ export function runUninstallPlan(
   const preparation = prepareUninstallRun(options, deps);
   if (preparation.kind === "complete") return preparation.outcome;
   if (!admitRemovedImmutabilityUninstall(preparation.prepared)) {
+    return failedPreparedUninstall(preparation.prepared);
+  }
+  if (receiptBackedSandboxNames(preparation.prepared.selectedSandboxState).length > 0) {
+    preparation.prepared.runtime.error(
+      "Uninstall stopped before cleanup because this synchronous entrypoint cannot run the receipt-backed sandbox destroy transaction.",
+    );
     return failedPreparedUninstall(preparation.prepared);
   }
   if (shouldBackUpCurrentSandboxState(preparation.prepared)) {
@@ -3996,11 +4193,21 @@ export async function runUninstallPlanProduction(
       if (!admitRemovedImmutabilityUninstall(prepared)) {
         return failedPreparedUninstall(prepared);
       }
-      return withSelectedSandboxMutationLocks(prepared, deps, () =>
-        shouldBackUpCurrentSandboxState(prepared)
-          ? backUpAndExecutePreparedUninstall(prepared, deps)
-          : Promise.resolve(executePreparedUninstall(prepared)),
-      );
+      return withSelectedSandboxMutationLocks(prepared, deps, async () => {
+        if (!revalidatePreparedUninstallRegistrations(prepared, "while acquiring mutation locks")) {
+          return failedPreparedUninstall(prepared);
+        }
+        if (
+          shouldBackUpCurrentSandboxState(prepared) &&
+          !(await backUpPreparedUninstall(prepared, deps))
+        ) {
+          return failedPreparedUninstall(prepared);
+        }
+        if (!(await destroyReceiptBackedSandboxes(prepared, deps))) {
+          return failedPreparedUninstall(prepared);
+        }
+        return executePreparedUninstall(prepared);
+      });
     });
   } catch (error) {
     (deps.error ?? ((message: string) => console.error(message)))(

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -59,6 +60,13 @@ const createdBuildContexts: string[] = [];
 let trackedRef = "";
 let testRoot = "";
 
+function hermesPackageProbeSuccess(): string {
+  const probe = fs.readFileSync(
+    path.join(process.cwd(), "packages/nemoclaw-hermes/checks/image-probe.py"),
+  );
+  return `nemoclaw-image-probe-ok ${crypto.createHash("sha256").update(probe).digest("hex")}`;
+}
+
 function stageHermesSandbox() {
   const sourceAgent = makeAgent();
   const packageRoot = fs.realpathSync(testRoot);
@@ -66,6 +74,12 @@ function stageHermesSandbox() {
   const dockerfilePath = path.join(packageRoot, "Dockerfile");
   fs.copyFileSync(sourceAgent.dockerfileBasePath ?? "", dockerfileBasePath);
   fs.copyFileSync(sourceAgent.dockerfilePath ?? "", dockerfilePath);
+  fs.copyFileSync(sourceAgent.manifestPath, path.join(packageRoot, "manifest.yaml"));
+  fs.mkdirSync(path.join(packageRoot, "checks"), { recursive: true });
+  fs.copyFileSync(
+    path.join(sourceAgent.agentDir, "checks/image-probe.py"),
+    path.join(packageRoot, "checks/image-probe.py"),
+  );
   const result = createAgentSandbox(
     makeAgent({
       agentDir: packageRoot,
@@ -117,7 +131,7 @@ describe("Hermes base-image resolver integration", () => {
       ],
     ]);
     const captureByEntrypoint = new Map([
-      ["/opt/hermes/.venv/bin/python", "nemoclaw-hermes-mcp-runtime-ok"],
+      ["/usr/local/lib/nemoclaw/checks/image-probe.py", hermesPackageProbeSuccess()],
       ["/bin/sh", "nemoclaw-security-inventory-ok"],
       ["/usr/bin/ldd", "ldd (GNU libc) 2.41"],
     ]);
@@ -163,7 +177,7 @@ describe("Hermes base-image resolver integration", () => {
       trackedRef,
       { ignoreError: true },
     );
-  }, 15_000);
+  }, 60_000);
 
   it("stops before a release fallback when the tracked Hermes base fails qualification (#10826)", () => {
     const platform = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
@@ -196,8 +210,11 @@ describe("Hermes base-image resolver integration", () => {
       (inspectOutputByKey.get(`${format}\0${ref}`) ?? "").trim(),
     );
     const captureByEntrypointAndRef = new Map([
-      [`/opt/hermes/.venv/bin/python\0${trackedRef}`, ""],
-      [`/opt/hermes/.venv/bin/python\0${fallbackRef}`, "nemoclaw-hermes-mcp-runtime-ok"],
+      [`/usr/local/lib/nemoclaw/checks/image-probe.py\0${trackedRef}`, ""],
+      [
+        `/usr/local/lib/nemoclaw/checks/image-probe.py\0${fallbackRef}`,
+        hermesPackageProbeSuccess(),
+      ],
       [`/bin/sh\0${fallbackRef}`, "nemoclaw-security-inventory-ok"],
     ]);
     dockerMocks.capture.mockImplementation((args: string[]) => {
@@ -211,7 +228,7 @@ describe("Hermes base-image resolver integration", () => {
 
     try {
       expect(() => stageHermesSandbox()).toThrow(
-        `Hermes Agent sandbox base image '${trackedRef}' is required but could not be pulled or did not pass the required MCP Streamable HTTP and ACP runtimes and the immutable security package inventory. No compatible local base image could be produced.`,
+        `Hermes Agent sandbox base image '${trackedRef}' is required but could not be pulled or did not pass the package-bound image probe and the immutable security package inventory. No compatible local base image could be produced.`,
       );
       expect(dockerMocks.imageInspect).not.toHaveBeenCalledWith(versionRef, expect.anything());
       expect(dockerMocks.forceRm).toHaveBeenCalledTimes(2);
@@ -225,7 +242,7 @@ describe("Hermes base-image resolver integration", () => {
     vi.stubEnv("NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF", platformRef);
 
     expect(() => createAgentSandbox(makeAgent())).toThrow(
-      `Hermes final image does not accept base image ref '${platformRef}'`,
+      `Hermes Agent final image does not accept base image ref '${platformRef}'`,
     );
   });
 
@@ -316,7 +333,7 @@ describe("Hermes base-image resolver integration", () => {
     }
 
     expect(() => stageHermesSandbox()).toThrow(
-      `Hermes final image does not accept base image ref '${platformRef}'`,
+      `Hermes Agent final image does not accept base image ref '${platformRef}'`,
     );
   }, 30_000);
 

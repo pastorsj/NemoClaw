@@ -223,6 +223,40 @@ describe("buildSandboxRuntimeEnvArgs", () => {
     expect(envArgs).toContain("NEMOCLAW_HERMES_API_PORT=8647");
   });
 
+  it("injects an unknown package's declared secondary-forward environment", () => {
+    const envArgs = buildSandboxRuntimeEnvArgs({
+      agent: packageOwnedAgent("future-runtime"),
+      chatUiUrl: "",
+      manageDashboard: false,
+      getDashboardForwardPort: () => "0",
+      hermesDashboardState: disabledHermesDashboardState,
+      secondaryForward: { environmentVariable: "FUTURE_RUNTIME_API_PORT", port: 9311 },
+      extraPlaceholderKeys: [],
+      env: {},
+      sandboxName: "future-box",
+    }).envArgs;
+
+    expect(envArgs).toContain("FUTURE_RUNTIME_API_PORT=9311");
+    expect(envArgs.some((entry) => entry.startsWith("NEMOCLAW_HERMES_API_PORT="))).toBe(false);
+  });
+
+  it("rejects mixed receipt-backed and legacy secondary-forward authority", () => {
+    expect(() =>
+      buildSandboxRuntimeEnvArgs({
+        agent: packageOwnedAgent("future-runtime"),
+        chatUiUrl: "",
+        manageDashboard: false,
+        getDashboardForwardPort: () => "0",
+        hermesDashboardState: disabledHermesDashboardState,
+        secondaryForward: { environmentVariable: "FUTURE_RUNTIME_API_PORT", port: 9311 },
+        hermesApiPort: 8642,
+        extraPlaceholderKeys: [],
+        env: {},
+        sandboxName: "future-box",
+      }),
+    ).toThrow(/cannot mix receipt-backed and legacy secondary ports/u);
+  });
+
   it("injects only the selected package's startup environment", () => {
     const base = {
       chatUiUrl: "",

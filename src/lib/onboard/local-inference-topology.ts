@@ -4,11 +4,15 @@
 import { detectContainerRuntimeFromDockerInfo } from "../adapters/docker/runtime";
 import {
   applyOllamaRuntimeContextWindow,
+  buildOllamaProbeOptions,
   findReachableOllamaHost,
+  getLocalProviderValidationBaseUrl,
+  getOllamaModelOptions,
   isLocalProviderHostHealthy,
   loadPersistedOllamaHost,
   OLLAMA_HOST_DOCKER_INTERNAL,
   OLLAMA_PORT,
+  resolveNonInteractiveOllamaModel,
   shouldFrontOllamaWithProxy,
   validateOllamaModel,
 } from "../inference/local";
@@ -19,6 +23,15 @@ import {
 } from "../inference/ollama-runtime-context";
 import type { ContainerRuntime } from "../platform";
 import { ensureOllamaLoopbackSystemdOverride } from "./ollama-systemd";
+
+// Keep onboarding's Ollama selection modules behind one local-inference boundary.
+export {
+  applyOllamaRuntimeContextWindow,
+  buildOllamaProbeOptions,
+  getLocalProviderValidationBaseUrl,
+  getOllamaModelOptions,
+  resolveNonInteractiveOllamaModel,
+};
 
 export function getContainerRuntime(): ContainerRuntime {
   return detectContainerRuntimeFromDockerInfo();

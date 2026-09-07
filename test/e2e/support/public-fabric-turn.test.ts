@@ -19,7 +19,6 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { FabricHarnessE2eContract } from "../../../tools/e2e/fabric-contract.mts";
-import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import type { SandboxClient } from "../fixtures/clients/sandbox.ts";
@@ -30,19 +29,9 @@ import {
   PUBLIC_FABRIC_TURN_PROMPT,
   PUBLIC_FABRIC_TURN_RESPONSE,
   runPublicFabricTurn,
-} from "../live/public-fabric-turn.ts";
+} from "../../../tools/e2e/fabric-turn.mts";
 
 type TestFabricContract = PublicFabricHarnessContract & { readonly descriptorPath: string };
-
-function loadBundledTestContract(packageId: string): TestFabricContract {
-  const contract = readBundledFabricHarnessE2eFixture(packageId);
-  return Object.freeze({ ...contract, descriptorPath: contract.descriptorGlob });
-}
-
-const CONTRACTS = {
-  hermes: loadBundledTestContract("hermes"),
-  openclaw: loadBundledTestContract("openclaw"),
-} as const;
 
 const FUTURE_CONTRACT = {
   packageId: "future-harness",
@@ -55,8 +44,6 @@ const FUTURE_CONTRACT = {
   descriptorRunnerModule: "future_harness_fabric.adapter",
   processMarkers: ["future_harness_headless"],
 } as const satisfies FabricHarnessE2eContract & { readonly descriptorPath: string };
-
-type BundledFabricPackage = keyof typeof CONTRACTS;
 
 function shellResult(overrides: Partial<ShellProbeResult> = {}): ShellProbeResult {
   return {
@@ -147,27 +134,25 @@ function fixture(
   const nemoclaw = vi
     .fn<HostCliClient["nemoclaw"]>()
     .mockResolvedValue(options.turnResult ?? shellResult());
-  const exec = vi.fn<SandboxClient["exec"]>();
-  for (const result of options.sandboxResults ?? [processProbe()]) {
-    exec.mockResolvedValueOnce(result);
-  }
+  const sandboxResults = options.sandboxResults ?? [processProbe()];
+  let sandboxResultIndex = 0;
+  const exec = vi
+    .fn<SandboxClient["exec"]>()
+    .mockImplementation(async () => sandboxResults[sandboxResultIndex++] ?? processProbe());
   const writeJson = vi.fn<ArtifactSink["writeJson"]>().mockResolvedValue("/tmp/proof.json");
   return {
     artifacts: { writeJson } as Pick<ArtifactSink, "writeJson">,
     host: { nemoclaw } as Pick<HostCliClient, "nemoclaw">,
     nemoclaw,
-    sandbox: { exec } as unknown as SandboxClient,
+    sandbox: { exec },
     sandboxExec: exec,
     writeJson,
   };
 }
 
-function runTurn(
-  packageId: BundledFabricPackage,
-  harness: ReturnType<typeof fixture>,
-  scanPrivateState: boolean,
-) {
-  const contract = CONTRACTS[packageId];
+function runTurn(harness: ReturnType<typeof fixture>, scanPrivateState: boolean) {
+  const contract = FUTURE_CONTRACT;
+  const packageId = contract.packageId;
   return runPublicFabricTurn({
     artifacts: harness.artifacts,
     contract,
@@ -183,130 +168,122 @@ function runTurn(
 }
 
 describe("public Fabric live turn", () => {
-  it.each(["openclaw", "hermes"] as const)(
-    "proves one plain %s turn and its pinned runtime integrity",
-    async (packageId) => {
-      const contract = CONTRACTS[packageId];
-      const harness = fixture({
-        sandboxResults: successfulSandboxResults(contract, false),
-      });
+  it("proves one plain package turn and its pinned runtime integrity", async () => {
+    const contract = FUTURE_CONTRACT;
+    const packageId = contract.packageId;
+    const harness = fixture({
+      sandboxResults: successfulSandboxResults(contract, false),
+    });
 
-      await expect(runTurn(packageId, harness, false)).resolves.toEqual({
-        schemaVersion: 1,
+    await expect(runTurn(harness, false)).resolves.toEqual({
+      schemaVersion: 1,
+      adapterId: contract.adapterId,
+      agent: packageId,
+      artifactEntryCount: 0,
+      artifactRoot: contract.artifactRoot,
+      artifactRootExists: true,
+      command: "nemoclaw sandbox agent <sandbox> <plain prompt>",
+      configMode: "0600",
+      configOwner: "sandbox:sandbox",
+      configPath: contract.configPath,
+      descriptorPath: contract.descriptorPath,
+      descriptorRunnerModule: contract.descriptorRunnerModule,
+      doctorStatus: "pass",
+      lifecyclePhase: "before-gateway-restart",
+      noLingeringProcesses: true,
+      outcome: "succeeded",
+      responseSha256: createHash("sha256").update(PUBLIC_FABRIC_TURN_RESPONSE).digest("hex"),
+      runnerIdentity: PUBLIC_FABRIC_RUNNER_IDENTITY,
+      sandboxName: `fabric-${packageId}`,
+      stateBytesScanned: null,
+      stateCredentialFree: null,
+      stateEntryCount: null,
+      stateScanRequired: false,
+      stateTreeBounded: null,
+    });
+
+    expect(harness.nemoclaw).toHaveBeenCalledExactlyOnceWith(
+      ["sandbox", "agent", `fabric-${packageId}`, PUBLIC_FABRIC_TURN_PROMPT],
+      {
+        artifactName: `fabric-${packageId}-before-gateway-restart-public-agent-turn`,
+        env: { PATH: "/test/bin" },
+        redactionValues: ["fixture-credential"],
+        timeoutMs: 45_000,
+      },
+    );
+    expect(harness.sandboxExec).toHaveBeenCalledTimes(5);
+    expect(harness.sandboxExec).toHaveBeenNthCalledWith(
+      1,
+      `fabric-${packageId}`,
+      ["/opt/nemoclaw-fabric-venv/bin/python3", "-I", "-c", expect.any(String), expect.any(String)],
+      expect.objectContaining({
+        artifactName: `fabric-${packageId}-before-gateway-restart-process-baseline`,
+      }),
+    );
+    expect(harness.sandboxExec).toHaveBeenNthCalledWith(
+      2,
+      `fabric-${packageId}`,
+      ["/usr/local/bin/nemoclaw-fabric", "--version"],
+      expect.objectContaining({
+        artifactName: `fabric-${packageId}-before-gateway-restart-runner-version`,
+      }),
+    );
+
+    const configCommand = harness.sandboxExec.mock.calls[3]![1];
+    expect(configCommand.slice(0, 3)).toEqual([
+      "/opt/nemoclaw-fabric-venv/bin/python3",
+      "-I",
+      "-c",
+    ]);
+    expect(configCommand.slice(4, 10)).toEqual([
+      contract.configPath,
+      contract.artifactRoot,
+      contract.adapterId,
+      contract.descriptorGlob,
+      contract.descriptorPathPrefix,
+      contract.descriptorRunnerModule,
+    ]);
+    expect(JSON.parse(configCommand[10]!)).toEqual([
+      {
+        length: Buffer.byteLength("fixture-credential"),
+        sha256: createHash("sha256").update("fixture-credential").digest("hex"),
+      },
+    ]);
+    expect(configCommand[11]).toBe("not-required");
+
+    expect(harness.sandboxExec.mock.calls[2]![1]).toEqual([
+      "/bin/bash",
+      "-lc",
+      expect.stringContaining('nemoclaw-fabric doctor --config "$1" --json'),
+      "nemoclaw-fabric-doctor",
+      contract.configPath,
+    ]);
+    expect(harness.sandboxExec.mock.calls[4]![1]).toEqual([
+      "/opt/nemoclaw-fabric-venv/bin/python3",
+      "-I",
+      "-c",
+      expect.any(String),
+      expect.any(String),
+    ]);
+    expect(JSON.parse(harness.sandboxExec.mock.calls[4]![1][4]!)).toEqual(
+      expect.arrayContaining([
+        PUBLIC_FABRIC_TURN_PROMPT,
+        contract.adapterId,
+        contract.descriptorRunnerModule,
+      ]),
+    );
+    expect(harness.writeJson).toHaveBeenCalledWith(
+      `fabric-${packageId}-before-gateway-restart-proof.json`,
+      expect.objectContaining({
         adapterId: contract.adapterId,
         agent: packageId,
-        artifactEntryCount: 0,
-        artifactRoot: contract.artifactRoot,
-        artifactRootExists: true,
-        command: "nemoclaw sandbox agent <sandbox> <plain prompt>",
-        configMode: "0600",
-        configOwner: "sandbox:sandbox",
-        configPath: contract.configPath,
-        descriptorPath: contract.descriptorPath,
         descriptorRunnerModule: contract.descriptorRunnerModule,
-        doctorStatus: "pass",
-        lifecyclePhase: "before-gateway-restart",
         noLingeringProcesses: true,
         outcome: "succeeded",
-        responseSha256: createHash("sha256").update(PUBLIC_FABRIC_TURN_RESPONSE).digest("hex"),
         runnerIdentity: PUBLIC_FABRIC_RUNNER_IDENTITY,
-        sandboxName: `fabric-${packageId}`,
-        stateBytesScanned: null,
-        stateCredentialFree: null,
-        stateEntryCount: null,
-        stateScanRequired: false,
-        stateTreeBounded: null,
-      });
-
-      expect(harness.nemoclaw).toHaveBeenCalledExactlyOnceWith(
-        ["sandbox", "agent", `fabric-${packageId}`, PUBLIC_FABRIC_TURN_PROMPT],
-        {
-          artifactName: `fabric-${packageId}-before-gateway-restart-public-agent-turn`,
-          env: { PATH: "/test/bin" },
-          redactionValues: ["fixture-credential"],
-          timeoutMs: 45_000,
-        },
-      );
-      expect(harness.sandboxExec).toHaveBeenCalledTimes(5);
-      expect(harness.sandboxExec).toHaveBeenNthCalledWith(
-        1,
-        `fabric-${packageId}`,
-        [
-          "/opt/nemoclaw-fabric-venv/bin/python3",
-          "-I",
-          "-c",
-          expect.any(String),
-          expect.any(String),
-        ],
-        expect.objectContaining({
-          artifactName: `fabric-${packageId}-before-gateway-restart-process-baseline`,
-        }),
-      );
-      expect(harness.sandboxExec).toHaveBeenNthCalledWith(
-        2,
-        `fabric-${packageId}`,
-        ["/usr/local/bin/nemoclaw-fabric", "--version"],
-        expect.objectContaining({
-          artifactName: `fabric-${packageId}-before-gateway-restart-runner-version`,
-        }),
-      );
-
-      const configCommand = harness.sandboxExec.mock.calls[3]![1];
-      expect(configCommand.slice(0, 3)).toEqual([
-        "/opt/nemoclaw-fabric-venv/bin/python3",
-        "-I",
-        "-c",
-      ]);
-      expect(configCommand.slice(4, 10)).toEqual([
-        contract.configPath,
-        contract.artifactRoot,
-        contract.adapterId,
-        contract.descriptorGlob,
-        contract.descriptorPathPrefix,
-        contract.descriptorRunnerModule,
-      ]);
-      expect(JSON.parse(configCommand[10]!)).toEqual([
-        {
-          length: Buffer.byteLength("fixture-credential"),
-          sha256: createHash("sha256").update("fixture-credential").digest("hex"),
-        },
-      ]);
-      expect(configCommand[11]).toBe("not-required");
-
-      expect(harness.sandboxExec.mock.calls[2]![1]).toEqual([
-        "/bin/bash",
-        "-lc",
-        expect.stringContaining('nemoclaw-fabric doctor --config "$1" --json'),
-        "nemoclaw-fabric-doctor",
-        contract.configPath,
-      ]);
-      expect(harness.sandboxExec.mock.calls[4]![1]).toEqual([
-        "/opt/nemoclaw-fabric-venv/bin/python3",
-        "-I",
-        "-c",
-        expect.any(String),
-        expect.any(String),
-      ]);
-      expect(JSON.parse(harness.sandboxExec.mock.calls[4]![1][4]!)).toEqual(
-        expect.arrayContaining([
-          PUBLIC_FABRIC_TURN_PROMPT,
-          contract.adapterId,
-          contract.descriptorRunnerModule,
-        ]),
-      );
-      expect(harness.writeJson).toHaveBeenCalledWith(
-        `fabric-${packageId}-before-gateway-restart-proof.json`,
-        expect.objectContaining({
-          adapterId: contract.adapterId,
-          agent: packageId,
-          descriptorRunnerModule: contract.descriptorRunnerModule,
-          noLingeringProcesses: true,
-          outcome: "succeeded",
-          runnerIdentity: PUBLIC_FABRIC_RUNNER_IDENTITY,
-        }),
-      );
-    },
-  );
+      }),
+    );
+  });
 
   it("proves a future package with an explicit private-state scan", async () => {
     const harness = fixture({
@@ -418,7 +395,10 @@ describe("public Fabric live turn", () => {
   });
 
   it("uses an immutable proof-contract snapshot across asynchronous probes", async () => {
-    const mutableContract = structuredClone(FUTURE_CONTRACT);
+    const mutableContract = {
+      ...structuredClone(FUTURE_CONTRACT),
+      adapterId: String(FUTURE_CONTRACT.adapterId),
+    };
     const harness = fixture({
       sandboxResults: successfulSandboxResults(FUTURE_CONTRACT, true),
     });
@@ -433,25 +413,24 @@ describe("public Fabric live turn", () => {
       sandboxName: "fabric-future-harness",
     });
 
-    const mutationTarget = mutableContract as unknown as { adapterId: string };
-    mutationTarget.adapterId = "example.fabric.changed";
+    mutableContract.adapterId = "example.fabric.changed";
 
     await expect(pending).resolves.toMatchObject({ adapterId: FUTURE_CONTRACT.adapterId });
     expect(harness.sandboxExec.mock.calls[3]![1]).toContain(FUTURE_CONTRACT.adapterId);
-    expect(harness.sandboxExec.mock.calls[3]![1]).not.toContain(mutationTarget.adapterId);
+    expect(harness.sandboxExec.mock.calls[3]![1]).not.toContain(mutableContract.adapterId);
   });
 
   it("accepts the exact root-owned read-only Shields posture and a warning-only doctor", async () => {
-    const results = successfulSandboxResults(CONTRACTS.openclaw, false);
+    const results = successfulSandboxResults(FUTURE_CONTRACT, false);
     results[2] = shellResult({ stdout: '{"checks":[],"status":"warn"}\n' });
     results[3] = configProbe(
-      CONTRACTS.openclaw,
+      FUTURE_CONTRACT,
       { configMode: "0444", configOwner: "root:root" },
       false,
     );
     const harness = fixture({ sandboxResults: results });
 
-    await expect(runTurn("openclaw", harness, false)).resolves.toMatchObject({
+    await expect(runTurn(harness, false)).resolves.toMatchObject({
       configMode: "0444",
       configOwner: "root:root",
       doctorStatus: "warn",
@@ -460,9 +439,9 @@ describe("public Fabric live turn", () => {
 
   it("executes the bounded private state probe without publishing credential evidence", async () => {
     const harness = fixture({
-      sandboxResults: successfulSandboxResults(CONTRACTS.openclaw, false),
+      sandboxResults: successfulSandboxResults(FUTURE_CONTRACT, false),
     });
-    await runTurn("openclaw", harness, false);
+    await runTurn(harness, false);
     const configCommand = harness.sandboxExec.mock.calls[3]![1];
     const processCommand = harness.sandboxExec.mock.calls[4]![1];
     const configScript = configCommand[3]!;
@@ -485,13 +464,13 @@ describe("public Fabric live turn", () => {
         descriptorPath,
         `${JSON.stringify({
           contract_version: "fabric.adapter/v1alpha2",
-          adapter_id: CONTRACTS.openclaw.adapterId,
-          runner: { module: CONTRACTS.openclaw.descriptorRunnerModule },
+          adapter_id: FUTURE_CONTRACT.adapterId,
+          runner: { module: FUTURE_CONTRACT.descriptorRunnerModule },
         })}\n`,
       );
       const cleanConfig = `${JSON.stringify({
         schema_version: "fabric.agent/v1alpha1",
-        harness: { adapter_id: CONTRACTS.openclaw.adapterId },
+        harness: { adapter_id: FUTURE_CONTRACT.adapterId },
         runtime: { artifacts: artifactRoot },
         environment: { artifacts: artifactRoot },
       })}\n`;
@@ -512,10 +491,10 @@ describe("public Fabric live turn", () => {
         configScript,
         configPath,
         artifactRoot,
-        CONTRACTS.openclaw.adapterId,
+        FUTURE_CONTRACT.adapterId,
         descriptorPath,
         descriptorRoot,
-        CONTRACTS.openclaw.descriptorRunnerModule,
+        FUTURE_CONTRACT.descriptorRunnerModule,
         fingerprints,
         "required",
       ];
@@ -534,10 +513,10 @@ describe("public Fabric live turn", () => {
         configCredentialFree: true,
         configMode: "0600",
         configRegularFile: true,
-        descriptorAdapterId: CONTRACTS.openclaw.adapterId,
+        descriptorAdapterId: FUTURE_CONTRACT.adapterId,
         descriptorPathBounded: true,
         descriptorRegularFile: true,
-        descriptorRunnerModule: CONTRACTS.openclaw.descriptorRunnerModule,
+        descriptorRunnerModule: FUTURE_CONTRACT.descriptorRunnerModule,
         stateCredentialFree: true,
         stateScanComplete: true,
         stateTreeBounded: true,
@@ -564,7 +543,7 @@ describe("public Fabric live turn", () => {
         configPath,
         `${JSON.stringify({
           schema_version: "fabric.agent/v1alpha1",
-          harness: { adapter_id: CONTRACTS.openclaw.adapterId },
+          harness: { adapter_id: FUTURE_CONTRACT.adapterId },
           runtime: { artifacts: artifactRoot },
           environment: { artifacts: artifactRoot },
           leaked: secret,
@@ -612,9 +591,9 @@ describe("public Fabric live turn", () => {
 
       const manyEntriesRoot = join(stateRoot, "many-entries");
       mkdirSync(manyEntriesRoot);
-      for (let index = 0; index < 4097; index += 1) {
-        writeFileSync(join(manyEntriesRoot, `entry-${index}`), "");
-      }
+      Array.from({ length: 4097 }, (_, index) =>
+        writeFileSync(join(manyEntriesRoot, `entry-${index}`), ""),
+      );
       const excessiveEntriesProbe = runConfigProbe();
       expect(excessiveEntriesProbe.status, excessiveEntriesProbe.stderr).toBe(0);
       expect(JSON.parse(excessiveEntriesProbe.stdout)).toMatchObject({
@@ -636,16 +615,16 @@ describe("public Fabric live turn", () => {
   });
 
   it.runIf(process.platform === "linux")(
-    "reports a detached Hermes process without treating transport as harness state",
+    "reports a detached package process without treating transport as harness state",
     async () => {
       const harness = fixture({
-        sandboxResults: successfulSandboxResults(CONTRACTS.hermes, false),
+        sandboxResults: successfulSandboxResults(FUTURE_CONTRACT, false),
       });
-      await runTurn("hermes", harness, false);
+      await runTurn(harness, false);
       const processScript = harness.sandboxExec.mock.calls[4]![1][3]!;
       const leaked = spawn(
         "python3",
-        ["-c", "import time; time.sleep(30)", "nemoclaw_hermes_fabric-detached-child"],
+        ["-c", "import time; time.sleep(30)", "future_harness_headless-detached-child"],
         { stdio: "ignore" },
       );
       const transport = spawn(
@@ -673,10 +652,10 @@ describe("public Fabric live turn", () => {
               "nemoclaw-fabric",
               "nemoclaw_fabric",
               PUBLIC_FABRIC_TURN_PROMPT,
-              CONTRACTS.hermes.adapterId,
-              CONTRACTS.hermes.descriptorRunnerModule,
-              "hermes.fabric-adapter.json",
-              ...(CONTRACTS.hermes.processMarkers ?? []),
+              FUTURE_CONTRACT.adapterId,
+              FUTURE_CONTRACT.descriptorRunnerModule,
+              "future-harness.fabric-adapter.json",
+              ...(FUTURE_CONTRACT.processMarkers ?? []),
             ]),
           ],
           { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
@@ -716,7 +695,7 @@ describe("public Fabric live turn", () => {
   ])("rejects %s after only the clean process baseline", async (_label, turnResult, message) => {
     const harness = fixture({ turnResult });
 
-    await expect(runTurn("hermes", harness, false)).rejects.toThrow(message);
+    await expect(runTurn(harness, false)).rejects.toThrow(message);
     expect(harness.sandboxExec).toHaveBeenCalledTimes(1);
     expect(harness.writeJson).not.toHaveBeenCalled();
   });
@@ -736,7 +715,7 @@ describe("public Fabric live turn", () => {
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-        configProbe(CONTRACTS.hermes, { configCredentialFree: false }, false),
+        configProbe(FUTURE_CONTRACT, { configCredentialFree: false }, false),
       ],
       message: "config, state, or artifact integrity",
     },
@@ -746,7 +725,7 @@ describe("public Fabric live turn", () => {
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-        configProbe(CONTRACTS.hermes, { descriptorRunnerModule: "unreviewed.adapter" }, false),
+        configProbe(FUTURE_CONTRACT, { descriptorRunnerModule: "unreviewed.adapter" }, false),
       ],
       message: "config, state, or artifact integrity",
     },
@@ -756,7 +735,7 @@ describe("public Fabric live turn", () => {
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-        configProbe(CONTRACTS.hermes, { artifactTreeBounded: false }, false),
+        configProbe(FUTURE_CONTRACT, { artifactTreeBounded: false }, false),
       ],
       message: "config, state, or artifact integrity",
     },
@@ -766,7 +745,7 @@ describe("public Fabric live turn", () => {
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-        configProbe(CONTRACTS.hermes, { artifactRootExists: false }, false),
+        configProbe(FUTURE_CONTRACT, { artifactRootExists: false }, false),
       ],
       message: "config, state, or artifact integrity",
     },
@@ -785,14 +764,14 @@ describe("public Fabric live turn", () => {
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-        configProbe(CONTRACTS.hermes, { artifactEntryCount: 1 }, false),
+        configProbe(FUTURE_CONTRACT, { artifactEntryCount: 1 }, false),
       ],
       message: "config, state, or artifact integrity",
     },
     {
       label: "a lingering adapter process",
       results: [
-        ...successfulSandboxResults(CONTRACTS.hermes, false).slice(0, 4),
+        ...successfulSandboxResults(FUTURE_CONTRACT, false).slice(0, 4),
         processProbe({ matchingPids: [321] }),
       ],
       message: "left a known runner, adapter, or harness process",
@@ -800,7 +779,7 @@ describe("public Fabric live turn", () => {
     {
       label: "an unreadable process during cleanup inspection",
       results: [
-        ...successfulSandboxResults(CONTRACTS.hermes, false).slice(0, 4),
+        ...successfulSandboxResults(FUTURE_CONTRACT, false).slice(0, 4),
         processProbe({ inspectionComplete: false, unreadablePids: [321] }),
       ],
       message: "left a known runner, adapter, or harness process",
@@ -808,7 +787,7 @@ describe("public Fabric live turn", () => {
   ])("rejects $label without writing a success proof", async ({ results, message }) => {
     const harness = fixture({ sandboxResults: results });
 
-    await expect(runTurn("hermes", harness, false)).rejects.toThrow(message);
+    await expect(runTurn(harness, false)).rejects.toThrow(message);
     expect(harness.writeJson).not.toHaveBeenCalled();
   });
 

@@ -27,6 +27,7 @@ export function preparePolicyHint(
   command: readonly string[],
   deps: ExecPolicyHintDeps = {},
   gatewayName?: string,
+  legacyScopeUpgrade = true,
 ): (completion: ExecPolicyDenialHintCompletion) => Promise<void> {
   const { now = Date.now, ...hintDeps } = deps;
   const commandStartedAtMs = now();
@@ -40,14 +41,16 @@ export function preparePolicyHint(
       hintDeps,
       gatewayName,
     );
-    await maybeEmitScopeUpgradeHint(
-      cliName,
-      sandboxName,
-      completion.commandCode,
-      Boolean(completion.invocationError),
-      command,
-      hintDeps,
-      gatewayName,
-    );
+    if (legacyScopeUpgrade) {
+      await maybeEmitScopeUpgradeHint(
+        cliName,
+        sandboxName,
+        completion.commandCode,
+        Boolean(completion.invocationError),
+        command,
+        hintDeps,
+        gatewayName,
+      );
+    }
   };
 }

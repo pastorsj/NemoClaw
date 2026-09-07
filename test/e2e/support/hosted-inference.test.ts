@@ -53,7 +53,7 @@ describe("hosted Fabric provider smoke selection", () => {
     },
   );
 
-  it("builds an isolated local-source environment without a DCode base override", () => {
+  it("builds an isolated local-source environment from generic hosted inputs", () => {
     const result = buildHostedFabricCommandEnvironment({
       HOME: "/tmp/nemoclaw-home",
       PATH: "/usr/bin",
@@ -69,22 +69,10 @@ describe("hosted Fabric provider smoke selection", () => {
       OPENSHELL_GATEWAY: "nemoclaw-18089",
     });
     expect(result.env).not.toHaveProperty("NEMOCLAW_REASONING_EFFORT");
-    expect(result.env).not.toHaveProperty(
-      "NEMOCLAW_LANGCHAIN_DEEPAGENTS_CODE_SANDBOX_BASE_IMAGE_REF",
-    );
   });
 
   it.each([
     ["local build is absent", { NEMOCLAW_GATEWAY_PORT: "18089" }],
-    [
-      "a DCode base override is set",
-      {
-        NEMOCLAW_GATEWAY_PORT: "18089",
-        NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1",
-        NEMOCLAW_LANGCHAIN_DEEPAGENTS_CODE_SANDBOX_BASE_IMAGE_REF:
-          "ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox-base@sha256:test",
-      },
-    ],
     ["the gateway port is absent", { NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1" }],
     [
       "the gateway port is the shared default",

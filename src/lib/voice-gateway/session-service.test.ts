@@ -9,9 +9,10 @@ import { VoiceSessionService } from "./session-service";
 
 class FakeAgentClient implements AgentTurnClient {
   readonly calls: Array<{
+    conversationKey: string;
     idempotencyKey: string;
     message: string;
-    sessionKey: string;
+    runtimeTarget: string;
   }> = [];
   closed = false;
   run: (onEvent: (event: AgentTurnEvent) => void) => ReturnType<AgentTurnClient["runTurn"]> =
@@ -26,15 +27,17 @@ class FakeAgentClient implements AgentTurnClient {
   }
 
   runTurn(options: {
+    readonly conversationKey: string;
     readonly idempotencyKey: string;
     readonly message: string;
     readonly onEvent: (event: AgentTurnEvent) => void;
-    readonly sessionKey: string;
+    readonly runtimeTarget: string;
   }): ReturnType<AgentTurnClient["runTurn"]> {
     this.calls.push({
+      conversationKey: options.conversationKey,
       idempotencyKey: options.idempotencyKey,
       message: options.message,
-      sessionKey: options.sessionKey,
+      runtimeTarget: options.runtimeTarget,
     });
     return this.run(options.onEvent);
   }
@@ -48,6 +51,7 @@ function serviceFixture(
     sessionLifetimeMs?: number;
     turnTimeoutMs?: number;
     maxResponseBytes?: number;
+    maxResponseEvents?: number;
     runtimeIdentity?: string;
     runtimeProfile?: string;
     sandbox?: string;
@@ -70,12 +74,13 @@ function serviceFixture(
     ...(overrides.sessionLifetimeMs ? { sessionLifetimeMs: overrides.sessionLifetimeMs } : {}),
     ...(overrides.turnTimeoutMs ? { turnTimeoutMs: overrides.turnTimeoutMs } : {}),
     ...(overrides.maxResponseBytes ? { maxResponseBytes: overrides.maxResponseBytes } : {}),
+    ...(overrides.maxResponseEvents ? { maxResponseEvents: overrides.maxResponseEvents } : {}),
   });
   return { service, client, diagnostics };
 }
 
 describe("voice session and committed turn boundary", () => {
-  it("derives an internal agent session key from the trusted runtime binding (#9411)", async () => {
+  it("derives an opaque conversation key from the trusted runtime binding (#9411)", async () => {
     const { service, client } = serviceFixture();
     const created = service.createSession("runtime-conversation");
     const events: VoiceResponseEvent[] = [];
@@ -90,15 +95,15 @@ describe("voice session and committed turn boundary", () => {
     });
 
     expect(created).toMatchObject({ voiceSessionId: "voice-session" });
-    expect(created.grant).not.toContain("openclaw");
     expect(client.calls).toEqual([
       {
+        conversationKey: expect.stringMatching(/^nemoclaw-voice:.+$/u),
         idempotencyKey: "turn",
         message: "repository status",
-        sessionKey: expect.stringMatching(/^agent:main:nemoclaw-voice:.+$/u),
+        runtimeTarget: "main",
       },
     ]);
-    expect(client.calls[0]?.sessionKey).not.toContain("runtime-conversation");
+    expect(client.calls[0]?.conversationKey).not.toContain("runtime-conversation");
     expect(events).toEqual([
       {
         type: "response.started",
@@ -124,7 +129,7 @@ describe("voice session and committed turn boundary", () => {
     service.closeAll();
   });
 
-  it("reuses the derived agent session key across separate admissions for one binding (#9411)", async () => {
+  it("reuses the conversation key across separate admissions for one binding (#9411)", async () => {
     const { service, client } = serviceFixture({
       randomIds: [
         "voice-session-one",
@@ -158,12 +163,12 @@ describe("voice session and committed turn boundary", () => {
     });
 
     expect(client.calls).toHaveLength(2);
-    expect(client.calls[1]?.sessionKey).toBe(client.calls[0]?.sessionKey);
+    expect(client.calls[1]?.conversationKey).toBe(client.calls[0]?.conversationKey);
     service.closeAll();
   });
 
-  it("isolates agent session keys when a runtime binding value changes (#9411)", async () => {
-    async function sessionKeyFor(options: {
+  it("isolates conversation keys when a runtime binding value changes (#9411)", async () => {
+    async function conversationKeyFor(options: {
       runtimeConversationId?: string;
       runtimeIdentity?: string;
       runtimeProfile?: string;
@@ -188,16 +193,16 @@ describe("voice session and committed turn boundary", () => {
         deliveryOpen: () => true,
       });
       service.closeAll();
-      return client.calls[0]?.sessionKey ?? "";
+      return client.calls[0]?.conversationKey ?? "";
     }
 
     const keys = await Promise.all([
-      sessionKeyFor({}),
-      sessionKeyFor({ runtimeConversationId: "other-conversation" }),
-      sessionKeyFor({ runtimeIdentity: "voiceclaw-other" }),
-      sessionKeyFor({ runtimeProfile: "voiceclaw-other" }),
-      sessionKeyFor({ sandbox: "other-sandbox" }),
-      sessionKeyFor({ agent: "secondary" }),
+      conversationKeyFor({}),
+      conversationKeyFor({ runtimeConversationId: "other-conversation" }),
+      conversationKeyFor({ runtimeIdentity: "voiceclaw-other" }),
+      conversationKeyFor({ runtimeProfile: "voiceclaw-other" }),
+      conversationKeyFor({ sandbox: "other-sandbox" }),
+      conversationKeyFor({ agent: "secondary" }),
     ]);
 
     expect(keys.every((key) => key.length > 0)).toBe(true);
@@ -310,6 +315,37 @@ describe("voice session and committed turn boundary", () => {
       reason: "response_too_large",
     });
     expect(events.filter((event) => event.type.endsWith("completed"))).toHaveLength(0);
+    service.closeAll();
+  });
+
+  it("bounds response event expansion even when text events are empty", async () => {
+    const client = new FakeAgentClient();
+    client.run = async (onEvent) => {
+      onEvent({ type: "started" });
+      onEvent({ type: "text", text: "" });
+      onEvent({ type: "text", text: "" });
+      onEvent({ type: "text", text: "" });
+      return { outcome: "completed" };
+    };
+    const { service } = serviceFixture({ client, maxResponseEvents: 2 });
+    const created = service.createSession("runtime-conversation");
+    const events: VoiceResponseEvent[] = [];
+
+    await service.commitTurn({
+      voiceSessionId: created.voiceSessionId,
+      grant: created.grant,
+      commitId: "runtime-commit",
+      text: "repository status",
+      deliver: (event) => events.push(event),
+      deliveryOpen: () => true,
+    });
+
+    expect(client.closed).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+      type: "response.failed",
+      reason: "response_too_large",
+    });
+    expect(events.filter((event) => event.type === "response.text.delta")).toHaveLength(2);
     service.closeAll();
   });
 

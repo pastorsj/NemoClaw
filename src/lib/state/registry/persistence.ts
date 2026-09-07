@@ -26,6 +26,8 @@ import {
   requireSandboxHostLocalInferenceProvenance,
 } from "./host-local-inference";
 import type { SandboxEntry, SandboxRegistry } from "./types";
+import { cloneSandboxDashboardUiState } from "./dashboard-ui";
+import { migrateLegacyDashboardUiState } from "./legacy-dashboard";
 import { cloneSandboxWorkloadReceipt } from "./workload";
 
 function cloneSandboxWorkloadReceiptOrThrow(
@@ -85,6 +87,35 @@ function cloneServingProfileProvenanceOrThrow(
     throw new Error(`Cannot ${operation} a sandbox entry with invalid serving profile provenance`);
   }
   return provenance ?? undefined;
+}
+
+function normalizeSecondaryForwardPortOrThrow(
+  entry: SandboxEntry,
+  operation: "load" | "save",
+): number | undefined {
+  const value =
+    entry.secondaryForwardPort ?? (entry.harnessPackage ? entry.hermesApiPort : undefined);
+  if (value === undefined || value === null) return undefined;
+  if (!Number.isInteger(value) || value < 1 || value > 65_535) {
+    throw new Error(`Cannot ${operation} a sandbox entry with an invalid secondary-forward port`);
+  }
+  return value;
+}
+
+function normalizeDashboardUiStateOrThrow(
+  entry: SandboxEntry,
+  operation: "load" | "save",
+): SandboxEntry["dashboardUi"] {
+  if (!entry.harnessPackage && entry.dashboardUi !== undefined) {
+    throw new Error(`Cannot ${operation} a no-receipt sandbox entry with package dashboard state`);
+  }
+  const current = cloneSandboxDashboardUiState(entry.dashboardUi, operation);
+  if (current || !entry.harnessPackage) return current;
+  try {
+    return migrateLegacyDashboardUiState(entry);
+  } catch {
+    throw new Error(`Cannot ${operation} a sandbox entry with invalid package dashboard state`);
+  }
 }
 
 export const REGISTRY_FILE = path.join(
@@ -196,6 +227,8 @@ function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
     "load",
   );
   const mcp = normalizeSandboxMcpState(entry.mcp);
+  const secondaryForwardPort = normalizeSecondaryForwardPortOrThrow(policyEntry, "load");
+  const dashboardUi = normalizeDashboardUiStateOrThrow(policyEntry, "load");
   const {
     cuaRuntimeReadiness: _legacyCuaRuntimeReadiness,
     messaging: _messaging,
@@ -204,6 +237,11 @@ function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
     hostLocalInferenceProvenance: _hostLocalInferenceProvenance,
     servingProfileProvenance: _servingProfileProvenance,
     mcp: _mcp,
+    dashboardUi: _dashboardUi,
+    hermesDashboardEnabled,
+    hermesDashboardPort,
+    hermesDashboardInternalPort,
+    hermesDashboardTui,
     ...rest
   } = policyEntry as SandboxEntry & { cuaRuntimeReadiness?: unknown };
   return {
@@ -214,6 +252,16 @@ function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
     ...(servingProfileProvenance ? { servingProfileProvenance } : {}),
     ...(messaging ? { messaging } : {}),
     ...(mcp ? { mcp } : {}),
+    ...(secondaryForwardPort !== undefined ? { secondaryForwardPort } : {}),
+    ...(dashboardUi ? { dashboardUi } : {}),
+    ...(!policyEntry.harnessPackage
+      ? {
+          ...(hermesDashboardEnabled !== undefined ? { hermesDashboardEnabled } : {}),
+          ...(hermesDashboardPort !== undefined ? { hermesDashboardPort } : {}),
+          ...(hermesDashboardInternalPort !== undefined ? { hermesDashboardInternalPort } : {}),
+          ...(hermesDashboardTui !== undefined ? { hermesDashboardTui } : {}),
+        }
+      : {}),
   };
 }
 
@@ -258,6 +306,8 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
     "save",
   );
   const mcp = serializeSandboxMcpStateForDisk(durable.mcp);
+  const secondaryForwardPort = normalizeSecondaryForwardPortOrThrow(policyEntry, "save");
+  const dashboardUi = normalizeDashboardUiStateOrThrow(policyEntry, "save");
   const {
     cuaRuntimeReadiness: _legacyCuaRuntimeReadiness,
     messaging: _messaging,
@@ -266,6 +316,11 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
     hostLocalInferenceProvenance: _hostLocalInferenceProvenance,
     servingProfileProvenance: _servingProfileProvenance,
     mcp: _mcp,
+    dashboardUi: _dashboardUi,
+    hermesDashboardEnabled,
+    hermesDashboardPort,
+    hermesDashboardInternalPort,
+    hermesDashboardTui,
     ...rest
   } = policyEntry as SandboxEntry & { cuaRuntimeReadiness?: unknown };
   return {
@@ -277,5 +332,15 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
     ...(servingProfileProvenance ? { servingProfileProvenance } : {}),
     ...(messaging ? { messaging } : {}),
     ...(mcp ? { mcp } : {}),
+    ...(secondaryForwardPort !== undefined ? { secondaryForwardPort } : {}),
+    ...(dashboardUi ? { dashboardUi } : {}),
+    ...(!policyEntry.harnessPackage
+      ? {
+          ...(hermesDashboardEnabled !== undefined ? { hermesDashboardEnabled } : {}),
+          ...(hermesDashboardPort !== undefined ? { hermesDashboardPort } : {}),
+          ...(hermesDashboardInternalPort !== undefined ? { hermesDashboardInternalPort } : {}),
+          ...(hermesDashboardTui !== undefined ? { hermesDashboardTui } : {}),
+        }
+      : {}),
   };
 }

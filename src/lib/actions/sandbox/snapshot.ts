@@ -44,8 +44,18 @@ import {
   resolveGatewayPortFromName,
   resolveSandboxGatewayName,
 } from "../../onboard/gateway-binding";
-import { findAvailableHermesApiPort, HERMES_API_PORT_ENV } from "../../onboard/hermes-api-port";
-import { resolveHermesDashboardOnboardState } from "../../onboard/hermes-dashboard";
+import {
+  findAvailableHermesApiPort,
+  findAvailableSecondaryForwardPort,
+  HERMES_API_PORT_ENV,
+  resolveRecordedSecondaryForwardPort,
+} from "../../onboard/hermes-api-port";
+import {
+  appendPackageDashboardEnvArgs,
+  packageDashboardStateFromRegistry,
+  rebindPackageDashboardPort,
+  resolveHermesDashboardOnboardState,
+} from "../../onboard/hermes-dashboard";
 import {
   cleanupTempDir,
   createExactTempFileCleanup,
@@ -73,6 +83,7 @@ import {
 import {
   inspectReceiptBackedBackupQuiescence,
   packageRequestsSnapshotRestoreAction,
+  receiptBackedPackageRequestsSnapshotRestoreAction,
 } from "./state-lifecycle";
 import {
   inspectLegacyDcodeBackupQuiescence,
@@ -108,6 +119,7 @@ import {
   prepareSandboxRuntimeRestore,
   readManagedSnapshotProfileAuthority,
   rejectManagedSnapshotCloneUntilRebind,
+  restartSandboxGateway,
   requireCurrentSnapshotRuntimeProvider,
   resolveSnapshotSourceAgent,
   retirePreparedHostLocalInferenceAuthority,
@@ -115,7 +127,7 @@ import {
   type SnapshotPackageAuthority,
   type SnapshotSourceRestoreAuthority,
 } from "./snapshot/dependencies";
-import { printHermesGatewayRestoreHint } from "./snapshot-hermes-gateway-hint";
+import { printLegacyHermesGatewayRestoreHint } from "./snapshot-hermes-gateway-hint";
 
 const useColor = !process.env.NO_COLOR && !!process.stdout.isTTY;
 const trueColor =
@@ -321,6 +333,7 @@ function allocateCloneDashboardPort(
   srcEntry: {
     name?: string;
     dashboardPort?: number | null;
+    dashboardUi?: SandboxEntry["dashboardUi"];
     hermesDashboardEnabled?: boolean;
     hermesDashboardInternalPort?: number | null;
   },
@@ -329,12 +342,17 @@ function allocateCloneDashboardPort(
   if (typeof srcPort !== "number" || !Number.isInteger(srcPort) || srcPort <= 0) return null;
   const forwards = captureOpenshell(["forward", "list"], { ignoreError: true });
   const occupied = getRegistryOccupiedDashboardPorts(dstName);
-  const hermesInternalPort = srcEntry.hermesDashboardInternalPort;
-  if (srcEntry.hermesDashboardEnabled === true && isValidForwardPort(hermesInternalPort)) {
-    occupied.set(
-      String(hermesInternalPort),
-      `${srcEntry.name ?? "source"} (Hermes dashboard internal)`,
-    );
+  const internalPort = srcEntry.dashboardUi?.enabled
+    ? srcEntry.dashboardUi.internalPort
+    : srcEntry.hermesDashboardInternalPort;
+  if (
+    (srcEntry.dashboardUi?.enabled === true || srcEntry.hermesDashboardEnabled === true) &&
+    isValidForwardPort(internalPort)
+  ) {
+    const internalPortOwner = srcEntry.dashboardUi?.enabled
+      ? "package dashboard internal"
+      : "Hermes dashboard internal";
+    occupied.set(String(internalPort), `${srcEntry.name ?? "source"} (${internalPortOwner})`);
   }
   try {
     return findAvailableDashboardPort(dstName, srcPort, forwards.output || "", undefined, occupied);
@@ -373,9 +391,55 @@ function allocateCloneHermesApiPort(
   }
 }
 
+type CloneSecondaryForwardAllocation = {
+  readonly environmentVariable: string;
+  readonly port: number;
+  readonly registryField: "secondaryForwardPort" | "hermesApiPort";
+};
+
+/** Allocate a clone endpoint from package data, retaining the old Hermes lane without receipts. */
+function allocateCloneSecondaryForward(
+  dstName: string,
+  srcEntry: SandboxEntry,
+  packageAuthority: SnapshotPackageAuthority,
+  sourceAgentDefinition: AgentDefinition,
+): CloneSecondaryForwardAllocation | null {
+  if (packageAuthority.harnessPackage === null) {
+    const port = allocateCloneHermesApiPort(dstName, srcEntry);
+    return port === null
+      ? null
+      : { environmentVariable: HERMES_API_PORT_ENV, port, registryField: "hermesApiPort" };
+  }
+
+  const allocation = sourceAgentDefinition.healthProbe?.secondary_forward;
+  if (!allocation) {
+    if (srcEntry.secondaryForwardPort != null) {
+      console.error(
+        "  Snapshot source records a secondary forward that its receipt-pinned manifest does not declare.",
+      );
+      snapshotExit(1);
+    }
+    return null;
+  }
+  const forwards = captureOpenshell(["forward", "list"], { ignoreError: true });
+  try {
+    resolveRecordedSecondaryForwardPort(srcEntry, allocation);
+    return {
+      environmentVariable: allocation.environment_variable,
+      port: findAvailableSecondaryForwardPort(dstName, allocation, forwards.output || ""),
+      registryField: "secondaryForwardPort",
+    };
+  } catch (error) {
+    console.error(`  ${error instanceof Error ? error.message : String(error)}`);
+    snapshotExit(1);
+  }
+}
+
 function resolveCloneDashboardEnvArgs(
   srcEntry: SandboxEntry | { name: string },
   dstDashboardPort: number | null,
+  packageAuthority: SnapshotPackageAuthority,
+  sourceAgentDefinition: AgentDefinition,
 ): string[] {
   const envArgs: string[] = [];
   if (dstDashboardPort !== null) {
@@ -384,6 +448,29 @@ function resolveCloneDashboardEnvArgs(
   }
 
   const source = srcEntry as SandboxEntry;
+  if (packageAuthority.harnessPackage) {
+    try {
+      let state = packageDashboardStateFromRegistry({
+        declaration: sourceAgentDefinition.dashboardUi ?? null,
+        state: source.dashboardUi,
+      });
+      if (state.enabled) {
+        if (dstDashboardPort === null) {
+          throw new Error(
+            "Cannot clone enabled package dashboard settings without a dashboard port",
+          );
+        }
+        state = rebindPackageDashboardPort(state, dstDashboardPort);
+      }
+      appendPackageDashboardEnvArgs(envArgs, state, (name, value) => `${name}=${value}`);
+      return envArgs;
+    } catch (error) {
+      console.error(
+        `  Cannot clone package dashboard settings: ${error instanceof Error ? error.message : String(error)}.`,
+      );
+      snapshotExit(1);
+    }
+  }
   // These fields are retained compatibility state. Their presence, not a
   // package identifier, determines whether clone startup must preserve them.
   if (source.hermesDashboardEnabled === undefined) return envArgs;
@@ -519,7 +606,7 @@ async function autoCreateSandboxFromSource(
   createPolicyPath: string,
   dstDashboardPort: number | null,
   dashboardEnvArgs: readonly string[],
-  dstHermesApiPort: number | null,
+  dstSecondaryForward: CloneSecondaryForwardAllocation | null,
   sourceRegistryFingerprint: string,
   packageAuthority: SnapshotPackageAuthority,
   sourceAgentDefinition: AgentDefinition,
@@ -553,7 +640,9 @@ async function autoCreateSandboxFromSource(
     "env",
     `NEMOCLAW_OBSERVABILITY=${sourceObservabilityEnabled ? "1" : "0"}`,
     ...dashboardEnvArgs,
-    ...(dstHermesApiPort === null ? [] : [`${HERMES_API_PORT_ENV}=${dstHermesApiPort}`]),
+    ...(dstSecondaryForward === null
+      ? []
+      : [`${dstSecondaryForward.environmentVariable}=${String(dstSecondaryForward.port)}`]),
     "nemoclaw-start",
   ];
   const createEnv = { ...process.env };
@@ -707,6 +796,23 @@ async function autoCreateSandboxFromSource(
     harnessPackageMigration: _sourceHarnessPackageMigration,
     ...cloneSourceEntry
   } = srcEntry as SandboxEntry;
+  const sourceDashboardUi = (srcEntry as SandboxEntry).dashboardUi;
+  if (
+    packageAuthority.harnessPackage &&
+    sourceDashboardUi?.enabled === true &&
+    !isValidForwardPort(dstDashboardPort)
+  ) {
+    snapshotExit(1);
+  }
+  const clonedDashboardUi =
+    packageAuthority.harnessPackage && sourceDashboardUi?.enabled === true
+      ? {
+          enabled: true as const,
+          publicPort: isValidForwardPort(dstDashboardPort) ? dstDashboardPort : snapshotExit(1),
+          internalPort: sourceDashboardUi.internalPort,
+          tuiEnabled: sourceDashboardUi.tuiEnabled,
+        }
+      : sourceDashboardUi;
   try {
     // Sandbox creation can take minutes. Re-read the source package/candidate
     // and target reservation immediately before publishing the pending row.
@@ -725,15 +831,22 @@ async function autoCreateSandboxFromSource(
         // `Sandbox GPU: enabled (CUDA verified)` based on another sandbox's run (#4231).
         sandboxGpuProof: null,
         dashboardPort: dstDashboardPort,
-        // The spread above carries the source's API port; the clone owns its own.
-        hermesApiPort: dstHermesApiPort,
+        // The spread above carries the source's port; the clone owns its own allocation.
+        secondaryForwardPort:
+          dstSecondaryForward?.registryField === "secondaryForwardPort"
+            ? dstSecondaryForward.port
+            : null,
+        hermesApiPort:
+          dstSecondaryForward?.registryField === "hermesApiPort" ? dstSecondaryForward.port : null,
         // The shared image keeps Hermes' image-baked internal listener port, but
         // the public WebUI port is a per-sandbox host resource and must follow the
         // clone's newly allocated dashboard port so rebuild validation converges.
         hermesDashboardPort:
+          packageAuthority.harnessPackage === null &&
           (srcEntry as SandboxEntry).hermesDashboardEnabled === true
             ? dstDashboardPort
             : (srcEntry as SandboxEntry).hermesDashboardPort,
+        dashboardUi: clonedDashboardUi,
         // A legacy source may have only a gateway name (or neither binding
         // field). Register the new clone with the complete canonical binding so
         // stop/start, recovery, and later snapshots can address its gateway.
@@ -1741,8 +1854,18 @@ async function runSnapshotRestoreUnlocked(
         // removes the existing `--force` destination — matching the pre-delete
         // validation the image and gateway-route checks above already do (#3756).
         const dstDashboardPort = allocateCloneDashboardPort(targetSandbox, lockedSourceEntry);
-        const dstHermesApiPort = allocateCloneHermesApiPort(targetSandbox, lockedSourceEntry);
-        const dashboardEnvArgs = resolveCloneDashboardEnvArgs(lockedSourceEntry, dstDashboardPort);
+        const dstSecondaryForward = allocateCloneSecondaryForward(
+          targetSandbox,
+          lockedSourceEntry,
+          lockedSourceAuthority.packageAuthority,
+          lockedSourceAuthority.agentDefinition,
+        );
+        const dashboardEnvArgs = resolveCloneDashboardEnvArgs(
+          lockedSourceEntry,
+          dstDashboardPort,
+          lockedSourceAuthority.packageAuthority,
+          lockedSourceAuthority.agentDefinition,
+        );
         let clonePolicy = await prepareSnapshotClonePolicy(
           lockedSourceEntry,
           targetSandbox,
@@ -1882,7 +2005,7 @@ async function runSnapshotRestoreUnlocked(
             clonePolicy.policyPath,
             dstDashboardPort,
             dashboardEnvArgs,
-            dstHermesApiPort,
+            dstSecondaryForward,
             fingerprintSandboxRecreateValue(lockedSourceEntrySnapshot),
             lockedSourceAuthority.packageAuthority,
             lockedSourceAuthority.agentDefinition,
@@ -2052,6 +2175,7 @@ async function runSnapshotRestoreUnlocked(
         );
       }
     };
+    let restartReceiptBackedRuntime = false;
     withMcpLifecycleLockSync(targetSandbox, () => {
       // Serialize filesystem restore and mutable-permission repair under the
       // same per-sandbox mutation lock as the surrounding lifecycle operation.
@@ -2210,16 +2334,26 @@ async function runSnapshotRestoreUnlocked(
           result,
           validateRestoreTargetRemoteMutationAuthority,
         );
+        const restoredSandbox = registry.getSandbox(targetSandbox);
+        restartReceiptBackedRuntime = restoredSandbox
+          ? receiptBackedPackageRequestsSnapshotRestoreAction(
+              restoredSandbox,
+              snapshotSourceAuthority.agentDefinition,
+              "restart-runtime",
+            )
+          : false;
         console.log(
           `  ${G}\u2713${R} Restored ${result.restoredDirs.length} directories, ${result.restoredFiles.length} files`,
         );
-        printHermesGatewayRestoreHint(
-          targetSandbox,
-          registry.getSandbox(targetSandbox)?.agent,
-          result.restoredFiles,
-          resolvedSnapshot?.stateFiles ?? [],
-          CLI_NAME,
-        );
+        if (restoredSandbox) {
+          printLegacyHermesGatewayRestoreHint(
+            targetSandbox,
+            restoredSandbox,
+            result.restoredFiles,
+            resolvedSnapshot?.stateFiles ?? [],
+            CLI_NAME,
+          );
+        }
       } else {
         console.error(`  Restore failed.`);
         if (result.restoredDirs.length > 0) {
@@ -2237,6 +2371,21 @@ async function runSnapshotRestoreUnlocked(
         snapshotExit(1);
       }
     });
+    if (restartReceiptBackedRuntime) {
+      validateRestoreTargetRemoteMutationAuthority();
+      const restart = restartSandboxGateway(targetSandbox, {
+        quiet: true,
+        agentDefinition: snapshotSourceAuthority.agentDefinition,
+      });
+      if (!restart.ok) {
+        throw new SnapshotCommandError([
+          `State restored into '${targetSandbox}', but its package-declared runtime restart failed.`,
+          `Run \`${CLI_NAME} ${targetSandbox} gateway restart\`, then run \`${CLI_NAME} ${targetSandbox} doctor\` before running an agent.`,
+          `Details: ${restart.detail}`,
+        ]);
+      }
+      console.log(`  ${G}\u2713${R} Package runtime restarted after state restore`);
+    }
     if (isCrossSandboxRestore && snapshotSourceAuthority.agentDefinition.hasDevicePairing) {
       validateRestoreTargetRemoteMutationAuthority();
       try {

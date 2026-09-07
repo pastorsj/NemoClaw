@@ -487,19 +487,15 @@ describe("rebuildSandbox flow: recovery", () => {
     );
   });
 
-  it("aborts before backup/delete when messaging manifest staging fails", async () => {
+  it("aborts before backup/delete when the package messaging adapter fails", async () => {
     const harness = createRebuildFlowHarness({
-      buildMessagingRebuildPlan: () => {
-        throw new Error("manifest boom");
-      },
+      receiptMessagingAdapterFailure: true,
     });
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("manifest boom");
+    ).rejects.toThrow("Installed harness messaging adapter describeMessagingIntegration failed");
 
-    const errors = harness.errorSpy.mock.calls.map((call) => String(call[0])).join("\n");
-    expect(errors).toContain("messaging manifest plan could not be staged");
     expect(harness.releaseOnboardLockSpy).toHaveBeenCalledOnce();
     expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
     expectNoSandboxDelete(harness.runOpenshellSpy);
@@ -582,6 +578,7 @@ describe("rebuildSandbox flow: recovery", () => {
     const harness = createRebuildFlowHarness({
       applyPreset: () => true,
       buildMessagingRebuildPlan: () => plan,
+      receiptMessagingChannelIds: ["teams"],
     });
 
     await expect(
@@ -592,6 +589,7 @@ describe("rebuildSandbox flow: recovery", () => {
       "alpha",
       plan,
       undefined,
+      expect.arrayContaining([expect.objectContaining({ id: "teams" })]),
     );
     expect(
       harness.ensureMessagingHostForwardAfterRebuildSpy.mock.invocationCallOrder[0],
@@ -618,19 +616,16 @@ describe("rebuildSandbox flow: recovery", () => {
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("State restore remained incomplete after rebuilding 'alpha'");
+    ).rejects.toThrow("OpenClaw post-restore verification failed for 'alpha'");
 
     const output = harness.logSpy.mock.calls.map((call) => String(call[0])).join("\n");
-    expect(output).toContain("rebuilt but some post-restore steps were incomplete");
-    expect(output).toContain("State restore was incomplete");
-    expect(output).toContain("Mutable config permissions were not verified");
-    expect(output).toContain("Mutable OpenClaw config hash was not refreshed");
+    expect(output).not.toContain("rebuilt successfully");
     expect(harness.registryUpdateSpy).toHaveBeenCalledWith("alpha", {
       agentVersion: "0.2.0",
     });
   });
 
-  it("reports MCP recovery when bridge restoration is incomplete", async () => {
+  it("fails receipt-backed rebuild when MCP restoration is incomplete", async () => {
     const mcpEntry = {
       server: "github",
       providerName: "nemoclaw-mcp-alpha-github",
@@ -646,11 +641,9 @@ describe("rebuildSandbox flow: recovery", () => {
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow("OpenClaw post-restore verification failed for 'alpha'");
 
     const output = harness.logSpy.mock.calls.map((call) => String(call[0])).join("\n");
-    expect(output).toContain("rebuilt but some post-restore steps were incomplete");
-    expect(output).toContain("MCP bridge definitions were preserved but not fully refreshed");
     expect(output).not.toContain("rebuilt successfully");
     expect(harness.errorSpy).toHaveBeenCalledWith(
       expect.stringContaining("MCP bridge restore incomplete; inspect redacted diagnostics"),

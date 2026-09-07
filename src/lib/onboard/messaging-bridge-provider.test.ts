@@ -857,6 +857,41 @@ describe("matchesRegisteredMessagingBridgeProfile", () => {
     );
   });
 
+  it("checks a receipt-supplied profile whose package and provider IDs are unknown to core", () => {
+    const futureProfile: MessagingBridgeProfile = {
+      ...DISCORD_PROFILE,
+      agent: "future-harness",
+      channelId: "future-chat",
+      profileId: "future-chat-static",
+      profilePath: "/installed/future-harness/provider-profiles/future-chat.yaml",
+      credentialKey: "FUTURE_CHAT_TOKEN",
+      sourceSecretEnv: "FUTURE_CHAT_TOKEN",
+    };
+    const futureProfileDocument = {
+      ...DISCORD_PROFILE_DOC,
+      id: futureProfile.profileId,
+      credentials: [
+        {
+          ...DISCORD_PROFILE_DOC.credentials[0],
+          env_vars: [futureProfile.credentialKey],
+        },
+      ],
+    };
+    const runOpenshell = vi.fn(() => ({
+      status: 0,
+      stdout: JSON.stringify(futureProfileDocument),
+    }));
+
+    expect(
+      matchesRegisteredMessagingBridgeProfile(futureProfile.profileId, {
+        root: "/repo",
+        profiles: [futureProfile],
+        readFileSync: () => YAML.stringify(futureProfileDocument),
+        runOpenshell,
+      }),
+    ).toBe(true);
+  });
+
   it("rejects a registered static profile with endpoint authority", () => {
     const runOpenshell = vi.fn(() => ({
       status: 0,

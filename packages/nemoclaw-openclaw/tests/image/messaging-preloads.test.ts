@@ -14,7 +14,7 @@ describe("messaging runtime preload packaging", () => {
     expect(dockerfile).toContain("FROM builder AS runtime-preload-builder");
     expect(dockerfile).toContain("COPY tsconfig.runtime-preloads.json /opt/nemoclaw-root/");
     expect(dockerfile).toContain(
-      "COPY src/lib/messaging/channels/ /opt/nemoclaw-root/src/lib/messaging/channels/",
+      "COPY packages/nemoclaw-openclaw/messaging/runtime/ /opt/nemoclaw-root/src/lib/messaging/channels/",
     );
     expect(dockerfile).toContain(
       "/opt/nemoclaw/node_modules/.bin/tsc -p tsconfig.runtime-preloads.json",

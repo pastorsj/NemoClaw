@@ -573,13 +573,13 @@ describe("managed snapshot backup authority", () => {
       spec: request.spec,
     });
 
-    for (const refused of [
+    [
       { ...request, dir: "/sandbox/.other" },
       { ...request, spec: { path: "other.json", strategy: "copy" as const } },
       { ...request, spec: { path: "config.json", strategy: "sqlite_backup" as const } },
-    ]) {
+    ].forEach((refused) => {
       expect(capture?.(refused)).toBeNull();
-    }
+    });
     expect(capturePrivilegedCopy).toHaveBeenCalledOnce();
   });
 

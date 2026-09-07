@@ -2,6 +2,20 @@
   {
     "channelId": "telegram",
     "config": {
+      "visibility": [
+        {
+          "inputId": "allowedIds",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "TELEGRAM_ALLOWED_USERS"
+        },
+        {
+          "inputId": "requireMention",
+          "target": "~/.hermes/config.yaml",
+          "kind": "structured",
+          "path": ["telegram", "require_mention"]
+        }
+      ],
       "renders": [
         {
           "id": "telegram-hermes-env",
@@ -38,7 +52,33 @@
   },
   {
     "channelId": "discord",
+    "credentialProvider": {
+      "profilePath": "provider-profiles/discord.yaml",
+      "profileId": "discord-hermes-static-v1",
+      "credentialEnv": "DISCORD_BOT_TOKEN",
+      "sourceInputId": "botToken"
+    },
     "config": {
+      "visibility": [
+        {
+          "inputId": "serverId",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "NEMOCLAW_DISCORD_GUILD_IDS"
+        },
+        {
+          "inputId": "userId",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "DISCORD_ALLOWED_USERS"
+        },
+        {
+          "inputId": "requireMention",
+          "target": "~/.hermes/config.yaml",
+          "kind": "structured",
+          "path": ["discord", "require_mention"]
+        }
+      ],
       "renders": [
         {
           "id": "discord-hermes-env",
@@ -89,6 +129,26 @@
   {
     "channelId": "wechat",
     "config": {
+      "visibility": [
+        {
+          "inputId": "accountId",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "WEIXIN_ACCOUNT_ID"
+        },
+        {
+          "inputId": "baseUrl",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "WEIXIN_BASE_URL"
+        },
+        {
+          "inputId": "allowedIds",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "WEIXIN_ALLOWED_USERS"
+        }
+      ],
       "renders": [
         {
           "id": "wechat-hermes-env",
@@ -129,6 +189,20 @@
   {
     "channelId": "slack",
     "config": {
+      "visibility": [
+        {
+          "inputId": "allowedUsers",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "SLACK_ALLOWED_USERS"
+        },
+        {
+          "inputId": "allowedChannels",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "SLACK_ALLOWED_CHANNELS"
+        }
+      ],
       "renders": [
         {
           "id": "slack-hermes-env",
@@ -163,6 +237,15 @@
   {
     "channelId": "whatsapp",
     "config": {
+      "visibility": [
+        { "inputId": "mode", "target": "~/.hermes/.env", "kind": "env", "envKey": "WHATSAPP_MODE" },
+        {
+          "inputId": "allowedIds",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "WHATSAPP_ALLOWED_USERS"
+        }
+      ],
       "renders": [
         {
           "id": "whatsapp-hermes-env",
@@ -190,11 +273,51 @@
       ]
     },
     "policy": [{ "presetName": "whatsapp", "policyKeys": ["whatsapp"] }],
-    "lifecycle": { "hookIds": ["whatsapp-config-prompt", "whatsapp-status-health"] }
+    "lifecycle": {
+      "statusProbe": {
+        "kind": "session-files",
+        "primaryCredentialPath": "platforms/whatsapp/session/creds.json",
+        "alternateCredentialPath": "profiles/dashboard-home/platforms/whatsapp/session/creds.json",
+        "primaryLabel": "Hermes gateway",
+        "alternateLabel": "dashboard-home",
+        "pairingCommand": { "argv": ["hermes", "whatsapp"] },
+        "configuredSessionPath": {
+          "configPath": "config.yaml",
+          "valuePath": ["platforms", "whatsapp", "extra", "session_path"]
+        }
+      },
+      "hookIds": ["whatsapp-config-prompt", "whatsapp-status-health"]
+    }
   },
   {
     "channelId": "teams",
     "config": {
+      "visibility": [
+        {
+          "inputId": "appId",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "TEAMS_CLIENT_ID"
+        },
+        {
+          "inputId": "tenantId",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "TEAMS_TENANT_ID"
+        },
+        {
+          "inputId": "allowedUsers",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "TEAMS_ALLOWED_USERS"
+        },
+        {
+          "inputId": "webhookPort",
+          "target": "~/.hermes/.env",
+          "kind": "env",
+          "envKey": "TEAMS_PORT"
+        }
+      ],
       "renders": [
         {
           "id": "teams-hermes-env",
@@ -246,7 +369,22 @@
   },
   {
     "channelId": "googlechat",
+    "credentialProvider": {
+      "profilePath": "provider-profiles/googlechat.yaml",
+      "profileId": "google-chat-hermes-bridge",
+      "credentialEnv": "GOOGLE_CHAT_ACCESS_TOKEN",
+      "sourceInputId": "serviceAccount",
+      "refresh": {
+        "strategy": "google-service-account-jwt",
+        "scopes": [
+          "https://www.googleapis.com/auth/chat.bot",
+          "https://www.googleapis.com/auth/pubsub"
+        ],
+        "secretMaterialKeys": ["private_key"]
+      }
+    },
     "config": {
+      "visibility": [],
       "renders": [
         {
           "id": "googlechat-hermes-env",
@@ -291,8 +429,14 @@
       ],
       "hookIds": [
         "googlechat-service-account",
-        "googlechat-config-prompt",
-        "googlechat-hermes-config-prompt"
+        "googlechat-config-prompt"
+      ],
+      "hookOperations": [
+        {
+          "hookId": "googlechat-config-prompt",
+          "kind": "config-prompt",
+          "outputIds": ["allowFrom", "projectId", "subscriptionName"]
+        }
       ]
     }
   }

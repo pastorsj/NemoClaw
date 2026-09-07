@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { materializeHarnessRuntime } from "./materialize-runtime.mts";
@@ -33,6 +34,81 @@ test("materializes and verifies each reviewed shared runtime", () => {
       });
       assert.ok((fs.statSync(path.join(packageRoot, destination)).mode & 0o111) !== 0);
     }
+  });
+});
+
+test("materialized messaging runtime is package-profile driven and contains no stock dispatch", () => {
+  withPackageRoot((packageRoot) => {
+    const destination = "messaging/messaging-build.mts";
+    materializeHarnessRuntime({
+      artifact: "messaging-build",
+      destination,
+      workingDirectory: packageRoot,
+    });
+    const runtime = fs.readFileSync(path.join(packageRoot, destination), "utf8");
+    assert.doesNotMatch(runtime, /BUILT_IN_CHANNEL_MANIFESTS/u);
+    assert.doesNotMatch(runtime, /\b(?:openclaw|hermes)\b/iu);
+
+    const messagingRoot = path.join(packageRoot, "messaging");
+    fs.writeFileSync(
+      path.join(messagingRoot, "profile.json"),
+      `${JSON.stringify([
+        {
+          channelId: "future-channel",
+          config: { renders: [], visibility: [] },
+          policy: [],
+          lifecycle: { hookIds: [], packageInstalls: [] },
+        },
+      ])}\n`,
+    );
+    const profilePath = path.join(messagingRoot, "runtime-profile.json");
+    fs.writeFileSync(
+      profilePath,
+      `${JSON.stringify({
+        packageId: "future-harness",
+        channelsPath: "profile.json",
+        build: { configRoot: "~/.future-harness", packageManagers: [] },
+      })}\n`,
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        path.join(packageRoot, destination),
+        "--agent",
+        "future-harness",
+        "--profile",
+        profilePath,
+        "--phase",
+        "managed-image-capability-union",
+        "--dry-run",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      agent: "future-harness",
+      phase: "managed-image-capability-union",
+      channels: [],
+      runtimePlanPath: "",
+      doctorEnv: {},
+      installSpecs: [],
+      pythonPackages: [],
+      packageVersion: "",
+    });
+    const missingProfile = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        path.join(packageRoot, destination),
+        "--agent",
+        "future-harness",
+        "--dry-run",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(missingProfile.status, 1);
+    assert.match(missingProfile.stderr, /requires --profile/u);
   });
 });
 

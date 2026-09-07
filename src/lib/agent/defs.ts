@@ -184,6 +184,7 @@ export function loadAgentFresh(
       manifest,
       manifestPath,
       packageRoot,
+      manifestSource: packaged ? "harness-package" : "legacy-repository",
     }),
   );
 }

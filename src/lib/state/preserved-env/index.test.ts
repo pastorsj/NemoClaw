@@ -8,7 +8,7 @@ import type { SandboxMessagingPlan } from "../../messaging/manifest/types";
 import {
   extractPreservedEnvAssignments,
   HERMES_PRESERVED_ENV_INVENTORY,
-  mergeHermesPreservedEnvIntoMessagingPlan,
+  mergePreservedEnvironmentIntoMessagingPlan,
   validatePreservedEnvFiles,
 } from "./index";
 
@@ -118,7 +118,7 @@ describe("preserved environment inventory", () => {
       kind: "env-lines";
       lines: string[];
     };
-    const merged = mergeHermesPreservedEnvIntoMessagingPlan(
+    const merged = mergePreservedEnvironmentIntoMessagingPlan(
       {
         ...plan,
         agentRender: [
@@ -141,7 +141,7 @@ describe("preserved environment inventory", () => {
     );
 
     expect(merged?.agentRender.map((render) => render.renderId)).toEqual([
-      "hermes-preserved-home-channels",
+      "preserved-environment-1",
       "slack-hermes-env",
     ]);
     expect(merged?.agentRender[0]).toMatchObject({
@@ -160,7 +160,7 @@ describe("preserved environment inventory", () => {
   });
 
   it("retains restored values when the current manifest leaves them unset (#7803)", () => {
-    const merged = mergeHermesPreservedEnvIntoMessagingPlan(
+    const merged = mergePreservedEnvironmentIntoMessagingPlan(
       { ...hermesPlan(), workflow: "onboard" },
       [
         {
@@ -174,25 +174,97 @@ describe("preserved environment inventory", () => {
     expect(envLines).toContain("SLACK_HOME_CHANNEL=C0123");
   });
 
+  it("keeps the targetless Hermes fallback for an explicit no-receipt plan", () => {
+    const merged = mergePreservedEnvironmentIntoMessagingPlan(hermesPlan(), [
+      {
+        path: ".env",
+        assignments: ["SLACK_HOME_CHANNEL=C0123"],
+      },
+    ]);
+
+    expect(merged?.agentRender[0]).toMatchObject({
+      agent: "hermes",
+      target: "~/.hermes/.env",
+    });
+  });
+
+  it("rejects a targetless preserved environment for a receipt-backed Hermes plan", () => {
+    const plan: SandboxMessagingPlan = {
+      ...hermesPlan(),
+      packageBuild: {
+        configRoot: "/sandbox/.receipt-hermes",
+        packageManagers: [],
+      },
+    };
+
+    expect(() =>
+      mergePreservedEnvironmentIntoMessagingPlan(plan, [
+        {
+          path: ".env",
+          assignments: ["SLACK_HOME_CHANNEL=C0123"],
+        },
+      ]),
+    ).toThrow("Invalid preserved environment assignments");
+  });
+
   it("rejects unscoped assignments at the merge boundary (#7803)", () => {
     expect(() =>
-      mergeHermesPreservedEnvIntoMessagingPlan(hermesPlan(), [
+      mergePreservedEnvironmentIntoMessagingPlan(hermesPlan(), [
         { path: ".env", assignments: ["SLACK_BOT_TOKEN=xoxb-secret"] },
       ]),
     ).toThrow("Invalid preserved environment assignments");
   });
 
-  it("does not apply preserved values without an active Hermes environment render (#7803)", () => {
+  it("fails instead of dropping preserved values without an active channel (#7803)", () => {
     const plan = hermesPlan();
     const inactivePlan: SandboxMessagingPlan = {
       ...plan,
       channels: plan.channels.map((channel) => ({ ...channel, active: false })),
     };
 
-    expect(
-      mergeHermesPreservedEnvIntoMessagingPlan(inactivePlan, [
+    expect(() =>
+      mergePreservedEnvironmentIntoMessagingPlan(inactivePlan, [
         { path: ".env", assignments: ["SLACK_HOME_CHANNEL=C0123"] },
       ]),
-    ).toBe(inactivePlan);
+    ).toThrow("Cannot restore preserved environment without an enabled messaging channel");
+  });
+
+  it("renders package-declared state for an unknown harness without an ID branch", () => {
+    const base = hermesPlan();
+    const plan: SandboxMessagingPlan = {
+      ...base,
+      agent: "future-harness",
+      agentRender: base.agentRender.map((render) => ({
+        ...render,
+        agent: "future-harness",
+        target: "~/.future/routes.env",
+      })),
+    };
+
+    const merged = mergePreservedEnvironmentIntoMessagingPlan(plan, [
+      {
+        path: "routing.env",
+        assignments: ["FUTURE_HOME_ROUTE=alerts"],
+        renderTarget: "~/.future/routes.env",
+      },
+    ]);
+
+    expect(merged?.agentRender[0]).toMatchObject({
+      agent: "future-harness",
+      target: "~/.future/routes.env",
+      lines: ["FUTURE_HOME_ROUTE=alerts"],
+    });
+  });
+
+  it("rejects a noncanonical package render target", () => {
+    expect(() =>
+      mergePreservedEnvironmentIntoMessagingPlan(hermesPlan(), [
+        {
+          path: ".env",
+          assignments: ["SLACK_HOME_CHANNEL=C1"],
+          renderTarget: "~/.hermes/./.env",
+        },
+      ]),
+    ).toThrow("Invalid preserved environment assignments");
   });
 });

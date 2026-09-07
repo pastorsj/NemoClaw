@@ -9,11 +9,12 @@ import {
   VOICE_GATEWAY_DEPLOYMENT_CREDENTIAL_FD,
   VOICE_GATEWAY_FEATURE_ENV,
   VOICE_GATEWAY_LISTEN_ADDRESS,
-  VOICE_GATEWAY_OPENCLAW_CREDENTIAL_FD,
+  type AgentTurnClient,
   type VoiceGatewayDiagnostic,
 } from "../../voice-gateway/contracts";
-import { readPrivateBearerDescriptors } from "../../voice-gateway/credential-file";
-import { OpenClawVoiceClient } from "../../voice-gateway/openclaw-client";
+import { readPrivateBearerDescriptor } from "../../voice-gateway/credential-file";
+import { createSandboxSemanticTurnClient } from "../../voice-gateway/semantic-turn";
+import type { SandboxSemanticTurnBinding } from "../../voice-gateway/sandbox-authority";
 import { VoiceSessionService } from "../../voice-gateway/session-service";
 
 const MIN_SERVICE_PORT = 1024;
@@ -27,17 +28,19 @@ interface ProcessEvents {
 }
 
 export interface VoiceGatewayServeOptions {
-  readonly gatewayUrl: string;
   readonly runtimeIdentity: string;
   readonly runtimeProfile: string;
   readonly sandbox: string;
+  readonly sandboxAuthority: SandboxSemanticTurnBinding;
   readonly agent: string;
+  readonly turnTimeoutMs: number;
   readonly listenPort?: number;
 }
 
 export interface VoiceGatewayServeDeps {
   readonly env?: NodeJS.ProcessEnv;
-  readonly readBearerDescriptors?: typeof readPrivateBearerDescriptors;
+  readonly readBearerDescriptor?: typeof readPrivateBearerDescriptor;
+  readonly createAgentTurnClient?: (sandboxName: string) => AgentTurnClient;
   readonly createServer?: typeof createVoiceGatewayServer;
   readonly processEvents?: ProcessEvents;
   readonly log?: (entry: VoiceGatewayDiagnostic) => void;
@@ -57,31 +60,6 @@ function validatePort(port: number): void {
       `Voice gateway listen port must be an integer between ${MIN_SERVICE_PORT} and ${MAX_SERVICE_PORT}.`,
     );
   }
-}
-
-export function validateOpenClawGatewayUrl(value: string): string {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error("OpenClaw gateway URL is invalid.");
-  }
-  if (
-    url.protocol !== "ws:" ||
-    (url.hostname !== "127.0.0.1" && url.hostname !== "[::1]") ||
-    url.port === "" ||
-    url.pathname !== "/ws" ||
-    url.username !== "" ||
-    url.password !== "" ||
-    url.search !== "" ||
-    url.hash !== ""
-  ) {
-    throw new Error(
-      "OpenClaw gateway URL must be a credential-free ws:// loopback IP literal with an explicit port and /ws path.",
-    );
-  }
-  validatePort(Number(url.port));
-  return url.href;
 }
 
 function listen(server: Server, port: number): Promise<void> {
@@ -117,13 +95,9 @@ export async function runVoiceGatewayServe(
   assertVoiceGatewayEnabled(env);
   const listenPort = options.listenPort ?? DEFAULT_VOICE_GATEWAY_LISTEN_PORT;
   validatePort(listenPort);
-  const gatewayUrl = validateOpenClawGatewayUrl(options.gatewayUrl);
 
-  const readBearerDescriptors = deps.readBearerDescriptors ?? readPrivateBearerDescriptors;
-  const { deploymentCredential, openClawCredential } = readBearerDescriptors({
-    deployment: VOICE_GATEWAY_DEPLOYMENT_CREDENTIAL_FD,
-    openClaw: VOICE_GATEWAY_OPENCLAW_CREDENTIAL_FD,
-  });
+  const readBearerDescriptor = deps.readBearerDescriptor ?? readPrivateBearerDescriptor;
+  const deploymentCredential = readBearerDescriptor(VOICE_GATEWAY_DEPLOYMENT_CREDENTIAL_FD);
   const log =
     deps.log ??
     ((entry: VoiceGatewayDiagnostic) => {
@@ -135,11 +109,13 @@ export async function runVoiceGatewayServe(
     sandbox: options.sandbox,
     agent: options.agent,
     createClient: () =>
-      new OpenClawVoiceClient({
-        gatewayUrl,
-        credential: openClawCredential,
-      }),
+      deps.createAgentTurnClient
+        ? deps.createAgentTurnClient(options.sandbox)
+        : createSandboxSemanticTurnClient(options.sandbox, {
+            expectedAuthority: options.sandboxAuthority,
+          }),
     diagnostic: log,
+    turnTimeoutMs: options.turnTimeoutMs,
   });
   const createServer = deps.createServer ?? createVoiceGatewayServer;
   const server = createServer({ deploymentCredential, service });

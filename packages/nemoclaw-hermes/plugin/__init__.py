@@ -494,10 +494,10 @@ def _handle_reload_skills(tool_input=None, context=None, **_kwargs):
     return "\n".join(lines)
 
 
-# Google Chat: the channel owns the override. Source lives in
-# src/lib/messaging/channels/googlechat/runtime/hermes-adapter.py; the Hermes
-# image copies it in beside this file. Loaded only when the channel is
-# configured, so other sandboxes never replace the bundled platform entry.
+# Google Chat: the Hermes package owns the override at
+# messaging/runtime/googlechat/hermes-adapter.py. The image copies it in beside
+# this file. Loaded only when the channel is configured, so other sandboxes
+# never replace the bundled platform entry.
 _GOOGLE_CHAT_SUBSCRIPTION_ENV = "GOOGLE_CHAT_SUBSCRIPTION_NAME"
 _GOOGLE_CHAT_MODULE = "googlechat_adapter.py"
 

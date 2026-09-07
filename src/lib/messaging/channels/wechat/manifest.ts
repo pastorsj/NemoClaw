@@ -227,6 +227,7 @@ export const wechatManifest = {
       phase: "post-agent-install",
       handler: WECHAT_OPENCLAW_ACCOUNT_FILE_CONTRACT.handlerId,
       agents: ["openclaw"],
+      packageOperationRequired: true,
       inputs: [
         "wechatConfig.accountId",
         "wechatConfig.baseUrl",

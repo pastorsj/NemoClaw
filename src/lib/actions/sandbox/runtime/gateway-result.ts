@@ -87,7 +87,10 @@ function sanitizeGatewayRestartFailureDetail(detail: string): string {
     .join("\n");
 }
 
-export function classifyGatewayRestartFailure(result: GatewayRestartCommandResult | null): {
+export function classifyGatewayRestartFailure(
+  result: GatewayRestartCommandResult | null,
+  { allowLegacyHarnessMarkers = false }: { allowLegacyHarnessMarkers?: boolean } = {},
+): {
   layer: GatewayRestartFailureLayer;
   detail: string;
 } {
@@ -168,8 +171,8 @@ export function classifyGatewayRestartFailure(result: GatewayRestartCommandResul
   }
   if (
     output.includes(MARKERS.GATEWAY_UNSAFE_CONFIG_PATH) ||
-    output.includes("HERMES_UNSAFE_CONFIG_PATH") ||
-    output.includes(MARKERS.HERMES_RUNTIME_CONFIG_GUARD_MISSING) ||
+    (allowLegacyHarnessMarkers && output.includes("HERMES_UNSAFE_CONFIG_PATH")) ||
+    (allowLegacyHarnessMarkers && output.includes(MARKERS.HERMES_RUNTIME_CONFIG_GUARD_MISSING)) ||
     output.includes(MARKERS.SECRET_BOUNDARY_VALIDATOR_MISSING)
   ) {
     return { layer: "unsafe config path", detail: detail || "unsafe config path" };
@@ -183,17 +186,17 @@ export function classifyGatewayRestartFailure(result: GatewayRestartCommandResul
   if (
     output.includes("mcp-integrity") ||
     output.includes("mcp-reconcile-required") ||
-    output.includes("HERMES_MCP_CONFIG_DRIFT")
+    (allowLegacyHarnessMarkers && output.includes("HERMES_MCP_CONFIG_DRIFT"))
   ) {
     return {
       layer: "MCP reconciliation refusal",
-      detail: detail || "Hermes MCP reconciliation refused",
+      detail: detail || "MCP reconciliation refused",
     };
   }
   if (
     output.includes(MARKERS.GATEWAY_CONFIG_HASH_MISMATCH) ||
-    output.includes("HERMES_LOCKED_HASH_MISMATCH") ||
-    output.includes("HERMES_CONFIG_HASH_MISMATCH")
+    (allowLegacyHarnessMarkers && output.includes("HERMES_LOCKED_HASH_MISMATCH")) ||
+    (allowLegacyHarnessMarkers && output.includes("HERMES_CONFIG_HASH_MISMATCH"))
   ) {
     return {
       layer: "config hash mismatch",

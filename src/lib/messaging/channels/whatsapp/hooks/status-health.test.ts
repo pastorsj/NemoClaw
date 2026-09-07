@@ -105,7 +105,7 @@ function hermesSessionProbeOutput(options: {
   dashboardSessionCreds: boolean;
 }): string {
   return [
-    "NEMOCLAW_HERMES_WHATSAPP_SESSION_V1",
+    "NEMOCLAW_WHATSAPP_SESSION_V1",
     `GATEWAY_SESSION=${options.gatewaySessionCreds ? "present" : "missing"}`,
     `DASHBOARD_SESSION=${options.dashboardSessionCreds ? "present" : "missing"}`,
   ].join("\n");
@@ -131,7 +131,7 @@ function hermesExec(options: {
           ? { status: 1, stdout: "", stderr: "config unavailable" }
           : {
               status: 0,
-              stdout: `NEMOCLAW_HERMES_WHATSAPP_CONFIG_V1\n${JSON.stringify(options.configuredSessionPath)}`,
+              stdout: `NEMOCLAW_WHATSAPP_CONFIG_V1\n${JSON.stringify(options.configuredSessionPath)}`,
               stderr: "",
             }
       : options.configuredSessionProbeFails &&
@@ -191,6 +191,42 @@ const UNPAIRED_WA: WaFixture = {
 };
 
 describe("whatsapp.statusHealth openclaw CLI probe", () => {
+  it("runs a receipt-backed unknown package through the typed status operation", () => {
+    const exec = makeExec({ status: 0, stdout: openclawJson(HEALTHY_WA), stderr: "" });
+    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(
+      context({
+        ...BASE_INPUTS,
+        agent: "future-harness",
+        receiptBackedProfile: true,
+        packageConfigRoot: "~/.future-harness",
+        statusProbe: {
+          kind: "channel-status-json",
+          command: { argv: ["futurectl", "channel-health", "whatsapp", "--json"] },
+          timeoutOption: "--deadline-ms",
+          pairingCommand: { argv: ["futurectl", "pair", "whatsapp"] },
+        },
+      }),
+    );
+
+    expect(reportOf(result)?.agent).toBe("future-harness");
+    expect(reportOf(result)?.verdict).toBe("healthy");
+    expect(exec).toHaveBeenCalledWith(
+      "alpha",
+      "futurectl channel-health whatsapp --json --deadline-ms 8000",
+      8_000,
+    );
+  });
+
+  it("does not fall back to an exact legacy probe for a receipt-backed profile", () => {
+    const exec = makeExec({ status: 0, stdout: openclawJson(HEALTHY_WA), stderr: "" });
+    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(
+      context({ ...BASE_INPUTS, receiptBackedProfile: true }),
+    );
+
+    expect(outputsOf(result)).toBeUndefined();
+    expect(exec).not.toHaveBeenCalled();
+  });
+
   it.each([
     // Verdict, wa fixture, and a short label. Table-driven so branching is
     // pushed into it.each iteration rather than test-body control flow.
@@ -447,7 +483,7 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     expect(report?.verdict).toBe("unpaired");
     expect(hint).toContain("`nemoclaw <sandbox> channels remove whatsapp`");
     expect(hint).toContain("`nemoclaw <sandbox> channels add whatsapp`");
-    expect(hint).toMatch(/Pair again from the dashboard/);
+    expect(hint).toContain("Pair again with `hermes whatsapp`");
     expect(hint).toContain("/sandbox/.hermes/platforms/whatsapp/session");
     expect(hint).toContain("`nemoclaw <sandbox> channels status --channel whatsapp`");
     expect(hint).not.toContain("platforms.whatsapp.extra.session_path");
@@ -565,7 +601,7 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     const secret = "sk-do-not-cross-the-sandbox-boundary";
     const exec = hermesExec({
       configProbeStdout: [
-        "NEMOCLAW_HERMES_WHATSAPP_CONFIG_V1",
+        "NEMOCLAW_WHATSAPP_CONFIG_V1",
         JSON.stringify(HERMES_DASHBOARD_SESSION_DIR),
         JSON.stringify({ api_key: secret }),
       ].join("\n"),
@@ -623,12 +659,12 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     },
     {
       label: "missing gateway session line",
-      stdout: ["NEMOCLAW_HERMES_WHATSAPP_SESSION_V1", "DASHBOARD_SESSION=present"].join("\n"),
+      stdout: ["NEMOCLAW_WHATSAPP_SESSION_V1", "DASHBOARD_SESSION=present"].join("\n"),
     },
     {
       label: "invalid dashboard session value",
       stdout: [
-        "NEMOCLAW_HERMES_WHATSAPP_SESSION_V1",
+        "NEMOCLAW_WHATSAPP_SESSION_V1",
         "GATEWAY_SESSION=missing",
         "DASHBOARD_SESSION=yes",
       ].join("\n"),

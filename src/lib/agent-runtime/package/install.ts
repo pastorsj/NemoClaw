@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getBuildIdentity, type BuildIdentity } from "../../core/build-identity";
+import { qualifyHarnessPackageAdapterInitialization } from "../adapter/qualification";
 import { buildAgentDefinition } from "../manifest-loader";
 import { assertHarnessPackageSupportsNemoClaw } from "./compatibility";
 import { parseHarnessPackageManifest } from "./manifest";
@@ -18,6 +19,7 @@ import {
 } from "./store";
 import { assertTreeAuthority, getPackageTreeAuthority, validateHarnessPackageTree } from "./tree";
 import type { HarnessPackageIdentity } from "./types";
+import { assertRequiredHarnessPackageArtifacts } from "./validation";
 
 export interface ReviewedHarnessPackageInstallSource {
   readonly packageRoot: string;
@@ -42,8 +44,9 @@ export interface InstallHarnessPackageOptions {
 }
 
 /**
- * Install one validated data-only harness package without invoking package-owned code.
- * The package store owns staging, locking, publication, and cleanup.
+ * Install one validated harness package and initialize its fixed adapters in the bounded VM.
+ * Adapter operations are not invoked. The package store owns staging, locking, publication,
+ * activation, and cleanup.
  */
 export function installHarnessPackage(
   source: HarnessPackageInstallSource,
@@ -63,7 +66,11 @@ export function installHarnessPackage(
   });
   assertTreeAuthority(getPackageTreeAuthority(validatedTree));
   const parsedPackage = parseHarnessPackageManifest(validatedTree.rootDir);
-  assertTreeAuthority(getPackageTreeAuthority(validatedTree));
+  assertRequiredHarnessPackageArtifacts(
+    validatedTree,
+    parsedPackage.envelope.manifest,
+    parsedPackage.manifest,
+  );
   assertHarnessPackageSupportsNemoClaw(parsedPackage.envelope, runningBuildIdentity);
   if (expectedId !== undefined && parsedPackage.envelope.id !== expectedId) {
     throw new Error("Harness package id does not match the requested installation id");
@@ -87,6 +94,15 @@ export function installHarnessPackage(
     validatedTree,
     expectedIdentity,
     sourceIdentity,
+    qualifyAdapterInitialization: (installed) =>
+      qualifyHarnessPackageAdapterInitialization(
+        installed.identity,
+        installed.packageManifest.manifest,
+        {
+          ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+          getBuildIdentity: () => runningBuildIdentity,
+        },
+      ),
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
     ...(options.dependencies === undefined ? {} : { dependencies: options.dependencies }),
     getBuildIdentity: () => runningBuildIdentity,

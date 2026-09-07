@@ -9,22 +9,18 @@ import { describe, expect, it } from "vitest";
 
 const SLACK_GUARD = path.join(
   import.meta.dirname,
-  "../../../..",
-  "src",
-  "lib",
+  "../..",
   "messaging",
-  "channels",
+  "runtime",
   "slack",
   "runtime",
   "slack-channel-guard.ts",
 );
 const WHATSAPP_QR_COMPACT = path.join(
   import.meta.dirname,
-  "../../../..",
-  "src",
-  "lib",
+  "../..",
   "messaging",
-  "channels",
+  "runtime",
   "whatsapp",
   "runtime",
   "whatsapp-qr-compact.ts",

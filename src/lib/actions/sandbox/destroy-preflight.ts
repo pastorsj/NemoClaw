@@ -40,6 +40,7 @@ export type SandboxDestroyPreflight = {
   selectedRunOpenshell: DestroyRunOpenshell;
   sandbox: SandboxEntry | null;
   sandboxConfirmedAbsent: boolean;
+  sandboxListResult: ReturnType<DestroyRunOpenshell>;
 };
 
 export function resolveSandboxDestroyRuntimeSelection(
@@ -342,14 +343,12 @@ export function prepareSandboxDestroy(
   selectGatewayForSandboxDestroy(sandboxName, cleanupGatewayName, selectedRunOpenshell);
   process.env.OPENSHELL_GATEWAY = cleanupGatewayName;
 
-  const sandboxPresence = classifyDestroySandboxPresence(
-    sandboxName,
-    selectedRunOpenshell(["sandbox", "list", "-o", "json"], {
-      ignoreError: true,
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: OPENSHELL_PROBE_TIMEOUT_MS,
-    }),
-  );
+  const sandboxListResult = selectedRunOpenshell(["sandbox", "list", "-o", "json"], {
+    ignoreError: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: OPENSHELL_PROBE_TIMEOUT_MS,
+  });
+  const sandboxPresence = classifyDestroySandboxPresence(sandboxName, sandboxListResult);
   const sandboxConfirmedAbsent = sandboxPresence === "absent";
   return {
     cleanupGatewayName,
@@ -357,6 +356,7 @@ export function prepareSandboxDestroy(
     selectedRunOpenshell,
     sandbox,
     sandboxConfirmedAbsent,
+    sandboxListResult,
     ...(selectedCaptureOpenshell ? { selectedCaptureOpenshell } : {}),
     ...(runtimeSelection ? { runtimeSelection } : {}),
   };

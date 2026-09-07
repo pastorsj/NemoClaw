@@ -43,6 +43,7 @@ export { MANAGED_STARTUP_CA_ENV, MANAGED_STARTUP_PROFILE_ENV } from "./transport
 export const MANAGED_STARTUP_RUNTIME_ENV_FILE = "/run/nemoclaw/managed-startup-runtime.env";
 export const MANAGED_STARTUP_RUNTIME_EXECUTABLE =
   "/usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs";
+export const MANAGED_STARTUP_MESSAGING_RUNTIME = "/usr/local/lib/nemoclaw/messaging-build.mts";
 export const MANAGED_STARTUP_MERGED_CA_FILE = "/run/nemoclaw/managed-startup-ca-bundle.pem";
 export const MANAGED_STARTUP_COMPLETION_FILE = "/run/nemoclaw/managed-startup-complete.json";
 
@@ -515,7 +516,7 @@ function messagingCommand(
   return [
     "/usr/local/bin/node",
     "--experimental-strip-types",
-    "/src/lib/messaging/applier/build/messaging-build-applier.mts",
+    MANAGED_STARTUP_MESSAGING_RUNTIME,
     "--agent",
     agent,
     "--phase",
@@ -1159,6 +1160,9 @@ function applyAdapter(
     if (!command) fail(`missing image command for ${action.kind}`);
     commandIndex += 1;
     if (action.kind === "apply-messaging") {
+      if (!trustedExecutable(MANAGED_STARTUP_MESSAGING_RUNTIME)) {
+        fail(`a trusted ${MANAGED_STARTUP_MESSAGING_RUNTIME} runtime is required`);
+      }
       if (action.phase === "runtime-setup") {
         prepareMessagingRuntimeTarget(action.mode);
       }

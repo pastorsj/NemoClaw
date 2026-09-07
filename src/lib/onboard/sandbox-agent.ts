@@ -1,20 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AgentDefinition } from "../agent/defs";
-import { createImmutableAgentDefinition, loadAgent, loadAgentFresh } from "../agent/defs";
-import { requireCandidateQualificationEnabled } from "../agent/candidate";
-import { buildAgentDefinition } from "../agent-runtime/manifest-loader";
+import type { AgentDefinition } from "../agent-runtime/manifest-types";
 import { getVersion } from "../core/version";
-import {
-  inspectHarnessPackageState,
-  type HarnessPackageIdentity,
-  type HarnessPackageMigration,
-} from "../agent-runtime/package/identity";
-import {
-  resolvePinnedHarnessPackage,
-  type HarnessPackageStoreOptions,
-} from "../agent-runtime/package/store";
 import { getNameValidationGuidance, NAME_ALLOWED_FORMAT } from "../name-validation";
 import { validateName } from "../runner";
 import type { SandboxEntry } from "../state/registry";
@@ -24,6 +12,14 @@ import {
   RESERVED_SANDBOX_NAMES,
   UNKNOWN_SANDBOX_AGENT_NAME,
 } from "./sandbox-agent/naming";
+import { loadLegacyDefaultAgent } from "./sandbox-agent/authority";
+
+export {
+  resolveLegacyBackupRecoveryOwner,
+  resolveSandboxAgent,
+  type ResolvedSandboxAgent,
+  type ResolveSandboxAgentOptions,
+} from "./sandbox-agent/authority";
 
 export {
   formatSandboxAgentName,
@@ -32,12 +28,11 @@ export {
   RESERVED_SANDBOX_NAMES,
   UNKNOWN_SANDBOX_AGENT_NAME,
 } from "./sandbox-agent/naming";
-const SANDBOX_AGENT_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
 export function getEffectiveSandboxAgent(
   agent: AgentDefinition | null | undefined,
 ): AgentDefinition {
-  return agent || loadAgent("openclaw");
+  return agent || loadLegacyDefaultAgent();
 }
 
 export function getDefaultSandboxNameForAgent(agent: AgentDefinition | null | undefined): string {
@@ -58,10 +53,15 @@ export function getSandboxPromptDefault(agent: AgentDefinition | null | undefine
 export function getAgentInferenceProviderOptions(
   agent: AgentDefinition | null | undefined,
 ): string[] {
-  const effectiveAgent = agent ?? loadAgent("openclaw");
-  return Array.isArray(effectiveAgent.inferenceProviderOptions)
+  const effectiveAgent = agent ?? loadLegacyDefaultAgent();
+  const declared = Array.isArray(effectiveAgent.inferenceProviderOptions)
     ? effectiveAgent.inferenceProviderOptions
     : [];
+  const packageProvider =
+    effectiveAgent.providerAuthCapability?.support === "managed"
+      ? effectiveAgent.providerAuthCapability.selection.key
+      : null;
+  return [...new Set([...declared, ...(packageProvider ? [packageProvider] : [])])];
 }
 
 /**
@@ -81,11 +81,15 @@ export function getNemoclawBuildFingerprint(): string | null {
 export function getSandboxAgentRegistryFields(
   agent: AgentDefinition | null | undefined,
   agentVersionKnown = true,
+  receiptBackedPackage = false,
 ): Pick<SandboxEntry, "agent" | "agentVersion" | "nemoclawVersion"> {
   const effectiveAgent = getEffectiveSandboxAgent(agent);
   const agentName = normalizeSandboxAgentName(effectiveAgent.name);
   return {
-    agent: agentName === "openclaw" ? null : agentName,
+    // Null is the historical OpenClaw sentinel. New receipt-backed packages
+    // always persist their exact manifest id; only the no-receipt lane may
+    // emit the legacy encoding.
+    agent: !receiptBackedPackage && agentName === "openclaw" ? null : agentName,
     agentVersion: agentVersionKnown ? effectiveAgent.expectedVersion || null : null,
     // Custom-image sandboxes are not defined by NemoClaw's build. The caller
     // passes false for those paths so upgrades never treat them as managed.
@@ -111,128 +115,6 @@ export function getSandboxAgentDrift(
     existingAgentName,
     requestedAgentName,
   };
-}
-
-export interface ResolvedSandboxAgent {
-  readonly recordedAgent: string | null;
-  readonly effectiveAgentId: string;
-  readonly definition: AgentDefinition;
-  readonly harnessPackage: HarnessPackageIdentity | null;
-  readonly harnessPackageMigration: HarnessPackageMigration | null;
-}
-
-export interface ResolveSandboxAgentOptions extends HarnessPackageStoreOptions {
-  readonly env?: NodeJS.ProcessEnv;
-  readonly requireLifecycleEligibility?: boolean;
-}
-
-function sandboxAgentAuthorityError(message: string): Error {
-  return new Error(`Sandbox agent authority is invalid: ${message}`);
-}
-
-function isRepositoryQualifiedAgent(agentId: string): boolean {
-  return agentId === "nemocua";
-}
-
-function requireRecordedSandboxAgent(agent: unknown): string | null {
-  if (agent === null || agent === undefined) return null;
-  if (typeof agent !== "string" || !SANDBOX_AGENT_ID_PATTERN.test(agent)) {
-    throw sandboxAgentAuthorityError(
-      "the recorded agent must be null or a canonical lowercase hyphen-separated identifier",
-    );
-  }
-  return agent;
-}
-
-/** Resolve one sandbox from its durable, exact agent authority. */
-export function resolveSandboxAgent(
-  entry: Pick<SandboxEntry, "agent" | "harnessPackage" | "harnessPackageMigration">,
-  options: ResolveSandboxAgentOptions = {},
-): ResolvedSandboxAgent {
-  const recordedAgent = requireRecordedSandboxAgent(entry.agent);
-  const effectiveAgentId = normalizeSandboxAgentName(recordedAgent);
-  if (options.requireLifecycleEligibility === true) {
-    requireCandidateQualificationEnabled(effectiveAgentId, options.env ?? process.env);
-  }
-  const packageState = inspectHarnessPackageState(
-    entry.harnessPackage,
-    entry.harnessPackageMigration,
-  );
-
-  if (isRepositoryQualifiedAgent(effectiveAgentId)) {
-    if (packageState.status !== "absent") {
-      throw sandboxAgentAuthorityError(
-        `qualified agent '${effectiveAgentId}' must not carry harness package authority`,
-      );
-    }
-    return Object.freeze({
-      recordedAgent,
-      effectiveAgentId,
-      definition: loadAgentFresh(effectiveAgentId, options.env ?? process.env),
-      harnessPackage: null,
-      harnessPackageMigration: null,
-    });
-  }
-
-  if (packageState.status === "absent") {
-    throw sandboxAgentAuthorityError(
-      `agent '${effectiveAgentId}' requires legacy package migration before use`,
-    );
-  }
-  if (packageState.status === "invalid") {
-    throw sandboxAgentAuthorityError("the recorded harness package identity is malformed");
-  }
-  if (packageState.harnessPackage.id !== effectiveAgentId) {
-    throw sandboxAgentAuthorityError(
-      `recorded agent '${effectiveAgentId}' does not match harness package '${packageState.harnessPackage.id}'`,
-    );
-  }
-
-  const installed = resolvePinnedHarnessPackage(packageState.harnessPackage, {
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-  });
-  const definition = createImmutableAgentDefinition(
-    buildAgentDefinition({
-      manifest: installed.packageManifest.manifest,
-      manifestPath: installed.packageManifest.manifestPath,
-      packageRoot: installed.packageRoot,
-    }),
-  );
-  if (definition.name !== effectiveAgentId || definition.packageRoot !== installed.packageRoot) {
-    throw sandboxAgentAuthorityError("the installed definition does not match its package receipt");
-  }
-
-  return Object.freeze({
-    recordedAgent,
-    effectiveAgentId,
-    definition,
-    harnessPackage: packageState.harnessPackage,
-    harnessPackageMigration: packageState.harnessPackageMigration,
-  });
-}
-
-/**
- * Resolve the durable owner that may authorize one legacy backup manifest.
- *
- * Legacy manifests predate package identity, so callers must first prove that
- * the current registry row still resolves to its qualified repository agent or
- * to the exact installed package recorded by its migration receipt.
- */
-export function resolveLegacyBackupRecoveryOwner(
-  entry: Pick<SandboxEntry, "agent" | "harnessPackage" | "harnessPackageMigration">,
-  options: ResolveSandboxAgentOptions = {},
-): string | null {
-  const authority = resolveSandboxAgent(entry, options);
-  if (authority.harnessPackage === null) return authority.recordedAgent;
-  if (
-    authority.harnessPackageMigration === null ||
-    authority.harnessPackageMigration.legacyAgent !== authority.recordedAgent
-  ) {
-    throw sandboxAgentAuthorityError(
-      "legacy backup owner is missing exact legacy-current-bundle migration provenance",
-    );
-  }
-  return authority.recordedAgent;
 }
 
 export interface PromptSandboxNameDeps {

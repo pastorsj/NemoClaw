@@ -145,9 +145,9 @@ describe("installed MCP package snapshot restore", () => {
     const assertCapability = vi.fn();
     const inspectRegistration = vi.fn().mockReturnValue({ state: "registered" });
     const prepared = prepareInstalledMcpSnapshotRestore(SANDBOX);
-    if (!prepared) throw new Error("expected a package repair plan");
+    expect(prepared).not.toBeNull();
 
-    applyInstalledMcpSnapshotRestore(prepared, RUNTIME_SELECTION, {
+    applyInstalledMcpSnapshotRestore(prepared!, RUNTIME_SELECTION, {
       executeArgvCommand,
       executeShellCommand,
       assertCapability,
@@ -189,9 +189,9 @@ describe("installed MCP package snapshot restore", () => {
     const assertCapability = vi.fn();
     const inspectRegistration = vi.fn();
     const prepared = prepareInstalledMcpSnapshotRestore(SANDBOX);
-    if (!prepared) throw new Error("expected a package repair plan");
+    expect(prepared).not.toBeNull();
 
-    applyInstalledMcpSnapshotRestore(prepared, RUNTIME_SELECTION, {
+    applyInstalledMcpSnapshotRestore(prepared!, RUNTIME_SELECTION, {
       executeArgvCommand,
       executeShellCommand,
       assertCapability,

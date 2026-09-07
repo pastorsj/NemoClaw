@@ -8,11 +8,23 @@ import { isPackageOwnedAgentDefinition } from "./docker-startup-command-agent";
 import { appendExtraPlaceholderKeysEnvArg } from "./extra-placeholder-keys";
 import { HERMES_API_PORT_ENV } from "./hermes-api-port";
 import { appendHermesDashboardEnvArgs, type HermesDashboardOnboardState } from "./hermes-dashboard";
+import {
+  appendPackageDashboardEnvArgs,
+  type DashboardUiOnboardState,
+} from "./dashboard/package-dashboard";
 import { appendHostProxyEnvArgs } from "./host-proxy-env";
 import { appendLegacyRuntimeEnvironment } from "./legacy-runtime";
 import { isValidProxyHost, isValidProxyPort, resolveManagedProxyRoute } from "./proxy-route";
 
 const STARTUP_COMMAND_TOKEN = /^[A-Za-z0-9_./:=,@%+\-\[\]]+$/u;
+const SECONDARY_FORWARD_ENVIRONMENT_NAME = /^(?=.{1,128}$)[A-Z][A-Z0-9_]*_PORT$/u;
+const SECONDARY_FORWARD_CREDENTIAL_NAME =
+  /(?:^|_)(?:AUTH|CREDENTIAL|KEY|PASSWORD|SECRET|TOKEN)(?:_|$)/u;
+const SECONDARY_FORWARD_RESERVED_NAMES = new Set([
+  "NEMOCLAW_DASHBOARD_PORT",
+  "NEMOCLAW_GATEWAY_PORT",
+  "NEMOCLAW_PROXY_PORT",
+]);
 
 function appendAgentStartupEnvironment(envArgs: string[], agent: AgentDefinition | null): void {
   for (const [name, value] of Object.entries(agent?.runtime?.startup_environment ?? {})) {
@@ -50,8 +62,10 @@ export interface SandboxRuntimeEnvArgsInput {
   chatUiUrl: string;
   manageDashboard: boolean;
   getDashboardForwardPort(chatUiUrl: string): string;
-  hermesDashboardState: HermesDashboardOnboardState;
+  hermesDashboardState: HermesDashboardOnboardState | DashboardUiOnboardState;
   hermesApiPort?: number | null;
+  /** Receipt-backed package allocation projected through its validated environment name. */
+  secondaryForward?: { readonly environmentVariable: string; readonly port: number } | null;
   extraPlaceholderKeys: readonly string[];
   allowHermesApiPortOverride?: boolean;
   observabilityEnabled?: boolean;
@@ -80,8 +94,32 @@ export function buildSandboxRuntimeEnvArgs(input: SandboxRuntimeEnvArgsInput): {
   if (!isPackageOwnedAgentDefinition(agent)) {
     appendLegacyRuntimeEnvironment(envArgs, agent, env, input.observabilityEnabled === true);
   }
-  appendHermesDashboardEnvArgs(envArgs, input.hermesDashboardState, formatEnvAssignment);
-  if (input.hermesApiPort != null && input.sandboxName) {
+  if (input.hermesDashboardState.packageOwned === true) {
+    appendPackageDashboardEnvArgs(envArgs, input.hermesDashboardState, formatEnvAssignment);
+  } else {
+    appendHermesDashboardEnvArgs(envArgs, input.hermesDashboardState, formatEnvAssignment);
+  }
+  if (input.secondaryForward && input.hermesApiPort != null) {
+    throw new Error("Sandbox startup cannot mix receipt-backed and legacy secondary ports.");
+  }
+  if (input.secondaryForward && input.sandboxName) {
+    if (
+      !SECONDARY_FORWARD_ENVIRONMENT_NAME.test(input.secondaryForward.environmentVariable) ||
+      SECONDARY_FORWARD_CREDENTIAL_NAME.test(input.secondaryForward.environmentVariable) ||
+      SECONDARY_FORWARD_RESERVED_NAMES.has(input.secondaryForward.environmentVariable) ||
+      !Number.isInteger(input.secondaryForward.port) ||
+      input.secondaryForward.port < 1 ||
+      input.secondaryForward.port > 65_535
+    ) {
+      throw new Error("Sandbox startup received an invalid secondary-forward environment.");
+    }
+    envArgs.push(
+      formatEnvAssignment(
+        input.secondaryForward.environmentVariable,
+        String(input.secondaryForward.port),
+      ),
+    );
+  } else if (input.hermesApiPort != null && input.sandboxName) {
     envArgs.push(formatEnvAssignment(HERMES_API_PORT_ENV, String(input.hermesApiPort)));
   }
   appendHostProxyEnvArgs(envArgs, env, {

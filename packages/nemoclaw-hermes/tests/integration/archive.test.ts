@@ -159,14 +159,18 @@ describe("published Hermes package", () => {
     expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
   });
 
-  it.each(["messaging/messaging-build.mts", "runtime/managed-gateway-control.py"])(
-    "ships package-owned image runtime %s as executable",
-    (artifact) => {
-      expect(packedFiles.has(artifact), artifact).toBe(true);
-      expect((packedFiles.get(artifact)?.mode ?? 0) & 0o111).not.toBe(0);
-      expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
-    },
-  );
+  it("ships the package-owned messaging build source as read-only data", () => {
+    const artifact = "messaging/messaging-build.mts";
+    expect(packedFiles.get(artifact)?.mode).toBe(0o644);
+    expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o777).toBe(0o644);
+  });
+
+  it("ships the package-owned managed gateway runtime as executable", () => {
+    const artifact = "runtime/managed-gateway-control.py";
+    expect(packedFiles.has(artifact), artifact).toBe(true);
+    expect((packedFiles.get(artifact)?.mode ?? 0) & 0o111).not.toBe(0);
+    expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
+  });
 
   it("ships the package-owned managed gateway profile", () => {
     expect(packedFiles.has("runtime/managed-gateway-profile.py")).toBe(true);

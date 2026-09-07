@@ -471,6 +471,8 @@ function installOnboardProcessHarnessPackage(agentName = "openclaw") {
       id: agentName,
       displayName,
       packageVersion: "0.1.0-process-fixture",
+      minimumNemoClawVersion: "0.0.113",
+      maximumNemoClawVersionExclusive: "0.0.121",
       manifest: "manifest.yaml",
     };
     fs.writeFileSync(

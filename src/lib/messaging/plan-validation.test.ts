@@ -67,6 +67,49 @@ describe("parseSandboxMessagingPlan", () => {
     expect(parsed).not.toBe(source);
   });
 
+  it("accepts only the bounded receipt credential-provider projection", () => {
+    const credentialProvider = {
+      profilePath: "provider-profiles/future.yaml",
+      profileId: "future-messaging-static",
+      credentialEnv: "FUTURE_TOKEN",
+      sourceInputId: "token",
+      sourceSecretEnv: "FUTURE_TOKEN",
+    } as const;
+    const source = makePlan({
+      packageBuild: { configRoot: "~/.future", packageManagers: [] },
+      channels: [{ ...makePlan().channels[0], credentialProvider }],
+    });
+
+    expect(parseSandboxMessagingPlan(source)?.channels[0]?.credentialProvider).toEqual(
+      credentialProvider,
+    );
+    expect(
+      parseSandboxMessagingPlan({
+        ...source,
+        channels: [
+          {
+            ...source.channels[0],
+            credentialProvider: { ...credentialProvider, callback: "run-package-code" },
+          },
+        ],
+      }),
+    ).toBeNull();
+    expect(
+      parseSandboxMessagingPlan({
+        ...source,
+        channels: [
+          {
+            ...source.channels[0],
+            credentialProvider: {
+              ...credentialProvider,
+              credentialEnv: "OTHER_TOKEN",
+            },
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
   it("accepts compact persisted plans without manifest-derived sections", () => {
     const source = makePlan({
       channels: [

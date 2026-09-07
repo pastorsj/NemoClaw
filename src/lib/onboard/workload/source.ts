@@ -97,11 +97,24 @@ function requireDockerfilePath(path: string, reason: LegacyDockerfileReason): st
   return path;
 }
 
+function hasMatchingHarnessPackageReceipt(options: ResolveSandboxWorkloadSourceOptions): boolean {
+  if (options.harnessPackage == null) return false;
+  if (options.harnessPackage.id !== options.agentName) {
+    throw new SandboxWorkloadSourceError(
+      `Harness package receipt '${options.harnessPackage.id}' does not match selected agent '${options.agentName}'.`,
+    );
+  }
+  return true;
+}
+
 function legacySource(
   options: ResolveSandboxWorkloadSourceOptions,
   reason: LegacyDockerfileReason,
 ): LegacyDockerfileWorkloadSource {
-  if (isCandidateManagedImageAgent(options.agentName)) {
+  if (
+    isCandidateManagedImageAgent(options.agentName) &&
+    !hasMatchingHarnessPackageReceipt(options)
+  ) {
     throw new SandboxWorkloadSourceError(
       `Agent '${options.agentName}' is a release candidate and must use its exact managed image digest; the legacy Dockerfile workload is not accepted for ${reason}.`,
     );
@@ -128,7 +141,8 @@ function unavailableSource(
   detail: string,
 ): LegacyDockerfileWorkloadSource {
   if (
-    isCandidateManagedImageAgent(options.agentName) ||
+    (isCandidateManagedImageAgent(options.agentName) &&
+      !hasMatchingHarnessPackageReceipt(options)) ||
     (options.policy ?? options.runtime.managedImageSelectionPolicy) === "require-managed"
   ) {
     throw new SandboxWorkloadSourceError(
@@ -176,8 +190,10 @@ export function managedImageRuntimePlatform(
 export function resolveSandboxWorkloadSource(
   options: ResolveSandboxWorkloadSourceOptions,
 ): SandboxWorkloadSource {
+  const receiptBackedSelection = hasMatchingHarnessPackageReceipt(options);
   if (
     isCandidateManagedImageAgent(options.agentName) &&
+    !receiptBackedSelection &&
     options.customDockerfilePath !== undefined &&
     options.customDockerfilePath !== null
   ) {
@@ -192,12 +208,7 @@ export function resolveSandboxWorkloadSource(
 
   const agentName = options.agentName;
   const stockManagedAgent = isManagedImageAgent(agentName);
-  const receiptBackedPackage = options.harnessPackage != null && options.managedImage != null;
-  if (receiptBackedPackage && options.harnessPackage!.id !== agentName) {
-    throw new SandboxWorkloadSourceError(
-      `Managed image package receipt '${options.harnessPackage!.id}' does not match selected agent '${agentName}'.`,
-    );
-  }
+  const receiptBackedPackage = receiptBackedSelection && options.managedImage != null;
   if (!stockManagedAgent && !receiptBackedPackage) {
     return unavailableSource(
       options,

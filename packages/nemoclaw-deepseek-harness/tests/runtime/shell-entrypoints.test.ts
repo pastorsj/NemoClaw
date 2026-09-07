@@ -24,13 +24,30 @@ describe("DeepSeek Harness shell entry points", () => {
     const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-deepseek-runtime-"));
     const runtimeEnvironment = path.join(temporaryRoot, "proxy-env.sh");
     const stateRoot = path.join(temporaryRoot, "state");
+    const proxyHost = path.join(temporaryRoot, "proxy-host");
+    const proxyPort = path.join(temporaryRoot, "proxy-port");
     const fixture = path.join(temporaryRoot, "start.sh");
     fs.mkdirSync(stateRoot, { mode: 0o700 });
+    fs.writeFileSync(proxyHost, "proxy.fixture\n", { mode: 0o444 });
+    fs.writeFileSync(proxyPort, "1234\n", { mode: 0o444 });
     const source = fs
       .readFileSync(path.join(PACKAGE_ROOT, "start.sh"), "utf8")
       .replace(
         "export DSH_HOME=/sandbox/.deepseek-harness",
         `export DSH_HOME=${JSON.stringify(stateRoot)}`,
+      )
+      .replace(
+        "MANAGED_PROXY_HOST_FILE=/usr/local/share/nemoclaw/deepseek-proxy-host",
+        `MANAGED_PROXY_HOST_FILE=${JSON.stringify(proxyHost)}`,
+      )
+      .replace(
+        "MANAGED_PROXY_PORT_FILE=/usr/local/share/nemoclaw/deepseek-proxy-port",
+        `MANAGED_PROXY_PORT_FILE=${JSON.stringify(proxyPort)}`,
+      )
+      .replace("stat -c '%u:%g:%a'", "stat -f '%u:%g:%Lp'")
+      .replace(
+        '"0:0:444"',
+        `"${String(process.getuid?.() ?? 0)}:${String(process.getgid?.() ?? 0)}:444"`,
       )
       .replace('if [ "$(id -u)" -eq 0 ]; then', "if false; then")
       .replace(
@@ -54,8 +71,8 @@ describe("DeepSeek Harness shell entry points", () => {
             PATH: process.env.PATH ?? "",
             HTTP_PROXY: "http://credential@untrusted.fixture:9999",
             HTTPS_PROXY: "http://credential@untrusted.fixture:9999",
-            NEMOCLAW_PROXY_HOST: "proxy.fixture",
-            NEMOCLAW_PROXY_PORT: "1234",
+            NEMOCLAW_PROXY_HOST: "ignored.fixture",
+            NEMOCLAW_PROXY_PORT: "9999",
             NO_PROXY: "inference.local",
             no_proxy: "inference.local",
           },

@@ -4,19 +4,17 @@
 import { describe, expect, it } from "vitest";
 import {
   configureDcodeSession,
+  createLegacyDcodeRebuildHarness,
   makeDcodeSandboxEntry,
 } from "../../../../test/helpers/rebuild-dcode-flow-helpers";
 import { expectNoSandboxDelete } from "../../../../test/helpers/rebuild-delete-assertions";
-import {
-  createRebuildFlowHarness,
-  installRebuildFlowTestHooks,
-} from "../../../../test/helpers/rebuild-flow-generic-harness";
+import { installRebuildFlowTestHooks } from "../../../../test/helpers/rebuild-flow-generic-harness";
 
 function expectPinnedDcodeAgentOptions() {
   return expect.objectContaining({
     agentDefinition: expect.objectContaining({
       name: "langchain-deepagents-code",
-      packageRoot: expect.stringContaining("/harnesses/objects/sha256/"),
+      packageRoot: "/tmp/nemoclaw-legacy-langchain-deepagents-code",
     }),
   });
 }
@@ -26,8 +24,7 @@ describe("rebuildSandbox DCode flow: mutation edge", () => {
 
   it("finishes DCode preparation and recheck before backup, delete, and recreate (#6195)", async () => {
     const mcpEntry = { server: "search", providerName: "mcp-search" };
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
       dcodeRouteResults: [{ ok: true }, { ok: true }, { ok: true }, { ok: true }],
       mcpPreparation: {
@@ -105,8 +102,7 @@ describe("rebuildSandbox DCode flow: mutation edge", () => {
   });
 
   it("retires removed Shields state after a complete DCode terminal-agent rebuild", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
       dcodeRouteResults: [{ ok: true }, { ok: true }, { ok: true }, { ok: true }],
     });
@@ -127,8 +123,7 @@ describe("rebuildSandbox DCode flow: mutation edge", () => {
   });
 
   it("retains removed Shields state when a DCode terminal-agent restore fails", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
       dcodeRouteResults: [{ ok: true }, { ok: true }, { ok: true }, { ok: true }],
       restoreSandboxState: () => ({
@@ -155,8 +150,7 @@ describe("rebuildSandbox DCode flow: mutation edge", () => {
   it("rolls back managed MCP mutation when DCode inputs drift during MCP preparation (#6195)", async () => {
     const detached = { server: "search", providerName: "mcp-search" };
     const scrubbed = { server: "filesystem", adapter: "deepagents-config" };
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
       dcodeRouteResults: [{ ok: true }, { ok: true }, { ok: true }, { ok: true }],
       dcodeImageVerificationResults: [true, true, false],

@@ -45,8 +45,9 @@ const OPENCLAW_RUNTIME_PROBE =
 export function shouldDiagnoseCustomOpenClawRuntime(
   fromDockerfile: string | null | undefined,
   selectedAgentName: string | null | undefined,
+  receiptBackedPackage: boolean,
 ): boolean {
-  return Boolean(fromDockerfile && selectedAgentName === "openclaw");
+  return Boolean(!receiptBackedPackage && fromDockerfile && selectedAgentName === "openclaw");
 }
 
 /**

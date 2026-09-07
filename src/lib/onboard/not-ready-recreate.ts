@@ -146,9 +146,12 @@ function assertNotReadyBackupRecoveryEligibility(
     );
   }
   const validatedBackup = recoveryValidation.manifest;
-  const markedCustomImageBackup = validatedBackup.reconcileOpenClawImagePluginProvenance === true;
+  const markedCustomImageBackup =
+    validatedBackup.reconcileManagedImageExtensions === true ||
+    validatedBackup.reconcileOpenClawImagePluginProvenance === true;
   if (
     (customOpenClaw || markedCustomImageBackup) &&
+    !sandboxState.hasAuthoritativeManagedImageExtensionProvenance(validatedBackup) &&
     !sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(validatedBackup)
   ) {
     throw new UnsafeCustomImagePluginBackupError(sandboxName, validatedBackup.backupPath);

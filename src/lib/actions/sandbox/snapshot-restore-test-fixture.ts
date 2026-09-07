@@ -57,6 +57,7 @@ export type SandboxRecord = {
   hostLocalInferenceReceipt?: string | null;
   hostLocalInferenceProvenance?: SandboxHostLocalInferenceProvenance;
   dashboardPort?: number | null;
+  dashboardUi?: SandboxEntry["dashboardUi"];
   hermesDashboardEnabled?: boolean;
   hermesDashboardPort?: number | null;
   hermesDashboardInternalPort?: number | null;
@@ -180,6 +181,18 @@ export const validateSnapshotRestoreMutationMock = vi.fn(
 );
 export function snapshotAgentDefinition(name: string, packageRoot = `/repo/agents/${name}`) {
   const openClaw = name === "openclaw";
+  const secondaryForward =
+    name === "hermes"
+      ? {
+          environment_variable: "NEMOCLAW_HERMES_API_PORT",
+          preferred_port: 8642,
+          range_start: 8642,
+          range_end: 8652,
+          label: "Hermes API",
+          remedy:
+            "Destroy a listed Hermes sandbox or stop a listed non-OpenShell listener, then rerun onboarding.",
+        }
+      : undefined;
   return {
     name,
     packageRoot,
@@ -187,7 +200,30 @@ export function snapshotAgentDefinition(name: string, packageRoot = `/repo/agent
     runtime: {
       kind: name === "langchain-deepagents-code" ? ("terminal" as const) : ("gateway" as const),
     },
+    healthProbe:
+      secondaryForward === undefined
+        ? undefined
+        : {
+            url: "http://localhost:8642/health",
+            port: 8642,
+            port_resolution: "sandbox-secondary-forward" as const,
+            secondary_forward: secondaryForward,
+            timeoutSeconds: 90,
+          },
     hasDevicePairing: openClaw,
+    dashboardUi:
+      name === "hermes"
+        ? {
+            label: "Hermes dashboard",
+            path: "/",
+            port: 9119,
+            enableEnv: "NEMOCLAW_HERMES_DASHBOARD",
+            portEnv: "NEMOCLAW_HERMES_DASHBOARD_PORT",
+            internalPort: 19119,
+            internalPortEnv: "NEMOCLAW_HERMES_DASHBOARD_INTERNAL_PORT",
+            tuiEnv: "NEMOCLAW_HERMES_DASHBOARD_TUI",
+          }
+        : null,
     configPaths: {
       dir: `/sandbox/.${name}`,
       configFile: openClaw ? "openclaw.json" : "config.yaml",
@@ -198,7 +234,10 @@ export function snapshotAgentDefinition(name: string, packageRoot = `/repo/agent
       backup_quiescence: { kind: "not-required" as const },
       snapshot_restore: openClaw ? (["repair-mutable-config"] as const) : [],
       rebuild: {
-        image_plugin_provenance: "not-required" as const,
+        managed_extensions: {
+          support: "disabled" as const,
+          reason: "Test package has no managed extensions.",
+        },
         scheduled_work: { support: "disabled" as const, reason: "test fixture" },
         post_restore: { kind: "not-required" as const },
       },
@@ -300,6 +339,12 @@ export const listBackupsMock = vi.fn<() => Array<Record<string, unknown>>>(() =>
 export const stopNimContainerMock = vi.fn();
 export const stopNimContainerByNameMock = vi.fn();
 export const parseLiveSandboxNamesMock = vi.fn((_output: string) => new Set(["alpha"]));
+export const restartSandboxGatewayMock = vi.fn(() => ({
+  ok: true as const,
+  restarted: true as const,
+  healthPassed: true as const,
+  forwardRecovered: true,
+}));
 export const waitForRestoredSandboxGatewaySupervisorMock = vi.fn(() => true);
 export const prepareInitialSandboxCreatePolicyMock = vi.fn(
   (
@@ -664,6 +709,10 @@ vi.mock("./mcp-bridge-provider-inspection", async (importOriginal) => ({
   getMcpProviderInspectionRuntimeSelection: getMcpProviderInspectionRuntimeSelectionMock,
 }));
 
+vi.mock("./process-recovery", () => ({
+  restartSandboxGateway: restartSandboxGatewayMock,
+}));
+
 export function resetSnapshotRestoreMocks(): void {
   isolatedStateHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-state-"));
   vi.stubEnv("HOME", isolatedStateHome);
@@ -796,6 +845,12 @@ export function resetSnapshotRestoreMocks(): void {
   }));
   waitForRestoredSandboxGatewaySupervisorMock.mockReturnValue(true);
   parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha"]));
+  restartSandboxGatewayMock.mockReset().mockReturnValue({
+    ok: true,
+    restarted: true,
+    healthPassed: true,
+    forwardRecovered: true,
+  });
 }
 
 export function cleanupSnapshotRestoreMocks(): void {

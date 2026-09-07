@@ -302,6 +302,7 @@ function toHookApplyRequest(
     inputKeys: hook.inputs,
     inputs: selectedInputs,
     outputs: hook.outputs,
+    packageOperation: hook.packageOperation,
     onFailure: hook.onFailure,
   };
 }

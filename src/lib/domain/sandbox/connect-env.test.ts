@@ -8,7 +8,6 @@ import {
   applyHermesLightSkinConfig,
   hermesConfigUsesManagedLightSkin,
   NEMOCLAW_HERMES_LIGHT_SKIN_NAME,
-  NEMOCLAW_HERMES_LIGHT_SKIN_REVIEWED_HERMES_VERSIONS,
   NEMOCLAW_HERMES_LIGHT_SKIN_YAML,
   removeHermesLightSkinConfig,
   shouldApplyHermesLightSkin,
@@ -17,14 +16,6 @@ import {
 } from "./connect-env";
 
 describe("sandbox connect environment helpers", () => {
-  it("tracks Hermes versions reviewed for the managed light skin compatibility shim (#6380)", () => {
-    expect(NEMOCLAW_HERMES_LIGHT_SKIN_REVIEWED_HERMES_VERSIONS).toEqual([
-      "v2026.6.19",
-      "v2026.7.1",
-      "v2026.8.27",
-    ]);
-  });
-
   it.each([{ HERMES_TUI_LIGHT: "0" }, { HERMES_TUI_THEME: "dark" }])(
     "does not inspect Hermes config with explicit theme env %# (#6380)",
     (env) => {

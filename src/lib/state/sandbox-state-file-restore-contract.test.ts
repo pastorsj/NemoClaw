@@ -8,7 +8,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { restoreEnv } from "../../../test/helpers/env-test-helpers";
+import { createHarnessPackageFixture } from "../../../test/helpers/harness-packages";
 import { loadAgent, type AgentDefinition } from "../agent/defs";
+import { resolvePackageIdentityAgent } from "../onboard/package/package-authority";
+import * as registry from "./registry";
 import {
   SCHEMA_V2_SNAPSHOT_RESTORE_AUTHORITY_ERROR,
   restoreRecreatedSandboxState,
@@ -213,6 +216,84 @@ describe("state-file restore target contract", () => {
       failedFiles: ["config.json"],
       error: "Package configuration restore requires the target harness package receipt",
     });
+  });
+
+  it("fails before the mutation fence when the exact package messaging profile is unavailable", () => {
+    const previousHome = process.env.HOME;
+    const packageHome = fs.mkdtempSync(
+      path.join(process.cwd(), "node_modules/.cache/nemoclaw-restore-home-"),
+    );
+    const fixture = createHarnessPackageFixture({
+      fixtureParent: path.join(packageHome, "fixtures"),
+      storeRoot: path.join(packageHome, ".nemoclaw", "harnesses"),
+      messaging: { packageId: "openclaw", failAdapter: true },
+    });
+    const packageRoot = fixture.packageRoots.get("openclaw");
+    expect(packageRoot, "OpenClaw fixture package root is unavailable").toBeDefined();
+    const manifestPath = path.join(packageRoot!, "manifest.yaml");
+    fs.appendFileSync(
+      manifestPath,
+      [
+        "state_files:",
+        "  - path: config.json",
+        "    restore:",
+        "      merge: package-config",
+        "",
+      ].join("\n"),
+    );
+    const restoreAdapterPath = path.join(packageRoot!, "host/restore-adapter.cts");
+    fs.mkdirSync(path.dirname(restoreAdapterPath), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(
+      restoreAdapterPath,
+      `// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+"use strict";
+module.exports = {
+  mergeConfigState(request) {
+    return {
+      kind: "merged",
+      content: request.currentContent || request.backupContent,
+      write: { kind: "atomic" },
+    };
+  },
+};
+`,
+      { mode: 0o600 },
+    );
+    process.env.HOME = packageHome;
+    const installed = fixture.install("openclaw");
+    const packageDefinition = resolvePackageIdentityAgent(installed.identity).definition;
+    const backupPath = writeBackup({
+      agentType: "openclaw",
+      dir: packageDefinition.configPaths.dir,
+      stateFiles: [{ path: "config.json", strategy: "copy" }],
+    });
+    const getSandbox = vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "alpha",
+      agent: "openclaw",
+      harnessPackage: installed.identity,
+    } as never);
+    const validateBeforeMutation = vi.fn();
+
+    try {
+      const result = restoreRecreatedSandboxState("alpha", backupPath, {
+        targetAgentType: "openclaw",
+        agentDefinition: packageDefinition,
+        validateBeforeMutation,
+      });
+
+      expect(result).toMatchObject({
+        success: false,
+        failedFiles: ["config.json"],
+      });
+      expect(result.error).toMatch(/configuration restore authority.*messaging.adapter/iu);
+      expect(validateBeforeMutation).not.toHaveBeenCalled();
+    } finally {
+      getSandbox.mockRestore();
+      fixture.cleanup();
+      fs.rmSync(packageHome, { recursive: true, force: true });
+      restoreEnv("HOME", previousHome);
+    }
   });
 
   it("restores staged state-file bytes when the backup path changes after the mutation fence", () => {

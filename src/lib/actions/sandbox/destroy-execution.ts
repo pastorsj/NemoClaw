@@ -57,6 +57,11 @@ export function redactDestroyError(error: unknown): string {
   return redactFull(error instanceof Error ? error.message : String(error));
 }
 
+/** Compare two captured registry rows without teaching the destroy orchestrator their shape. */
+export function sandboxRegistryEntriesMatch(left: unknown, right: unknown): boolean {
+  return isDeepStrictEqual(left, right);
+}
+
 export function retirePortableLifecycleAuthority(sandboxName: string): void {
   removePortableDemoSandboxLifecycleReceipt(sandboxName);
 }
@@ -64,7 +69,9 @@ export function retirePortableLifecycleAuthority(sandboxName: string): void {
 export { preparePortableDemoSandboxDestroyAuthority };
 
 type SandboxDestroyExecutionInput = {
+  detachReceiptProviders?: (runOpenshell: DestroyRunOpenshell) => DetachSandboxProvidersResult;
   force: boolean;
+  gatewayProbeResult?: ReturnType<DestroyRunOpenshell>;
   getSandbox?: (sandboxName: string) => SandboxEntry | null;
   listSandboxes?: () => { sandboxes: SandboxEntry[] };
   runOpenshell: DestroyRunOpenshell;
@@ -200,7 +207,9 @@ async function finalizeMcpDestroy(
 }
 
 export async function executeSandboxDestroy({
+  detachReceiptProviders,
   force,
+  gatewayProbeResult,
   getSandbox,
   listSandboxes,
   runOpenshell,
@@ -219,6 +228,46 @@ export async function executeSandboxDestroy({
 }: SandboxDestroyExecutionInput): Promise<SandboxDestroyExecutionResult> {
   return withMcpLifecycleLock(sandboxName, async () => {
     let destroyRuntimeSelection = mcpRuntimeSelection;
+    const hasHostLocalInferenceOwnership = typeof sandbox?.hostLocalInferenceReceipt === "string";
+    const hasRetainedMcpOwnership = Object.values(sandbox?.mcp?.bridges ?? {}).some(
+      (entry) => entry.addState !== "prepared",
+    );
+    const gatewayProbeOutcome = gatewayProbeResult
+      ? getSandboxDeleteOutcome(gatewayProbeResult)
+      : null;
+    if (
+      gatewayProbeResult &&
+      gatewayProbeResult.status !== 0 &&
+      gatewayProbeOutcome?.gatewayUnreachable === true
+    ) {
+      const mayDiscardLocalRecord =
+        force &&
+        gatewayProbeOutcome.timedOut !== true &&
+        !hasRetainedMcpOwnership &&
+        !hasHostLocalInferenceOwnership &&
+        portableContainerAuthority === undefined;
+      if (mayDiscardLocalRecord) {
+        return {
+          ok: true,
+          alreadyGone: false,
+          deleteOutput: gatewayProbeOutcome.output,
+          deleteResult: gatewayProbeResult,
+          detachOutcome: { detached: [], failures: [] },
+          forcedLocalCleanup: true,
+          ...(mcpRuntimeSelection ? { runtimeSelection: mcpRuntimeSelection } : {}),
+        };
+      }
+      return {
+        ok: false,
+        deleteOutput: gatewayProbeOutcome.output,
+        exitCode: gatewayProbeResult.status || 1,
+        gatewayUnreachable: true,
+        ...(gatewayProbeOutcome.timedOut ? { timedOut: true as const } : {}),
+        hostLocalInferenceOwnershipRequiresGateway: hasHostLocalInferenceOwnership,
+        mcpOwnershipRequiresGateway: hasRetainedMcpOwnership,
+        portableLifecycleOwnershipRequiresGateway: portableContainerAuthority !== undefined,
+      };
+    }
     type IdentityContinuity =
       | { status: "match" }
       | { status: "changed"; subject?: string }
@@ -380,7 +429,6 @@ export async function executeSandboxDestroy({
     // A receipt alone is not a llama.cpp lifecycle discriminator. Explicit
     // provenance selects the common coordinator; an unmarked schema-v1 receipt
     // remains on its established cleanup path.
-    const hasHostLocalInferenceOwnership = typeof sandbox?.hostLocalInferenceReceipt === "string";
     let runtimeProvider: RuntimeProviderBundle | null = null;
     let hostLocalInferenceAuthority: PreparedHostLocalInferenceAuthority | null = null;
     let commonLlamaCppAuthorityRetired = false;
@@ -528,10 +576,12 @@ export async function executeSandboxDestroy({
       };
     }
     const detachProviders = (): DetachSandboxProvidersResult =>
-      runSandboxProviderPreDeleteCleanup(sandboxName, {
-        runOpenshell: selectedRunOpenshell,
-        redact,
-      });
+      detachReceiptProviders
+        ? detachReceiptProviders(selectedRunOpenshell)
+        : runSandboxProviderPreDeleteCleanup(sandboxName, {
+            runOpenshell: selectedRunOpenshell,
+            redact,
+          });
     const preProviderContinuity = inspectIdentityContinuity();
     if (preProviderContinuity.status !== "match") {
       const mcpRecoveryFailure = await restoreMcpForAbort();
@@ -542,11 +592,27 @@ export async function executeSandboxDestroy({
         " Managed inference cleanup and workspace wipe may already have run; inspect those resources before retrying.",
       );
     }
-    const detachOutcome: DetachSandboxProvidersResult = sandboxConfirmedAbsent
-      ? { detached: [], failures: [] }
-      : runtimeProvider?.cleanup.supported === true && sandbox
-        ? runtimeProvider.cleanup.prepareDestroy({ sandbox, sandboxName }, { detachProviders })
-        : detachProviders();
+    let detachOutcome: DetachSandboxProvidersResult;
+    try {
+      detachOutcome = sandboxConfirmedAbsent
+        ? { detached: [], failures: [] }
+        : runtimeProvider?.cleanup.supported === true && sandbox
+          ? runtimeProvider.cleanup.prepareDestroy({ sandbox, sandboxName }, { detachProviders })
+          : detachProviders();
+    } catch (error) {
+      const mcpRecoveryFailure = await restoreMcpForAbort();
+      return {
+        ok: false,
+        deleteOutput:
+          `Receipt-backed provider cleanup could not be confirmed: ${redactDestroyError(error)} ` +
+          "No sandbox delete was attempted.",
+        exitCode: 1,
+        gatewayUnreachable: false,
+        hostLocalInferenceOwnershipRequiresGateway: false,
+        mcpOwnershipRequiresGateway: false,
+        mcpRecoveryFailure,
+      };
+    }
     // The final identity proof runs immediately before OpenShell delete. A
     // runtime administrator remains a trusted host authority; this closes the
     // multi-step window without claiming a cross-runtime transaction.
@@ -606,9 +672,11 @@ export async function executeSandboxDestroy({
     const deleteOutput = timedOut
       ? `OpenShell sandbox delete timed out after ${String(SANDBOX_DESTROY_TIMEOUT_MS / 1000)} seconds. Deletion could not be confirmed.`
       : capturedDeleteOutput;
-    // Exact MCP, host-local inference, and Portable lifecycle ownership must
-    // survive an unconfirmed remote deletion. Force may discard only a local
-    // record that retains none of those cleanup authorities.
+    // Exact MCP, host-local inference, and Portable lifecycle authority cannot
+    // be reconstructed after local record removal. Generic package receipts,
+    // provider-broker ownership, and managed-volume ownership remain in the
+    // immutable package store; explicit --force may discard their registry
+    // reference after skipping every gateway-dependent mutation.
     const forcedLocalCleanup =
       deleteResult.status !== 0 &&
       !alreadyGone &&

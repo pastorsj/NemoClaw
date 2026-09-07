@@ -14,6 +14,7 @@ import type {
 } from "../../src/lib/adapters/podman";
 import type { HermesPortableOpenShellExecutableAuthority } from "../../src/lib/adapters/openshell/resolve-shared";
 import { loadAgent } from "../../src/lib/agent/defs";
+import { DEFAULT_MANAGED_PROXY_ROUTE } from "../../src/lib/onboard/proxy-route";
 import { withMcpLifecycleLock } from "../../src/lib/state/mcp-lifecycle-lock-acquisition";
 import type { SandboxEntry } from "../../src/lib/state/registry";
 import {
@@ -102,6 +103,8 @@ export function hermesPortableTestStartupArgv(sandboxName = "alpha") {
     "HERMES_HOME=/sandbox/.hermes",
     "HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages",
     "NEMOCLAW_HERMES_API_PORT=8642",
+    `NEMOCLAW_PROXY_HOST=${DEFAULT_MANAGED_PROXY_ROUTE.host}`,
+    `NEMOCLAW_PROXY_PORT=${String(DEFAULT_MANAGED_PROXY_ROUTE.port)}`,
     `NEMOCLAW_SANDBOX_NAME=${sandboxName}`,
     "/usr/local/bin/nemoclaw-start",
   ];

@@ -19,7 +19,12 @@ import {
  *   sandbox; treated as an unexpected regression and re-emitted via the
  *   `unexpected` callback so it does not vanish into a generic catch.
  */
-export type PolicyContextRefreshOutcome = "ok" | "unreachable" | "failed" | "crashed";
+export type PolicyContextRefreshOutcome =
+  | "ok"
+  | "unsupported"
+  | "unreachable"
+  | "failed"
+  | "crashed";
 
 export interface RefreshOutcome extends WritePolicyContextResult {
   outcome: PolicyContextRefreshOutcome;
@@ -65,6 +70,9 @@ export function refreshSandboxPolicyContextFile(
   if (result.written) {
     return { ...result, outcome: "ok" };
   }
+  if (result.failure === "unsupported") {
+    return { ...result, outcome: "unsupported" };
+  }
   if (result.failure === "unexpected-loader") {
     unexpected(
       new Error(result.errorMessage ?? result.reason ?? "policy-context executor failed to load"),
@@ -80,7 +88,7 @@ export function refreshSandboxPolicyContextFile(
     return { ...result, outcome: "unreachable" };
   }
   warn(
-    `  Could not refresh ${POLICY_CONTEXT_SANDBOX_PATH} for sandbox '${sandboxName}': ${result.reason ?? "unknown reason"}.`,
+    `  Could not refresh ${result.targetPath ?? "the harness policy context file"} for sandbox '${sandboxName}': ${result.reason ?? "unknown reason"}.`,
   );
   return { ...result, outcome: "failed" };
 }

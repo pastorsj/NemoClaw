@@ -6,6 +6,11 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../test/helpers/adapter-fixtures";
 import { loadHarnessAdapter } from "./adapter/loader";
 import { HARNESS_MCP_ADAPTER_CONTRACT } from "./adapter/mcp";
 import { loadHarnessMcpAdapterHostModule } from "./host-module";
@@ -163,12 +168,18 @@ function writeFuturePackage(moduleSource: string = VALID_MODULE): void {
       "    reason: Synthetic fixture uses fixed inference.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: Synthetic fixture has no scheduled work.",
@@ -183,6 +194,18 @@ function writeFuturePackage(moduleSource: string = VALID_MODULE): void {
     ].join("\n"),
   );
   writeFixtureFile("runtime/payload.txt", "future runtime\n");
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/host/config-adapter.cts",
+    TEST_CONFIG_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/host/messaging-adapter.cts",
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/host/startup-adapter.cts",
+    TEST_STARTUP_ADAPTER_SOURCE,
+  );
   writeFixtureFile("packages/nemoclaw-future-harness/host/mcp-adapter.cts", moduleSource);
 }
 
@@ -224,12 +247,18 @@ function installFuturePackageWithoutMcpCapability(): InstalledHarnessPackage {
       "    reason: Synthetic fixture uses fixed inference.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: Synthetic fixture has no scheduled work.",
@@ -354,11 +383,9 @@ describe("installed harness host module", () => {
     });
   });
 
-  it("rejects an installed package without the fixed MCP adapter file", () => {
-    const installed = installFuturePackageWithoutHostModule();
-
-    expect(() => loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot })).toThrow(
-      /does not contain host\/mcp-adapter\.cts/u,
+  it("rejects package installation without the fixed MCP adapter file", () => {
+    expect(() => installFuturePackageWithoutHostModule()).toThrow(
+      /requires a non-empty regular artifact 'host\/mcp-adapter\.cts'/u,
     );
   });
 
@@ -393,14 +420,10 @@ describe("installed harness host module", () => {
     );
   });
 
-  it("rejects an MCP adapter that omits a required plan builder", () => {
-    const installed = installFuturePackage(
-      "module.exports = { buildMcpRegistrationPlan() { return {}; } };\n",
-    );
-
-    expect(() => loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot })).toThrow(
-      /must export buildMcpRemovalPlan/u,
-    );
+  it("rejects package installation when the MCP adapter omits a required plan builder", () => {
+    expect(() =>
+      installFuturePackage("module.exports = { buildMcpRegistrationPlan() { return {}; } };\n"),
+    ).toThrow(/must export buildMcpRemovalPlan/u);
   });
 
   it("rejects a plan builder that returns the wrong shape", () => {
@@ -557,17 +580,15 @@ module.exports = {
     );
   });
 
-  it("rejects package modules that import host dependencies", () => {
-    const installed = installFuturePackage(`
+  it("rejects package installation when an adapter imports host dependencies", () => {
+    expect(() =>
+      installFuturePackage(`
 require("node:fs");
 module.exports = {
   buildMcpRegistrationPlan() { return {}; },
   buildMcpRemovalPlan() { return {}; },
 };
-`);
-
-    expect(() => loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot })).toThrow(
-      /must be self-contained/u,
-    );
+`),
+    ).toThrow(/must be self-contained/u);
   });
 });

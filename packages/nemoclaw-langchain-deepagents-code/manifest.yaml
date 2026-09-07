@@ -45,6 +45,16 @@ alias_summary: "nemo-deepagents/dcode/deepagents/deepagents-code/langchain → l
 onboarding:
   sandbox_name: deepagents-code
 sandbox_create:
+  startup_controls:
+    - approval-mode
+    - observability
+  docker_ulimits:
+    - name: nproc
+      soft: 512
+      hard: 512
+    - name: nofile
+      soft: 65536
+      hard: 65536
   driver_mounts:
     - type: tmpfs
       drivers:
@@ -90,6 +100,7 @@ runtime:
   interactive_command: "dcode"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.deepagents/fabric.json"
   prompt_transport: stdin
+  prompt_protocol: fabric-cli
   smoke_boundary:
     kind: managed-launcher
     launcher: /usr/local/lib/nemoclaw/dcode-managed-exec
@@ -102,6 +113,10 @@ runtime:
     - "/usr/local/bin/nemoclaw-fabric-run --help >/dev/null && echo NEMOCLAW_FABRIC_RUNNER_OK"
     - "timeout --version"
     - 'empty_prompt=; output="$(timeout 10 dcode -n "$empty_prompt" 2>&1)"; status=$?; [ "$status" -eq 2 ] && [ "$output" = "NemoClaw: empty non-interactive prompt for -n; provide prompt text." ] && echo NEMOCLAW_DCODE_EMPTY_PROMPT_OK'
+  selection_qualification:
+    command:
+      - /usr/local/lib/nemoclaw/dcode-selection-qualify
+    timeout_seconds: 30
 
 # ── Configuration ───────────────────────────────────────────────
 config:
@@ -122,7 +137,9 @@ state_lifecycle:
     timeout_seconds: 15
   snapshot_restore: []
   rebuild:
-    image_plugin_provenance: not-required
+    managed_extensions:
+      support: disabled
+      reason: Deep Agents Code does not preserve image-owned extensions during rebuild.
     scheduled_work:
       support: disabled
       reason: Deep Agents Code does not run scheduled work.
@@ -187,14 +204,33 @@ device_pairing: false
 # Routes NVIDIA/OpenAI-compatible selections through OpenShell's managed
 # inference.local endpoint using Deep Agents Code's OpenAI-compatible provider.
 inference:
+  route_probe:
+    terminal_connect: required
+    models_404: inference-invocation
   config_update:
     support: unsupported
     reason: This configuration is materialized by the sandbox image. Re-onboard to change it.
   provider_type: openai_compatible
+  # Preserve the package's historical hosted-inference credential input without
+  # requiring NemoClaw core to identify this harness.
+  provider_key_credential_alias: hosted-inference
   default_model: nvidia/nemotron-3-ultra-550b-a55b
   base_url_config_key: "models.providers.openai.base_url"
   model_config_key: "models.default"
   proxy_support: implicit
+
+# ── Policy UX ───────────────────────────────────────────────────
+policy:
+  owned_presets: [observability-otlp-local]
+  automatic_presets:
+    - name: observability-otlp-local
+      activation:
+        kind: observability-enabled
+      apply_during_create: true
+      suppress_in_tiers: [restricted]
+  baseline_exclusion_impacts:
+    github: Git operations and GitHub API or source access may stop working.
+    pypi: Python package installation through pip may stop working.
 
 # ── MCP server support ───────────────────────────────────────────
 mcp:

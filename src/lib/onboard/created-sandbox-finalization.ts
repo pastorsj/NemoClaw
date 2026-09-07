@@ -4,6 +4,12 @@
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
+import type {
+  HarnessManagedExtension,
+  HarnessManagedExtensionsDeclaration,
+  HarnessSelectionQualificationDeclaration,
+} from "@nvidia/nemoclaw-harness-contract";
+
 import type { AgentDefinition } from "../agent/defs";
 import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import {
@@ -17,17 +23,26 @@ import type {
   OpenClawManagedExtensionDiscoveryResult,
 } from "../state/openclaw-plugin-restore";
 import * as openClawPluginRestore from "../state/openclaw-plugin-restore";
+import {
+  discoverManagedImageExtensions,
+  type ManagedExtensionInspectionResult,
+} from "../state/snapshot/managed-extensions";
 import type { SandboxEntry, SandboxGpuProofResult } from "../state/registry";
 import type { QualifiedSandboxInferenceRouteReservation } from "../state/registry/route-reservation";
 import type { SandboxWorkloadReceipt } from "../state/registry/types";
 import * as sandboxState from "../state/sandbox";
 import {
   MANAGED_SNAPSHOT_RESTORE_AUTHORITY_ERROR,
+  MANAGED_IMAGE_EXTENSION_RESTORE_ERROR,
   OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR,
   type RecreatedSandboxRestoreOptions,
   type RestoreResult,
 } from "../state/sandbox";
 import { createDcodeSelectionDriftReader } from "./dcode-selection-drift";
+import {
+  createPackageSelectionQualificationReader,
+  type PackageSelectionQualificationReader,
+} from "./selection/qualification";
 import { restoreDefaultAfterRecreate } from "./default-preservation";
 import * as dockerGpuLocalInference from "./docker-gpu-local-inference";
 import type { HermesPortableConfiguredReceipt } from "./experimental/hermes-portable-receipt";
@@ -66,7 +81,16 @@ export type CreatedSandboxFinalizationOptions = {
   agentDefinition?: AgentDefinition;
   customImage?: boolean;
   discoverOpenClawImagePluginInstalls?: boolean;
+  discoverManagedImageExtensions?: boolean;
+  managedExtensionDeclaration?: Extract<
+    HarnessManagedExtensionsDeclaration,
+    { readonly support: "managed" }
+  >;
   validateManagedDcode: boolean;
+  selectionQualification?: {
+    readonly package: HarnessPackageIdentity;
+    readonly declaration: HarnessSelectionQualificationDeclaration;
+  };
   provider: string;
   model: string;
   preferredInferenceApi: string | null;
@@ -86,6 +110,10 @@ export type CreatedSandboxFinalizationDeps = {
   discoverFreshOpenClawImagePluginInstalls(
     sandboxName: string,
   ): OpenClawManagedExtensionDiscoveryResult;
+  discoverFreshManagedImageExtensions?(
+    sandboxName: string,
+    declaration: Extract<HarnessManagedExtensionsDeclaration, { readonly support: "managed" }>,
+  ): ManagedExtensionInspectionResult;
   restoreRecreatedSandboxState(
     sandboxName: string,
     backupPath: string,
@@ -99,16 +127,20 @@ export type CreatedSandboxFinalizationDeps = {
     preferredInferenceApi: string | null,
     endpointUrl: string | null,
   ): SelectionDrift;
+  getPackageSelectionQualification?: PackageSelectionQualificationReader;
   prepareRegistration?(
     openclawImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
+    managedImageExtensions?: readonly HarnessManagedExtension[],
   ): SandboxEntry;
   revalidatePreparedRegistration?(
     prepared: SandboxEntry,
     openclawImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
+    managedImageExtensions?: readonly HarnessManagedExtension[],
   ): SandboxEntry;
   register(
     openclawImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
     prepared?: SandboxEntry,
+    managedImageExtensions?: readonly HarnessManagedExtension[],
   ): SandboxEntry | void;
   note(message: string): void;
   error(message: string): void;
@@ -123,6 +155,7 @@ type RegistrationSeed = Omit<
   | "imageTag"
   | "workload"
   | "openclawImagePluginInstalls"
+  | "managedImageExtensions"
   | "hermesDashboardState"
   | "dashboardPort"
   | "lifecycleGeneration"
@@ -474,6 +507,7 @@ export function createCreatedSandboxCompletionActions(
       );
       const registrationInput = (
         openclawImagePluginInstalls: readonly OpenClawImagePluginInstall[] | undefined,
+        managedImageExtensions: readonly HarnessManagedExtension[] | undefined,
         revalidateLifecycle: boolean,
       ): CreatedSandboxRegistrationInput => {
         const currentLifecycle = revalidateLifecycle
@@ -513,6 +547,7 @@ export function createCreatedSandboxCompletionActions(
           imageTag: resolved.resolvedImageTag,
           workload: resolved.workloadReceipt,
           openclawImagePluginInstalls,
+          managedImageExtensions,
           hermesDashboardState,
           dashboardPort,
           ...currentLifecycle,
@@ -527,17 +562,28 @@ export function createCreatedSandboxCompletionActions(
         },
         {
           ...deps,
-          prepareRegistration: (openclawImagePluginInstalls) =>
+          prepareRegistration: (openclawImagePluginInstalls, managedImageExtensions) =>
             (deps.prepareCreatedSandboxRegistration ?? prepareCreatedSandboxRegistration)(
-              registrationInput(openclawImagePluginInstalls, true),
+              registrationInput(openclawImagePluginInstalls, managedImageExtensions, true),
             ),
-          revalidatePreparedRegistration: (prepared, openclawImagePluginInstalls) =>
+          revalidatePreparedRegistration: (
+            prepared,
+            openclawImagePluginInstalls,
+            managedImageExtensions,
+          ) =>
             (
               deps.revalidatePreparedCreatedSandboxRegistration ??
               revalidatePreparedCreatedSandboxRegistration
-            )(registrationInput(openclawImagePluginInstalls, true), prepared),
-          register: (openclawImagePluginInstalls, prepared) => {
-            const input = registrationInput(openclawImagePluginInstalls, prepared !== undefined);
+            )(
+              registrationInput(openclawImagePluginInstalls, managedImageExtensions, true),
+              prepared,
+            ),
+          register: (openclawImagePluginInstalls, prepared, managedImageExtensions) => {
+            const input = registrationInput(
+              openclawImagePluginInstalls,
+              managedImageExtensions,
+              prepared !== undefined,
+            );
             return prepared
               ? (deps.registerPreparedCreatedSandbox ?? registerPreparedCreatedSandbox)(
                   input,
@@ -603,6 +649,7 @@ type OnboardCreateContext = {
 type OnboardAgentFlags = {
   readonly customOpenClawImage: boolean;
   readonly isManagedDcodeAgent: boolean;
+  readonly harnessPackage?: HarnessPackageIdentity | null;
 };
 type OnboardInferenceSelection = {
   readonly provider: string;
@@ -613,14 +660,17 @@ type OnboardInferenceSelection = {
 type OnboardMessagingRegistration = {
   readonly plannedMessagingState: RegistrationSeed["plannedMessagingState"];
   readonly preservedMcpState: RegistrationSeed["preservedMcpState"];
+  readonly toolGatewaySelections?: string[];
   readonly hermesToolGateways: string[];
 };
 type OnboardCreationFidelity = {
   readonly webSearchConfig: Parameters<typeof creationFidelity>[0];
   readonly hermesAuthMethod: Parameters<typeof creationFidelity>[2];
+  readonly providerAuthMethod?: string | null;
 };
 type OnboardSandboxRegistrationOptions = {
   readonly toolDisclosure: RegistrationSeed["toolDisclosure"];
+  readonly approvalMode?: RegistrationSeed["approvalMode"];
   readonly dcodeAutoApprovalMode: RegistrationSeed["dcodeAutoApprovalMode"];
 };
 type OnboardGatewayBinding = {
@@ -698,7 +748,13 @@ export function createOnboardCreatedSandboxCompletion(
   sandboxRegistrationOptions: OnboardSandboxRegistrationOptions,
   creation: OnboardCreationFidelity,
   messaging: OnboardMessagingRegistration,
-  hermesApiPort: number | null,
+  allocatedSecondaryForward:
+    | number
+    | {
+        readonly port: number;
+        readonly registryField: "secondaryForwardPort" | "hermesApiPort";
+      }
+    | null,
   gateway: OnboardGatewayBinding,
   preparedPolicy: OnboardPreparedPolicy,
   prebuildImageRef: string | null,
@@ -727,6 +783,9 @@ export function createOnboardCreatedSandboxCompletion(
       `Selected restore snapshot for '${sandboxName}' changed before sandbox creation. Retry the upgrade so it can bind current snapshot authority.`,
     );
   }
+  const declaredManagedExtensions = effectiveAgent.stateLifecycle?.rebuild?.managed_extensions;
+  const managedExtensionDeclaration =
+    declaredManagedExtensions?.support === "managed" ? declaredManagedExtensions : undefined;
   return createCreatedSandboxCompletionActions(
     {
       finalization: {
@@ -736,8 +795,19 @@ export function createOnboardCreatedSandboxCompletion(
         targetAgentType: effectiveAgent.name,
         agentDefinition: effectiveAgent,
         customImage: Boolean(fromDockerfile),
-        discoverOpenClawImagePluginInstalls: agentFlags.customOpenClawImage,
+        discoverOpenClawImagePluginInstalls:
+          agentFlags.customOpenClawImage && managedExtensionDeclaration === undefined,
+        discoverManagedImageExtensions: managedExtensionDeclaration !== undefined,
+        managedExtensionDeclaration,
         validateManagedDcode: agentFlags.isManagedDcodeAgent,
+        ...(effectiveAgent.runtime?.selection_qualification && agentFlags.harnessPackage
+          ? {
+              selectionQualification: {
+                package: agentFlags.harnessPackage,
+                declaration: effectiveAgent.runtime.selection_qualification,
+              },
+            }
+          : {}),
         provider,
         model,
         preferredInferenceApi,
@@ -758,19 +828,32 @@ export function createOnboardCreatedSandboxCompletion(
         portableLifecycle,
         toolDisclosure: sandboxRegistrationOptions.toolDisclosure,
         observabilityEnabled: createIntent?.observabilityEnabled === true,
-        ...(agentFlags.isManagedDcodeAgent
-          ? {
-              dcodeAutoApprovalMode: sandboxRegistrationOptions.dcodeAutoApprovalMode,
-            }
-          : {}),
+        ...(sandboxRegistrationOptions.approvalMode !== undefined
+          ? { approvalMode: sandboxRegistrationOptions.approvalMode }
+          : agentFlags.isManagedDcodeAgent
+            ? {
+                dcodeAutoApprovalMode: sandboxRegistrationOptions.dcodeAutoApprovalMode,
+              }
+            : {}),
         ...creationFidelity(
           creation.webSearchConfig,
           fromDockerfile,
           creation.hermesAuthMethod,
+          creation.providerAuthMethod,
           preparedPolicy.dashboardRemoteBindPrepared,
         ),
         ...messaging,
-        hermesApiPort,
+        hermesApiPort:
+          typeof allocatedSecondaryForward === "number"
+            ? allocatedSecondaryForward
+            : allocatedSecondaryForward?.registryField === "hermesApiPort"
+              ? allocatedSecondaryForward.port
+              : null,
+        secondaryForwardPort:
+          typeof allocatedSecondaryForward === "object" &&
+          allocatedSecondaryForward?.registryField === "secondaryForwardPort"
+            ? allocatedSecondaryForward.port
+            : null,
         ...gateway,
         hostMounts: resolvedCreateIntent.hostMounts,
       },
@@ -811,9 +894,18 @@ export function createOnboardCreatedSandboxCompletion(
           sandboxState,
           effectiveAgent.configPaths.dir,
         ),
+      discoverFreshManagedImageExtensions: (name, declaration) =>
+        discoverManagedImageExtensions(name, declaration, {
+          getSshConfig: (sandbox) => sandboxState.getSshConfig(sandbox),
+          sshArgs: sandboxState.sshArgs,
+        }),
       restoreRecreatedSandboxState: (name, backupPath, restoreOptions, resolveTarget) =>
         restoreSelectedOnboardSnapshot(name, backupPath, restoreOptions, resolveTarget),
       getDcodeSelectionDrift: createDcodeSelectionDriftReader(
+        runCaptureOpenshell,
+        () => gateway.gatewayName,
+      ),
+      getPackageSelectionQualification: createPackageSelectionQualificationReader(
         runCaptureOpenshell,
         () => gateway.gatewayName,
       ),
@@ -837,6 +929,30 @@ export function finalizeCreatedSandbox(
     );
     deps.error("  Verify its durable identity before manual cleanup; do not act by name alone.");
   };
+  let freshManagedImageExtensions: readonly HarnessManagedExtension[] | undefined;
+  if (options.discoverManagedImageExtensions === true) {
+    if (!options.managedExtensionDeclaration) {
+      throw new Error("Managed image extension discovery is missing its package declaration.");
+    }
+    if (!deps.discoverFreshManagedImageExtensions) {
+      throw new Error("Managed image extension discovery is unavailable.");
+    }
+    const discovery = deps.discoverFreshManagedImageExtensions(
+      options.sandboxName,
+      options.managedExtensionDeclaration,
+    );
+    if (!discovery.ok) {
+      deps.error(
+        `  Managed image extension discovery failed for sandbox '${options.sandboxName}': ${discovery.error}`,
+      );
+      deps.error("  State was not restored and registry metadata was not updated.");
+      reportUnregisteredSandboxRecovery();
+      deps.error("  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.");
+      if (options.restoreBackupPath) deps.error(`  Manual recovery: ${options.restoreBackupPath}`);
+      return deps.exitProcess(1);
+    }
+    freshManagedImageExtensions = discovery.extensions;
+  }
   let freshOpenClawImagePluginInstalls: readonly OpenClawImagePluginInstall[] | undefined;
   if (options.discoverOpenClawImagePluginInstalls === true) {
     const discovery = deps.discoverFreshOpenClawImagePluginInstalls(options.sandboxName);
@@ -870,7 +986,10 @@ export function finalizeCreatedSandbox(
       deps.error(`  Manual recovery: ${options.restoreBackupPath}`);
       return deps.exitProcess(1);
     }
-    preparedRegistration = deps.prepareRegistration(freshOpenClawImagePluginInstalls);
+    preparedRegistration =
+      freshManagedImageExtensions === undefined
+        ? deps.prepareRegistration(freshOpenClawImagePluginInstalls)
+        : deps.prepareRegistration(freshOpenClawImagePluginInstalls, freshManagedImageExtensions);
     const selectedHarnessPackage = deps.revalidateHarnessPackageAuthority?.(
       `preparing state restore for sandbox '${options.sandboxName}'`,
     );
@@ -881,6 +1000,7 @@ export function finalizeCreatedSandbox(
       ...(freshOpenClawImagePluginInstalls !== undefined
         ? { freshOpenClawImagePluginInstalls }
         : {}),
+      ...(freshManagedImageExtensions !== undefined ? { freshManagedImageExtensions } : {}),
     } satisfies RecreatedSandboxRestoreOptions;
     const resolveTarget = () => {
       deps.revalidateSandboxIdentity?.(`restoring files for sandbox '${options.sandboxName}'`);
@@ -894,10 +1014,17 @@ export function finalizeCreatedSandbox(
           );
         }
       }
-      preparedRegistration = deps.revalidatePreparedRegistration!(
-        preparedRegistration!,
-        freshOpenClawImagePluginInstalls,
-      );
+      preparedRegistration =
+        freshManagedImageExtensions === undefined
+          ? deps.revalidatePreparedRegistration!(
+              preparedRegistration!,
+              freshOpenClawImagePluginInstalls,
+            )
+          : deps.revalidatePreparedRegistration!(
+              preparedRegistration!,
+              freshOpenClawImagePluginInstalls,
+              freshManagedImageExtensions,
+            );
       return preparedRegistration;
     };
     const restore = deps.restoreRecreatedSandboxState(
@@ -935,6 +1062,16 @@ export function finalizeCreatedSandbox(
         deps.error(`  Manual recovery: ${options.restoreBackupPath}`);
         return deps.exitProcess(1);
       }
+      if (restore.error === MANAGED_IMAGE_EXTENSION_RESTORE_ERROR) {
+        deps.error(
+          `  Managed image extension provenance validation failed for sandbox '${options.sandboxName}': ${restore.error}`,
+        );
+        deps.error("  State was not restored and registry metadata was not updated.");
+        reportUnregisteredSandboxRecovery();
+        deps.error("  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.");
+        deps.error(`  Manual recovery: ${options.restoreBackupPath}`);
+        return deps.exitProcess(1);
+      }
       // Source-of-truth review:
       // - Invalid state: a fresh sandbox exists after an external workspace copy fails.
       // - Boundary: restore.success owns copy completeness; live validation owns route integrity.
@@ -960,17 +1097,40 @@ export function finalizeCreatedSandbox(
     }
   }
 
-  if (options.validateManagedDcode) {
-    const finalSelection = deps.getDcodeSelectionDrift(
-      options.sandboxName,
-      options.provider,
-      options.model,
-      options.preferredInferenceApi,
-      options.endpointUrl ?? null,
-    );
+  if (options.selectionQualification || options.validateManagedDcode) {
+    const finalSelection = options.selectionQualification
+      ? deps.getPackageSelectionQualification?.(
+          options.sandboxName,
+          options.selectionQualification.package.id,
+          options.selectionQualification.declaration,
+          options.provider,
+          options.model,
+          options.preferredInferenceApi,
+          options.endpointUrl ?? null,
+          () => {
+            const current = deps.revalidateHarnessPackageAuthority?.(
+              `qualifying live inference selection for '${options.sandboxName}'`,
+            );
+            if (!current || !isDeepStrictEqual(current, options.selectionQualification!.package)) {
+              throw new Error("Harness package authority changed during selection qualification.");
+            }
+          },
+        )
+      : deps.getDcodeSelectionDrift(
+          options.sandboxName,
+          options.provider,
+          options.model,
+          options.preferredInferenceApi,
+          options.endpointUrl ?? null,
+        );
+    if (!finalSelection) {
+      throw new Error("Package selection qualification runtime is unavailable.");
+    }
     if (finalSelection.changed || finalSelection.unknown) {
       deps.error(
-        `  DCode live model/provider validation failed for sandbox '${options.sandboxName}'. The sandbox still exists, but its live route is unverified and registry metadata was not updated.`,
+        options.selectionQualification
+          ? `  Package live model/provider validation failed for sandbox '${options.sandboxName}'. The sandbox still exists, but its live route is unverified and registry metadata was not updated.`
+          : `  DCode live model/provider validation failed for sandbox '${options.sandboxName}'. The sandbox still exists, but its live route is unverified and registry metadata was not updated.`,
       );
       deps.error(
         "  A NemoClaw rebuild is unsafe here because no verified registry metadata exists.",
@@ -986,12 +1146,26 @@ export function finalizeCreatedSandbox(
 
   deps.revalidateSandboxIdentity?.(`registering sandbox '${options.sandboxName}'`);
   if (preparedRegistration) {
-    preparedRegistration = deps.revalidatePreparedRegistration!(
-      preparedRegistration,
-      freshOpenClawImagePluginInstalls,
-    );
+    preparedRegistration =
+      freshManagedImageExtensions === undefined
+        ? deps.revalidatePreparedRegistration!(
+            preparedRegistration,
+            freshOpenClawImagePluginInstalls,
+          )
+        : deps.revalidatePreparedRegistration!(
+            preparedRegistration,
+            freshOpenClawImagePluginInstalls,
+            freshManagedImageExtensions,
+          );
   }
-  return preparedRegistration
-    ? deps.register(freshOpenClawImagePluginInstalls, preparedRegistration)
-    : deps.register(freshOpenClawImagePluginInstalls);
+  if (freshManagedImageExtensions === undefined) {
+    return preparedRegistration
+      ? deps.register(freshOpenClawImagePluginInstalls, preparedRegistration)
+      : deps.register(freshOpenClawImagePluginInstalls);
+  }
+  return deps.register(
+    freshOpenClawImagePluginInstalls,
+    preparedRegistration,
+    freshManagedImageExtensions,
+  );
 }

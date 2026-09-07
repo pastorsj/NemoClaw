@@ -9,8 +9,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  formatMissingDockerfileCopySources,
-  missingDockerfileCopySources,
+  formatMissingDockerfileContextSources,
+  missingDockerfileContextSources,
 } from "../lib/dockerfile-copy-sources.mts";
 
 type BuildContextModule = typeof import("../../src/lib/sandbox/build-context.ts");
@@ -33,13 +33,13 @@ export function checkOptimizedBuildContextCopySources(
   );
   try {
     const staged = stageOptimizedSandboxBuildContext(rootDir, stagingRoot);
-    const missingSources = missingDockerfileCopySources(
+    const missingSources = missingDockerfileContextSources(
       staged.stagedDockerfile,
       staged.buildCtx,
       "Dockerfile",
     );
     if (missingSources.length > 0) {
-      throw new Error(formatMissingDockerfileCopySources(missingSources));
+      throw new Error(formatMissingDockerfileContextSources(missingSources));
     }
   } finally {
     fs.rmSync(stagingRoot, { recursive: true, force: true });

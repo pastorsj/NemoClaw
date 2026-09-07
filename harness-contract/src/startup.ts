@@ -16,6 +16,9 @@ export type HarnessStartupInferenceApi =
   | "openai-responses"
   | "anthropic-messages";
 
+/** Core-owned approval choices that a package can consume through its startup profile. */
+export type HarnessStartupApprovalMode = "disabled" | "thread-opt-in";
+
 export interface HarnessStartupInferenceSettings {
   readonly routeProvider: string;
   readonly upstreamProvider: string;
@@ -62,7 +65,7 @@ export interface HarnessStartupConfigSettings {
     readonly optOutSource: "operator" | "managed-onboard";
   };
   readonly minimalBootstrap?: boolean;
-  readonly autoApprovalMode?: "disabled" | "thread-opt-in";
+  readonly autoApprovalMode?: HarnessStartupApprovalMode;
   readonly observabilityEnabled?: boolean;
 }
 
@@ -142,7 +145,7 @@ export interface HarnessStartupProfileInput {
     readonly enabledGateways: readonly string[];
   };
   readonly messagingPlan: HarnessStartupJsonObject | null;
-  readonly approvalMode: "disabled" | "thread-opt-in";
+  readonly approvalMode: HarnessStartupApprovalMode;
   readonly observabilityEnabled: boolean;
   readonly proxy: HarnessStartupProxySettings;
   /** A fixed allowlist of non-secret compatibility inputs; arbitrary process environment is excluded. */

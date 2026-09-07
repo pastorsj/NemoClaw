@@ -84,6 +84,17 @@ describe("interactive agent command resolution", () => {
     expect(getInteractiveAgentCommand(null, undefined)).toBe("openclaw tui");
   });
 
+  it("does not apply the no-definition fallback to an OpenClaw-named package definition", () => {
+    const commandlessPackage = {
+      name: "openclaw",
+      runtime: { kind: "gateway" },
+    } as unknown as AgentDefinition;
+
+    expect(() => getInteractiveAgentCommand(commandlessPackage, "openclaw")).toThrow(
+      'Cannot resolve an interactive command for unsupported agent "openclaw".',
+    );
+  });
+
   it("rejects an untrusted agent name when no agent definition is loaded", () => {
     expect(() => getInteractiveAgentCommand(null, "mystery-agent; echo pwned")).toThrow(
       'Cannot resolve an interactive command for unsupported agent "mystery-agent; echo pwned".',

@@ -5,7 +5,7 @@ import { MessagingSetupApplier } from "../../../messaging/applier/setup-applier"
 import type { MessagingOpenShellRunner } from "../../../messaging/applier/types";
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
 import * as gatewayRestart from "../gateway-restart";
-import * as processRecovery from "../process-recovery";
+import * as sandboxLifecycle from "./sandbox-lifecycle";
 
 export function createHermesCredentialEnvReconciliationRuntime(
   runOpenshell: MessagingOpenShellRunner,
@@ -23,14 +23,18 @@ export function createHermesCredentialEnvReconciliationRuntime(
       }),
     restartGateway: (sandboxName: string, revalidate: (operation: string) => void) => {
       revalidate(`restarting Hermes gateway for sandbox '${sandboxName}'`);
-      const result = processRecovery.executeGatewaySupervisorAction(sandboxName, "restart", 210000);
+      const result = sandboxLifecycle.executeGatewaySupervisorAction(
+        sandboxName,
+        "restart",
+        210000,
+      );
       revalidate(`confirming Hermes gateway restart for sandbox '${sandboxName}'`);
       return result;
     },
     parseRestartCompletion: gatewayRestart.parseManagedGatewayControlCompletion,
     waitForGateway: (sandboxName: string, revalidate: (operation: string) => void) => {
       revalidate(`checking Hermes gateway health for sandbox '${sandboxName}'`);
-      const healthy = processRecovery.waitForRecoveredSandboxGateway(sandboxName, {
+      const healthy = sandboxLifecycle.waitForRecoveredSandboxGateway(sandboxName, {
         quiet: true,
         initialManagedHealthPassed: true,
         requireManagedProbe: true,
@@ -41,25 +45,3 @@ export function createHermesCredentialEnvReconciliationRuntime(
     revalidateSandboxIdentity,
   };
 }
-
-// Keep process-recovery's importer count flat: post-restore and post-create
-// reconciliation share this focused lifecycle adapter.
-export function restartSandboxGateway(
-  ...args: Parameters<typeof processRecovery.restartSandboxGateway>
-) {
-  return processRecovery.restartSandboxGateway(...args);
-}
-
-export function checkAndRecoverSandboxProcesses(
-  ...args: Parameters<typeof processRecovery.checkAndRecoverSandboxProcesses>
-) {
-  return processRecovery.checkAndRecoverSandboxProcesses(...args);
-}
-
-export function executePrivilegedSandboxCommand(
-  ...args: Parameters<typeof processRecovery.executePrivilegedSandboxCommand>
-) {
-  return processRecovery.executePrivilegedSandboxCommand(...args);
-}
-
-export type SandboxCommandResult = processRecovery.SandboxCommandResult;

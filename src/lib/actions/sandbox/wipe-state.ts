@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { R, YW } from "../../cli/terminal-style";
 import { shellQuote } from "../../core/shell-quote";
+import { resolveRecordedSandboxAgentAuthority } from "./authority/package";
 import * as registry from "../../state/registry";
 import { SANDBOX_DESTROY_TIMEOUT_MS } from "./destroy-gateway";
 
@@ -12,6 +13,7 @@ type RunOpenshellResult = { error?: Error; status: number | null };
 type RunOpenshell = (args: string[], opts?: Record<string, unknown>) => RunOpenshellResult;
 
 type AgentStateInfo = {
+  name?: string;
   configPaths: { dir: string };
   stateDirs: string[];
   stateDirPrefixes: string[];
@@ -21,6 +23,7 @@ type AgentStateInfo = {
 export type WipeSandboxStateDeps = {
   getSandbox?: typeof registry.getSandbox;
   loadAgent?: (name: string) => AgentStateInfo;
+  resolveRecordedAgent?: typeof resolveRecordedSandboxAgentAuthority;
   runOpenshell?: RunOpenshell;
   /** Optional warning sink. Defaults to `console.warn`. */
   warn?: (message: string) => void;
@@ -86,10 +89,26 @@ export function wipeSandboxState(sandboxName: string, deps: WipeSandboxStateDeps
       return runtime.runOpenshell(args, opts);
     });
 
-  const agentName = getSandbox(sandboxName)?.agent || "openclaw";
+  const sandbox = getSandbox(sandboxName);
+  const agentName = sandbox?.agent || "openclaw";
+  const receiptBacked = sandbox?.harnessPackage != null || sandbox?.harnessPackageMigration != null;
   let agent: AgentStateInfo;
   try {
-    agent = loadAgentDef(agentName);
+    if (receiptBacked) {
+      const authority = (deps.resolveRecordedAgent ?? resolveRecordedSandboxAgentAuthority)(
+        sandbox,
+      );
+      if (
+        authority.harnessPackage === null ||
+        authority.effectiveAgentId !== agentName ||
+        authority.definition.name !== agentName
+      ) {
+        throw new Error("the resolved harness package does not match the sandbox registry entry");
+      }
+      agent = authority.definition;
+    } else {
+      agent = loadAgentDef(agentName);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     warn(`  ${YW}⚠${R} Could not resolve agent '${agentName}' to wipe workspace state: ${message}`);

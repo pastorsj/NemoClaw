@@ -20,6 +20,7 @@ import {
   resolveSandboxGatewayName,
 } from "../../onboard/gateway-binding";
 import { isDcodeAgent } from "../../onboard/observability-policy-presets";
+import { packageSupportsSandboxStartupControl } from "../../onboard/managed-startup/startup-controls";
 import { normalizePersistedSandboxHostMounts } from "../../state/registry/host-mount";
 import type {
   PreparedDcodeRebuildHandoff,
@@ -50,6 +51,7 @@ export type RebuildGpuOptOutEntry = {
   gatewayPort?: number | null;
   toolDisclosure?: ToolDisclosure;
   dcodeAutoApprovalMode?: DcodeAutoApprovalMode;
+  approvalMode?: DcodeAutoApprovalMode;
   observabilityEnabled?: boolean;
   endpointSource?: InferenceEndpointSource | null;
   provider?: string | null;
@@ -192,7 +194,10 @@ export function buildRebuildRecreateOnboardOpts(args: {
   if (authorityIssue === "package-mismatch") {
     throw new Error("Pinned rebuild package authority does not match the sandbox registry entry.");
   }
-  if (args.sb?.observabilityEnabled === true && !isDcodeAgent(rebuildAgent)) {
+  const observabilitySupported = args.agentAuthority.harnessPackage
+    ? packageSupportsSandboxStartupControl(args.agentAuthority.definition, "observability")
+    : isDcodeAgent(rebuildAgent);
+  if (args.sb?.observabilityEnabled === true && !observabilitySupported) {
     throw new Error(
       "Recorded observability state is valid only for agent 'langchain-deepagents-code'.",
     );
@@ -245,7 +250,11 @@ export function buildRebuildRecreateOnboardOpts(args: {
     ...(args.preparedDcodeRebuild ? { preparedDcodeRebuild: args.preparedDcodeRebuild } : {}),
     autoYes: args.autoYes,
     toolDisclosure: toolDisclosureOrDefault(args.sb?.toolDisclosure),
-    dcodeAutoApprovalMode: normalizeDcodeAutoApprovalMode(args.sb?.dcodeAutoApprovalMode),
+    dcodeAutoApprovalMode: normalizeDcodeAutoApprovalMode(
+      args.agentAuthority.harnessPackage
+        ? (args.sb?.approvalMode ?? args.sb?.dcodeAutoApprovalMode)
+        : args.sb?.dcodeAutoApprovalMode,
+    ),
     dcodeAutoApprovalRequestedExplicitly: false,
     observabilityEnabled: args.sb?.observabilityEnabled === true,
     observabilityRequestedExplicitly: false,

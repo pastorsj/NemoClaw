@@ -20,7 +20,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 const require = createRequire(import.meta.url);
 const providers = require("../../../src/lib/onboard/providers.js") as {
   HOSTED_INFERENCE_MODEL: string;
-  stageHostedInferenceSourceSecretEnv: () => boolean;
+  stageHostedInferenceSourceSecretEnv: (options?: {
+    readonly allowHostedInferenceProviderKeyAlias?: boolean;
+  }) => boolean;
 };
 const { patchStagedDockerfile } = require("../../../src/lib/onboard/dockerfile-patch.js") as {
   patchStagedDockerfile: (
@@ -173,10 +175,11 @@ describe("hosted inference default model namespace (#5667)", () => {
   it("stages the Deep Agents NEMOCLAW_PROVIDER_KEY path with the provider-convention model", () => {
     // Reproduce the issue command: a Deep Agents compatible endpoint key is
     // supplied via the generic provider-key hint, with no explicit model.
-    process.env.NEMOCLAW_AGENT = "langchain-deepagents-code";
     process.env.NEMOCLAW_PROVIDER_KEY = "sk-test-inference-hub-key";
 
-    const staged = providers.stageHostedInferenceSourceSecretEnv();
+    const staged = providers.stageHostedInferenceSourceSecretEnv({
+      allowHostedInferenceProviderKeyAlias: true,
+    });
 
     expect(staged).toBe(true);
     expect(process.env.NEMOCLAW_PROVIDER).toBe("custom");

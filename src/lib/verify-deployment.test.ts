@@ -481,81 +481,22 @@ describe("verifyDeployment", () => {
     expect(result.verification.messagingBridgesHealthy).toBe(true);
   });
 
-  it("detects gateway version from openclaw --version", async () => {
-    const deps = makeDeps({
-      executeSandboxCommand: (_name: string, script: string) => {
-        if (script.includes("openclaw --version")) {
-          return { status: 0, stdout: "2026.5.27", stderr: "" };
-        }
-        return { status: 0, stdout: "200", stderr: "" };
-      },
-    });
-    const result = await verifyDeployment("my-sandbox", chain, deps, NO_RETRY);
-    expect(result.verification.gatewayVersion).toBe("2026.5.27");
-  });
-
-  it("extracts the gateway version from decorated output (#5896)", async () => {
-    const deps = makeDeps({
-      executeSandboxCommand: (_name: string, script: string) =>
-        script.includes("openclaw --version")
-          ? {
-              status: 0,
-              stdout: "Dependency 1.2.3\nOpenClaw v2026.5.27 (abcdef)\n",
-              stderr: "",
-            }
-          : { status: 0, stdout: "200", stderr: "" },
+  it("does not invoke a harness CLI while verifying a healthy deployment", async () => {
+    const scripts: string[] = [];
+    const executeSandboxCommand = vi.fn((_name: string, script: string) => {
+      scripts.push(script);
+      return { status: 0, stdout: "200", stderr: "" };
     });
 
-    const result = await verifyDeployment("my-sandbox", chain, deps, NO_RETRY);
-
-    expect(result.verification.gatewayVersion).toBe("2026.5.27");
-  });
-
-  it("rejects malformed gateway version output (#5896)", async () => {
-    const deps = makeDeps({
-      executeSandboxCommand: (_name: string, script: string) =>
-        script.includes("openclaw --version")
-          ? { status: 0, stdout: "OpenClaw development build\n", stderr: "" }
-          : { status: 0, stdout: "200", stderr: "" },
-    });
-
-    const result = await verifyDeployment("my-sandbox", chain, deps, NO_RETRY);
+    const result = await verifyDeployment(
+      "my-sandbox",
+      chain,
+      makeDeps({ executeSandboxCommand }),
+      NO_RETRY,
+    );
 
     expect(result.verification.gatewayVersion).toBeNull();
-  });
-
-  it("rejects gateway versions with extra dotted components (#5896)", async () => {
-    const deps = makeDeps({
-      executeSandboxCommand: (_name: string, script: string) =>
-        script.includes("openclaw --version")
-          ? { status: 0, stdout: "OpenClaw 2026.5.27.1\n", stderr: "" }
-          : { status: 0, stdout: "200", stderr: "" },
-    });
-
-    const result = await verifyDeployment("my-sandbox", chain, deps, NO_RETRY);
-
-    expect(result.verification.gatewayVersion).toBeNull();
-  });
-
-  it("rejects version output from a failed OpenClaw command (#5896)", async () => {
-    const deps = makeDeps({
-      executeSandboxCommand: (_name: string, script: string) =>
-        script.includes("openclaw --version")
-          ? { status: 1, stdout: "OpenClaw v2026.5.27\n", stderr: "command failed" }
-          : { status: 0, stdout: "200", stderr: "" },
-    });
-
-    const result = await verifyDeployment("my-sandbox", chain, deps, NO_RETRY);
-
-    expect(result.verification.gatewayVersion).toBeNull();
-  });
-
-  it("reports null version when gateway is down (skips version probe)", async () => {
-    const deps = makeDeps({
-      executeSandboxCommand: () => ({ status: 0, stdout: "000", stderr: "" }),
-    });
-    const result = await verifyDeployment("my-sandbox", chain, deps, NO_RETRY);
-    expect(result.verification.gatewayVersion).toBeNull();
+    expect(scripts.some((script) => script.includes("openclaw"))).toBe(false);
   });
 
   it("detects access method from chain configuration", async () => {
@@ -761,7 +702,7 @@ describe("formatVerificationDiagnostics", () => {
     );
     const lines = formatVerificationDiagnostics(result);
     expect(lines.some((l) => l.includes("verified"))).toBe(true);
-    expect(lines.some((l) => l.includes("2026.5.27"))).toBe(true);
+    expect(lines.some((l) => l.includes("OpenClaw version"))).toBe(false);
   });
 
   it("prints failure diagnostics with hints when unhealthy", async () => {

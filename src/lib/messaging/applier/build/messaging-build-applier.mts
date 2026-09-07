@@ -20,24 +20,29 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { packReviewedNpmArchive } from "../../../../../scripts/lib/reviewed-npm-archive.mts";
-import { BUILT_IN_CHANNEL_MANIFESTS } from "../../channels/built-ins.ts";
+import LEGACY_CHANNEL_MANIFESTS from "../../channels/legacy-manifests.ts";
 import type {
   ChannelAgentPackageManager,
   ChannelAgentPackageRuntimeLockSpec,
-  ChannelManifest,
   HarnessMessagingBuildProfile,
+  ChannelManifest,
 } from "../../manifest/types.ts";
+import type { HarnessMessagingChannelProfile } from "@nvidia/nemoclaw-harness-contract";
 import {
   migrationOnlyEnvTargets,
   readEnvLineKey,
   staleCredentialEnvKeys,
 } from "../credential-env-cleanup.ts";
-import { allowRenderedOpenClawPlugins } from "../openclaw-plugin-allow.ts";
+import { allowRenderedPlugins } from "../rendered-plugin-allow.ts";
 import {
   selectActiveMessagingChannelIds,
   selectEnabledMessagingAgentRender,
   selectEnabledPostAgentInstallBuildFiles,
 } from "../../post-agent-install-selection.ts";
+
+declare global {
+  var NEMOCLAW_PACKAGE_MESSAGING_RUNTIME_BUILD: boolean | undefined;
+}
 
 type Env = Record<string, string | undefined>;
 type JsonObject = Record<string, any>;
@@ -132,11 +137,13 @@ export type BuildCommandResult = {
   readonly runtimePlanPath: string;
   readonly doctorEnv: Record<string, string>;
   readonly installSpecs: readonly string[];
-  readonly hermesUvPackages: readonly string[];
-  readonly openclawVersion: string;
+  readonly pythonPackages: readonly string[];
+  readonly packageVersion: string;
+  readonly hermesUvPackages?: readonly string[];
+  readonly openclawVersion?: string;
 };
 
-type OpenClawPluginInstall = {
+type VerifiedNodePackageInstall = {
   readonly spec: string;
   readonly npmPackageSpec?: string;
   readonly integrity?: string;
@@ -144,11 +151,12 @@ type OpenClawPluginInstall = {
   readonly runtimeLock?: ChannelAgentPackageRuntimeLockSpec;
   readonly pin: boolean;
 };
+type OpenClawPluginInstall = VerifiedNodePackageInstall;
 
 // Every trusted messaging plugin binds exact package identity, registry SRI,
 // registry tarball URL, and packed-byte SRI before local archive installation.
 // Keep these checks together when #5896 consolidates the archive installers.
-export const OPENCLAW_MESSAGING_PLUGIN_ARCHIVE_PROVENANCE_POLICY = Object.freeze({
+export const NODE_PACKAGE_ARCHIVE_PROVENANCE_POLICY = Object.freeze({
   schemaVersion: 1,
   packageIdentity: "exact-npm-package-spec",
   registryIntegrityField: "dist.integrity",
@@ -156,82 +164,31 @@ export const OPENCLAW_MESSAGING_PLUGIN_ARCHIVE_PROVENANCE_POLICY = Object.freeze
   registryTarballField: "dist.tarball",
   registryTarballUrl: "must-match-committed-url",
 } as const);
+export const OPENCLAW_MESSAGING_PLUGIN_ARCHIVE_PROVENANCE_POLICY =
+  NODE_PACKAGE_ARCHIVE_PROVENANCE_POLICY;
 
-type HermesUvPackageInstall = {
+type PinnedPythonPackageInstall = {
   readonly spec: string;
 };
+type HermesUvPackageInstall = PinnedPythonPackageInstall;
 
-function isPinnedHermesUvPackageSpec(spec: string): boolean {
+function isPinnedPythonPackageSpec(spec: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9_.-]*(?:\[[A-Za-z0-9][A-Za-z0-9_.-]*(?:,[A-Za-z0-9][A-Za-z0-9_.-]*)*\])?==[A-Za-z0-9][A-Za-z0-9_.!+~-]*$/.test(
     spec,
   );
 }
+const isPinnedHermesUvPackageSpec = isPinnedPythonPackageSpec;
+
+type MessagingRuntimeProfile = {
+  readonly packageId: string;
+  readonly build: HarnessMessagingBuildProfile;
+  readonly channels: readonly HarnessMessagingChannelProfile[];
+};
 
 export class MessagingBuildApplierError extends Error {}
 
 export const DEFAULT_MESSAGING_RUNTIME_PLAN_PATH =
   "/usr/local/share/nemoclaw/messaging-runtime-plan.json";
-
-export function reviewedOpenClawPluginIntegrityByPackageSpec(
-  env: Env = process.env,
-  manifests: readonly ChannelManifest[] = BUILT_IN_CHANNEL_MANIFESTS,
-): Readonly<Record<string, string>> {
-  const entries: [string, string][] = [];
-  for (const manifest of manifests) {
-    for (const packageSpec of manifest.agentPackages ?? []) {
-      if (packageSpec.manager !== "node-package") continue;
-      const resolvedSpec = resolveOpenClawPackageSpec(packageSpec.spec, env);
-      const npmPackage = requireExactNpmPackageSpec(resolvedSpec, manifest.id);
-      const integrity =
-        packageSpec.integrity ?? packageSpec.integrityByVersion?.[npmPackage.version];
-      if (integrity) entries.push([npmPackage.packageSpec, integrity]);
-    }
-  }
-  return Object.freeze(
-    Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right))),
-  );
-}
-
-export function reviewedOpenClawPluginTarballUrlByPackageSpec(
-  env: Env = process.env,
-  manifests: readonly ChannelManifest[] = BUILT_IN_CHANNEL_MANIFESTS,
-): Readonly<Record<string, string>> {
-  const entries: [string, string][] = [];
-  for (const manifest of manifests) {
-    for (const packageSpec of manifest.agentPackages ?? []) {
-      if (packageSpec.manager !== "node-package") continue;
-      const resolvedSpec = resolveOpenClawPackageSpec(packageSpec.spec, env);
-      const npmPackage = requireExactNpmPackageSpec(resolvedSpec, manifest.id);
-      const tarballUrl =
-        packageSpec.tarballUrl ?? packageSpec.tarballUrlByVersion?.[npmPackage.version];
-      if (tarballUrl) entries.push([npmPackage.packageSpec, tarballUrl]);
-    }
-  }
-  return Object.freeze(
-    Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right))),
-  );
-}
-
-function reviewedOpenClawPluginRuntimeLocksByPackageSpec(
-  env: Env,
-  manifests: readonly ChannelManifest[],
-): Readonly<Record<string, ChannelAgentPackageRuntimeLockSpec>> {
-  const entries: [string, ChannelAgentPackageRuntimeLockSpec][] = [];
-  for (const manifest of manifests) {
-    for (const packageSpec of manifest.agentPackages ?? []) {
-      if (
-        packageSpec.manager !== "node-package" ||
-        !packageSpec.runtimeLock
-      ) {
-        continue;
-      }
-      const resolvedSpec = resolveOpenClawPackageSpec(packageSpec.spec, env);
-      const npmPackage = requireExactNpmPackageSpec(resolvedSpec, manifest.id);
-      entries.push([npmPackage.packageSpec, packageSpec.runtimeLock]);
-    }
-  }
-  return Object.freeze(Object.fromEntries(entries));
-}
 
 export function readMessagingBuildPlanFromEnv(
   env: Env,
@@ -264,6 +221,235 @@ export function readMessagingBuildPlanFromEnv(
     );
   }
   return parsed as MessagingBuildPlan;
+}
+
+function readMessagingRuntimeProfile(profilePath: string, packageId: string): MessagingRuntimeProfile {
+  if (!isAbsolute(profilePath)) {
+    throw new MessagingBuildApplierError("--profile must be an absolute path");
+  }
+  let parsed: unknown;
+  try {
+    const metadata = lstatSync(profilePath);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 256 * 1024) {
+      throw new Error("profile is not a bounded regular file");
+    }
+    parsed = JSON.parse(readFileSync(profilePath, "utf8"));
+  } catch (error) {
+    throw new MessagingBuildApplierError(`Messaging runtime profile is invalid: ${formatError(error)}`);
+  }
+  if (
+    !isObject(parsed) ||
+    Object.keys(parsed).some((key) => !["packageId", "build", "channelsPath"].includes(key)) ||
+    parsed.packageId !== packageId ||
+    !isObject(parsed.build) ||
+    typeof parsed.channelsPath !== "string" ||
+    !/^[a-z][a-z0-9-]*\.json$/u.test(parsed.channelsPath)
+  ) {
+    throw new MessagingBuildApplierError("Messaging runtime profile does not match the selected package");
+  }
+  const channelsPath = resolve(dirname(profilePath), parsed.channelsPath);
+  if (!channelsPath.startsWith(`${dirname(profilePath)}${sep}`)) {
+    throw new MessagingBuildApplierError("Messaging runtime channel profile escapes its directory");
+  }
+  let channels: unknown;
+  try {
+    const metadata = lstatSync(channelsPath);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 256 * 1024) {
+      throw new Error("channel profile is not a bounded regular file");
+    }
+    channels = JSON.parse(readFileSync(channelsPath, "utf8"));
+  } catch (error) {
+    throw new MessagingBuildApplierError(`Messaging channel profile is invalid: ${formatError(error)}`);
+  }
+  if (!Array.isArray(channels)) {
+    throw new MessagingBuildApplierError("Messaging channel profile must be an array");
+  }
+  const profile = {
+    packageId: parsed.packageId,
+    build: parsed.build,
+    channels,
+  } as unknown as MessagingRuntimeProfile;
+  validateBuildProfile(profile.build, true);
+  const channelIds = new Set<string>();
+  for (const channel of profile.channels) {
+    if (!isObject(channel) || typeof channel.channelId !== "string" || channelIds.has(channel.channelId)) {
+      throw new MessagingBuildApplierError("Messaging runtime profile has invalid channels");
+    }
+    channelIds.add(channel.channelId);
+    if (!isObject(channel.lifecycle) || !Array.isArray(channel.lifecycle.packageInstalls ?? [])) {
+      throw new MessagingBuildApplierError("Messaging runtime profile has invalid package installs");
+    }
+  }
+  return profile;
+}
+
+export function reviewedOpenClawPluginIntegrityByPackageSpec(
+  env: Env = process.env,
+  manifests: readonly ChannelManifest[] = LEGACY_CHANNEL_MANIFESTS,
+): Readonly<Record<string, string>> {
+  const entries: [string, string][] = [];
+  for (const manifest of manifests) {
+    for (const packageSpec of manifest.agentPackages ?? []) {
+      if (packageSpec.manager !== "node-package") continue;
+      const resolvedSpec = resolveOpenClawPackageSpec(packageSpec.spec, env);
+      const npmPackage = requireExactNpmPackageSpec(resolvedSpec, manifest.id);
+      const integrity = packageSpec.integrity ?? packageSpec.integrityByVersion?.[npmPackage.version];
+      if (integrity) entries.push([npmPackage.packageSpec, integrity]);
+    }
+  }
+  return Object.freeze(Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right))));
+}
+
+export function reviewedOpenClawPluginTarballUrlByPackageSpec(
+  env: Env = process.env,
+  manifests: readonly ChannelManifest[] = LEGACY_CHANNEL_MANIFESTS,
+): Readonly<Record<string, string>> {
+  const entries: [string, string][] = [];
+  for (const manifest of manifests) {
+    for (const packageSpec of manifest.agentPackages ?? []) {
+      if (packageSpec.manager !== "node-package") continue;
+      const resolvedSpec = resolveOpenClawPackageSpec(packageSpec.spec, env);
+      const npmPackage = requireExactNpmPackageSpec(resolvedSpec, manifest.id);
+      const tarballUrl = packageSpec.tarballUrl ?? packageSpec.tarballUrlByVersion?.[npmPackage.version];
+      if (tarballUrl) entries.push([npmPackage.packageSpec, tarballUrl]);
+    }
+  }
+  return Object.freeze(Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right))));
+}
+
+function reviewedOpenClawPluginRuntimeLocksByPackageSpec(
+  env: Env,
+  manifests: readonly ChannelManifest[],
+): Readonly<Record<string, ChannelAgentPackageRuntimeLockSpec>> {
+  const entries: [string, ChannelAgentPackageRuntimeLockSpec][] = [];
+  for (const manifest of manifests) {
+    for (const packageSpec of manifest.agentPackages ?? []) {
+      if (packageSpec.manager !== "node-package" || !packageSpec.runtimeLock) continue;
+      const resolvedSpec = resolveOpenClawPackageSpec(packageSpec.spec, env);
+      const npmPackage = requireExactNpmPackageSpec(resolvedSpec, manifest.id);
+      entries.push([npmPackage.packageSpec, packageSpec.runtimeLock]);
+    }
+  }
+  return Object.freeze(Object.fromEntries(entries));
+}
+
+function runtimePackageDeclarations(
+  profile: MessagingRuntimeProfile,
+  activeChannelIds?: ReadonlySet<string>,
+) {
+  return profile.channels.flatMap((channel) =>
+    activeChannelIds && !activeChannelIds.has(channel.channelId)
+      ? []
+      : (channel.lifecycle.packageInstalls ?? []).map((install) => ({
+          channelId: channel.channelId,
+          ...install,
+        })),
+  );
+}
+
+function resolveRuntimePackageSpec(
+  spec: string,
+  profile: MessagingRuntimeProfile,
+  env: Env,
+): string {
+  const versionEnvironment =
+    profile.build.packageInstallers?.["node-package"]?.packageVersionEnvironment;
+  const version = versionEnvironment ? sanitizeOptionalString(env[versionEnvironment]) : "";
+  const resolved = spec.replaceAll("{{package.version}}", () => {
+    if (!version) {
+      throw new MessagingBuildApplierError(
+        `${versionEnvironment ?? "Package version environment"} is required for the package version template`,
+      );
+    }
+    return version;
+  });
+  if (/\{\{\s*[^}]+\s*\}\}/u.test(resolved)) {
+    throw new MessagingBuildApplierError(`Unresolved package-install template in ${spec}`);
+  }
+  return resolved;
+}
+
+function selectedRuntimePackageDeclarations(
+  plan: MessagingBuildPlan,
+  profile: MessagingRuntimeProfile,
+) {
+  const declarations = runtimePackageDeclarations(profile, new Set(activeChannels(plan)));
+  return enabledBuildStepsForPhase(plan, "agent-install")
+    .filter((step) => step.kind === "package-install" && step.value !== undefined)
+    .map((step) => {
+      const value = step.value as JsonObject;
+      const manager = readMessagingPackageManager(value, step.outputId);
+      const declared = declarations.find(
+        (candidate) =>
+          candidate.channelId === step.channelId &&
+          candidate.id === step.outputId &&
+          candidate.manager === manager &&
+          candidate.spec === value.spec,
+      );
+      if (!declared) {
+        throw new MessagingBuildApplierError(
+          `Messaging package-install output ${step.outputId} is not declared by the package runtime profile`,
+        );
+      }
+      return declared;
+    });
+}
+
+function collectRuntimeNodePackages(
+  plan: MessagingBuildPlan | null,
+  profile: MessagingRuntimeProfile,
+  env: Env,
+  allChannels = false,
+): VerifiedNodePackageInstall[] {
+  const declarations = (allChannels
+    ? runtimePackageDeclarations(profile)
+    : selectedRuntimePackageDeclarations(plan!, profile)
+  ).filter((install) => install.manager === "node-package");
+  const seen = new Set<string>();
+  const installs: VerifiedNodePackageInstall[] = [];
+  for (const declaration of declarations) {
+    const spec = resolveRuntimePackageSpec(declaration.spec, profile, env);
+    const npmPackage = requireExactNpmPackageSpec(spec, declaration.channelId);
+    const integrity = declaration.integrity ?? declaration.integrityByVersion?.[npmPackage.version];
+    const tarballUrl = declaration.tarballUrl ?? declaration.tarballUrlByVersion?.[npmPackage.version];
+    if (declaration.pin !== true || !integrity || !tarballUrl) {
+      throw new MessagingBuildApplierError(
+        `Managed messaging package ${npmPackage.packageSpec} must have a committed integrity pin and tarball URL`,
+      );
+    }
+    if (seen.has(npmPackage.packageSpec)) continue;
+    seen.add(npmPackage.packageSpec);
+    installs.push({
+      spec,
+      npmPackageSpec: npmPackage.packageSpec,
+      integrity,
+      tarballUrl,
+      ...(declaration.runtimeLock ? { runtimeLock: declaration.runtimeLock } : {}),
+      pin: true,
+    });
+  }
+  return installs;
+}
+
+function collectRuntimePythonPackages(
+  plan: MessagingBuildPlan | null,
+  profile: MessagingRuntimeProfile,
+  allChannels = false,
+): PinnedPythonPackageInstall[] {
+  const declarations = (allChannels
+    ? runtimePackageDeclarations(profile)
+    : selectedRuntimePackageDeclarations(plan!, profile)
+  ).filter((install) => install.manager === "python-package");
+  const specs = new Set<string>();
+  for (const declaration of declarations) {
+    if (!isPinnedPythonPackageSpec(declaration.spec)) {
+      throw new MessagingBuildApplierError(
+        `Messaging Python package must use a safe exact-pinned package spec: ${declaration.spec}`,
+      );
+    }
+    specs.add(declaration.spec);
+  }
+  return [...specs].map((spec) => ({ spec }));
 }
 
 export function applyMessagingAgentRenderToObject(
@@ -528,7 +714,7 @@ export function collectManagedImageOpenClawPluginInstallSpecs(env: Env): string[
 
 /** Return every pinned Hermes package required by a supported managed-image channel. */
 export function collectManagedImageHermesUvPackages(): string[] {
-  return collectTrustedHermesUvPackageInstalls(BUILT_IN_CHANNEL_MANIFESTS).map(
+  return collectTrustedHermesUvPackageInstalls(LEGACY_CHANNEL_MANIFESTS).map(
     (install) => install.spec,
   );
 }
@@ -593,20 +779,20 @@ function collectOpenClawMessagingPluginInstalls(
 function collectManagedImageOpenClawPluginInstalls(env: Env): OpenClawPluginInstall[] {
   const reviewedIntegrity = reviewedOpenClawPluginIntegrityByPackageSpec(
     env,
-    BUILT_IN_CHANNEL_MANIFESTS,
+    LEGACY_CHANNEL_MANIFESTS,
   );
   const reviewedTarballUrls = reviewedOpenClawPluginTarballUrlByPackageSpec(
     env,
-    BUILT_IN_CHANNEL_MANIFESTS,
+    LEGACY_CHANNEL_MANIFESTS,
   );
   const runtimeLocks = reviewedOpenClawPluginRuntimeLocksByPackageSpec(
     env,
-    BUILT_IN_CHANNEL_MANIFESTS,
+    LEGACY_CHANNEL_MANIFESTS,
   );
   const installs: OpenClawPluginInstall[] = [];
   const seen = new Set<string>();
 
-  for (const manifest of BUILT_IN_CHANNEL_MANIFESTS as readonly ChannelManifest[]) {
+  for (const manifest of LEGACY_CHANNEL_MANIFESTS as readonly ChannelManifest[]) {
     for (const packageSpec of manifest.agentPackages ?? []) {
       if (packageSpec.manager !== "node-package") continue;
       const spec = resolveOpenClawPackageSpec(packageSpec.spec, env);
@@ -645,7 +831,7 @@ function collectManagedImageOpenClawPluginInstalls(env: Env): OpenClawPluginInst
  */
 function trustedChannelManifestsForActivePlan(plan: MessagingBuildPlan | null): ChannelManifest[] {
   const active = new Set(activeChannels(plan));
-  return BUILT_IN_CHANNEL_MANIFESTS.filter((manifest) => active.has(manifest.id));
+  return LEGACY_CHANNEL_MANIFESTS.filter((manifest) => active.has(manifest.id));
 }
 
 function trustedOpenClawPluginSpecsForManifests(
@@ -708,7 +894,7 @@ function trustedHermesUvPackageSpecsForPlan(plan: MessagingBuildPlan | null): Se
   const active = new Set(activeChannels(plan));
   return new Set(
     collectTrustedHermesUvPackageInstalls(
-      BUILT_IN_CHANNEL_MANIFESTS.filter((manifest) => active.has(manifest.id)),
+      LEGACY_CHANNEL_MANIFESTS.filter((manifest) => active.has(manifest.id)),
     ).map((install) => install.spec),
   );
 }
@@ -1000,10 +1186,10 @@ function applyDeclaredRenderFinalizers(
 ): void {
   const finalizers = effectiveBuildProfile(plan).renderFinalizers ?? [];
   if (finalizers.includes("allow-rendered-plugins")) {
-    allowRenderedOpenClawPlugins(config, renderEntries);
+    allowRenderedPlugins(config, renderEntries);
   }
   if (finalizers.includes("inherit-api-server-toolsets")) {
-    finalizeHermesRenderedPlatformToolsets(config);
+    inheritApiServerToolsets(config);
   }
 }
 
@@ -1025,7 +1211,7 @@ function readEnvRenderLines(render: MessagingRenderEntry): readonly string[] {
   return render.lines;
 }
 
-function finalizeHermesRenderedPlatformToolsets(config: JsonObject): void {
+function inheritApiServerToolsets(config: JsonObject): void {
   const platforms = config.platforms;
   const platformToolsets = config.platform_toolsets;
   if (!isObject(platforms) || !isObject(platformToolsets)) return;
@@ -1073,11 +1259,19 @@ function resolveAgentRenderTarget(
 
 function effectiveBuildProfile(plan: MessagingBuildPlan): HarnessMessagingBuildProfile {
   if (plan.packageBuild) return validateBuildProfile(plan.packageBuild);
-  return legacyBuildProfile(plan);
+  if (globalThis.NEMOCLAW_PACKAGE_MESSAGING_RUNTIME_BUILD === true) {
+    throw new MessagingBuildApplierError(
+      "Receipt-backed messaging plan is missing its package build profile",
+    );
+  }
+  return legacyBuildProfile!(plan);
 }
 
 /** Decode only pre-contract serialized plans. Receipt-backed plans always carry packageBuild. */
-function legacyBuildProfile(plan: MessagingBuildPlan): HarnessMessagingBuildProfile {
+const legacyBuildProfile =
+  globalThis.NEMOCLAW_PACKAGE_MESSAGING_RUNTIME_BUILD === true
+    ? undefined
+    : function legacyBuildProfile(plan: MessagingBuildPlan): HarnessMessagingBuildProfile {
   const targets = plan.agentRender.map((entry) => entry.target);
   const homeTarget = targets.find((target) => target.startsWith("~/"));
   const packageManagers = uniqueStrings(
@@ -1109,7 +1303,7 @@ function legacyBuildProfile(plan: MessagingBuildPlan): HarnessMessagingBuildProf
   }
   const openClawLegacy = targets.includes("openclaw.json");
   const hermesLegacy = configRoot === "~/.hermes";
-  return validateBuildProfile({
+        return validateBuildProfile({
     configRoot,
     packageManagers,
     ...(openClawLegacy
@@ -1122,11 +1316,12 @@ function legacyBuildProfile(plan: MessagingBuildPlan): HarnessMessagingBuildProf
         }
       : {}),
     ...(hermesLegacy ? { renderFinalizers: ["inherit-api-server-toolsets"] as const } : {}),
-  });
-}
+        });
+      };
 
 function validateBuildProfile(
   profile: HarnessMessagingBuildProfile,
+  requireInstallers = false,
 ): HarnessMessagingBuildProfile {
   if (!/^~\/[A-Za-z0-9._-]+$/u.test(profile.configRoot)) {
     throw new MessagingBuildApplierError("Messaging build profile has an unsafe config root");
@@ -1137,6 +1332,64 @@ function validateBuildProfile(
     )
   ) {
     throw new MessagingBuildApplierError("Messaging build profile has an unsupported package manager");
+  }
+  for (const manager of requireInstallers ? profile.packageManagers : []) {
+    const installer = profile.packageInstallers?.[manager];
+    if (!installer) {
+      throw new MessagingBuildApplierError(
+        `Messaging build profile is missing its ${manager} installer`,
+      );
+    }
+    const placeholder =
+      manager === "node-package" ? "{{archive}}" : "{{packages}}";
+    if (
+      !Array.isArray(installer.command) ||
+      installer.command.length < 2 ||
+      installer.command.length > 16 ||
+      installer.command.filter((argument) => argument === placeholder).length !== 1 ||
+      installer.command.some(
+        (argument) =>
+          typeof argument !== "string" ||
+          argument.length === 0 ||
+          argument.length > 8192 ||
+          (/\{\{/u.test(argument) && argument !== placeholder),
+      )
+    ) {
+      throw new MessagingBuildApplierError(
+        `Messaging ${manager} installer has an invalid command`,
+      );
+    }
+  }
+  for (const manager of ["node-package", "python-package"] as const) {
+    if (profile.packageInstallers?.[manager] && !profile.packageManagers.includes(manager)) {
+      throw new MessagingBuildApplierError(
+        `Messaging build profile has an undeclared ${manager} installer`,
+      );
+    }
+  }
+  const nodeVersionEnvironment =
+    profile.packageInstallers?.["node-package"]?.packageVersionEnvironment;
+  if (
+    nodeVersionEnvironment !== undefined &&
+    !/^[A-Z_][A-Z0-9_]*$/u.test(nodeVersionEnvironment)
+  ) {
+    throw new MessagingBuildApplierError(
+      "Messaging node package installer has an invalid version environment key",
+    );
+  }
+  const pythonEnvironment = profile.packageInstallers?.["python-package"]?.environment ?? {};
+  for (const [key, value] of Object.entries(pythonEnvironment)) {
+    if (
+      !/^[A-Z_][A-Z0-9_]*$/u.test(key) ||
+      value.length === 0 ||
+      value.length > 1024 ||
+      /[\r\n\0]/u.test(value) ||
+      /(?:openshell:resolve|\{\{|\}\}|token|secret|password|api[_-]?key)/iu.test(value)
+    ) {
+      throw new MessagingBuildApplierError(
+        "Messaging Python package installer has an invalid fixed environment",
+      );
+    }
   }
   const repair = profile.postRenderRepair;
   if (
@@ -1450,12 +1703,12 @@ function requireExactNpmPackageSpec(
   const parsed = parseNpmPackageSpec(spec);
   if (!parsed) {
     throw new MessagingBuildApplierError(
-      `Trusted manifest ${manifestId} declares a non-npm OpenClaw plugin package: ${spec}`,
+      `Trusted profile entry ${manifestId} declares a non-npm node package: ${spec}`,
     );
   }
   if (!parsed.version || !EXACT_NPM_VERSION_PATTERN.test(parsed.version)) {
     throw new MessagingBuildApplierError(
-      `Trusted manifest ${manifestId} must use an exact-version OpenClaw plugin package: ${spec}`,
+      `Trusted profile entry ${manifestId} must use an exact-version node package: ${spec}`,
     );
   }
   return { packageSpec: parsed.packageSpec, version: parsed.version };
@@ -1475,30 +1728,31 @@ function runCommand(args: readonly string[], env: Env): void {
   }
 }
 
-function packVerifiedOpenClawPluginArchive(
+function packVerifiedNodePackageArchive(
   install: OpenClawPluginInstall,
   env: Env,
   enableRemediation: boolean,
+  label = "Node package",
 ): { readonly archivePath: string; readonly rootDir: string } {
   if (!install.npmPackageSpec) {
     throw new MessagingBuildApplierError(
-      `OpenClaw plugin spec ${install.spec} must use an npm: package with committed integrity pin`,
+      `${label} spec ${install.spec} must use an npm: package with committed integrity pin`,
     );
   }
   if (!install.integrity) {
     throw new MessagingBuildApplierError(
-      `OpenClaw plugin ${install.npmPackageSpec} has no committed npm integrity pin`,
+      `${label} ${install.npmPackageSpec} has no committed npm integrity pin`,
     );
   }
   if (!install.tarballUrl) {
     throw new MessagingBuildApplierError(
-      `OpenClaw plugin ${install.npmPackageSpec} has no committed npm tarball URL`,
+      `${label} ${install.npmPackageSpec} has no committed npm tarball URL`,
     );
   }
   const archive = packReviewedNpmArchive({
     env: env as NodeJS.ProcessEnv,
     expectedIntegrity: install.integrity,
-    label: `OpenClaw plugin ${install.npmPackageSpec}`,
+    label: `${label} ${install.npmPackageSpec}`,
     packageSpec: install.npmPackageSpec,
     tarballUrl: install.tarballUrl,
   });
@@ -1512,6 +1766,14 @@ function packVerifiedOpenClawPluginArchive(
       })
     : { archivePath: archive.archivePath };
   return { archivePath: remediated.archivePath, rootDir: archive.rootDirectory };
+}
+
+function packVerifiedOpenClawPluginArchive(
+  install: OpenClawPluginInstall,
+  env: Env,
+  enableRemediation: boolean,
+) {
+  return packVerifiedNodePackageArchive(install, env, enableRemediation, "OpenClaw plugin");
 }
 
 type PackageArchiveRemediationRequest = Readonly<{
@@ -2001,6 +2263,8 @@ export interface MessagingBuildPhaseOptions {
   readonly managedStartupRuntime?: boolean;
   /** Explicit provider-owned intent for managed startup profile application. */
   readonly mode?: MessagingBuildApplyMode;
+  /** Integrity-bound package data authorizing package-manager execution. */
+  readonly runtimeProfile?: MessagingRuntimeProfile;
 }
 
 export function applyMessagingBuildPhase(
@@ -2032,7 +2296,16 @@ export function applyMessagingBuildPhase(
     return target ? [target] : [];
   }
   if (phase === "agent-install") {
-    installMessagingPackages(plan, env);
+    if (globalThis.NEMOCLAW_PACKAGE_MESSAGING_RUNTIME_BUILD === true) {
+      if (!options.runtimeProfile) {
+        throw new MessagingBuildApplierError("Messaging package installation requires --profile");
+      }
+      installMessagingPackagesFromProfile(plan, options.runtimeProfile, env);
+    } else if (options.runtimeProfile) {
+      installMessagingPackagesFromProfile(plan, options.runtimeProfile, env);
+    } else {
+      installMessagingPackages(plan, env);
+    }
     return [];
   }
   const applyPostAgentInstallOutputs = (): readonly string[] => [
@@ -2049,6 +2322,148 @@ export function applyMessagingBuildPhase(
     return uniqueStrings([...appliedTargets, ...applyPostAgentInstallOutputs()]);
   }
   return uniqueStrings(appliedTargets);
+}
+
+function applyPackageMessagingBuildPhase(
+  plan: MessagingBuildPlan | null,
+  phase: MessagingBuildPhase,
+  env: Env,
+  options: MessagingBuildPhaseOptions,
+): readonly string[] {
+  const mode = options.mode ?? "apply";
+  if (mode === "clear") {
+    if (plan !== null) throw new MessagingBuildApplierError("Messaging clear mode requires an absent plan");
+    return [];
+  }
+  if (options.managedStartupRuntime && plan === null) {
+    throw new MessagingBuildApplierError("Managed startup apply mode requires a messaging plan");
+  }
+  if (phase === "runtime-setup") {
+    const target = writeMessagingRuntimePlanArtifact(plan, messagingRuntimePlanPath(env));
+    return target ? [target] : [];
+  }
+  if (phase === "agent-install") {
+    if (!options.runtimeProfile) {
+      throw new MessagingBuildApplierError("Messaging package installation requires --profile");
+    }
+    installMessagingPackagesFromProfile(plan, options.runtimeProfile, env);
+    return [];
+  }
+  const applyOutputs = (): readonly string[] => [
+    ...applyMessagingAgentRenderToLocalFiles(plan),
+    ...applyPostAgentInstallBuildFilesToLocalFiles(plan),
+  ];
+  const applied = applyOutputs();
+  if (plan && effectiveBuildProfile(plan).postRenderRepair && !options.managedStartupRuntime) {
+    runMessagingPostRenderRepair(plan, env);
+    return uniqueStrings([...applied, ...applyOutputs()]);
+  }
+  return uniqueStrings(applied);
+}
+
+function renderInstallerCommand(
+  command: readonly string[],
+  placeholder: "{{archive}}" | "{{packages}}",
+  values: readonly string[],
+): string[] {
+  const positions = command.flatMap((value, index) => (value === placeholder ? [index] : []));
+  if (positions.length !== 1) {
+    throw new MessagingBuildApplierError(
+      `Messaging package installer command must contain exactly one ${placeholder} argument`,
+    );
+  }
+  return command.flatMap((value) => (value === placeholder ? values : [value]));
+}
+
+function installRuntimeNodePackages(
+  installs: readonly VerifiedNodePackageInstall[],
+  profile: MessagingRuntimeProfile,
+  env: Env,
+): void {
+  const installer = profile.build.packageInstallers?.["node-package"];
+  if (!installer || installer.kind !== "verified-archive-command") {
+    throw new MessagingBuildApplierError("Messaging build profile is missing its node package installer");
+  }
+  for (const install of installs) {
+    const installCache = install.runtimeLock
+      ? requireWritableRuntimeInstallCache(install.runtimeLock, env)
+      : undefined;
+    const installEnv = {
+      ...env,
+      NPM_CONFIG_IGNORE_SCRIPTS: "true",
+      npm_config_ignore_scripts: "true",
+      ...(install.runtimeLock
+        ? {
+            NPM_CONFIG_CACHE: installCache,
+            NPM_CONFIG_OFFLINE: String(install.runtimeLock.offline),
+            NPM_CONFIG_LEGACY_PEER_DEPS: String(install.runtimeLock.legacyPeerDeps),
+          }
+        : {}),
+    };
+    const packed = packVerifiedNodePackageArchive(
+      install,
+      installEnv,
+      profile.build.nodeArchiveRemediation === "package-helper",
+    );
+    try {
+      const archiveArgument = `${installer.archiveArgumentPrefix ?? ""}${packed.archivePath}`;
+      runCommand(renderInstallerCommand(installer.command, "{{archive}}", [archiveArgument]), installEnv);
+      if (install.runtimeLock) {
+        const versionEnvironment = installer.packageVersionEnvironment;
+        const packageVersion = versionEnvironment ? sanitizeOptionalString(env[versionEnvironment]) : "";
+        if (!packageVersion) {
+          throw new MessagingBuildApplierError(
+            `${versionEnvironment ?? "Package version environment"} is required to verify the runtime lock`,
+          );
+        }
+        runCommand(
+          [
+            "node",
+            "--experimental-strip-types",
+            install.runtimeLock.verifierPath,
+            install.runtimeLock.lockFile,
+            install.runtimeLock.projectsRoot,
+            packageVersion,
+          ],
+          installEnv,
+        );
+      }
+    } finally {
+      rmSync(packed.rootDir, { recursive: true, force: true });
+    }
+  }
+}
+
+function installRuntimePythonPackages(
+  installs: readonly PinnedPythonPackageInstall[],
+  profile: MessagingRuntimeProfile,
+  env: Env,
+): void {
+  if (installs.length === 0) return;
+  const installer = profile.build.packageInstallers?.["python-package"];
+  if (!installer || installer.kind !== "batched-command") {
+    throw new MessagingBuildApplierError("Messaging build profile is missing its Python package installer");
+  }
+  runCommand(
+    renderInstallerCommand(installer.command, "{{packages}}", installs.map(({ spec }) => spec)),
+    { ...env, ...(installer.environment ?? {}) },
+  );
+}
+
+function installMessagingPackagesFromProfile(
+  plan: MessagingBuildPlan | null,
+  profile: MessagingRuntimeProfile,
+  env: Env,
+  allChannels = false,
+): void {
+  if (!plan && !allChannels) return;
+  const managers = profile.build.packageManagers;
+  if (managers.includes("node-package")) {
+    installRuntimeNodePackages(collectRuntimeNodePackages(plan, profile, env, allChannels), profile, env);
+  }
+  if (managers.includes("python-package")) {
+    installRuntimePythonPackages(collectRuntimePythonPackages(plan, profile, allChannels), profile, env);
+  }
 }
 
 export function installMessagingPackages(plan: MessagingBuildPlan | null, env: Env): void {
@@ -2118,6 +2533,50 @@ export function describeMessagingBuildPhase(
   plan: MessagingBuildPlan | null,
   phase: MessagingBuildPhase,
   env: Env,
+  runtimeProfile?: MessagingRuntimeProfile,
+): BuildCommandResult & {
+  readonly agent: MessagingAgentId | "unknown";
+  readonly phase: MessagingBuildPhase;
+} {
+  const managers = plan ? effectiveBuildProfile(plan).packageManagers : [];
+  const installSpecs =
+    plan && managers.includes("node-package")
+      ? runtimeProfile
+        ? collectRuntimeNodePackages(plan, runtimeProfile, env).map(({ spec }) => spec)
+        : collectOpenClawMessagingPluginInstallSpecs(plan, env)
+      : [];
+  const pythonPackages =
+    plan && managers.includes("python-package")
+      ? runtimeProfile
+        ? collectRuntimePythonPackages(plan, runtimeProfile).map(({ spec }) => spec)
+        : collectHermesMessagingUvPackages(plan)
+      : [];
+  const packageVersion = runtimeProfile?.build.packageInstallers?.["node-package"]
+    ?.packageVersionEnvironment
+    ? env[runtimeProfile.build.packageInstallers["node-package"].packageVersionEnvironment!] ?? ""
+    : env.OPENCLAW_VERSION ?? "";
+  return {
+    agent: plan?.agent ?? "unknown",
+    phase,
+    channels: activeChannels(plan),
+    runtimePlanPath: phase === "runtime-setup" ? messagingRuntimePlanPath(env) : "",
+    doctorEnv:
+      plan && effectiveBuildProfile(plan).postRenderRepair !== undefined
+        ? messagingRepairEnvOverrides(plan, env)
+        : {},
+    installSpecs,
+    pythonPackages,
+    packageVersion,
+    hermesUvPackages: pythonPackages,
+    openclawVersion: packageVersion,
+  };
+}
+
+function describePackageMessagingBuildPhase(
+  plan: MessagingBuildPlan | null,
+  phase: MessagingBuildPhase,
+  env: Env,
+  runtimeProfile?: MessagingRuntimeProfile,
 ): BuildCommandResult & {
   readonly agent: MessagingAgentId | "unknown";
   readonly phase: MessagingBuildPhase;
@@ -2132,26 +2591,65 @@ export function describeMessagingBuildPhase(
         ? messagingRepairEnvOverrides(plan, env)
         : {},
     installSpecs:
-      plan && effectiveBuildProfile(plan).packageManagers.includes("node-package")
-        ? collectOpenClawMessagingPluginInstallSpecs(plan, env)
+      plan && runtimeProfile && effectiveBuildProfile(plan).packageManagers.includes("node-package")
+        ? collectRuntimeNodePackages(plan, runtimeProfile, env).map(({ spec }) => spec)
         : [],
-    hermesUvPackages:
-      plan && effectiveBuildProfile(plan).packageManagers.includes("python-package")
-        ? collectHermesMessagingUvPackages(plan)
+    pythonPackages:
+      plan && runtimeProfile && effectiveBuildProfile(plan).packageManagers.includes("python-package")
+        ? collectRuntimePythonPackages(plan, runtimeProfile).map(({ spec }) => spec)
         : [],
-    openclawVersion: env.OPENCLAW_VERSION || "",
+    packageVersion: runtimeProfile?.build.packageInstallers?.["node-package"]
+      ?.packageVersionEnvironment
+      ? env[runtimeProfile.build.packageInstallers["node-package"].packageVersionEnvironment!] ?? ""
+      : "",
   };
 }
 
 export function main(argv: readonly string[] = process.argv.slice(2)): void {
-  const { agent, phase, dryRun, managedStartupRuntime, mode } = parseMessagingBuildArgs(argv);
+  runMessagingBuildCommand(
+    parseMessagingBuildArgs(argv),
+    applyMessagingBuildPhase,
+    describeMessagingBuildPhase,
+  );
+}
+
+/** Standalone package entry: every operation is bound to explicit package-owned data. */
+export function packageRuntimeMain(argv: readonly string[] = process.argv.slice(2)): void {
+  const parsed = parseMessagingBuildArgs(argv);
+  if (!parsed.profilePath) {
+    throw new MessagingBuildApplierError("Package messaging runtime requires --profile");
+  }
+  runMessagingBuildCommand(
+    parsed,
+    applyPackageMessagingBuildPhase,
+    describePackageMessagingBuildPhase,
+  );
+}
+
+function runMessagingBuildCommand({
+  agent,
+  phase,
+  dryRun,
+  managedStartupRuntime,
+  mode,
+  profilePath,
+}: ReturnType<typeof parseMessagingBuildArgs>, applyPhase: (
+  plan: MessagingBuildPlan | null,
+  phase: MessagingBuildPhase,
+  env: Env,
+  options: MessagingBuildPhaseOptions,
+) => readonly string[], describePhase: typeof describePackageMessagingBuildPhase): void {
   const plan = readMessagingBuildPlanFromEnv(process.env, agent);
+  const runtimeProfile = profilePath ? readMessagingRuntimeProfile(profilePath, agent) : undefined;
   if (phase === "managed-image-capability-union") {
     // Stock publication intentionally has no receipt-backed messaging plan.
     if (plan) {
       throw new MessagingBuildApplierError(
         "Managed-image capability union must be built without a serialized messaging plan",
       );
+    }
+    if (!runtimeProfile) {
+      throw new MessagingBuildApplierError("Managed-image capability union requires --profile");
     }
     if (dryRun) {
       console.log(
@@ -2162,12 +2660,17 @@ export function main(argv: readonly string[] = process.argv.slice(2)): void {
             channels: [],
             runtimePlanPath: "",
             doctorEnv: {},
-            installSpecs:
-              agent === "openclaw"
-                ? collectManagedImageOpenClawPluginInstallSpecs(process.env)
-                : [],
-            hermesUvPackages: agent === "hermes" ? collectManagedImageHermesUvPackages() : [],
-            openclawVersion: process.env.OPENCLAW_VERSION || "",
+            installSpecs: collectRuntimeNodePackages(null, runtimeProfile, process.env, true).map(
+              ({ spec }) => spec,
+            ),
+            pythonPackages: collectRuntimePythonPackages(null, runtimeProfile, true).map(
+              ({ spec }) => spec,
+            ),
+            packageVersion:
+              process.env[
+                runtimeProfile.build.packageInstallers?.["node-package"]
+                  ?.packageVersionEnvironment ?? ""
+              ] ?? "",
           },
           null,
           2,
@@ -2175,14 +2678,29 @@ export function main(argv: readonly string[] = process.argv.slice(2)): void {
       );
       return;
     }
-    installManagedImageCapabilityUnion(agent, process.env);
+    if (process.env.NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION !== "1") {
+      throw new MessagingBuildApplierError(
+        "Managed-image capability union installation requires NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION=1",
+      );
+    }
+    installMessagingPackagesFromProfile(null, runtimeProfile, process.env, true);
     return;
   }
   if (dryRun) {
-    console.log(JSON.stringify(describeMessagingBuildPhase(plan, phase, process.env), null, 2));
+    console.log(
+      JSON.stringify(
+        describePhase(plan, phase, process.env, runtimeProfile),
+        null,
+        2,
+      ),
+    );
     return;
   }
-  applyMessagingBuildPhase(plan, phase, process.env, { managedStartupRuntime, mode });
+  applyPhase(plan, phase, process.env, {
+    managedStartupRuntime,
+    mode,
+    ...(runtimeProfile ? { runtimeProfile } : {}),
+  });
 }
 
 function parseMessagingBuildArgs(argv: readonly string[]): {
@@ -2191,12 +2709,14 @@ function parseMessagingBuildArgs(argv: readonly string[]): {
   readonly dryRun: boolean;
   readonly managedStartupRuntime: boolean;
   readonly mode: MessagingBuildApplyMode;
+  readonly profilePath?: string;
 } {
   let agent: MessagingAgentId | undefined;
   let phase: MessagingBuildCliPhase | undefined;
   let dryRun = false;
   let managedStartupRuntime = false;
   let mode: MessagingBuildApplyMode = "apply";
+  let profilePath: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -2206,6 +2726,15 @@ function parseMessagingBuildArgs(argv: readonly string[]): {
     }
     if (arg === "--managed-startup-runtime") {
       managedStartupRuntime = true;
+      continue;
+    }
+    if (arg === "--profile") {
+      profilePath = readProfilePathArg(argv[index + 1]);
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--profile=")) {
+      profilePath = readProfilePathArg(arg.slice("--profile=".length));
       continue;
     }
     if (arg === "--mode") {
@@ -2249,12 +2778,26 @@ function parseMessagingBuildArgs(argv: readonly string[]): {
     );
   }
   return {
-    agent: agent ?? "openclaw",
+    agent:
+      agent ??
+      (() => {
+        if (globalThis.NEMOCLAW_PACKAGE_MESSAGING_RUNTIME_BUILD === true) {
+          throw new MessagingBuildApplierError("Package messaging runtime requires --agent");
+        }
+        return "openclaw";
+      })(),
     phase: resolvedPhase,
     dryRun,
     managedStartupRuntime,
     mode,
+    ...(profilePath ? { profilePath } : {}),
   };
+}
+
+function readProfilePathArg(value: string | undefined): string {
+  const profilePath = sanitizeOptionalString(value);
+  if (profilePath && isAbsolute(profilePath)) return profilePath;
+  throw new MessagingBuildApplierError("--profile must be an absolute path");
 }
 
 function readApplyModeArg(value: string | undefined): MessagingBuildApplyMode {
@@ -2288,7 +2831,10 @@ function isMainModule(): boolean {
   return process.argv[1] ? import.meta.url === pathToFileURL(resolve(process.argv[1])).href : false;
 }
 
-if (isMainModule()) {
+if (
+  globalThis.NEMOCLAW_PACKAGE_MESSAGING_RUNTIME_BUILD !== true &&
+  isMainModule()
+) {
   try {
     main();
   } catch (error) {

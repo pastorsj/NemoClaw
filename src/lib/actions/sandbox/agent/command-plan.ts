@@ -14,8 +14,28 @@ export type PackageAgentCommandPlan =
       readonly kind: "dispatch";
       readonly argv: readonly string[];
       readonly outputMode: "direct" | "bounded-text" | "bounded-json";
+      readonly structuredTurnEnvelope?: StructuredTurnEnvelopeDeclaration;
       readonly requestedTimeoutSeconds: number | null;
     };
+
+export type ReceiptAgentCommandPlan = Exclude<PackageAgentCommandPlan, { readonly kind: "help" }>;
+
+/** The exact package declaration that authorizes core's finite envelope parser. */
+export type StructuredTurnEnvelopeDeclaration = HarnessAgentCommandDeclaration & {
+  readonly output_interpretation: "structured-turn-envelope";
+};
+
+export function declarationAuthorizesStructuredTurnEnvelope(
+  declaration: StructuredTurnEnvelopeDeclaration,
+  command: readonly string[],
+): boolean {
+  return (
+    declaration.output_mode === "bounded-text" &&
+    declaration.output_interpretation === "structured-turn-envelope" &&
+    declaration.argv.length > 0 &&
+    declaration.argv.every((argument, index) => command[index] === argument)
+  );
+}
 
 function hasSelector(
   args: readonly string[],
@@ -30,6 +50,14 @@ function hasSelector(
       return true;
     }
     if (valueOptions.includes(argument)) index += 1;
+  }
+  return false;
+}
+
+function requestsNativeHelp(args: readonly string[]): boolean {
+  for (const argument of args) {
+    if (argument === "--") return false;
+    if (argument === "-h" || argument === "--help") return true;
   }
   return false;
 }
@@ -120,9 +148,16 @@ export function packageRequestedTimeoutSeconds(
 export function buildPackageAgentCommandPlan(
   declaration: HarnessAgentCommandDeclaration,
   args: readonly string[],
-): PackageAgentCommandPlan {
-  if (args.some((argument) => argument === "-h" || argument === "--help")) {
-    return { kind: "help" };
+): ReceiptAgentCommandPlan {
+  // Help belongs to the package-native command. It is not a turn, so bypass
+  // selector enforcement and relay it without interpreting agent output.
+  if (requestsNativeHelp(args)) {
+    return {
+      kind: "dispatch",
+      argv: Object.freeze([...declaration.argv, ...args]),
+      outputMode: declaration.output_mode,
+      requestedTimeoutSeconds: null,
+    };
   }
   const selectors = declaration.selector_options ?? [];
   if (declaration.selector_required && !hasSelector(args, declaration)) {
@@ -140,6 +175,9 @@ export function buildPackageAgentCommandPlan(
     kind: "dispatch",
     argv: Object.freeze([...declaration.argv, ...args]),
     outputMode,
+    ...(declaration.output_interpretation === "structured-turn-envelope"
+      ? { structuredTurnEnvelope: declaration as StructuredTurnEnvelopeDeclaration }
+      : {}),
     requestedTimeoutSeconds: packageRequestedTimeoutSeconds(args, declaration),
   };
 }

@@ -132,7 +132,10 @@ export function buildOnboardMachineContext(session: Session): OnboardMachineCont
     preferredInferenceApi: nullableString(session.preferredInferenceApi),
     ...(reasoningEffort ? { reasoningEffort } : {}),
     hermesAuthMethod: hermesAuthMethod(session.hermesAuthMethod),
-    hermesToolGateways: stringArray(session.hermesToolGateways),
+    toolGatewaySelections: session.harnessPackage
+      ? stringArray(session.toolGatewaySelections)
+      : null,
+    hermesToolGateways: session.harnessPackage ? null : stringArray(session.hermesToolGateways),
     messagingChannels: getActiveChannelsFromPlan(session.messagingPlan),
     gpuPassthrough: booleanValue(session.gpuPassthrough),
   };

@@ -13,12 +13,17 @@ import { sleepSeconds } from "../core/wait";
 import { getProviderSelectionConfig } from "../inference/config";
 import { runSandboxConfigSync, sandboxConfigSyncArgs } from "../onboard/config-sync";
 import { isValidForwardPort } from "../onboard/dashboard-runtime";
+import { resolveSandboxHealthPort, retargetAgentHealthUrl } from "../onboard/hermes-api-port";
 import { collectLegacyAgentStartupDiagnostics } from "./legacy-diagnostics";
 import { isLegacyOpenClawAgentName } from "../onboard/package/legacy-onboard";
 
 export { collectHermesStartupDiagnostics } from "./legacy-diagnostics";
 
 export {
+  createSecondaryForwardPortScopedSandboxEntryPoints,
+  createSecondaryForwardPortReservationScope,
+  type SecondaryForwardPortReservationScope,
+  withSecondaryForwardPortReservationScope,
   createHermesApiPortScopedSandboxEntryPoints,
   createHermesApiPortReservationScope,
   type HermesApiPortReservationScope,
@@ -221,41 +226,9 @@ function resolveAgentHealthProbeUrl(
   sandboxName: string,
   probeUrl: string,
 ): string {
-  const sandbox = registry.getSandbox(sandboxName);
   const declaredPort = agent.healthProbe?.port;
-  const secondaryHealthPort =
-    sandbox?.agent === agent.name && agent.forward_ports?.includes(declaredPort ?? -1) === true;
-  const effectivePort =
-    declaredPort === agent.forwardPort
-      ? sandbox?.dashboardPort
-      : secondaryHealthPort
-        ? sandbox?.hermesApiPort
-        : null;
-  return retargetHealthProbePort(probeUrl, declaredPort, effectivePort);
-}
-
-/** Retarget a manifest probe only when its declared listener received a new port. */
-function retargetHealthProbePort(
-  probeUrl: string,
-  declaredPort: unknown,
-  effectivePort: unknown,
-): string {
-  if (
-    !isValidForwardPort(declaredPort) ||
-    !isValidForwardPort(effectivePort) ||
-    declaredPort === effectivePort
-  ) {
-    return probeUrl;
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(probeUrl);
-  } catch {
-    return probeUrl;
-  }
-  if (parsed.port !== String(declaredPort)) return probeUrl;
-  parsed.port = String(effectivePort);
-  return parsed.toString();
+  const effectivePort = resolveSandboxHealthPort(sandboxName, agent);
+  return retargetAgentHealthUrl(probeUrl, declaredPort, effectivePort);
 }
 
 const AGENT_BINARY_OBSERVATION_ATTEMPTS = 31;
@@ -328,18 +301,26 @@ export async function handleAgentSetup(
 
   const syncNemoClawConfig = (): void => {
     revalidateSandboxIdentity?.(`synchronize agent configuration in sandbox '${sandboxName}'`);
-    runSandboxConfigSync(sandboxName, {
-      getSelectionConfig: () => {
-        const cfg = getProviderSelectionConfig(provider, model);
-        return cfg ? { ...cfg, agent: agent.name } : null;
+    runSandboxConfigSync(
+      sandboxName,
+      {
+        getSelectionConfig: () => {
+          const cfg = getProviderSelectionConfig(provider, model);
+          return cfg ? { ...cfg, agent: agent.name } : null;
+        },
+        runConnectScript: (name, scriptContent) => {
+          run([openshellBin, ...sandboxConfigSyncArgs(name)], {
+            stdio: ["pipe", "ignore", "inherit"],
+            input: scriptContent,
+          });
+        },
       },
-      runConnectScript: (name, scriptContent) => {
-        run([openshellBin, ...sandboxConfigSyncArgs(name)], {
-          stdio: ["pipe", "ignore", "inherit"],
-          input: scriptContent,
-        });
+      {
+        // A package receipt owns its config posture. Only a pre-package row may
+        // retain the historical OpenClaw permission repair embedded in config sync.
+        legacyOpenClawPermissions: session?.harnessPackage == null,
       },
-    });
+    );
   };
 
   if (resume && sandboxName) {
@@ -663,13 +644,11 @@ function printAdditionalForwardPorts(
 ): void {
   const declared = Array.isArray(agent.forward_ports) ? agent.forward_ports : [];
   if (declared.length === 0) return;
-  const declaredApiPort = agent.healthProbe?.port;
-  // A manifest-declared secondary health port may receive a sandbox-specific
-  // allocation. The registry still carries the historical field name while
-  // the selection itself is driven entirely by declared port metadata.
-  const registeredSandbox = sandboxName ? registry.getSandbox(sandboxName) : undefined;
-  const sandboxApiPort =
-    registeredSandbox?.agent === agent.name ? registeredSandbox.hermesApiPort : undefined;
+  const declaredApiPort =
+    agent.healthProbe?.port_resolution === "sandbox-secondary-forward"
+      ? agent.healthProbe.port
+      : undefined;
+  const sandboxApiPort = sandboxName ? resolveSandboxHealthPort(sandboxName, agent) : undefined;
   for (const declaredPort of declared) {
     if (!Number.isInteger(declaredPort) || declaredPort < 1024 || declaredPort > 65535) continue;
     if (declaredPort === primaryPort || declaredPort === agent.forwardPort) continue;

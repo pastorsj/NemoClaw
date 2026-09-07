@@ -68,10 +68,12 @@ gateway_command: "openclaw gateway run"
 # kind and command let NemoClaw avoid a package-name decision.
 runtime:
   kind: gateway
+  gateway_log_path: /tmp/gateway.log
   command_shell: /bin/sh
   interactive_command: "openclaw tui"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 15 --config /sandbox/.openclaw/fabric.json"
   prompt_transport: stdin
+  prompt_protocol: fabric-cli
   # Core invokes this package-owned controller with one finite lifecycle action
   # and a core-generated nonce. Core still owns privileged sandbox execution.
   process_lifecycle:
@@ -80,11 +82,23 @@ runtime:
   device_pairing_settlement:
     command: [/usr/local/bin/nemoclaw-device-pairing-settle]
     timeout_seconds: 130
+  session_qualification:
+    command: [/usr/local/bin/nemoclaw-session-qualify]
+    timeout_seconds: 30
+  # The package owns translation between this finite turn protocol and
+  # OpenClaw's native WebSocket frames. NemoClaw owns OpenShell execution,
+  # input/output bounds, cancellation, and response delivery.
+  semantic_turn:
+    support: managed
+    command: [/usr/local/bin/nemoclaw-openclaw-semantic-turn]
+    timeout_seconds: 120
+    protocol: semantic-turn-ndjson
   # OpenClaw owns this native argv grammar. NemoClaw only validates the finite
   # declaration and applies its sandbox execution, output, and timeout policy.
   agent_command:
     argv: [openclaw, agent]
     output_mode: bounded-text
+    output_interpretation: structured-turn-envelope
     selector_options: [--agent, --session-id, --session-key, --to]
     selector_required: true
     value_options: [-a, -m, --message, --model, --provider, --reply-channel, --thinking, --timeout]
@@ -105,6 +119,7 @@ health_probe:
   url: "http://127.0.0.1:18789/health"
   port: 18789
   timeout_seconds: 30
+  success_statuses: [200, 401]
 
 # ── Dashboard / UI ──────────────────────────────────────────────
 dashboard:
@@ -129,7 +144,33 @@ state_lifecycle:
   snapshot_restore:
     - repair-mutable-config
   rebuild:
-    image_plugin_provenance: required
+    managed_extensions:
+      support: managed
+      controller:
+        command:
+          - /usr/local/lib/nemoclaw/openclaw-state-extensions.py
+          - /sandbox/.openclaw
+        timeout_seconds: 30
+      state_directory: extensions
+      preserved_directories:
+        - nemoclaw
+        - diagnostics-otel
+        - brave
+        - discord
+        - openclaw-weixin
+        - slack
+        - whatsapp
+        - msteams
+      allowed_symlinks:
+        - kind: relative-within
+          source_pattern: extensions/*/node_modules/.bin/*
+          root_ancestor_depth: 1
+          forbidden_prefixes: [.bin]
+        - kind: exact-target
+          source_pattern: extensions/*/node_modules/openclaw
+          targets:
+            - /usr/local/lib/node_modules/openclaw
+            - /usr/local/lib/nemoclaw/openclaw-runtime/node_modules/openclaw
     scheduled_work:
       support: disabled
       reason: OpenClaw scheduled work does not require a rebuild dispatch gate.
@@ -212,8 +253,60 @@ web_auth_method: device_pairing
 web_search:
   support: providers
   providers:
-    - brave
-    - tavily
+    - provider: brave
+      credential_env: BRAVE_API_KEY
+      profile_type: brave
+      config_verification:
+        path: /sandbox/.openclaw/openclaw.json
+        format: json
+        assertions:
+          - path: [tools, web, search, enabled]
+            equals: true
+          - path: [tools, web, search, provider]
+            equals: brave
+        credential_paths:
+          - [plugins, entries, brave, config, webSearch, apiKey]
+          - [tools, web, search, apiKey]
+      egress_verification:
+        method: GET
+        url: https://api.search.brave.com/res/v1/web/search
+        parameters:
+          - name: q
+            value: NVIDIA
+          - name: count
+            value: 1
+        credential:
+          kind: header
+          name: X-Subscription-Token
+          prefix: none
+        result_array_path: [web, results]
+    - provider: tavily
+      credential_env: TAVILY_API_KEY
+      profile_type: tavily
+      config_verification:
+        path: /sandbox/.openclaw/openclaw.json
+        format: json
+        assertions:
+          - path: [tools, web, search, enabled]
+            equals: true
+          - path: [tools, web, search, provider]
+            equals: tavily
+        credential_paths:
+          - [plugins, entries, tavily, config, webSearch, apiKey]
+          - [tools, web, search, apiKey]
+      egress_verification:
+        method: POST
+        url: https://api.tavily.com/search
+        parameters:
+          - name: query
+            value: NVIDIA
+          - name: max_results
+            value: 1
+        credential:
+          kind: header
+          name: Authorization
+          prefix: bearer
+        result_array_path: [results]
 
 # ── Inference ───────────────────────────────────────────────────
 inference:
@@ -239,6 +332,43 @@ inference:
   provider_type: gateway_managed
   proxy_support: explicit # configured in openclaw.json providers block
 
+# ── Policy UX ───────────────────────────────────────────────────
+policy:
+  context_target: /sandbox/.openclaw/workspace/POLICY.md
+  owned_presets:
+    - brave
+    - openclaw-pricing
+    - openclaw-diagnostics-otel-local
+    - discord
+    - googlechat
+    - slack
+    - teams
+    - telegram
+    - wechat
+    - whatsapp
+  automatic_presets:
+    - name: openclaw-pricing
+      activation:
+        kind: always
+      apply_during_create: false
+      suppress_in_tiers: [restricted, personal]
+    - name: openclaw-diagnostics-otel-local
+      activation:
+        kind: local-endpoint-enabled
+        enabled_environment: NEMOCLAW_OPENCLAW_OTEL
+        endpoint_environment: NEMOCLAW_OPENCLAW_OTEL_ENDPOINT
+        default_endpoint: http://host.openshell.internal:4318
+        local_origin: http://host.openshell.internal:4318
+      apply_during_create: true
+      suppress_in_tiers: [restricted]
+  baseline_exclusion_impacts:
+    nvidia: Direct NVIDIA API inference may stop working.
+    openclaw_gateway_dialback: OpenClaw sessions_spawn and multi-agent delegation may stop working.
+    clawhub: ClawHub authentication and skill or plugin discovery may stop working.
+    openclaw_api: OpenClaw authentication and plugin discovery may stop working.
+    openclaw_docs: In-sandbox access to OpenClaw documentation may stop working.
+    npm_registry: OpenClaw plugin installation from npm may stop working.
+
 # ── MCP server support ───────────────────────────────────────────
 mcp:
   support: bridge
@@ -258,6 +388,12 @@ sessions:
     - delete
     - reset
     - export
+
+# ── Secondary agent roster ─────────────────────────────────────
+agent_roster:
+  support: managed
+  adapter: agent-roster
+  onboarding_environment: NEMOCLAW_EXTRA_AGENTS_JSON
 
 # ── Skill installation ───────────────────────────────────────────
 skills:

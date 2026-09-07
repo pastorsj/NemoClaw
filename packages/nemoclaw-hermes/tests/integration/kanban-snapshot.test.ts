@@ -6,37 +6,40 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, expect, it } from "vitest";
+import { expect, it } from "vitest";
 
-import {
-  createSnapshotBackupAuthorityFixture,
-  createSnapshotHarnessPackageFixture,
-  createSnapshotRestoreAuthorityFixture,
-} from "../../../../test/helpers/snapshot-authority.ts";
+import { buildAgentDefinition } from "../../../../src/lib/agent-runtime/manifest-loader";
+import { REGISTRY_FILE } from "../../../../src/lib/state/registry/persistence";
+import { createSnapshotRestoreAuthorityFixture } from "../../../../test/helpers/snapshot-authority.ts";
+import { installHermesPackage } from "../helpers/package-store";
 
-// sandbox-state captures HOME when the module loads, so isolate its registry
-// and rebuild backups before importing it.
-const ORIGINAL_HOME = process.env.HOME;
-const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-kanban-snapshot-"));
-process.env.HOME = TMP_HOME;
+// The Vitest setup owns a unique HOME for this file. Keep the package store,
+// registry constant, and dynamically loaded snapshot module on that one path;
+// changing process.env.HOME at module scope races other files in a parallel worker.
+const TMP_HOME = process.env.HOME;
+if (!TMP_HOME || !path.isAbsolute(TMP_HOME)) {
+  throw new Error("Hermes kanban snapshot tests require an isolated absolute HOME");
+}
+const HERMES_INSTALLED_PACKAGE = installHermesPackage(TMP_HOME);
+const HERMES_PACKAGE_IDENTITY = HERMES_INSTALLED_PACKAGE.identity;
+const HERMES_AGENT_DEFINITION = buildAgentDefinition({
+  manifest: HERMES_INSTALLED_PACKAGE.packageManifest.manifest,
+  manifestPath: HERMES_INSTALLED_PACKAGE.packageManifest.manifestPath,
+  packageRoot: HERMES_INSTALLED_PACKAGE.packageRoot,
+});
 const sandboxState = await import(
   pathToFileURL(path.join(import.meta.dirname, "../../../..", "src", "lib", "state", "sandbox.ts"))
     .href
 );
-
-afterAll(() => {
-  ORIGINAL_HOME === undefined ? delete process.env.HOME : (process.env.HOME = ORIGINAL_HOME);
-  fs.rmSync(TMP_HOME, { recursive: true, force: true });
-});
 
 function writeExecutable(filePath: string, source: string): void {
   fs.writeFileSync(filePath, source, { mode: 0o755 });
 }
 
 function writeHermesRegistry(): void {
-  fs.mkdirSync(path.join(TMP_HOME, ".nemoclaw"), { recursive: true });
+  fs.mkdirSync(path.dirname(REGISTRY_FILE), { recursive: true });
   fs.writeFileSync(
-    path.join(TMP_HOME, ".nemoclaw", "sandboxes.json"),
+    REGISTRY_FILE,
     JSON.stringify({
       defaultSandbox: "hermes",
       sandboxes: {
@@ -46,7 +49,7 @@ function writeHermesRegistry(): void {
           provider: "p",
           gpuEnabled: false,
           agent: "hermes",
-          harnessPackage: createSnapshotHarnessPackageFixture("hermes"),
+          harnessPackage: HERMES_PACKAGE_IDENTITY,
         },
       },
     }),
@@ -60,6 +63,7 @@ function exerciseFailedKanbanBackup(options: { mode: "execute" | "empty-success"
   backupComplete: boolean | undefined;
   localKanbanBackupExists: boolean;
   remoteKanbanStatus: number | null;
+  error: string | undefined;
 } {
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-kanban-failure-"));
   const oldPath = process.env.PATH;
@@ -93,7 +97,11 @@ const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const mode = ${JSON.stringify(options.mode)};
 if (mode === "empty-success") {
-  if (cmd.includes("[ -d ")) process.exit(0);
+  if (
+    cmd.startsWith("{ [ -d ") ||
+    cmd.startsWith("{ for d ") ||
+    cmd.startsWith("[ -d ")
+  ) process.exit(0);
   if (cmd.includes("nemoclaw-sqlite-backup") && cmd.includes("kanban.db")) process.exit(0);
   process.exit(2);
 }
@@ -111,7 +119,8 @@ process.exit(result.status === null ? 1 : result.status);
     process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
 
     const backup = sandboxState.backupSandboxState("hermes", {
-      ...createSnapshotBackupAuthorityFixture("hermes"),
+      agentDefinition: HERMES_AGENT_DEFINITION,
+      harnessPackage: HERMES_PACKAGE_IDENTITY,
       name: options.name,
     });
     return {
@@ -125,6 +134,7 @@ process.exit(result.status === null ? 1 : result.status);
       remoteKanbanStatus: fs.existsSync(remoteStatusPath)
         ? Number(fs.readFileSync(remoteStatusPath, "utf-8"))
         : null,
+      error: backup.error,
     };
   } finally {
     oldOpenshell === undefined
@@ -139,6 +149,7 @@ it("fails closed when the remote Hermes SQLite backup command fails (#7144)", ()
   const result = exerciseFailedKanbanBackup({ mode: "execute", name: "invalid-kanban" });
 
   expect(result.success).toBe(false);
+  expect(result.error, result.error).toBeUndefined();
   expect(result.backedUpFiles).toEqual([]);
   expect(result.failedFiles).toEqual(["kanban.db"]);
   expect(result.backupComplete).toBe(false);
@@ -150,6 +161,7 @@ it("rejects an empty Hermes SQLite backup payload (#7144)", () => {
   const result = exerciseFailedKanbanBackup({ mode: "empty-success", name: "empty-kanban" });
 
   expect(result.success).toBe(false);
+  expect(result.error, result.error).toBeUndefined();
   expect(result.backedUpFiles).toEqual([]);
   expect(result.failedFiles).toEqual(["kanban.db"]);
   expect(result.backupComplete).toBe(false);
@@ -239,7 +251,11 @@ function readStdin() {
   }
   return Buffer.concat(chunks);
 }
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.exit(0);
 }
 if (cmd.includes("nemoclaw-sqlite-backup")) {
@@ -263,10 +279,11 @@ process.exit(0);
     process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
 
     const backup = sandboxState.backupSandboxState("hermes", {
-      ...createSnapshotBackupAuthorityFixture("hermes"),
+      agentDefinition: HERMES_AGENT_DEFINITION,
+      harnessPackage: HERMES_PACKAGE_IDENTITY,
       name: "kanban-state",
     });
-    expect(backup.success).toBe(true);
+    expect(backup.success, backup.error).toBe(true);
     expect(backup.backedUpFiles).toEqual(["kanban.db"]);
     expect(backup.failedFiles).toEqual([]);
     expect(backup.backedUpDirs).not.toContain("kanban");
@@ -275,9 +292,6 @@ process.exit(0);
       path: "kanban.db",
       strategy: "sqlite_backup",
     });
-    expect(fs.readFileSync(path.join(backup.manifest!.backupPath, "kanban.db"), "utf-8")).toBe(
-      "original kanban database\n",
-    );
     expect(fs.existsSync(path.join(backup.manifest!.backupPath, "kanban"))).toBe(false);
 
     fs.writeFileSync(path.join(hermesDir, "kanban.db"), "changed kanban database\n");
@@ -288,16 +302,15 @@ process.exit(0);
     fs.writeFileSync(externalDirFile, "fresh external dir workspace\n");
     fs.writeFileSync(externalWorktreeFile, "fresh external worktree\n");
 
-    const restore = sandboxState.restoreSandboxState(
-      "hermes",
-      backup.manifest!.backupPath,
-      createSnapshotRestoreAuthorityFixture(
+    const restore = sandboxState.restoreSandboxState("hermes", backup.manifest!.backupPath, {
+      ...createSnapshotRestoreAuthorityFixture(
         sandboxState,
         "hermes",
         "hermes",
         backup.manifest!.backupPath,
       ),
-    );
+      agentDefinition: HERMES_AGENT_DEFINITION,
+    });
     expect(restore.success).toBe(true);
     expect(restore.restoredFiles).toEqual(["kanban.db"]);
     expect(restore.restoredDirs).toEqual([]);

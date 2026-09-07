@@ -3,7 +3,7 @@
 
 import path from "node:path";
 
-import { inspectHarnessPackageState } from "../agent-runtime/package/identity";
+import { inspectHarnessPackageState } from "../agent-runtime/package/identity-read";
 import { normalizeProcessExitCode } from "../core/process-status";
 import type { ServingProfileProvenance } from "../inference/serving/types";
 import { NEMOCLAW_VLLM_GPU_DEVICE_ENV, parseVllmGpuDevice } from "../inference/vllm-models";

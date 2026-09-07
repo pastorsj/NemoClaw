@@ -32,12 +32,14 @@ import {
 } from "../managed-image/contract";
 import {
   buildLegacyManagedStartupProfile,
+  buildInstalledStartupPlan,
   buildManagedStartupInferenceCandidates,
   type BuiltManagedStartupOnboardProfile,
   type BuiltManagedStartupPackageProfile,
   type LoadHarnessStartupProfileAdapter,
   type ManagedStartupOnboardProfileInput,
   prepareInitialManagedStartupPackageProfile,
+  isManagedStartupPackageProfile,
 } from "../managed-startup/profile-selection";
 import { createManagedStartupRootApplyRequest } from "../managed-startup/root-apply";
 import {
@@ -165,7 +167,7 @@ export interface CreateManagedWorkloadOnboardRuntimeInput {
   readonly tempManagedRuntimeCatalog: string | null;
   readonly agentName: string;
   /** Receipt-pinned definition selected for this exact onboarding transaction. */
-  readonly agentDefinition?: Pick<AgentDefinition, "managedImage" | "name">;
+  readonly agentDefinition?: AgentDefinition;
   /** Exact installed package selected for this onboarding transaction. */
   readonly harnessPackage?: HarnessPackageIdentity | null;
   readonly legacyDockerfilePath: string;
@@ -183,6 +185,8 @@ export interface CreateManagedWorkloadOnboardRuntimeInput {
 export interface ManagedWorkloadOnboardRuntime {
   readonly runtimeProvider: RuntimeProviderBundle | null;
   readonly agentDefinition?: Pick<AgentDefinition, "managedImage" | "name">;
+  /** Full definition only when the same transaction carries an exact package receipt. */
+  readonly receiptAgentDefinition: AgentDefinition | null;
   ensurePreparedWorkload(): Promise<PreparedSandboxWorkloadSource>;
   ensurePreparedProfile(
     workload: PreparedSandboxWorkloadSource,
@@ -376,9 +380,14 @@ export function createManagedWorkloadOnboardRuntime(
   const ensurePreparedProfile = (
     workload: PreparedSandboxWorkloadSource,
   ): BuiltManagedStartupOnboardProfile | BuiltManagedStartupPackageProfile | null => {
-    if (workload.source.kind !== "managed-image") return null;
-    requireBootstrapProvider(runtimeProvider);
+    const packageProfileRequired =
+      input.harnessPackage != null || input.managedWorkloadRebuild?.harnessPackage != null;
+    if (workload.source.kind !== "managed-image" && !packageProfileRequired) return null;
+    if (workload.source.kind === "managed-image") requireBootstrapProvider(runtimeProvider);
     if (input.managedWorkloadRebuild) {
+      if (workload.source.kind !== "managed-image") {
+        throw new Error("Managed rebuild workload did not retain its prepared image source.");
+      }
       if (workload.source.reference !== input.managedWorkloadRebuild.replacement.source.reference) {
         throw new Error("Managed rebuild workload changed before startup profile preparation.");
       }
@@ -423,9 +432,12 @@ export function createManagedWorkloadOnboardRuntime(
             },
             webSearch: input.startupProfile.webSearch,
             toolDisclosure: input.startupProfile.toolDisclosure,
-            enabledToolGateways: input.startupProfile.hermesToolGateways,
+            enabledToolGateways: input.startupProfile.enabledToolGateways ?? [],
             messagingPlan: input.startupProfile.messagingPlan,
-            approvalMode: input.startupProfile.dcodeAutoApprovalMode,
+            approvalMode:
+              input.startupProfile.approvalMode ??
+              input.startupProfile.dcodeAutoApprovalMode ??
+              "disabled",
             observabilityEnabled: input.startupProfile.observabilityEnabled,
             environment: input.startupProfile.environment,
             corporateCa: resolveCorporateCa(input.startupProfile.environment),
@@ -452,6 +464,7 @@ export function createManagedWorkloadOnboardRuntime(
   return {
     runtimeProvider,
     agentDefinition,
+    receiptAgentDefinition: input.harnessPackage ? input.agentDefinition! : null,
     ensurePreparedWorkload,
     ensurePreparedProfile,
   };
@@ -497,6 +510,7 @@ export interface PrepareOnboardSandboxWorkloadLaunchInput {
     readonly gatewayPort: number;
   };
   readonly dependencies: {
+    readonly buildInstalledStartupPlan?: typeof buildInstalledStartupPlan;
     readonly materializeSandboxCreatePlan: typeof import("../sandbox-create-plan-materialization").materializeSandboxCreatePlan;
     readonly prepareSandboxBuildPatchConfig: typeof import("../sandbox-build-patch-config").prepareSandboxBuildPatchConfig;
     readonly resolveSandboxBuildPatch?: typeof import("../prepared-dcode-rebuild").resolveSandboxBuildPatch;
@@ -551,6 +565,7 @@ export async function prepareOnboardSandboxWorkloadLaunch(
   const messagingTokenDefs = await input.plan.rebindMessagingTokenDefs();
   const createPlan = input.dependencies.materializeSandboxCreatePlan({
     intent: input.plan.intent,
+    packageAgentDefinition: input.runtime.receiptAgentDefinition ?? undefined,
     fromRef,
     policylessCreate: input.plan.policylessCreate,
     deferSandboxEffectsUntilIdentityVerification:
@@ -627,6 +642,26 @@ export async function prepareOnboardSandboxWorkloadLaunch(
     const buildContext = requireLegacyBuildContext(legacyBuildContext);
     input.dependencies.prepareSandboxBuildPatchConfig({ configuredMessagingChannels });
     const patchInput = input.legacy.resolvePatchInput();
+    const preparedProfile = input.runtime.ensurePreparedProfile(input.workload);
+    const installedStartupPlan =
+      preparedProfile && isManagedStartupPackageProfile(preparedProfile.profile)
+        ? (input.dependencies.buildInstalledStartupPlan ?? buildInstalledStartupPlan)(
+            preparedProfile.profile,
+            process.env,
+          )
+        : null;
+    const packageDockerfilePlan =
+      installedStartupPlan && preparedProfile
+        ? {
+            packageId: installedStartupPlan.agent,
+            configurationEnvironment: installedStartupPlan.configurationEnvironment,
+            materials: installedStartupPlan.materials,
+            ...(preparedProfile?.corporateCaB64 === undefined
+              ? {}
+              : { corporateCaB64: preparedProfile.corporateCaB64 }),
+            dashboardRemoteBindPrepared: preparedProfile.dashboardRemoteBindPrepared,
+          }
+        : undefined;
     const patch = await (input.dependencies.resolveSandboxBuildPatch ?? resolveSandboxBuildPatch)({
       // Build-context staging resolves managed-agent base-image provenance.
       // Read the patch input only after that boundary so the final image gets
@@ -637,6 +672,7 @@ export async function prepareOnboardSandboxWorkloadLaunch(
       fromDockerfile: buildContext.origin === "generated" ? null : patchInput.fromDockerfile,
       selectedGpuRoute: initialGpuRoute,
       stagedDockerfile: buildContext.stagedDockerfile,
+      ...(packageDockerfilePlan === undefined ? {} : { packageDockerfilePlan }),
     });
     buildId = patch.buildId;
     dashboardRemoteBindPrepared = patch.dashboardRemoteBindPrepared;
@@ -778,18 +814,33 @@ export function resolveOnboardSandboxWorkloadReceipt(input: {
     input.prebuildImageRef ??
     input.extractBuiltImageRef(output) ??
     input.resolveSandboxImageTagFromCreateOutput(output, input.buildId);
+  const profile = input.runtime.ensurePreparedProfile(input.workload);
   if (input.workload.source.kind === "legacy-dockerfile") {
+    if (profile !== null && !isManagedStartupPackageProfile(profile.profile)) {
+      throw new Error("Dockerfile package startup profile is not package-bound.");
+    }
     return {
       resolvedImageTag,
       workloadReceipt: {
         schemaVersion: 1,
         kind: "legacy-dockerfile",
         reference: resolvedImageTag,
+        ...(profile === null
+          ? {}
+          : {
+              packageStartupProfile: {
+                encodedProfile: profile.encodedProfile,
+                startupProfileSha256: profile.startupProfileSha256,
+                credentialProxyReplayRequired: profile.credentialProxyReplayRequired,
+                ...(profile.corporateCaB64 === undefined
+                  ? {}
+                  : { corporateCaB64: profile.corporateCaB64 }),
+              },
+            }),
         shared: false,
       },
     };
   }
-  const profile = input.runtime.ensurePreparedProfile(input.workload);
   if (!profile) throw new Error("Managed sandbox workload is missing its startup profile.");
   return {
     resolvedImageTag,

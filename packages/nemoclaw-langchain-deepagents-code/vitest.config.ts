@@ -110,7 +110,9 @@ export default defineConfig({
       "tests/host/session-adapter.test.ts",
       "tests/host/startup-adapter.test.ts",
       "tests/image/fabric-runtime.test.ts",
+      "tests/integration/live-contract.test.ts",
       "tests/runtime/backup-ready.test.ts",
+      "tests/runtime/selection-qualify.test.ts",
     ],
   },
 });

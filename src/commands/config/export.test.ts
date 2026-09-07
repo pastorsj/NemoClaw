@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Interfaces } from "@oclif/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -24,6 +25,24 @@ vi.mock("../../lib/config/export-live-adapters", async (importOriginal) => ({
 }));
 
 import ConfigExportCommand from "./export";
+
+const sourceHelpOptions = {
+  root: process.cwd(),
+  pjson: {
+    name: "nemoclaw",
+    version: "0.0.0-test",
+    oclif: {
+      bin: "nemoclaw",
+      commands: {
+        strategy: "pattern",
+        target: "./src/commands",
+        globPatterns: ["config/export.ts"],
+      },
+      helpClass: "./src/lib/cli/public-help",
+      topicSeparator: " ",
+    },
+  },
+} satisfies Interfaces.Options;
 
 describe("config export command", () => {
   beforeEach(() => {
@@ -66,34 +85,41 @@ describe("config export command", () => {
   });
 
   it("provides short and long command help without reading source state (#10938)", async () => {
-    await expect(ConfigExportCommand.run(["alpha", "--help"], process.cwd())).rejects.toMatchObject(
+    await expect(
+      ConfigExportCommand.run(["alpha", "--help"], sourceHelpOptions),
+    ).rejects.toMatchObject({
+      code: "EEXIT",
+      oclif: { exit: 0 },
+    });
+    await expect(ConfigExportCommand.run(["alpha", "-h"], sourceHelpOptions)).rejects.toMatchObject(
       {
         code: "EEXIT",
         oclif: { exit: 0 },
       },
     );
-    await expect(ConfigExportCommand.run(["alpha", "-h"], process.cwd())).rejects.toMatchObject({
-      code: "EEXIT",
-      oclif: { exit: 0 },
-    });
     expect(mocks.observeLiveExportSource).not.toHaveBeenCalled();
   });
 
   it("composes live observation through file publication and JSON result (#10938)", async () => {
-    await expect(
-      ConfigExportCommand.run(["alpha", "--output", "/tmp/alpha.yaml", "--json"], process.cwd()),
-    ).resolves.toMatchObject({
-      status: "succeeded",
-      sourceSandbox: "alpha",
-      outputPath: "/tmp/alpha.yaml",
-      documentDigest: "sha256:document",
-      specDigest: "sha256:spec",
-    });
-    expect(mocks.publishExportFile).toHaveBeenCalledWith(
-      "/tmp/alpha.yaml",
-      "kind: NemoClawConfig\n",
-      false,
-    );
+    const platform = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+    try {
+      await expect(
+        ConfigExportCommand.run(["alpha", "--output", "/tmp/alpha.yaml", "--json"], process.cwd()),
+      ).resolves.toMatchObject({
+        status: "succeeded",
+        sourceSandbox: "alpha",
+        outputPath: "/tmp/alpha.yaml",
+        documentDigest: "sha256:document",
+        specDigest: "sha256:spec",
+      });
+      expect(mocks.publishExportFile).toHaveBeenCalledWith(
+        "/tmp/alpha.yaml",
+        "kind: NemoClawConfig\n",
+        false,
+      );
+    } finally {
+      platform.mockRestore();
+    }
   });
 
   it("declares the required output and safe replacement flags (#10938)", () => {

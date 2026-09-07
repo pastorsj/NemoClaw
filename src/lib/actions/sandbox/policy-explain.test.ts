@@ -12,6 +12,7 @@ import type { PolicyContext } from "../../policy/context";
 import {
   explainSandboxPolicy,
   POLICY_CONTEXT_SANDBOX_PATH,
+  resolvePolicyContextWriteTarget,
   writePolicyContextToSandbox,
 } from "./policy-explain";
 
@@ -134,6 +135,62 @@ describe("explainSandboxPolicy", () => {
 });
 
 describe("writePolicyContextToSandbox", () => {
+  it("writes to the package-declared target instead of assuming a harness path", () => {
+    const targetPath = "/sandbox/.future-agent/context/POLICY.md";
+    const assertCurrentAuthority = vi.fn();
+    const exec = vi.fn((_sandbox: string, _command: string) => ({
+      status: 0,
+      stdout: "",
+      stderr: "",
+    }));
+
+    const result = writePolicyContextToSandbox("alpha", {
+      build: fakeContext,
+      render: () => "policy\n",
+      exec,
+      resolveTarget: () => ({ targetPath, assertCurrentAuthority }),
+    });
+
+    expect(result).toEqual({ written: true, targetPath });
+    expect(assertCurrentAuthority).toHaveBeenCalledOnce();
+    expect(exec.mock.calls[0][1]).toContain(`'${targetPath}'`);
+    expect(exec.mock.calls[0][1]).not.toContain(POLICY_CONTEXT_SANDBOX_PATH);
+  });
+
+  it("reports unsupported without executing when a package declares no context target", () => {
+    const exec = vi.fn();
+
+    const result = writePolicyContextToSandbox("alpha", {
+      build: fakeContext,
+      render: () => "policy\n",
+      exec,
+      resolveTarget: () => null,
+    });
+
+    expect(result.failure).toBe("unsupported");
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("refuses the write when exact package authority changes after rendering", () => {
+    const exec = vi.fn();
+
+    const result = writePolicyContextToSandbox("alpha", {
+      build: fakeContext,
+      render: () => "policy\n",
+      exec,
+      resolveTarget: () => ({
+        targetPath: "/sandbox/.future-agent/context/POLICY.md",
+        assertCurrentAuthority: () => {
+          throw new Error("receipt changed");
+        },
+      }),
+    });
+
+    expect(result.failure).toBe("authority-invalid");
+    expect(result.reason).toContain("receipt changed");
+    expect(exec).not.toHaveBeenCalled();
+  });
+
   it("encodes the rendered markdown as base64 and pipes it through base64 -d", () => {
     const build = vi.fn(fakeContext);
     const render = vi.fn(() => "hello sandbox\n");
@@ -168,11 +225,13 @@ describe("writePolicyContextToSandbox", () => {
     // Payload must land in a freshly-minted temp file under the workspace
     // directory before any rename — never written directly to the final
     // path.
-    expect(command).toContain("mktemp /sandbox/.openclaw/workspace/.POLICY.md.XXXXXX");
+    expect(command).toContain("mktemp '/sandbox/.openclaw/workspace/.POLICY.md.XXXXXX'");
     // The atomic replace must use rename(2) semantics — `mv -fT` operates
     // on the link itself rather than the target of a symlink, so a
     // pre-existing POLICY.md symlink is replaced, never followed.
-    expect(command).toMatch(/mv -fT -- "\$__pm_tmp" \/sandbox\/\.openclaw\/workspace\/POLICY\.md/);
+    expect(command).toMatch(
+      /mv -fT -- "\$__pm_tmp" '\/sandbox\/\.openclaw\/workspace\/POLICY\.md'/,
+    );
     // The legacy direct-redirect-into-target form must not appear — that
     // form would write through a pre-existing symlink and is the failure
     // mode this contract guards against.
@@ -252,4 +311,64 @@ describe("writePolicyContextToSandbox", () => {
       expect(occurrences).toBeGreaterThanOrEqual(1);
     },
   );
+});
+
+describe("resolvePolicyContextWriteTarget", () => {
+  it("reads the target from exact package authority and rechecks it before mutation", () => {
+    const entry = { harnessPackage: { id: "future-agent" } } as never;
+    const authority = {
+      definition: {
+        policyCapability: {
+          context_target: "/sandbox/.future-agent/POLICY.md",
+        },
+      },
+    } as never;
+    const getSandbox = vi.fn(() => entry);
+    const captureAuthority = vi.fn(() => authority);
+    const requireCurrentAuthority = vi.fn(() => authority);
+
+    const target = resolvePolicyContextWriteTarget("alpha", {
+      getSandbox,
+      captureAuthority,
+      requireCurrentAuthority,
+    });
+
+    expect(target?.targetPath).toBe("/sandbox/.future-agent/POLICY.md");
+    target?.assertCurrentAuthority?.();
+    expect(captureAuthority).toHaveBeenCalledWith(entry);
+    expect(requireCurrentAuthority).toHaveBeenCalledWith(authority, entry);
+  });
+
+  it("does not substitute a target for a receipt-backed package that omits the capability", () => {
+    const entry = { harnessPackage: { id: "future-agent" } } as never;
+    const authority = { definition: { policyCapability: {} } } as never;
+
+    expect(
+      resolvePolicyContextWriteTarget("alpha", {
+        getSandbox: () => entry,
+        captureAuthority: () => authority,
+        requireCurrentAuthority: () => authority,
+      }),
+    ).toBeNull();
+  });
+
+  it("retains the historical path only for a sandbox without a package receipt", () => {
+    const target = resolvePolicyContextWriteTarget("legacy", {
+      getSandbox: () => ({ harnessPackage: null } as never),
+      captureAuthority: vi.fn(),
+      requireCurrentAuthority: vi.fn(),
+    });
+
+    expect(target).toEqual({ targetPath: POLICY_CONTEXT_SANDBOX_PATH });
+  });
+
+  it("fails closed for a partial package migration instead of entering legacy behavior", () => {
+    expect(() =>
+      resolvePolicyContextWriteTarget("partial", {
+        getSandbox: () => ({ harnessPackage: null, harnessPackageMigration: {} } as never),
+        captureAuthority: vi.fn(),
+        requireCurrentAuthority: vi.fn(),
+      }),
+    ).toThrow("migration has no current package receipt");
+  });
 });

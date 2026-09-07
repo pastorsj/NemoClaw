@@ -287,6 +287,9 @@ export interface Session {
   stationExpressReceiptRetirement: string | null;
   endpointUrl: string | null;
   credentialEnv: string | null;
+  /** Receipt-backed package authentication method; never contains credentials. */
+  providerAuthMethod: string | null;
+  /** No-receipt compatibility field. Receipt rows decode it once, then clear it. */
   hermesAuthMethod: HermesAuthMethod | null;
   preferredInferenceApi: string | null;
   compatibleEndpointReasoning: string | null;
@@ -307,6 +310,9 @@ export interface Session {
   observabilityRequestedExplicitly: boolean;
   /** Operator-selected APF create mode; this is not observed policy provenance. */
   apfInterceptorRequested: boolean;
+  /** Receipt-backed package managed-tool selections; never contains credentials. */
+  toolGatewaySelections: string[] | null;
+  /** No-receipt Hermes compatibility field. */
   hermesToolGateways: string[] | null;
   messagingPlan: SandboxMessagingPlan | null;
   /** Non-secret names of credential providers registered before sandbox setup completed. */
@@ -378,6 +384,7 @@ export interface SessionUpdates {
   servingProfileProvenance?: ServingProfileProvenance | null;
   endpointUrl?: string | null;
   credentialEnv?: string | null;
+  providerAuthMethod?: string | null;
   hermesAuthMethod?: HermesAuthMethod | null;
   preferredInferenceApi?: string | null;
   compatibleEndpointReasoning?: string | null;
@@ -388,6 +395,7 @@ export interface SessionUpdates {
   webSearchConfig?: WebSearchConfig | null;
   toolDisclosure?: ToolDisclosure;
   observabilityEnabled?: boolean;
+  toolGatewaySelections?: string[] | null;
   hermesToolGateways?: string[] | null;
   messagingPlan?: SandboxMessagingPlan | null;
   migratedLegacyValueHashes?: Record<string, string>;
@@ -415,6 +423,7 @@ export interface DebugSessionSummary {
   servingProfileProvenance: ServingProfileProvenance | null;
   endpointUrl: string | null;
   credentialEnv: string | null;
+  providerAuthMethod: string | null;
   hermesAuthMethod: HermesAuthMethod | null;
   preferredInferenceApi: string | null;
   compatibleEndpointReasoning: string | null;
@@ -424,6 +433,7 @@ export interface DebugSessionSummary {
   observabilityEnabled: boolean;
   observabilityRequestedExplicitly: boolean;
   apfInterceptorRequested: boolean;
+  toolGatewaySelections: string[] | null;
   hermesToolGateways: string[] | null;
   gpuPassthrough: boolean;
   lastStepStarted: string | null;
@@ -567,6 +577,14 @@ function parseVllmGpuDevice(value: unknown): string | null {
 
 function readHermesAuthMethod(value: SessionJsonValue | undefined): HermesAuthMethod | null {
   return value === "oauth" || value === "api_key" ? value : null;
+}
+
+function readProviderAuthMethod(value: SessionJsonValue | undefined): string | null {
+  return typeof value === "string" && /^[a-z][a-z0-9-]{0,63}$/u.test(value) ? value : null;
+}
+
+function decodeLegacyProviderAuthMethod(value: HermesAuthMethod | null): string | null {
+  return value === "api_key" ? "api-key" : value;
 }
 
 function readPositiveInteger(value: SessionJsonValue | undefined): number | null {
@@ -822,10 +840,7 @@ function parseMachineSnapshot(
   };
 }
 
-function hasValidPresentMachineSnapshot(
-  source: UnknownRecord,
-  sessionId: string,
-): boolean {
+function hasValidPresentMachineSnapshot(source: UnknownRecord, sessionId: string): boolean {
   if (!hasOwn(source, "machine")) return true;
   const machine = source.machine;
   if (!isObject(machine)) return false;
@@ -1015,6 +1030,8 @@ export function createSession(overrides: Partial<Session> = {}): Session {
     overrides.harnessPackage,
     overrides.harnessPackageMigration,
   );
+  const receiptBacked = harnessPackageState.status === "valid";
+  const legacyHermesAuthMethod = overrides.hermesAuthMethod ?? null;
   const session: Session = {
     version: SESSION_VERSION,
     sessionId,
@@ -1048,7 +1065,11 @@ export function createSession(overrides: Partial<Session> = {}): Session {
       : null,
     endpointUrl: overrides.endpointUrl ?? null,
     credentialEnv: overrides.credentialEnv ?? null,
-    hermesAuthMethod: overrides.hermesAuthMethod ?? null,
+    providerAuthMethod: receiptBacked
+      ? (readProviderAuthMethod(overrides.providerAuthMethod) ??
+        decodeLegacyProviderAuthMethod(legacyHermesAuthMethod))
+      : null,
+    hermesAuthMethod: receiptBacked ? null : legacyHermesAuthMethod,
     preferredInferenceApi: overrides.preferredInferenceApi ?? null,
     compatibleEndpointReasoning: overrides.compatibleEndpointReasoning ?? null,
     compatibleEndpointReasoningEffort: normalizeReasoningEffort(
@@ -1067,7 +1088,11 @@ export function createSession(overrides: Partial<Session> = {}): Session {
     observabilityEnabled: overrides.observabilityEnabled === true,
     observabilityRequestedExplicitly: overrides.observabilityRequestedExplicitly === true,
     apfInterceptorRequested: overrides.apfInterceptorRequested === true,
-    hermesToolGateways: readStringArray(overrides.hermesToolGateways),
+    toolGatewaySelections: receiptBacked
+      ? (readStringArray(overrides.toolGatewaySelections) ??
+        readStringArray(overrides.hermesToolGateways))
+      : null,
+    hermesToolGateways: receiptBacked ? null : readStringArray(overrides.hermesToolGateways),
     messagingPlan: parseSandboxMessagingPlan(overrides.messagingPlan),
     stagedCredentialProviders: readStringArray(overrides.stagedCredentialProviders) ?? [],
     migratedLegacyValueHashes: overrides.migratedLegacyValueHashes
@@ -1160,6 +1185,14 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
       "Refusing to load the onboarding session: saved recovery authority is incomplete.",
     );
   }
+  const providerAuthMethod = readProviderAuthMethod(data.providerAuthMethod);
+  if (
+    hasOwn(data, "providerAuthMethod") &&
+    data.providerAuthMethod !== null &&
+    !providerAuthMethod
+  ) {
+    return null;
+  }
 
   const normalized = createSession({
     sessionId: readString(data.sessionId) ?? undefined,
@@ -1182,6 +1215,7 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
     stationExpressReceiptRetirement,
     endpointUrl: typeof data.endpointUrl === "string" ? redactUrl(data.endpointUrl) : null,
     credentialEnv: readString(data.credentialEnv),
+    providerAuthMethod,
     hermesAuthMethod: readHermesAuthMethod(data.hermesAuthMethod),
     preferredInferenceApi: readString(data.preferredInferenceApi),
     compatibleEndpointReasoning: readString(data.compatibleEndpointReasoning),
@@ -1196,6 +1230,7 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
     observabilityEnabled: data.observabilityEnabled === true,
     observabilityRequestedExplicitly: data.observabilityRequestedExplicitly === true,
     apfInterceptorRequested: data.apfInterceptorRequested === true,
+    toolGatewaySelections: readStringArray(data.toolGatewaySelections),
     hermesToolGateways: readStringArray(data.hermesToolGateways),
     messagingPlan: parseSandboxMessagingPlan(data.messagingPlan),
     stagedCredentialProviders: readStringArray(data.stagedCredentialProviders) ?? [],
@@ -1981,6 +2016,9 @@ export function filterSafeUpdates(updates: SessionUpdates): Partial<Session> {
   }
   assignNullableString(safe, "endpointUrl", updates.endpointUrl, redactUrl);
   assignNullableString(safe, "credentialEnv", updates.credentialEnv);
+  assignNullableString(safe, "providerAuthMethod", updates.providerAuthMethod, (value) =>
+    readProviderAuthMethod(value),
+  );
   if (updates.hermesAuthMethod === "oauth" || updates.hermesAuthMethod === "api_key") {
     safe.hermesAuthMethod = updates.hermesAuthMethod;
   } else if (updates.hermesAuthMethod === null) {
@@ -2019,6 +2057,13 @@ export function filterSafeUpdates(updates: SessionUpdates): Partial<Session> {
   assignSafeToolDisclosureUpdate(safe, updates.toolDisclosure);
   if (typeof updates.observabilityEnabled === "boolean") {
     safe.observabilityEnabled = updates.observabilityEnabled;
+  }
+  if (updates.toolGatewaySelections === null) {
+    safe.toolGatewaySelections = null;
+  } else if (Array.isArray(updates.toolGatewaySelections)) {
+    safe.toolGatewaySelections = updates.toolGatewaySelections.filter(
+      (value) => typeof value === "string",
+    );
   }
   if (updates.hermesToolGateways === null) {
     safe.hermesToolGateways = null;
@@ -2460,11 +2505,13 @@ export function markStepRejected(stepName: string): Session {
       session.vllmInstallModel = null;
       session.endpointUrl = null;
       session.credentialEnv = null;
+      session.providerAuthMethod = null;
       session.hermesAuthMethod = null;
       session.preferredInferenceApi = null;
       session.compatibleEndpointReasoning = null;
       session.compatibleEndpointReasoningEffort = null;
       session.nimContainer = null;
+      session.toolGatewaySelections = null;
       session.hermesToolGateways = null;
       session.sandboxName = null;
       session.sandboxPromptProgress.sandboxName = false;
@@ -2703,6 +2750,7 @@ export function summarizeForDebug(
     servingProfileProvenance: session.servingProfileProvenance,
     endpointUrl: redactUrl(session.endpointUrl),
     credentialEnv: session.credentialEnv,
+    providerAuthMethod: session.providerAuthMethod,
     hermesAuthMethod: session.hermesAuthMethod,
     preferredInferenceApi: session.preferredInferenceApi,
     compatibleEndpointReasoning: session.compatibleEndpointReasoning,
@@ -2712,6 +2760,7 @@ export function summarizeForDebug(
     observabilityEnabled: session.observabilityEnabled,
     observabilityRequestedExplicitly: session.observabilityRequestedExplicitly,
     apfInterceptorRequested: session.apfInterceptorRequested,
+    toolGatewaySelections: session.toolGatewaySelections,
     hermesToolGateways: session.hermesToolGateways,
     gpuPassthrough: session.gpuPassthrough,
     lastStepStarted: session.lastStepStarted,

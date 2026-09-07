@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const clientModulePath = require.resolve("../adapters/openshell/client");
 const configModulePath = require.resolve("./config");
 const inferenceSetModulePath = require.resolve("../actions/inference-set");
+const inferenceSetPreflightModulePath = require.resolve("../actions/inference-set/preflight");
 
 type CaptureResult = {
   status: number;
@@ -40,6 +41,7 @@ function loadConfigReaders(): Pick<typeof import("./config"), "readSandboxConfig
   Pick<typeof import("../actions/inference-set"), "readInSandboxConfigOrFail"> {
   delete require.cache[configModulePath];
   delete require.cache[inferenceSetModulePath];
+  delete require.cache[inferenceSetPreflightModulePath];
   const config = require(configModulePath) as typeof import("./config");
   const inferenceSet = require(inferenceSetModulePath) as typeof import("../actions/inference-set");
   return {
@@ -61,6 +63,7 @@ describe("readSandboxConfig stopped-sandbox detail (#10251)", () => {
     client.captureOpenshellCommand = realCapture;
     delete require.cache[configModulePath];
     delete require.cache[inferenceSetModulePath];
+    delete require.cache[inferenceSetPreflightModulePath];
   });
 
   it.each([

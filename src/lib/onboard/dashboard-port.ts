@@ -33,6 +33,7 @@ type RunCaptureFn = typeof import("../runner").runCapture;
 type SandboxRegistryEntry = {
   name: string;
   dashboardPort?: number | null;
+  secondaryForwardPort?: number | null;
   hermesApiPort?: number | null;
   scopeGatewayPort?: number;
 };
@@ -217,6 +218,7 @@ function listHostRegistrySandboxes(): { sandboxes: SandboxRegistryEntry[] } {
       ({ entry, gatewayPort }) => ({
         name: entry.name,
         dashboardPort: entry.dashboardPort,
+        secondaryForwardPort: entry.secondaryForwardPort,
         hermesApiPort: entry.hermesApiPort,
         scopeGatewayPort: gatewayPort,
       }),
@@ -312,6 +314,21 @@ export function getRegistryOccupiedHermesApiPorts(
   return getRegistryOccupiedPorts(
     currentSandboxName,
     (entry) => entry.hermesApiPort,
+    listSandboxesFn,
+  );
+}
+
+/**
+ * Cross-gateway occupancy view for a package-declared secondary forward. New receipt-backed
+ * packages share this neutral registry field, so allocation never needs a package identifier.
+ */
+export function getRegistryOccupiedSecondaryForwardPorts(
+  currentSandboxName: string,
+  listSandboxesFn?: ListSandboxesFn,
+): Map<string, string> {
+  return getRegistryOccupiedPorts(
+    currentSandboxName,
+    (entry) => entry.secondaryForwardPort,
     listSandboxesFn,
   );
 }

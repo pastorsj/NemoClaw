@@ -23,11 +23,17 @@ import {
   parseHarnessPackageIdentity,
   type HarnessPackageIdentity,
 } from "../../agent-runtime/package/identity.js";
+import type {
+  HarnessManagedExtension,
+  HarnessStateLifecycleDeclaration,
+} from "@nvidia/nemoclaw-harness-contract";
+import { resolvePackageIdentityAgent } from "../../onboard/package/package-authority.js";
 import {
   hasCompleteOpenClawImagePluginProvenance,
   type OpenClawImagePluginInstall,
   parseOpenClawImagePluginInstalls,
 } from "../openclaw-plugin-restore.js";
+import { parseManagedImageExtensions } from "./managed-extensions.js";
 import {
   HERMES_PRESERVED_ENV_INVENTORY,
   type PreservedEnvFile,
@@ -49,9 +55,28 @@ import type {
 } from "../registry/types.js";
 import { cloneSandboxWorkloadReceipt } from "../registry/workload.js";
 import { hashSnapshotBackupContent, isSnapshotControlPath } from "./content-digest.js";
+import {
+  allowsLegacyImagePluginProvenance,
+  allowsLegacyNullPackageAuthority,
+  allowsLegacyPreservedEnvironment,
+} from "./legacy-manifest.js";
 
 const MANIFEST_VERSION = 2;
 const CONTENT_SHA256_PATTERN = /^[0-9a-f]{64}$/u;
+
+interface SnapshotManifestDependencies {
+  readonly resolvePackageStateLifecycle: (
+    identity: HarnessPackageIdentity,
+  ) => HarnessStateLifecycleDeclaration;
+}
+
+const snapshotManifestDependencies: SnapshotManifestDependencies = {
+  resolvePackageStateLifecycle(identity) {
+    return resolvePackageIdentityAgent(identity).definition.stateLifecycle;
+  },
+};
+
+export { allowsLegacyImagePluginProvenance, allowsLegacyPreservedEnvironment };
 
 export interface RebuildManifest {
   version: number;
@@ -66,6 +91,10 @@ export interface RebuildManifest {
   openclawImagePluginInstalls?: OpenClawImagePluginInstall[];
   /** The plugin baseline is authoritative and must be reconciled during recreation. */
   reconcileOpenClawImagePluginProvenance?: boolean;
+  /** Receipt-backed image-extension baseline captured before user state is restored. */
+  managedImageExtensions?: HarnessManagedExtension[];
+  /** The generic image-extension baseline must be reconciled during recreation. */
+  reconcileManagedImageExtensions?: boolean;
   stateDirs: string[];
   /** Directories verified as safe to restore. Absent on older manifests. */
   backedUpDirs?: string[];
@@ -252,10 +281,9 @@ export function inspectRebuildManifestHarnessPackage(
     if (isRepositoryQualifiedManifestAgent(manifest.agentType)) {
       return { status: "candidate", harnessPackage: null };
     }
-    // Pi snapshots written before the package migration carried explicit null
-    // authority. Keep that compatibility exact to Pi so adding another
-    // candidate cannot silently grant it the same legacy restore path.
-    return manifest.agentType === "pi" ? { status: "legacy" } : { status: "invalid" };
+    return allowsLegacyNullPackageAuthority(manifest.agentType)
+      ? { status: "legacy" }
+      : { status: "invalid" };
   }
   try {
     const harnessPackage = parseHarnessPackageIdentity(manifest.harnessPackage);
@@ -276,14 +304,64 @@ export function hasAuthoritativeOpenClawImagePluginProvenance(value: {
 }): boolean {
   const dir = resolveRebuildManifestDir(value);
   return (
-    value.agentType === "openclaw" &&
     typeof dir === "string" &&
     value.reconcileOpenClawImagePluginProvenance === true &&
     hasCompleteOpenClawImagePluginProvenance(value.openclawImagePluginInstalls, dir)
   );
 }
 
-function isRebuildManifest(value: unknown): value is RebuildManifest {
+export function hasAuthoritativeManagedImageExtensions(
+  value: {
+    managedImageExtensions?: unknown;
+    reconcileManagedImageExtensions?: unknown;
+  },
+  stateLifecycle: HarnessStateLifecycleDeclaration,
+): boolean {
+  const declaration = stateLifecycle.rebuild.managed_extensions;
+  return (
+    declaration.support === "managed" &&
+    value.reconcileManagedImageExtensions === true &&
+    parseManagedImageExtensions(value.managedImageExtensions, declaration).ok
+  );
+}
+
+/** Resolve the exact receipt before accepting a generic extension baseline. */
+export function hasAuthoritativeManagedImageExtensionProvenance(
+  value: Pick<
+    RebuildManifest,
+    | "version"
+    | "agentType"
+    | "harnessPackage"
+    | "managedImageExtensions"
+    | "reconcileManagedImageExtensions"
+  >,
+  dependencies: SnapshotManifestDependencies = snapshotManifestDependencies,
+): boolean {
+  const packageState = inspectRebuildManifestHarnessPackage(value);
+  if (packageState.status !== "package") return false;
+  try {
+    return hasAuthoritativeManagedImageExtensions(
+      value,
+      dependencies.resolvePackageStateLifecycle(packageState.harnessPackage),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function packageOrLegacyManifestFeature(
+  state: RebuildManifestHarnessPackageInspection,
+  legacyAllowed: boolean,
+  packageAllowed: boolean,
+): boolean {
+  if (state.status === "legacy") return legacyAllowed;
+  return state.status === "package" && packageAllowed;
+}
+
+function isRebuildManifest(
+  value: unknown,
+  dependencies: SnapshotManifestDependencies = snapshotManifestDependencies,
+): value is RebuildManifest {
   if (!isObjectRecord(value) || !isStateDirArray(value.stateDirs)) return false;
   if (Object.prototype.hasOwnProperty.call(value, "harnessPackageMigration")) return false;
   const dir = resolveRebuildManifestDir(value);
@@ -302,6 +380,23 @@ function isRebuildManifest(value: unknown): value is RebuildManifest {
   const harnessPackageState = inspectRebuildManifestHarnessPackage(
     value as unknown as Pick<RebuildManifest, "version" | "agentType" | "harnessPackage">,
   );
+  let packageStateLifecycle: HarnessStateLifecycleDeclaration | null = null;
+  if (
+    harnessPackageState.status === "package" &&
+    (value.reconcileManagedImageExtensions === true ||
+      value.managedImageExtensions !== undefined ||
+      value.reconcileOpenClawImagePluginProvenance === true ||
+      value.openclawImagePluginInstalls !== undefined ||
+      value.preservedEnv !== undefined)
+  ) {
+    try {
+      packageStateLifecycle = dependencies.resolvePackageStateLifecycle(
+        harnessPackageState.harnessPackage,
+      );
+    } catch {
+      return false;
+    }
+  }
   const validHostLocalInferenceProvenance = (() => {
     if (value.hostLocalInferenceProvenance === undefined) return true;
     if (!hostLocalInferenceProvenance || typeof hostLocalInferenceReceipt !== "string") {
@@ -333,12 +428,37 @@ function isRebuildManifest(value: unknown): value is RebuildManifest {
       (typeof value.backupContentSha256 === "string" &&
         CONTENT_SHA256_PATTERN.test(value.backupContentSha256))) &&
     typeof dir === "string" &&
+    !(
+      (value.managedImageExtensions !== undefined ||
+        value.reconcileManagedImageExtensions !== undefined) &&
+      (value.openclawImagePluginInstalls !== undefined ||
+        value.reconcileOpenClawImagePluginProvenance !== undefined)
+    ) &&
+    (value.managedImageExtensions === undefined ||
+      (harnessPackageState.status === "package" &&
+        packageStateLifecycle?.rebuild.managed_extensions.support === "managed" &&
+        parseManagedImageExtensions(
+          value.managedImageExtensions,
+          packageStateLifecycle.rebuild.managed_extensions,
+        ).ok)) &&
+    (value.reconcileManagedImageExtensions === undefined ||
+      typeof value.reconcileManagedImageExtensions === "boolean") &&
+    (value.reconcileManagedImageExtensions !== true ||
+      (harnessPackageState.status === "package" &&
+        packageStateLifecycle !== null &&
+        hasAuthoritativeManagedImageExtensions(value, packageStateLifecycle))) &&
     (value.openclawImagePluginInstalls === undefined ||
       parseOpenClawImagePluginInstalls(value.openclawImagePluginInstalls, dir).ok) &&
     (value.reconcileOpenClawImagePluginProvenance === undefined ||
       typeof value.reconcileOpenClawImagePluginProvenance === "boolean") &&
     (value.reconcileOpenClawImagePluginProvenance !== true ||
-      hasAuthoritativeOpenClawImagePluginProvenance(value)) &&
+      (packageOrLegacyManifestFeature(
+        harnessPackageState,
+        allowsLegacyImagePluginProvenance(value.agentType),
+        allowsLegacyImagePluginProvenance(value.agentType) &&
+          packageStateLifecycle?.rebuild.managed_extensions.support === "managed",
+      ) &&
+        hasAuthoritativeOpenClawImagePluginProvenance(value))) &&
     typeof value.backupPath === "string" &&
     (value.stateFiles === undefined ||
       (Array.isArray(value.stateFiles) && value.stateFiles.every(isStateFileSpec))) &&
@@ -355,8 +475,17 @@ function isRebuildManifest(value: unknown): value is RebuildManifest {
         value.rebuildPolicyHandoff.file ===
           `rebuild-policy-handoff.${value.rebuildPolicyHandoff.sha256}.yaml`)) &&
     (value.preservedEnv === undefined ||
-      (value.agentType === "hermes" &&
-        validatePreservedEnvFiles(value.preservedEnv, HERMES_PRESERVED_ENV_INVENTORY))) &&
+      (packageOrLegacyManifestFeature(
+        harnessPackageState,
+        allowsLegacyPreservedEnvironment(value.agentType),
+        packageStateLifecycle?.rebuild.preserved_environment !== undefined,
+      ) &&
+        validatePreservedEnvFiles(
+          value.preservedEnv,
+          harnessPackageState.status === "package"
+            ? (packageStateLifecycle?.rebuild.preserved_environment?.files ?? [])
+            : HERMES_PRESERVED_ENV_INVENTORY,
+        ))) &&
     (value.runtimeSnapshot === undefined || runtimeSnapshot !== undefined) &&
     (value.workload === undefined || workload !== undefined) &&
     (value.hostLocalInferenceReceipt === undefined ||
@@ -623,10 +752,31 @@ export function hasInvalidMarkedOpenClawPluginProvenance(backupPath: string): bo
   );
 }
 
-export function readManifest(backupPath: string): RebuildManifest | null {
+export function hasInvalidMarkedManagedExtensionProvenance(backupPath: string): boolean {
+  const parsed = readManifestPayload(backupPath);
+  return (
+    isObjectRecord(parsed) &&
+    parsed.reconcileManagedImageExtensions === true &&
+    !hasAuthoritativeManagedImageExtensionProvenance(
+      parsed as unknown as Pick<
+        RebuildManifest,
+        | "version"
+        | "agentType"
+        | "harnessPackage"
+        | "managedImageExtensions"
+        | "reconcileManagedImageExtensions"
+      >,
+    )
+  );
+}
+
+export function readManifest(
+  backupPath: string,
+  dependencies: SnapshotManifestDependencies = snapshotManifestDependencies,
+): RebuildManifest | null {
   try {
     const parsed = readManifestPayload(backupPath);
-    if (!isRebuildManifest(parsed)) return null;
+    if (!isRebuildManifest(parsed, dependencies)) return null;
     const manifest = parsed as RebuildManifest & { dir?: string; writableDir?: string };
     const dir = resolveRebuildManifestDir(manifest);
     if (typeof dir !== "string" || !dir) return null;
@@ -647,6 +797,15 @@ export function readManifest(backupPath: string): RebuildManifest | null {
     return {
       ...manifest,
       dir,
+      ...(Array.isArray(manifest.managedImageExtensions)
+        ? {
+            managedImageExtensions: manifest.managedImageExtensions.map((extension) => ({
+              id: extension.id,
+              directory: extension.directory,
+              configPaths: [...extension.configPaths],
+            })),
+          }
+        : {}),
       stateFiles: normalizeStateFileSpecsPreservingDuplicates(manifest.stateFiles ?? []),
       blueprintDigest: manifest.blueprintDigest ?? null,
       ...(runtimeSnapshot === undefined ? {} : { runtimeSnapshot }),

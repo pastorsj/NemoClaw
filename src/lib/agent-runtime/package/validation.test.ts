@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { validateHarnessPackage } from "./validation";
+import { listRequiredHarnessPackageArtifacts, validateHarnessPackage } from "./validation";
 
 const TEST_PARENT = path.join(
   process.cwd(),
@@ -60,12 +60,18 @@ function writeValidArtifact(): void {
       "    reason: This synthetic package has fixed inference configuration.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This package does not run scheduled work.",
@@ -73,6 +79,18 @@ function writeValidArtifact(): void {
       "      kind: not-required",
       "",
     ].join("\n"),
+  );
+  writeArtifactFile(
+    "agents/example-runtime/host/config-adapter.cts",
+    "module.exports = Object.freeze({});\n",
+  );
+  writeArtifactFile(
+    "agents/example-runtime/host/messaging-adapter.cts",
+    "module.exports = Object.freeze({});\n",
+  );
+  writeArtifactFile(
+    "agents/example-runtime/host/startup-adapter.cts",
+    "module.exports = Object.freeze({});\n",
   );
   writeArtifactFile("runtime/payload.txt", "first payload\n");
 }
@@ -123,6 +141,10 @@ describe("validateHarnessPackage", () => {
       "runtime/entry.mjs",
       `throw new Error(${JSON.stringify(executionMarker)});\n`,
     );
+    writeArtifactFile(
+      "agents/example-runtime/host/startup-adapter.cts",
+      `throw new Error(${JSON.stringify(executionMarker)});\n`,
+    );
     writeArtifactFile("runtime/install.sh", `#!/bin/sh\ntouch ${executionMarker}\n`, 0o700);
     const before = snapshotArtifact(artifactDirectory);
 
@@ -140,7 +162,7 @@ describe("validateHarnessPackage", () => {
       displayName: "Example Runtime",
       manifest: "agents/example-runtime/manifest.yaml",
       runtimeKind: "terminal",
-      entryCount: 9,
+      entryCount: 13,
       totalBytes: expect.any(Number),
     });
     expect(Object.isFrozen(report)).toBe(true);
@@ -177,12 +199,18 @@ describe("validateHarnessPackage", () => {
         "    reason: This synthetic package has fixed inference configuration.",
         "messaging:",
         "  support: disabled",
+        "policy:",
+        "  owned_presets: []",
+        "  automatic_presets: []",
+        "  baseline_exclusion_impacts: {}",
         "state_lifecycle:",
         "  backup_quiescence:",
         "    kind: not-required",
         "  snapshot_restore: []",
         "  rebuild:",
-        "    image_plugin_provenance: not-required",
+        "    managed_extensions:",
+        "      support: disabled",
+        "      reason: Test package has no managed extensions.",
         "    scheduled_work:",
         "      support: disabled",
         "      reason: This package does not run scheduled work.",
@@ -201,5 +229,62 @@ describe("validateHarnessPackage", () => {
     writeArtifactFile("tests/runtime.test.ts", "throw new Error('must not run');\n");
 
     expect(() => validateHarnessPackage(artifactDirectory)).toThrow("contains authoring content");
+  });
+
+  it.each([
+    [
+      "missing",
+      "host/config-adapter.cts",
+      () =>
+        fs.rmSync(path.join(artifactDirectory, "agents/example-runtime/host/config-adapter.cts")),
+    ],
+    [
+      "empty",
+      "host/messaging-adapter.cts",
+      () => writeArtifactFile("agents/example-runtime/host/messaging-adapter.cts", ""),
+    ],
+    [
+      "directory",
+      "host/config-adapter.cts",
+      () => {
+        const adapterPath = path.join(
+          artifactDirectory,
+          "agents/example-runtime/host/config-adapter.cts",
+        );
+        fs.rmSync(adapterPath);
+        fs.mkdirSync(adapterPath, { mode: 0o700 });
+      },
+    ],
+  ])("rejects a %s required artifact at %s", (_condition, relativePath, arrange) => {
+    arrange();
+
+    expect(() => validateHarnessPackage(artifactDirectory)).toThrow(
+      `requires a non-empty regular artifact '${relativePath}'`,
+    );
+  });
+
+  it("maps every optional manifest capability to its fixed runtime artifacts", () => {
+    expect(
+      listRequiredHarnessPackageArtifacts({
+        mcp: { support: "bridge" },
+        agent_roster: { support: "managed" },
+        sessions: { operations: [] },
+        managed_image: {},
+        provider_auth: { support: "managed" },
+        provider_broker: { support: "managed" },
+        state_files: [{ path: "config.json", restore: { merge: "package-config" } }],
+      }),
+    ).toEqual([
+      "host/config-adapter.cts",
+      "host/messaging-adapter.cts",
+      "host/startup-adapter.cts",
+      "host/mcp-adapter.cts",
+      "host/agent-roster-adapter.cts",
+      "host/session-adapter.cts",
+      "host/provider-auth-adapter.cts",
+      "host/provider-broker-adapter.cts",
+      "host/provider-broker-control.cts",
+      "host/restore-adapter.cts",
+    ]);
   });
 });

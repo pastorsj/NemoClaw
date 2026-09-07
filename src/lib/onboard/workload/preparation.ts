@@ -487,7 +487,7 @@ export async function prepareSandboxWorkloadSource(
     };
   }
 
-  if (receiptBackedPackageSelection && !stockManagedAgent && !input.catalog && !input.catalogPath) {
+  if (receiptBackedPackageSelection && !input.catalog && !input.catalogPath) {
     return unavailableResult(
       input,
       `package '${input.agentName}' does not declare an immutable managed image publication`,

@@ -141,6 +141,7 @@ function hasProviderBackedApfIntent(context: OnboardFlowContext): boolean {
     routeValues.some((value) => typeof value === "string" && value.trim().length > 0) ||
     context.endpointSource != null ||
     context.selectedMessagingChannels.length > 0 ||
+    (context.toolGatewaySelections?.length ?? 0) > 0 ||
     context.hermesToolGateways.length > 0 ||
     context.webSearchConfig !== null ||
     Boolean(context.session?.messagingPlan) ||
@@ -276,6 +277,7 @@ export function createProviderInferenceOnboardFlowPhase<
         onboardEndpointUrl: endpointProvenance.onboardEndpointUrl,
         credentialEnv: context.credentialEnv,
         hermesAuthMethod: context.hermesAuthMethod,
+        toolGatewaySelections: context.toolGatewaySelections ?? [],
         hermesToolGateways: context.hermesToolGateways,
         preferredInferenceApi: context.preferredInferenceApi,
         compatibleEndpointReasoning: context.compatibleEndpointReasoning,
@@ -301,6 +303,7 @@ export function createProviderInferenceOnboardFlowPhase<
         onboardEndpointUrl: providerInferenceResult.onboardEndpointUrl,
         credentialEnv: providerInferenceResult.credentialEnv,
         hermesAuthMethod: providerInferenceResult.hermesAuthMethod,
+        toolGatewaySelections: providerInferenceResult.toolGatewaySelections,
         hermesToolGateways: providerInferenceResult.hermesToolGateways,
         preferredInferenceApi: providerInferenceResult.preferredInferenceApi,
         compatibleEndpointReasoning: providerInferenceResult.compatibleEndpointReasoning,
@@ -366,6 +369,7 @@ export function createSandboxOnboardFlowPhase<
       gpu: context.gpu,
       preferredInferenceApi: context.preferredInferenceApi,
       sandboxGpuConfig: context.sandboxGpuConfig,
+      toolGatewaySelections: context.toolGatewaySelections ?? [],
       hermesToolGateways: context.hermesToolGateways,
       hermesAuthMethod: context.hermesAuthMethod,
       hostLocalInferenceRouteOnly: context.hostLocalInferenceRouteOnly === true,
@@ -382,6 +386,7 @@ export function createSandboxOnboardFlowPhase<
         recreateJournalHandoff: Boolean(options.recreateJournalTargetIntentFingerprint),
         webSearchConfig: sandboxStateResult.webSearchConfig,
         webSearchConfigChanged: sandboxStateResult.webSearchConfigChanged,
+        toolGatewaySelections: sandboxStateResult.toolGatewaySelections,
         hermesToolGateways: sandboxStateResult.hermesToolGateways,
         selectedMessagingChannels: sandboxStateResult.selectedMessagingChannels,
         webSearchSupported: sandboxStateResult.webSearchSupported,

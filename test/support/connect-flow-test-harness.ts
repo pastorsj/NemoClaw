@@ -566,10 +566,12 @@ export function createConnectHarness(options: ConnectHarnessOptions = {}): Conne
   const writeSandboxConfigSpy = vi
     .spyOn(sandboxConfig, "writeSandboxConfig")
     .mockImplementation(() => undefined);
-  // - `getSessionAgent` returns null for OpenClaw, which `??` alone turned into `{ name: "openclaw" }`.
-  // - Distinguish "not supplied" from an explicit null so a test can model that production shape.
+  // A legacy OpenClaw registry row resolves to null in production so its
+  // compatibility command is selected only at the explicit legacy boundary.
+  // Distinguish "not supplied" from an explicit value so tests can provide a
+  // complete package-owned runtime definition when that behavior matters.
   vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue(
-    (Object.hasOwn(options, "sessionAgent") ? options.sessionAgent : { name: "openclaw" }) as never,
+    (Object.hasOwn(options, "sessionAgent") ? options.sessionAgent : null) as never,
   );
   vi.spyOn(agentRuntime, "getAgentDisplayName").mockReturnValue("OpenClaw");
   const runAutoPairSpy = vi

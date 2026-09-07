@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-/** Parses direct Dockerfile COPY sources and rejects unhandled forms. */
+/** Parses local Dockerfile COPY and ADD sources and rejects unhandled forms. */
 
 import fs from "node:fs";
 import path from "node:path";
@@ -11,12 +11,12 @@ interface LogicalDockerfileInstruction {
   text: string;
 }
 
-export interface DirectDockerfileCopySource {
+export interface DirectDockerfileContextSource {
   lineNumber: number;
   source: string;
 }
 
-export interface MissingDockerfileCopySource extends DirectDockerfileCopySource {
+export interface MissingDockerfileContextSource extends DirectDockerfileContextSource {
   dockerfileLabel: string;
 }
 
@@ -74,50 +74,55 @@ function logicalDockerfileInstructions(
   return instructions;
 }
 
-function unsupportedDirectCopyForm(
+function unsupportedDirectContextForm(
   instruction: LogicalDockerfileInstruction,
   dockerfileLabel: string,
+  keyword: "ADD" | "COPY",
 ): never {
   throw new Error(
-    `Unsupported direct ${dockerfileLabel} COPY form at line ${instruction.lineNumber}: ${instruction.text}`,
+    `Unsupported direct ${dockerfileLabel} ${keyword} form at line ${instruction.lineNumber}: ${instruction.text}`,
   );
 }
 
-function parseDirectCopyOperands(
+function parseDirectContextOperands(
   tokens: string[],
   instruction: LogicalDockerfileInstruction,
   dockerfileLabel: string,
+  keyword: "ADD" | "COPY",
 ): string[] | null {
   let operandIndex = 0;
   let copiesFromStage = false;
   while (operandIndex < tokens.length && tokens[operandIndex]?.startsWith("--")) {
     const flag = tokens[operandIndex]!;
     if (/^--from=.+$/iu.test(flag)) {
+      if (keyword !== "COPY") unsupportedDirectContextForm(instruction, dockerfileLabel, keyword);
       copiesFromStage = true;
       operandIndex += 1;
       continue;
     }
     const handledDirectFlag =
       /^--(?:chown|chmod)=.+$/iu.test(flag) ||
-      /^--(?:link|parents)(?:=(?:true|false))?$/iu.test(flag);
-    if (!handledDirectFlag) unsupportedDirectCopyForm(instruction, dockerfileLabel);
+      /^--(?:link|parents)(?:=(?:true|false))?$/iu.test(flag) ||
+      (keyword === "ADD" && /^--checksum=sha256:[a-f0-9]{64}$/u.test(flag));
+    if (!handledDirectFlag) unsupportedDirectContextForm(instruction, dockerfileLabel, keyword);
     operandIndex += 1;
   }
 
   const operands = tokens.slice(operandIndex);
   if (operands[0]?.startsWith("[")) {
-    unsupportedDirectCopyForm(instruction, dockerfileLabel);
+    unsupportedDirectContextForm(instruction, dockerfileLabel, keyword);
   }
   if (operands.length < 2 || operands.some((operand) => operand.startsWith("--"))) {
-    unsupportedDirectCopyForm(instruction, dockerfileLabel);
+    unsupportedDirectContextForm(instruction, dockerfileLabel, keyword);
   }
   return copiesFromStage ? null : operands;
 }
 
-function validateDirectCopySource(
+function validateDirectContextSource(
   source: string,
   instruction: LogicalDockerfileInstruction,
   dockerfileLabel: string,
+  keyword: "ADD" | "COPY",
 ): void {
   const withoutTrailingSlash = source.replace(/\/+$/u, "");
   const parts = withoutTrailingSlash.split("/");
@@ -131,33 +136,36 @@ function validateDirectCopySource(
     parts.some((part) => !part || part === "." || part === "..");
   if (invalidSource) {
     throw new Error(
-      `Unsupported direct ${dockerfileLabel} COPY source at line ${instruction.lineNumber}: ${source}`,
+      `Unsupported direct ${dockerfileLabel} ${keyword} source at line ${instruction.lineNumber}: ${source}`,
     );
   }
 }
 
-export function directDockerfileCopySources(
+export function directDockerfileContextSources(
   dockerfilePath: string,
   dockerfileLabel = path.basename(dockerfilePath),
-): DirectDockerfileCopySource[] {
+): DirectDockerfileContextSource[] {
   const text = fs.readFileSync(dockerfilePath, "utf8");
-  const sources: DirectDockerfileCopySource[] = [];
+  const sources: DirectDockerfileContextSource[] = [];
 
   for (const instruction of logicalDockerfileInstructions(text, dockerfileLabel)) {
     const instructionMatch = /^(\S+)\b([\s\S]*)$/u.exec(instruction.text);
-    if (!instructionMatch || instructionMatch[1].toUpperCase() !== "COPY") continue;
+    if (!instructionMatch) continue;
+    const keyword = instructionMatch[1].toUpperCase();
+    if (keyword !== "ADD" && keyword !== "COPY") continue;
 
-    const copyForm = instructionMatch[2].trim();
-    const tokens = copyForm.split(/\s+/u).filter(Boolean);
-    if (!copyForm) {
-      unsupportedDirectCopyForm(instruction, dockerfileLabel);
+    const contextForm = instructionMatch[2].trim();
+    const tokens = contextForm.split(/\s+/u).filter(Boolean);
+    if (!contextForm) {
+      unsupportedDirectContextForm(instruction, dockerfileLabel, keyword);
     }
 
-    const operands = parseDirectCopyOperands(tokens, instruction, dockerfileLabel);
+    const operands = parseDirectContextOperands(tokens, instruction, dockerfileLabel, keyword);
     if (operands === null) continue;
 
     for (const source of operands.slice(0, -1)) {
-      validateDirectCopySource(source, instruction, dockerfileLabel);
+      if (keyword === "ADD" && /^https:\/\//iu.test(source)) continue;
+      validateDirectContextSource(source, instruction, dockerfileLabel, keyword);
       sources.push({ lineNumber: instruction.lineNumber, source });
     }
   }
@@ -172,21 +180,21 @@ function sourceExistsInContext(contextRoot: string, source: string): boolean {
   return fs.existsSync(path.join(contextRoot, ...source.split("/")));
 }
 
-export function missingDockerfileCopySources(
+export function missingDockerfileContextSources(
   dockerfilePath: string,
   contextRoot: string,
   dockerfileLabel = path.basename(dockerfilePath),
-): MissingDockerfileCopySource[] {
-  return directDockerfileCopySources(dockerfilePath, dockerfileLabel)
+): MissingDockerfileContextSource[] {
+  return directDockerfileContextSources(dockerfilePath, dockerfileLabel)
     .filter(({ source }) => !sourceExistsInContext(contextRoot, source))
     .map((source) => ({ ...source, dockerfileLabel }));
 }
 
-export function formatMissingDockerfileCopySources(
-  missingSources: readonly MissingDockerfileCopySource[],
+export function formatMissingDockerfileContextSources(
+  missingSources: readonly MissingDockerfileContextSource[],
 ): string {
   return [
-    "The optimized build context does not contain every direct Dockerfile COPY source.",
+    "The optimized build context does not contain every local Dockerfile COPY or ADD source.",
     "Review each missing source before you add it to stageOptimizedSandboxBuildContext.",
     "",
     ...missingSources.map(

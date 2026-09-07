@@ -169,7 +169,10 @@ function requireTrackedCoreTemplate(): string {
 function stageTrackedCoreBuildInput(buildCtx: string): void {
   const templateRoot = requireTrackedCoreTemplate();
   for (const entry of fs.readdirSync(templateRoot)) {
-    fs.cpSync(path.join(templateRoot, entry), path.join(buildCtx, entry), { recursive: true });
+    fs.cpSync(path.join(templateRoot, entry), path.join(buildCtx, entry), {
+      mode: fs.constants.COPYFILE_FICLONE,
+      recursive: true,
+    });
   }
 }
 

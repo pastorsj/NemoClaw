@@ -3,13 +3,16 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AgentDefinition } from "../agent/defs";
 import { getCredential, prompt, saveCredential } from "../credentials/store";
 import {
   createBuiltInChannelManifestRegistry,
   MessagingSetupApplier,
+  type ChannelManifest,
   type SandboxMessagingPlan,
 } from "../messaging";
 import { MESSAGING_SETUP_APPLIER_ENV_KEY } from "../messaging/applier/types";
+import { discordManifest } from "../messaging/channels/built-ins";
 import { validateSlackCredentials } from "../messaging/channels/slack/hooks/credential-validation";
 import { runWechatHostQrLogin } from "../messaging/channels/wechat/login";
 import { resolveMessagingPlanAuthority } from "../messaging/plan-authority";
@@ -59,6 +62,18 @@ function manifests(...channelIds: string[]) {
     if (!manifest) throw new Error(`missing manifest ${channelId}`);
     return manifest;
   });
+}
+
+function exactDiscordManifest(agent: string): ChannelManifest {
+  return {
+    ...discordManifest,
+    supportedAgents: [agent],
+    render: [],
+    runtime: {},
+    agentPackages: [],
+    hooks: discordManifest.hooks.filter(({ handler }) => handler === "common.tokenPaste"),
+    packageBuild: { configRoot: `~/.${agent}`, packageManagers: [] },
+  };
 }
 
 function stubTelegramReachability(): void {
@@ -506,6 +521,63 @@ describe("setupMessagingChannels", () => {
     expect(prompt).not.toHaveBeenCalled();
   });
 
+  it("sets up an unknown package's channel from its exact composed manifests", async () => {
+    process.env.DISCORD_BOT_TOKEN = "future-discord-token";
+
+    const result = await setupMessagingChannels(
+      { name: "future-harness" } as AgentDefinition,
+      ["discord"],
+      {
+        sandboxName: "future-sandbox",
+        selectionCompleted: true,
+        isNonInteractive: () => true,
+        messagingManifests: [exactDiscordManifest("future-harness")],
+      },
+    );
+
+    expect(result).toEqual(["discord"]);
+    expect(MessagingSetupApplier.requirePlanFromEnv()).toMatchObject({
+      sandboxName: "future-sandbox",
+      agent: "future-harness",
+      channels: [expect.objectContaining({ channelId: "discord", active: true })],
+    });
+  });
+
+  it("does not use ambient same-id channels outside the exact composed manifests", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "123456:ambient-telegram-token";
+
+    const result = await setupMessagingChannels(
+      { name: "openclaw" } as AgentDefinition,
+      ["telegram"],
+      {
+        sandboxName: "exact-openclaw",
+        selectionCompleted: true,
+        isNonInteractive: () => true,
+        messagingManifests: [exactDiscordManifest("openclaw")],
+      },
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it("ignores invalid ambient config for a channel omitted by exact receipt manifests", async () => {
+    process.env.DISCORD_BOT_TOKEN = "future-discord-token";
+    process.env.TELEGRAM_GROUP_POLICY = "lockdown";
+
+    const result = await setupMessagingChannels(
+      { name: "future-harness" } as AgentDefinition,
+      ["discord"],
+      {
+        sandboxName: "future-sandbox",
+        selectionCompleted: true,
+        isNonInteractive: () => true,
+        messagingManifests: [exactDiscordManifest("future-harness")],
+      },
+    );
+
+    expect(result).toEqual(["discord"]);
+  });
+
   it("validates a completed non-interactive selection when its credential is supplied (#3631)", async () => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "123456:replacement-telegram-token");
     vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-ambient-slack-token");
@@ -772,27 +844,26 @@ describe("setupMessagingChannels", () => {
     expect(prompt).not.toHaveBeenCalled();
   });
 
-  it.each(
-    BLANK_WHATSAPP_SEED_CASES,
-  )("keeps credentialless WhatsApp disabled when its optional allowlist is $label", async ({
-    environment,
-  }) => {
-    applyWhatsAppSeedEnvironment(environment);
-    process.env[MESSAGING_SETUP_APPLIER_ENV_KEY] = "stale-plan";
-    const notes: string[] = [];
+  it.each(BLANK_WHATSAPP_SEED_CASES)(
+    "keeps credentialless WhatsApp disabled when its optional allowlist is $label",
+    async ({ environment }) => {
+      applyWhatsAppSeedEnvironment(environment);
+      process.env[MESSAGING_SETUP_APPLIER_ENV_KEY] = "stale-plan";
+      const notes: string[] = [];
 
-    const result = await setupMessagingChannels(null, null, {
-      note: (message) => notes.push(message),
-      isNonInteractive: () => true,
-    });
+      const result = await setupMessagingChannels(null, null, {
+        note: (message) => notes.push(message),
+        isNonInteractive: () => true,
+      });
 
-    expect(result).toEqual([]);
-    expect(notes).toEqual([
-      "  [non-interactive] No complete messaging channel inputs configured. Skipping.",
-    ]);
-    expect(process.env[MESSAGING_SETUP_APPLIER_ENV_KEY]).toBeUndefined();
-    expect(prompt).not.toHaveBeenCalled();
-  });
+      expect(result).toEqual([]);
+      expect(notes).toEqual([
+        "  [non-interactive] No complete messaging channel inputs configured. Skipping.",
+      ]);
+      expect(process.env[MESSAGING_SETUP_APPLIER_ENV_KEY]).toBeUndefined();
+      expect(prompt).not.toHaveBeenCalled();
+    },
+  );
 
   it("validates detected non-interactive Slack inputs before returning enabled channels", async () => {
     process.env.SLACK_BOT_TOKEN = "not-a-slack-token";
@@ -906,7 +977,7 @@ describe("setupMessagingChannels", () => {
     expect(output).toContain("slack — already configured");
   });
 
-  it("exits with code 1 when TELEGRAM_GROUP_POLICY is set to an unrecognised value (#5696)", async () => {
+  it("keeps legacy all-built-ins validation for an invalid TELEGRAM_GROUP_POLICY (#5696)", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-test-token";
     process.env.TELEGRAM_GROUP_POLICY = "lockdown";
     const errors: string[] = [];
@@ -969,15 +1040,14 @@ describe("detectMessagingChannelsFromEnv", () => {
     expect(detectMessagingChannelsFromEnv(null)).toContain("whatsapp");
   });
 
-  it.each(
-    BLANK_WHATSAPP_SEED_CASES,
-  )("does not detect credentialless WhatsApp when its optional allowlist is $label", ({
-    environment,
-  }) => {
-    applyWhatsAppSeedEnvironment(environment);
+  it.each(BLANK_WHATSAPP_SEED_CASES)(
+    "does not detect credentialless WhatsApp when its optional allowlist is $label",
+    ({ environment }) => {
+      applyWhatsAppSeedEnvironment(environment);
 
-    expect(detectMessagingChannelsFromEnv(null)).not.toContain("whatsapp");
-  });
+      expect(detectMessagingChannelsFromEnv(null)).not.toContain("whatsapp");
+    },
+  );
 
   it("does not detect channels for unsupported named agents even when env inputs are complete", () => {
     process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-test-token";

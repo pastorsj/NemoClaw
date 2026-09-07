@@ -12,7 +12,6 @@ import {
   installRebuildFlowTestHooks,
   makePreparedRecoveryManifest,
 } from "../../../../test/helpers/rebuild-flow-generic-harness";
-import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import {
   installRebuildHarnessPackage,
   registryPersistence,
@@ -38,6 +37,16 @@ function createPreparedRecoveryHarness(overrides: RebuildFlowOverrides = {}) {
       ...(overrides.sandboxEntry ?? {}),
     },
   });
+}
+
+function requiresLifecycleEligibility(args: readonly unknown[]): boolean {
+  const options = args[1];
+  return (
+    typeof options === "object" &&
+    options !== null &&
+    "requireLifecycleEligibility" in options &&
+    options.requireLifecycleEligibility === true
+  );
 }
 
 function schemaV2RecoveryManifest(
@@ -195,21 +204,31 @@ describe("prepared rebuild recovery", () => {
   ] as const)(
     "refuses package-backed Pi when qualification is withdrawn %s",
     async (_edge, withdrawAtResolution, expectedError) => {
-      const piAuthority = makeRebuildAgentAuthority("pi");
-      assert.ok(piAuthority.harnessPackage);
+      const harnessPackage = installRebuildHarnessPackage("pi");
+      assert.ok(harnessPackage);
+      const resolveExact = sandboxAgent.resolveSandboxAgent.bind(sandboxAgent);
+      const piAuthority = resolveExact({
+        name: "alpha",
+        agent: "pi",
+        harnessPackage,
+        harnessPackageMigration: null,
+      });
       const recoveryManifest = {
-        ...schemaV2RecoveryManifest(piAuthority.harnessPackage),
+        ...schemaV2RecoveryManifest(harnessPackage),
         agentType: "pi",
       };
       let resolutionCount = 0;
-      vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((_entry, options) => {
-        resolutionCount++;
-        expect(options).toMatchObject({ requireLifecycleEligibility: true });
-        return resolutionCount === withdrawAtResolution
+      vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) => {
+        return requiresLifecycleEligibility(args)
           ? (() => {
-              throw new Error("Pi candidate qualification receipt was removed");
+              resolutionCount++;
+              return resolutionCount === withdrawAtResolution
+                ? (() => {
+                    throw new Error("Pi candidate qualification receipt was removed");
+                  })()
+                : piAuthority;
             })()
-          : piAuthority;
+          : resolveExact(...args);
       });
       const harness = createPreparedRecoveryHarness({
         agentName: "pi",
@@ -247,8 +266,12 @@ describe("prepared rebuild recovery", () => {
         throw new Error(`retained harness package ${authorityKind} failed integrity validation`);
       };
       vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) => {
-        resolutionCount++;
-        return (resolutionCount === 3 ? rejectDrift : resolveExact)(...args);
+        return requiresLifecycleEligibility(args)
+          ? (() => {
+              resolutionCount++;
+              return (resolutionCount === 3 ? rejectDrift : resolveExact)(...args);
+            })()
+          : resolveExact(...args);
       });
       const harness = createPreparedRecoveryHarness({
         harnessPackage,
@@ -281,14 +304,18 @@ describe("prepared rebuild recovery", () => {
     let resolutionCount = 0;
     const resolveExact = sandboxAgent.resolveSandboxAgent.bind(sandboxAgent);
     vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) => {
-      resolutionCount++;
-      const authority = resolveExact(...args);
-      return resolutionCount === 3
-        ? {
-            ...authority,
-            definition: { ...authority.definition, name: "hermes" },
-          }
-        : authority;
+      return requiresLifecycleEligibility(args)
+        ? (() => {
+            resolutionCount++;
+            const authority = resolveExact(...args);
+            return resolutionCount === 3
+              ? {
+                  ...authority,
+                  definition: { ...authority.definition, name: "hermes" },
+                }
+              : authority;
+          })()
+        : resolveExact(...args);
     });
     const harness = createPreparedRecoveryHarness({
       harnessPackage,
@@ -325,17 +352,21 @@ describe("prepared rebuild recovery", () => {
       let resolutionCount = 0;
       const resolveExact = sandboxAgent.resolveSandboxAgent.bind(sandboxAgent);
       vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) => {
-        resolutionCount++;
-        const authority = resolveExact(...args);
-        return resolutionCount === driftAtResolution
-          ? {
-              ...authority,
-              definition: {
-                ...authority.definition,
-                packageRoot: `${authority.definition.packageRoot}/changed`,
-              },
-            }
-          : authority;
+        return requiresLifecycleEligibility(args)
+          ? (() => {
+              resolutionCount++;
+              const authority = resolveExact(...args);
+              return resolutionCount === driftAtResolution
+                ? {
+                    ...authority,
+                    definition: {
+                      ...authority.definition,
+                      packageRoot: `${authority.definition.packageRoot}/changed`,
+                    },
+                  }
+                : authority;
+            })()
+          : resolveExact(...args);
       });
       const harness = createPreparedRecoveryHarness({
         harnessPackage,
@@ -371,9 +402,13 @@ describe("prepared rebuild recovery", () => {
     const resolutionValidationCounts: number[] = [];
     vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) => {
       const authority = resolveExact(...args);
-      resolvedAuthorities.push(authority);
-      resolutionValidationCounts.push(validationCount);
-      return authority;
+      return requiresLifecycleEligibility(args)
+        ? (() => {
+            resolvedAuthorities.push(authority);
+            resolutionValidationCounts.push(validationCount);
+            return authority;
+          })()
+        : authority;
     });
     const advancedPackages: Array<ReturnType<typeof packageFixture.advanceActivePointer>> = [];
     const validationActions = new Map<number, () => void>([

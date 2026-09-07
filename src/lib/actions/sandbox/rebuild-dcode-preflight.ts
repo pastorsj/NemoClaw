@@ -246,11 +246,13 @@ function requireInferenceRoute(
   sandboxName: string,
   target: ResolvedDcodeRebuildTarget,
   bail: DcodeRebuildPreflightBail,
+  agent: AgentDefinition,
   runtimeSelection?: OpenShellRuntimeSelection,
 ): void {
   const result = probeSandboxInferenceInvocation({
     sandboxName,
     agentName: target.agent,
+    probeBoundary: agent.runtime?.smoke_boundary ?? { kind: "login-shell" },
     ...target,
     ...(runtimeSelection ? { runtimeSelection } : {}),
   });
@@ -561,7 +563,8 @@ export async function prepareDcodeReplacementBeforeMutation(
 
     const session = loadMatchingDcodeSession(sandboxName);
     const target = resolveTarget(entry, resumeConfig, bail, gatewayPort);
-    if (!skipLiveRoute) requireInferenceRoute(sandboxName, target, bail, runtimeSelection);
+    if (!skipLiveRoute)
+      requireInferenceRoute(sandboxName, target, bail, agentDefinition, runtimeSelection);
     // Re-read the registry and retained package before any Docker/base-image
     // work. The later copy remains the post-build fence before we retain the
     // prepared replacement.
@@ -602,7 +605,8 @@ export async function prepareDcodeReplacementBeforeMutation(
       return null;
     }
     if (!input.checkGatewaySchema(runtimeSelection)) return null;
-    if (!skipLiveRoute) requireInferenceRoute(sandboxName, target, bail, runtimeSelection);
+    if (!skipLiveRoute)
+      requireInferenceRoute(sandboxName, target, bail, agentDefinition, runtimeSelection);
     requireCurrentTarget(sandboxName, entry, target, resumeConfig, bail, gatewayPort);
     if (!verifyPreparedDcodeRebuildImage(buildContext) || !pinnedBase.verify()) {
       fail("the prepared DCode replacement inputs changed during preflight", bail);
@@ -662,7 +666,14 @@ export async function revalidateDcodeReplacementAtMutationEdge(
     return false;
   }
   if (!input.checkGatewaySchema(runtimeSelection)) return false;
-  if (!skipLiveRoute) requireInferenceRoute(sandboxName, target, bail, runtimeSelection);
+  if (!skipLiveRoute)
+    requireInferenceRoute(
+      sandboxName,
+      target,
+      bail,
+      input.resumeConfig.agentAuthority.definition,
+      runtimeSelection,
+    );
   requireCurrentTarget(sandboxName, entry, target, resumeConfig, bail, gatewayPort);
   if (!replacement.verify()) {
     fail("the prepared DCode replacement inputs changed before deletion", bail);
@@ -701,7 +712,14 @@ export async function revalidateManagedDcodeWorkloadAtMutationEdge(
     return false;
   }
   if (!input.checkGatewaySchema(runtimeSelection)) return false;
-  if (!skipLiveRoute) requireInferenceRoute(sandboxName, target, bail, runtimeSelection);
+  if (!skipLiveRoute)
+    requireInferenceRoute(
+      sandboxName,
+      target,
+      bail,
+      input.resumeConfig.agentAuthority.definition,
+      runtimeSelection,
+    );
   requireCurrentTarget(sandboxName, entry, target, resumeConfig, bail, gatewayPort);
   return true;
 }

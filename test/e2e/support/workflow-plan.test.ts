@@ -306,21 +306,20 @@ describe("E2E workflow plan", () => {
     ).toEqual([targetId]);
   });
 
-  it("selects every Fabric journey when the shared runner changes", () => {
+  it("selects catalogue Fabric journeys while package-owned journeys use the standalone CLI", () => {
     expect(
       catalogueTargetsForChangedFiles([
         "packages/nemoclaw-fabric/src/nemoclaw_fabric/command.py",
       ]).map(({ id }) => id),
     ).toEqual([
       "full-e2e",
-      "deepseek-harness-fabric",
-      "haystack-agent-fabric",
       "hermes-inference-switch",
       "openclaw-inference-switch",
       "pi-agent-qualification-amd64",
       "rebuild-openclaw",
       "rebuild-hermes",
     ]);
+    expect(existsSync(path.join(REPO_ROOT, "tools/e2e/fabric-package.mts"))).toBe(true);
   });
 
   it.each([

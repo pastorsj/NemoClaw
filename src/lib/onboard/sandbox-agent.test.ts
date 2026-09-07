@@ -6,6 +6,11 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../test/helpers/adapter-fixtures";
 const candidateAuthority = vi.hoisted(() => ({ digests: [] as string[] }));
 
 vi.mock("../agent/candidate-authority", () => ({
@@ -23,6 +28,7 @@ import { HarnessPackageStoreIntegrityError } from "../agent-runtime/package/stor
 import type { HarnessPackageMigration } from "../agent-runtime/package/identity";
 import {
   createPromptValidatedSandboxName,
+  getSandboxAgentRegistryFields,
   getDefaultSandboxNameForAgent,
   getAgentInferenceProviderOptions,
   resolveLegacyBackupRecoveryOwner,
@@ -77,6 +83,15 @@ function writeOpenClawPackage(
       "binary_path: /usr/local/bin/openclaw",
       "runtime:",
       "  kind: gateway",
+      "  interactive_command: openclaw",
+      "  process_lifecycle:",
+      "    support: unsupported",
+      "    reason: This fixture does not manage a gateway process.",
+      "gateway_command: openclaw gateway run",
+      "health_probe:",
+      "  url: http://127.0.0.1:18789/health",
+      "  port: 18789",
+      "  timeout_seconds: 30",
       "config:",
       "  dir: /sandbox/.openclaw",
       "  config_file: openclaw.json",
@@ -93,12 +108,18 @@ function writeOpenClawPackage(
       "    reason: This synthetic package has fixed inference configuration.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This package does not run scheduled work.",
@@ -106,6 +127,18 @@ function writeOpenClawPackage(
       "      kind: not-required",
       "",
     ].join("\n"),
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-openclaw/host/config-adapter.cts",
+    TEST_CONFIG_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-openclaw/host/messaging-adapter.cts",
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-openclaw/host/startup-adapter.cts",
+    TEST_STARTUP_ADAPTER_SOURCE,
   );
   writeFixtureFile("runtime/payload.txt", `${packageVersion}\n`);
 }
@@ -152,12 +185,18 @@ function installPiPackage() {
       "    reason: This synthetic package has fixed inference configuration.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This package does not run scheduled work.",
@@ -166,6 +205,12 @@ function installPiPackage() {
       "",
     ].join("\n"),
   );
+  writeFixtureFile("packages/nemoclaw-pi/host/config-adapter.cts", TEST_CONFIG_ADAPTER_SOURCE);
+  writeFixtureFile(
+    "packages/nemoclaw-pi/host/messaging-adapter.cts",
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  writeFixtureFile("packages/nemoclaw-pi/host/startup-adapter.cts", TEST_STARTUP_ADAPTER_SOURCE);
   writeFixtureFile("runtime/payload.txt", "pi package\n");
   return installHarnessPackage(
     { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
@@ -190,6 +235,16 @@ afterEach(() => {
 });
 
 describe("sandbox agent authority", () => {
+  it("persists an exact package id while containing the OpenClaw null sentinel to legacy state", () => {
+    const agent = {
+      name: "openclaw",
+      expectedVersion: "1.2.3",
+    } as never;
+
+    expect(getSandboxAgentRegistryFields(agent, true, true).agent).toBe("openclaw");
+    expect(getSandboxAgentRegistryFields(agent, true, false).agent).toBeNull();
+  });
+
   it("uses the package manifest sandbox name without an agent id branch", () => {
     expect(getDefaultSandboxNameForAgent({ defaultSandboxName: "future-sandbox" } as never)).toBe(
       "future-sandbox",
@@ -357,12 +412,22 @@ describe("sandbox agent authority", () => {
     expect(resolved.harnessPackageMigration).toBeNull();
   });
 
-  it("rejects an installed Pi package when candidate qualification is unavailable", () => {
+  it("uses an exact installed Pi package without applying the package-free candidate gate", () => {
     const installed = installPiPackage();
 
+    const resolved = resolveSandboxAgent(
+      { agent: "pi", harnessPackage: installed.identity },
+      { storeRoot, env: {}, requireLifecycleEligibility: true },
+    );
+
+    expect(resolved.definition.name).toBe("pi");
+    expect(resolved.harnessPackage).toEqual(installed.identity);
+  });
+
+  it("keeps package-free Pi lifecycle authority behind candidate qualification", () => {
     expect(() =>
       resolveSandboxAgent(
-        { agent: "pi", harnessPackage: installed.identity },
+        { agent: "pi" },
         { storeRoot, env: {}, requireLifecycleEligibility: true },
       ),
     ).toThrow(/release candidate.*not selectable/u);

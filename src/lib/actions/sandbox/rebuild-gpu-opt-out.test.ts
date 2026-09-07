@@ -28,6 +28,9 @@ function pinnedDefinition(name: string): AgentDefinition {
     name,
     packageRoot: `/pinned/${name}`,
     runtime: { kind: terminal ? "terminal" : "service" },
+    ...(terminal
+      ? { sandbox_create: { startup_controls: ["approval-mode", "observability"] } }
+      : {}),
     forward_ports: terminal ? [] : [18_789],
   } as AgentDefinition;
 }
@@ -332,6 +335,28 @@ describe("buildRebuildRecreateOnboardOpts", () => {
     });
 
     expect(opts).not.toHaveProperty("policyTier");
+    expect(opts.observabilityEnabled).toBe(true);
+  });
+
+  it("carries declared startup controls for an unknown receipt-backed package", () => {
+    const definition = {
+      ...pinnedDefinition("future-harness"),
+      sandbox_create: { startup_controls: ["approval-mode", "observability"] },
+    } as AgentDefinition;
+    const harnessPackage = packageIdentity("future-harness");
+    const opts = buildRebuildRecreateOnboardOpts({
+      ...baseArgs,
+      agentAuthority: pinnedAuthority("future-harness", definition, harnessPackage),
+      sb: {
+        agent: "future-harness",
+        harnessPackage,
+        dashboardPort: 18_789,
+        approvalMode: "thread-opt-in",
+        observabilityEnabled: true,
+      },
+    });
+
+    expect(opts.dcodeAutoApprovalMode).toBe("thread-opt-in");
     expect(opts.observabilityEnabled).toBe(true);
   });
 

@@ -95,7 +95,7 @@ function preserveCaseDeps(
 }
 
 describe("uninstall messaging for a preserved-but-orphaned sandbox registry (#6520)", () => {
-  it("uses the 'already removed' wording for provider and sandbox delete no-ops", async () => {
+  it("uses the 'already removed' wording while treating an unproven no-op as incomplete", async () => {
     // Same defect family as the gateway wording fix (#3456 sub-bug 4): when
     // `openshell provider delete <name>` or `openshell sandbox delete --all`
     // no-ops (target already gone), `Deleted provider 'X' skipped` reads as if
@@ -124,10 +124,12 @@ describe("uninstall messaging for a preserved-but-orphaned sandbox registry (#65
       },
     );
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).toBe(1);
     const combined = `${warnings.join("\n")}\n${logs.join("\n")}`;
-    expect(warnings.join("\n")).toContain("Provider 'nvidia-nim' already removed or unreachable");
     expect(warnings.join("\n")).toContain("OpenShell sandboxes already removed or unreachable");
+    expect(warnings.join("\n")).toContain(
+      "OpenShell did not confirm deletion of every sandbox",
+    );
     expect(combined).not.toContain("Deleted provider 'nvidia-nim' skipped");
     expect(combined).not.toContain("Deleted all OpenShell sandboxes skipped");
   });

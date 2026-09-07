@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   ensureValidatedWebSearchCredential: vi.fn(),
   isDockerDesktopWslRuntime: vi.fn(),
   isLinuxDockerDriverGatewayEnabled: vi.fn(),
+  listRebuildCredentialMessagingManifests: vi.fn(() => []),
   preflightAuthoritativeRebuildTarget: vi.fn(),
   preflightRebuildCredentials: vi.fn(),
   readGatewayProviderMetadata: vi.fn(),
@@ -49,11 +50,17 @@ vi.mock("../../onboard/docker-gpu-sandbox-create", () => ({
 
 vi.mock("./rebuild-credential-preflight", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./rebuild-credential-preflight")>()),
+  listRebuildCredentialMessagingManifests: mocks.listRebuildCredentialMessagingManifests,
   preflightRebuildCredentials: mocks.preflightRebuildCredentials,
 }));
 
 import * as rebuildImagePreflight from "./rebuild-custom-image-preflight";
 import { loadAgent } from "../../agent/defs";
+import {
+  buildManagedStartupPackageProfile,
+  managedStartupSettingsFromProfile,
+} from "../../onboard/managed-startup/package-profile";
+import { managedStartupE2eProfile } from "../../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
 import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
 import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 import type { RebuildResumeConfig } from "./rebuild-resume-config";
@@ -201,6 +208,90 @@ describe("preflightRebuildTargetRuntime GPU route", () => {
       expect(imagePreflight).toHaveBeenCalledWith(
         expect.objectContaining({ preResolvedBaseImageMetadata: metadata }),
       );
+    } finally {
+      imagePreflight.mockRestore();
+    }
+  });
+
+  it("passes a receipt-backed Dockerfile startup plan into replacement image preflight", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "openclaw",
+      packageVersion: "1.0.0",
+      contentDigest: "d".repeat(64),
+    };
+    const builtProfile = buildManagedStartupPackageProfile({
+      harnessPackage,
+      desiredState: managedStartupSettingsFromProfile(managedStartupE2eProfile("openclaw")),
+      packageConfig: { mode: "dockerfile" },
+      credentialProxyReplayRequired: false,
+      dashboardRemoteBindPrepared: false,
+    });
+    const packageTarget = {
+      ...TARGET,
+      agentAuthority: { ...OPENCLAW_AUTHORITY, harnessPackage },
+    } as unknown as RebuildTargetConfig;
+    const packageEntry = {
+      name: "example",
+      agent: "openclaw",
+      harnessPackage,
+      workload: {
+        schemaVersion: 1,
+        kind: "legacy-dockerfile",
+        reference: "nemoclaw-openclaw:local",
+        packageStartupProfile: {
+          encodedProfile: builtProfile.encodedProfile,
+          startupProfileSha256: builtProfile.startupProfileSha256,
+          credentialProxyReplayRequired: false,
+        },
+        shared: false,
+      },
+    } as RebuildSandboxEntry;
+    const installedPlan = {
+      schemaVersion: 1,
+      agent: "openclaw",
+      configurationEnvironment: { NEMOCLAW_TEST_MODE: "strict" },
+      runtimeEnvironment: {},
+      applicationRuntime: { executablePath: "/usr/local/bin/openclaw" },
+      managedState: {},
+      materials: [{ kind: "corporate-ca-handoff", environmentVariable: "CA", required: false }],
+      actions: [],
+    } as const;
+    const buildInstalledStartupPlan = vi.fn(() => installedPlan as never);
+    const imagePreflight = vi
+      .spyOn(rebuildImagePreflight, "preflightRebuildImage")
+      .mockResolvedValue({ ok: true, imageTag: "preflight:test", prepared: null } as never);
+    const bail = vi.fn((message: string): never => {
+      throw new Error(message);
+    });
+    try {
+      await expect(
+        preflightRebuildTargetRuntime(
+          packageTarget,
+          packageEntry,
+          RECREATE_OPTIONS,
+          vi.fn(),
+          bail,
+          { buildInstalledStartupPlan },
+        ),
+      ).resolves.toEqual({
+        ok: true,
+        preparedImage: null,
+        requiresGatewayProviderReconfigure: false,
+      });
+
+      expect(buildInstalledStartupPlan).toHaveBeenCalledWith(builtProfile.profile, process.env);
+      expect(imagePreflight).toHaveBeenCalledWith(
+        expect.objectContaining({
+          packageDockerfilePlan: {
+            packageId: "openclaw",
+            configurationEnvironment: { NEMOCLAW_TEST_MODE: "strict" },
+            materials: installedPlan.materials,
+            dashboardRemoteBindPrepared: false,
+          },
+        }),
+      );
+      expect(bail).not.toHaveBeenCalled();
     } finally {
       imagePreflight.mockRestore();
     }
@@ -358,6 +449,50 @@ describe("preflightRebuildTargetRuntime web search credential", () => {
         name: packageId,
         displayName: "Example Gateway",
       },
+    } as unknown as RebuildTargetConfig;
+    mocks.readGatewayProviderMetadata.mockReturnValue(GATEWAY_BINDING_METADATA);
+
+    const { result, bail } = await runPreflight(packageTarget);
+
+    expect(result).toEqual({
+      ok: true,
+      preparedImage: null,
+      requiresGatewayProviderReconfigure: false,
+    });
+    expect(mocks.readGatewayProviderMetadata).toHaveBeenCalledOnce();
+    expect(mocks.ensureValidatedWebSearchCredential).not.toHaveBeenCalled();
+    expect(bail).not.toHaveBeenCalled();
+  });
+
+  it("uses a receipt declaration when its package ID matches a legacy harness name", async () => {
+    const packageDefinition = {
+      ...loadAgent("hermes"),
+      web_search: {
+        support: "providers",
+        providers: [
+          {
+            provider: "brave",
+            credential_env: "BRAVE_API_KEY",
+            profile_type: "brave",
+          },
+        ],
+      },
+    } as const;
+    const packageTarget = {
+      ...WEB_SEARCH_TARGET,
+      agentAuthority: {
+        recordedAgent: "hermes",
+        effectiveAgentId: "hermes",
+        definition: packageDefinition,
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: "hermes",
+          packageVersion: "1.0.0",
+          contentDigest: "b".repeat(64),
+        },
+        harnessPackageMigration: null,
+      },
+      agentDefinition: packageDefinition,
     } as unknown as RebuildTargetConfig;
     mocks.readGatewayProviderMetadata.mockReturnValue(GATEWAY_BINDING_METADATA);
 

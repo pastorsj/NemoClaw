@@ -27,6 +27,7 @@ const MAX_GATEWAY_DIRECTORY_ENTRIES = 1024;
 export interface GatewayRegistryEntry extends Record<string, unknown> {
   name: string;
   dashboardPort?: number | null;
+  secondaryForwardPort?: number | null;
   hermesApiPort?: number | null;
   gatewayName?: string | null;
   gatewayPort?: number | null;
@@ -103,20 +104,28 @@ function parseRegistry(filePath: string, raw: string): GatewayRegistryDocument {
     ) {
       throw stateError(`${filePath} has an invalid sandbox row for ${JSON.stringify(name)}`);
     }
-    for (const field of ["dashboardPort", "hermesApiPort"] as const) {
+    for (const field of ["dashboardPort", "secondaryForwardPort", "hermesApiPort"] as const) {
       const port = value[field];
+      const minimum = field === "secondaryForwardPort" ? 1 : 0;
       if (
         port !== undefined &&
         port !== null &&
-        (typeof port !== "number" || !Number.isInteger(port) || port < 0 || port > 65535)
+        (typeof port !== "number" || !Number.isInteger(port) || port < minimum || port > 65535)
       ) {
         throw stateError(`${filePath} has an invalid ${field} for sandbox ${JSON.stringify(name)}`);
       }
     }
-    sandboxes[name] =
-      value.dashboardPort === 0
-        ? { ...(value as GatewayRegistryEntry), dashboardPort: null }
-        : (value as GatewayRegistryEntry);
+    const normalized = value as GatewayRegistryEntry;
+    // Receipts written before the neutral field existed used the only secondary-forward field
+    // available at the time. Migrate by authority shape, never by harness identity.
+    const secondaryForwardPort =
+      normalized.secondaryForwardPort ??
+      (isObjectRecord(normalized.harnessPackage) ? normalized.hermesApiPort : undefined);
+    sandboxes[name] = {
+      ...normalized,
+      ...(value.dashboardPort === 0 ? { dashboardPort: null } : {}),
+      ...(secondaryForwardPort !== undefined ? { secondaryForwardPort } : {}),
+    };
   }
   return {
     ...parsed,

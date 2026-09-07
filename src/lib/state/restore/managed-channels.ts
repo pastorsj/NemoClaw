@@ -1,13 +1,26 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { BUILT_IN_CHANNEL_MANIFESTS } from "../../messaging/channels/built-ins.js";
 import type { ChannelManifest } from "../../messaging/manifest/index.js";
+import { createBuiltInChannelManifestRegistry } from "../../messaging/channels/built-ins.js";
+import {
+  listMessagingChannelsForProfile,
+  resolveSandboxMessagingProfileAuthority,
+} from "../../messaging/profile-authority.js";
+import type { SandboxEntry } from "../registry/types.js";
+
+export function listPackageConfigRestoreManagedChannelNames(entry: SandboxEntry): string[] {
+  const authority = resolveSandboxMessagingProfileAuthority(entry);
+  return listManagedChannelNames(
+    authority.agent.name,
+    listMessagingChannelsForProfile(authority, createBuiltInChannelManifestRegistry()),
+  );
+}
 
 /** Resolve agent-native channel keys for package-owned configuration restore. */
 export function listManagedChannelNames(
   agentName: string,
-  manifests: readonly ChannelManifest[] = BUILT_IN_CHANNEL_MANIFESTS,
+  manifests: readonly ChannelManifest[],
 ): string[] {
   const normalizedAgentName = agentName.trim();
   if (!normalizedAgentName) return [];

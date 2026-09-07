@@ -11,6 +11,7 @@ import {
 import {
   hydrateDerivedSandboxMessagingPlanFields,
   MessagingSetupApplier,
+  type ChannelManifest,
   type SandboxMessagingPlan,
 } from "../messaging";
 import { parseSandboxMessagingPlan } from "../messaging/plan-validation";
@@ -19,7 +20,7 @@ import {
   type SandboxBaseImageResolutionMetadata,
 } from "../sandbox-base-image";
 import {
-  mergeHermesPreservedEnvIntoMessagingPlan,
+  mergePreservedEnvironmentIntoMessagingPlan,
   type PreservedEnvFile,
 } from "../state/preserved-env/index";
 import {
@@ -185,6 +186,8 @@ export interface PatchStagedDockerfileOptions {
   compatibleEndpointReasoning?: "true" | "false";
   wslDashboardExposure?: boolean;
   rebuildPreservedEnv?: readonly PreservedEnvFile[];
+  /** Exact composed manifests required when the staged plan is receipt-backed. */
+  messagingManifests?: readonly ChannelManifest[];
 }
 
 function openClawRootStartupArg(dockerfile: string): DockerfileInstruction | null {
@@ -265,11 +268,14 @@ function patchMessagingPlanDockerArg(
   dockerfile: string,
   plan: SandboxMessagingPlan,
   preservedEnv: readonly PreservedEnvFile[] | undefined,
+  manifests?: readonly ChannelManifest[],
 ): string {
+  const hydrationOptions = manifests === undefined ? {} : { manifests };
   const baseMessagingPlan = hydrateDerivedSandboxMessagingPlanFields(
-    parseSandboxMessagingPlan(plan) ?? plan,
+    parseSandboxMessagingPlan(plan, hydrationOptions) ?? plan,
+    hydrationOptions,
   );
-  const imageMessagingPlan = mergeHermesPreservedEnvIntoMessagingPlan(
+  const imageMessagingPlan = mergePreservedEnvironmentIntoMessagingPlan(
     baseMessagingPlan,
     preservedEnv,
   );
@@ -289,9 +295,15 @@ export function patchStagedDockerfileMessagingPlan(
   dockerfilePath: string,
   plan: SandboxMessagingPlan,
   preservedEnv: readonly PreservedEnvFile[],
+  manifests?: readonly ChannelManifest[],
 ): void {
   const patchSnapshot = readDockerfilePatchSnapshot(dockerfilePath);
-  const dockerfile = patchMessagingPlanDockerArg(patchSnapshot.content, plan, preservedEnv);
+  const dockerfile = patchMessagingPlanDockerArg(
+    patchSnapshot.content,
+    plan,
+    preservedEnv,
+    manifests,
+  );
   replaceDockerfilePatchSnapshot(dockerfilePath, patchSnapshot, dockerfile);
 }
 
@@ -399,7 +411,10 @@ export function patchStagedDockerfile(
   // when the staged Dockerfile predates this ARG (e.g. OpenClaw).
   const upstreamProvider = provider && provider.trim() ? provider : providerKey;
   const upstreamProviderArgPattern = /^ARG NEMOCLAW_UPSTREAM_PROVIDER=.*$/m;
-  if (upstreamProviderArgPattern.test(dockerfile) && !isValidDcodeUpstreamProvider(upstreamProvider)) {
+  if (
+    upstreamProviderArgPattern.test(dockerfile) &&
+    !isValidDcodeUpstreamProvider(upstreamProvider)
+  ) {
     throw new Error(
       "NEMOCLAW_UPSTREAM_PROVIDER must start with an ASCII letter or digit and contain 1-64 ASCII letters, digits, dots, underscores, or hyphens for DCode.",
     );
@@ -593,6 +608,7 @@ export function patchStagedDockerfile(
       dockerfile,
       messagingPlan,
       options.rebuildPreservedEnv,
+      options.messagingManifests,
     );
   }
   if (hermesToolGateways.length > 0) {

@@ -642,6 +642,11 @@ function unregisterRuntimeRefreshCredential(sandbox) {
   runtimeRefreshCredentials.unregister(sandbox);
 }
 
+function hasRuntimeRefreshCredential(sandbox) {
+  const loaded = loadStateForSandbox(sandbox);
+  return loaded ? runtimeRefreshCredentials.has(loaded.state) : false;
+}
+
 module.exports = {
   AGENT_KEY_REFRESH_INTERVAL_MS,
   UPSTREAM_REQUEST_TIMEOUT_MS,
@@ -651,6 +656,7 @@ module.exports = {
   ensureInferenceAgentKey,
   errorCode,
   findCredentialState,
+  hasRuntimeRefreshCredential,
   refreshAccessToken,
   refreshManagedInferenceForRuntimeCredentials,
   registerInitialRuntimeRefreshCredential,

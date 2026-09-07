@@ -18,7 +18,9 @@ function runRestore(
   refreshOpenClawConfigHash: boolean,
   occupy: (stateDir: string) => void = () => undefined,
 ): { configPath: string; stateDir: string; status: number | null } {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-state-file-mode-"));
+  const fixture = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-state-file-mode-")),
+  );
   fixtures.push(fixture);
   const stateDir = path.join(fixture, ".openclaw");
   fs.mkdirSync(stateDir);
@@ -62,7 +64,9 @@ describe("state-file restore modes", () => {
   });
 
   it("writes an exact hash record for every protected configuration file", () => {
-    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-state-file-hash-"));
+    const fixture = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-state-file-hash-")),
+    );
     fixtures.push(fixture);
     const stateDir = path.join(fixture, ".agent");
     const configPath = path.join(stateDir, "config.json");
@@ -90,7 +94,9 @@ describe("state-file restore modes", () => {
   });
 
   it("refuses an unsafe hash target before changing config or recovery state", () => {
-    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-state-file-hash-refusal-"));
+    const fixture = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-state-file-hash-refusal-")),
+    );
     fixtures.push(fixture);
     const stateDir = path.join(fixture, ".agent");
     const configPath = path.join(stateDir, "config.json");
@@ -118,5 +124,35 @@ describe("state-file restore modes", () => {
     expect(fs.readFileSync(configPath, "utf8")).toBe('{"state":"current"}\n');
     expect(fs.readFileSync(lastGoodPath, "utf8")).toBe('{"state":"last-good"}\n');
     expect(fs.readFileSync(redirectedHashPath, "utf8")).toBe("outside remains unchanged\n");
+  });
+
+  it("refuses a non-regular last-good target before changing protected state", () => {
+    const fixture = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-state-file-anchor-refusal-")),
+    );
+    fixtures.push(fixture);
+    const stateDir = path.join(fixture, ".agent");
+    const configPath = path.join(stateDir, "config.json");
+    const lastGoodPath = `${configPath}.last-good`;
+    fs.mkdirSync(lastGoodPath, { recursive: true });
+    fs.writeFileSync(configPath, '{"state":"current"}\n');
+    fs.writeFileSync(path.join(lastGoodPath, "sentinel.txt"), "anchor remains unchanged\n");
+
+    const command = buildStateFileRestoreCommand(
+      stateDir,
+      { path: "config.json", strategy: "copy" },
+      true,
+    );
+    const result = spawnSync("bash", ["-c", command], {
+      input: Buffer.from('{"state":"restored"}\n'),
+    });
+
+    expect(result.status).toBe(13);
+    expect(fs.readFileSync(configPath, "utf8")).toBe('{"state":"current"}\n');
+    expect(fs.readFileSync(path.join(lastGoodPath, "sentinel.txt"), "utf8")).toBe(
+      "anchor remains unchanged\n",
+    );
+    expect(fs.existsSync(path.join(stateDir, ".config-hash"))).toBe(false);
+    expect(fs.readdirSync(lastGoodPath)).toEqual(["sentinel.txt"]);
   });
 });

@@ -26,6 +26,24 @@ describe("live preset provenance", () => {
     expect(formatPresetProvenanceTag({ source: "user" })).toBe("user-added");
   });
 
+  it("uses receipt-owned presets without recognizing the harness identifier", () => {
+    expect(
+      classifyPresetProvenance("future-tools", {
+        agentName: "future-harness",
+        ownedPresetNames: ["future-tools"],
+      }),
+    ).toEqual({ source: "agent", agent: "future-harness" });
+  });
+
+  it("does not use legacy ownership when a receipt declares no owned presets", () => {
+    expect(
+      classifyPresetProvenance("openclaw-pricing", {
+        agentName: "openclaw",
+        ownedPresetNames: [],
+      }),
+    ).toEqual({ source: "user" });
+  });
+
   it("reports provenance only when OpenShell confirms the active entry", () => {
     expect(
       formatPresetProvenanceSuffix("npm", {}, { active: true, observedInOpenShell: true }),

@@ -1,0 +1,30 @@
+{
+  "packageId": "hermes",
+  "channelsPath": "profile.json",
+  "build": {
+    "configRoot": "~/.hermes",
+    "packageManagers": ["python-package"],
+    "packageInstallers": {
+      "python-package": {
+        "kind": "batched-command",
+        "command": [
+          "uv",
+          "pip",
+          "install",
+          "--python",
+          "/opt/hermes/.venv/bin/python",
+          "--no-cache",
+          "--",
+          "{{packages}}"
+        ],
+        "environment": {
+          "UV_SYSTEM_CERTS": "1",
+          "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt"
+        }
+      }
+    },
+    "renderFinalizers": ["inherit-api-server-toolsets"],
+    "postCreateCredentialReconciliation": "restart-runtime",
+    "degradedDiagnostics": "gateway-log-tail"
+  }
+}

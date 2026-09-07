@@ -7,9 +7,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  directDockerfileCopySources,
-  formatMissingDockerfileCopySources,
-  missingDockerfileCopySources,
+  directDockerfileContextSources,
+  formatMissingDockerfileContextSources,
+  missingDockerfileContextSources,
 } from "../../../scripts/lib/dockerfile-copy-sources.mts";
 
 const temporaryDirectories: string[] = [];
@@ -33,7 +33,7 @@ describe("optimized build-context Dockerfile sources", () => {
     }
   });
 
-  it("parses flags, continuations, and multiple sources while ignoring build stages", () => {
+  it("parses local COPY and ADD sources while ignoring build stages and pinned downloads", () => {
     const directory = makeTemporaryDirectory();
     const dockerfilePath = writeDockerfile(
       directory,
@@ -44,12 +44,15 @@ describe("optimized build-context Dockerfile sources", () => {
         "  scripts/lib/sandbox-init.sh \\",
         "  /usr/local/lib/nemoclaw/",
         "COPY --from=build /out/runtime /usr/local/lib/runtime",
+        "ADD packages/nemoclaw-example/runtime.tgz /usr/local/share/runtime.tgz",
+        `ADD --checksum=sha256:${"a".repeat(64)} https://packages.example/runtime.tgz /tmp/runtime.tgz`,
       ].join("\n"),
     );
 
-    expect(directDockerfileCopySources(dockerfilePath)).toEqual([
+    expect(directDockerfileContextSources(dockerfilePath)).toEqual([
       { lineNumber: 2, source: "scripts/lib/corporate-ca-runtime.sh" },
       { lineNumber: 2, source: "scripts/lib/sandbox-init.sh" },
+      { lineNumber: 7, source: "packages/nemoclaw-example/runtime.tgz" },
     ]);
   });
 
@@ -63,7 +66,7 @@ describe("optimized build-context Dockerfile sources", () => {
       ].join("\n"),
     );
 
-    const missing = missingDockerfileCopySources(dockerfilePath, directory);
+    const missing = missingDockerfileContextSources(dockerfilePath, directory);
 
     expect(missing).toEqual([
       {
@@ -72,7 +75,7 @@ describe("optimized build-context Dockerfile sources", () => {
         source: "scripts/lib/corporate-ca-runtime.sh",
       },
     ]);
-    expect(formatMissingDockerfileCopySources(missing)).toContain(
+    expect(formatMissingDockerfileContextSources(missing)).toContain(
       "Dockerfile:2 missing scripts/lib/corporate-ca-runtime.sh",
     );
   });
@@ -86,10 +89,10 @@ describe("optimized build-context Dockerfile sources", () => {
     const scriptsDirectory = path.join(directory, "nemoclaw-blueprint", "scripts");
     fs.mkdirSync(scriptsDirectory, { recursive: true });
 
-    expect(missingDockerfileCopySources(dockerfilePath, directory)).toHaveLength(1);
+    expect(missingDockerfileContextSources(dockerfilePath, directory)).toHaveLength(1);
 
     fs.writeFileSync(path.join(scriptsDirectory, "http-proxy-fix.js"), "fixture\n", "utf8");
-    expect(missingDockerfileCopySources(dockerfilePath, directory)).toEqual([]);
+    expect(missingDockerfileContextSources(dockerfilePath, directory)).toEqual([]);
   });
 
   it.each([
@@ -105,7 +108,7 @@ describe("optimized build-context Dockerfile sources", () => {
     const directory = makeTemporaryDirectory();
     const dockerfilePath = writeDockerfile(directory, dockerfile);
 
-    expect(() => directDockerfileCopySources(dockerfilePath), dockerfile).toThrow(
+    expect(() => directDockerfileContextSources(dockerfilePath), dockerfile).toThrow(
       /Unsupported (?:direct )?Dockerfile (?:COPY (?:form|source)|heredoc instruction)/u,
     );
   });

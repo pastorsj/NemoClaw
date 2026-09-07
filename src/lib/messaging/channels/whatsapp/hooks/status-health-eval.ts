@@ -55,7 +55,7 @@ export type WhatsappHeartbeat = {
 };
 
 export type WhatsappProbeInput = {
-  // Agent owning the sandbox: "openclaw", "hermes", etc. Used for hint text.
+  // Receipt-backed package identifier used only in the report identity.
   agent: string;
   // Pairing state reported by the channel runtime. True when the runtime
   // reports a linked account, false when it reports no link, and null when
@@ -65,8 +65,8 @@ export type WhatsappProbeInput = {
   // to parse. parseError records the reason a present file failed.
   heartbeat: WhatsappHeartbeat | null;
   heartbeatParseError: string | null;
-  // True when at least one bridge process (Baileys, openclaw-whatsapp,
-  // hermes whatsapp adapter) was observed running. Null on probe failure.
+  // True when the declared status operation reports a live bridge. Null when
+  // the selected operation does not expose live process state.
   bridgeProcessAlive: boolean | null;
   // Snippets of recent bridge log output that mention well-known signals
   // (connection.open, 401 unauthorized, qr expired). The diagnostic never
@@ -85,9 +85,23 @@ export type WhatsappProbeInput = {
   presetOnGateway: boolean | null;
   // Whether the whatsapp channel is recorded in the registry messaging plan.
   channelEnabledInRegistry: boolean;
-  // Hermes runs the dashboard under a separate home. This probe records only
-  // whether the two expected credential files exist, never their contents.
+  // A session-files operation records only whether the two declared
+  // credential files exist, never their contents.
   sessionLocations?: WhatsappSessionLocations;
+  // Human-readable labels and repair command derived from the typed package
+  // declaration. The evaluator never selects behavior from `agent`.
+  guidance?: WhatsappProbeGuidance;
+};
+
+export type WhatsappProbeGuidance = {
+  pairingCommand: string;
+  session?: {
+    primaryLabel: string;
+    alternateLabel: string;
+    primarySessionDir: string;
+    configuredValuePath?: string;
+    configRoot: string;
+  };
 };
 
 export type WhatsappSessionLocations = {
@@ -132,11 +146,24 @@ function isParseableTimestamp(value: string | null): value is string {
   return value !== null && Number.isFinite(Date.parse(value));
 }
 
-// A rebuild restores the legacy dashboard session instead of dropping it, so
-// re-pairing alone leaves the sandbox holding two credential sets. Send the
-// operator through `channels remove`, which clears every WhatsApp session path.
-const HERMES_LEGACY_DASHBOARD_SESSION_HINT =
-  "Run `nemoclaw <sandbox> channels remove whatsapp` to clear every WhatsApp session path, then `nemoclaw <sandbox> channels add whatsapp`. Pair again from the dashboard so credentials are stored in `/sandbox/.hermes/platforms/whatsapp/session`. Rerun `nemoclaw <sandbox> channels status --channel whatsapp`.";
+function pairingCommand(input: WhatsappProbeInput): string {
+  return input.guidance?.pairingCommand ?? "the harness pairing command";
+}
+
+// Re-pairing alone can leave the sandbox holding two credential sets. Send
+// the operator through `channels remove`, which clears every declared path.
+function alternateSessionRepairHint(input: WhatsappProbeInput): string {
+  const session = input.guidance?.session;
+  const destination = session?.primarySessionDir
+    ? ` so credentials are stored in \`${session.primarySessionDir}\``
+    : "";
+  return (
+    "Run `nemoclaw <sandbox> channels remove whatsapp` to clear every WhatsApp session path, " +
+    "then `nemoclaw <sandbox> channels add whatsapp`. " +
+    `Pair again with \`${pairingCommand(input)}\`${destination}. ` +
+    "Rerun `nemoclaw <sandbox> channels status --channel whatsapp`."
+  );
+}
 
 function pairingSignal(input: WhatsappProbeInput): DiagnosticSignal {
   if (!input.probeReachable) {
@@ -155,26 +182,22 @@ function pairingSignal(input: WhatsappProbeInput): DiagnosticSignal {
     };
   }
   if (input.paired === false) {
-    const dashboardOnly = hermesDashboardOnlySession(input);
-    if (input.agent === "hermes") {
+    const session = input.guidance?.session;
+    if (session) {
       return {
         label: "Pairing / session",
         severity: "warn",
-        detail: "Hermes gateway session path has no WhatsApp credentials",
-        hint: dashboardOnly
-          ? HERMES_LEGACY_DASHBOARD_SESSION_HINT
-          : "run `hermes whatsapp` inside the sandbox to display a QR code",
+        detail: `${session.primaryLabel} session path has no WhatsApp credentials`,
+        hint: alternateOnlySession(input)
+          ? alternateSessionRepairHint(input)
+          : `run \`${pairingCommand(input)}\` inside the sandbox to display a QR code`,
       };
     }
-    const loginHint =
-      input.agent === "hermes"
-        ? "run `hermes whatsapp` inside the sandbox to display a QR code"
-        : "run `openclaw channels login --channel whatsapp` inside the sandbox to display a QR code";
     return {
       label: "Pairing / session",
       severity: "warn",
       detail: "channel runtime reports WhatsApp is not paired",
-      hint: loginHint,
+      hint: `run \`${pairingCommand(input)}\` inside the sandbox to display a QR code`,
     };
   }
   return {
@@ -184,9 +207,9 @@ function pairingSignal(input: WhatsappProbeInput): DiagnosticSignal {
   };
 }
 
-function hermesDashboardOnlySession(input: WhatsappProbeInput): boolean {
+function alternateOnlySession(input: WhatsappProbeInput): boolean {
   return (
-    input.agent === "hermes" &&
+    input.guidance?.session !== undefined &&
     input.sessionLocations?.gatewaySessionCreds === false &&
     input.sessionLocations.dashboardSessionCreds === true &&
     input.sessionLocations.gatewaySessionPathSource !== "config"
@@ -196,6 +219,9 @@ function hermesDashboardOnlySession(input: WhatsappProbeInput): boolean {
 function sessionLocationSignal(input: WhatsappProbeInput): DiagnosticSignal | null {
   const locations = input.sessionLocations;
   if (!locations) return null;
+  const guidance = input.guidance?.session;
+  const primaryLabel = guidance?.primaryLabel ?? "primary runtime";
+  const alternateLabel = guidance?.alternateLabel ?? "alternate runtime";
   const gateway = locations.gatewaySessionCreds;
   const dashboard = locations.dashboardSessionCreds;
   if (locations.gatewaySessionPathSource === "config" && gateway !== null) {
@@ -206,71 +232,74 @@ function sessionLocationSignal(input: WhatsappProbeInput): DiagnosticSignal | nu
       ? {
           label: "Session location",
           severity: "ok",
-          detail: `the configured Hermes WhatsApp session path${configuredPath} contains credentials`,
+          detail: `the configured WhatsApp session path${configuredPath} contains credentials`,
         }
       : {
           label: "Session location",
           severity: "warn",
-          detail: `the configured Hermes WhatsApp session path${configuredPath} has no WhatsApp credentials`,
-          hint: "pair WhatsApp again, or set `platforms.whatsapp.extra.session_path` to the session path that holds the credentials",
+          detail: `the configured WhatsApp session path${configuredPath} has no WhatsApp credentials`,
+          hint: guidance?.configuredValuePath
+            ? `pair WhatsApp again, or set \`${guidance.configuredValuePath}\` to the session path that holds the credentials`
+            : "pair WhatsApp again, or update the declared session path to the directory that holds the credentials",
         };
   }
   if (gateway === false && dashboard === true) {
     return {
       label: "Session location",
       severity: "warn",
-      detail:
-        "dashboard-home has WhatsApp credentials, but the Hermes gateway session path is empty",
-      hint: HERMES_LEGACY_DASHBOARD_SESSION_HINT,
+      detail: `${alternateLabel} has WhatsApp credentials, but the ${primaryLabel} session path is empty`,
+      hint: alternateSessionRepairHint(input),
     };
   }
   if (gateway === true && dashboard === false) {
     return {
       label: "Session location",
       severity: "ok",
-      detail: "Hermes gateway session path contains WhatsApp credentials",
+      detail: `${primaryLabel} session path contains WhatsApp credentials`,
     };
   }
   if (gateway === false && dashboard === false) {
     return {
       label: "Session location",
       severity: "info",
-      detail: "no WhatsApp credentials found in the Hermes gateway or dashboard session paths",
+      detail: `no WhatsApp credentials found in the ${primaryLabel} or ${alternateLabel} session paths`,
     };
   }
   if (gateway === true && dashboard === true) {
     return {
       label: "Session location",
       severity: "info",
-      detail: "both Hermes session paths contain WhatsApp credentials",
+      detail: "both declared session paths contain WhatsApp credentials",
       hint: "use one active WhatsApp bridge for the paired account",
     };
   }
   return {
     label: "Session location",
     severity: "info",
-    detail: "Hermes session paths could not be inspected",
+    detail: "declared session paths could not be inspected",
   };
 }
 
 function sessionPathOverrideSignal(input: WhatsappProbeInput): DiagnosticSignal | null {
   const source = input.sessionLocations?.gatewaySessionPathSource;
+  const guidance = input.guidance?.session;
+  const configuredPath = guidance?.configuredValuePath ?? "the declared session-path setting";
   if (source === "config") {
     return {
       label: "Session path override",
       severity: "info",
-      detail:
-        "the gateway session check used the path set in `platforms.whatsapp.extra.session_path`",
-      hint: "remove the override after Hermes uses one WhatsApp session path for dashboard pairing and gateway startup",
+      detail: `the primary session check used the path set in \`${configuredPath}\``,
+      hint: "remove the override after the harness uses one WhatsApp session path for pairing and runtime startup",
     };
   }
   if (source === "unsupported") {
     return {
       label: "Session path override",
       severity: "warn",
-      detail:
-        "`platforms.whatsapp.extra.session_path` is not a supported session path, so the gateway session check used the default path",
-      hint: "set `platforms.whatsapp.extra.session_path` to an absolute path under `/sandbox/.hermes` that has no `.` or `..` segment",
+      detail: `\`${configuredPath}\` is not a supported session path, so the primary session check used the default path`,
+      hint: guidance
+        ? `set \`${configuredPath}\` to an absolute path under \`${guidance.configRoot}\` that has no \`.\` or \`..\` segment`
+        : "set the declared session path to a contained absolute sandbox path",
     };
   }
   return null;
@@ -519,17 +548,15 @@ function buildHints(verdict: WhatsappVerdict, input: WhatsappProbeInput): string
       );
       break;
     case "unpaired":
-      if (hermesDashboardOnlySession(input)) {
+      if (alternateOnlySession(input)) {
         hints.push(
-          "Hermes dashboard pairing wrote credentials under dashboard-home, but the gateway reads the default platforms path.",
-          HERMES_LEGACY_DASHBOARD_SESSION_HINT,
+          "The alternate pairing location contains credentials, but the primary runtime session path is empty.",
+          alternateSessionRepairHint(input),
         );
         break;
       }
       hints.push(
-        input.agent === "hermes"
-          ? "Run `hermes whatsapp` inside the sandbox and scan the QR with your phone."
-          : "Run `openclaw channels login --channel whatsapp` inside the sandbox and scan the QR with your phone.",
+        `Run \`${pairingCommand(input)}\` inside the sandbox and scan the QR with your phone.`,
       );
       break;
     case "policy_gap":

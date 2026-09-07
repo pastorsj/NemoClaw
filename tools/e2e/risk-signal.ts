@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
+
+import { readPrivateRegularFile, writePrivateRegularFile } from "./private-file.mts";
 
 export const RISK_SIGNAL_FILE = "risk-signal.json";
 
@@ -102,4 +105,47 @@ export function buildRiskSignal(
     correlationId: environment.correlationId,
     ...counts,
   };
+}
+
+function mergeRiskSignals(previous: E2eRiskSignal | null, current: E2eRiskSignal): E2eRiskSignal {
+  if (!previous) return current;
+  if (
+    previous.version !== current.version ||
+    previous.jobId !== current.jobId ||
+    previous.shardId !== current.shardId ||
+    previous.expectedSha !== current.expectedSha ||
+    previous.testedSha !== current.testedSha ||
+    previous.correlationId !== current.correlationId
+  ) {
+    throw new Error("risk signal metadata changed between executions");
+  }
+  return {
+    ...current,
+    passed: previous.passed + current.passed,
+    failed: previous.failed + current.failed,
+    skipped: previous.skipped + current.skipped,
+    pending: previous.pending + current.pending,
+    unhandledErrors: previous.unhandledErrors + current.unhandledErrors,
+    runReason:
+      previous.runReason === "failed" || current.runReason === "failed"
+        ? "failed"
+        : previous.runReason === "interrupted" || current.runReason === "interrupted"
+          ? "interrupted"
+          : "passed",
+  };
+}
+
+/** Write one validated, private risk-signal update for Vitest or a standalone runner. */
+export function writeRiskSignalCounts(
+  environment: RiskSignalEnvironment,
+  counts: RiskSignalCounts,
+): E2eRiskSignal {
+  const signal = buildRiskSignal(environment, counts);
+  fs.mkdirSync(environment.artifactDir, { recursive: true, mode: 0o700 });
+  const file = path.join(environment.artifactDir, RISK_SIGNAL_FILE);
+  const previousSource = readPrivateRegularFile(file, { allowMissing: true, maxBytes: 64 * 1024 });
+  const previous = previousSource === null ? null : (JSON.parse(previousSource) as E2eRiskSignal);
+  const merged = mergeRiskSignals(previous, signal);
+  writePrivateRegularFile(file, `${JSON.stringify(merged, null, 2)}\n`);
+  return merged;
 }

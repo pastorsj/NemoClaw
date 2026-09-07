@@ -10,6 +10,7 @@ import {
   shouldManageDashboardForAgent,
 } from "./dashboard-runtime";
 import { resolveOnboardHermesApiPort } from "./hermes-api-port";
+import { resolveRecordedSecondaryForwardPort } from "./gateway-binding/secondary-forward";
 
 // Health-port resolution lives with the existing per-sandbox port allocator;
 // re-export it beside the host-forward workflow that consumes the result.
@@ -27,6 +28,11 @@ export type EnsureDashboardForward = (
 export type AgentDashboardForwardConfig = NonNullable<DashboardRuntimeAgent> & {
   dashboard?: { kind?: unknown } | null;
   dashboardUi?: unknown;
+  healthProbe?: {
+    port?: number;
+    port_resolution?: "sandbox-secondary-forward";
+    secondary_forward?: import("./gateway-binding/secondary-forward").SecondaryForwardAllocation;
+  } | null;
 };
 
 export async function ensureAgentDashboardForward(options: {
@@ -37,6 +43,10 @@ export async function ensureAgentDashboardForward(options: {
   controlUiPort?: number;
   /** Host port allocated to this sandbox's OpenAI-compatible API, when it has one. */
   hermesApiPort?: number | null;
+  /** Host port allocated from the receipt-pinned secondary-forward declaration. */
+  secondaryForwardPort?: number | null;
+  /** Whether the exact package receipt, rather than legacy registry fields, owns the ports. */
+  receiptBackedPackage: boolean;
   beforeForwardPort?: (port: number) => Promise<void> | void;
   revalidateSandboxIdentity?: (operation: string) => void;
   warn?: (message: string) => void;
@@ -48,6 +58,8 @@ export async function ensureAgentDashboardForward(options: {
     chatUiUrl,
     controlUiPort,
     hermesApiPort,
+    secondaryForwardPort,
+    receiptBackedPackage,
     beforeForwardPort,
     revalidateSandboxIdentity,
     warn = (message: string) => console.warn(message),
@@ -75,10 +87,29 @@ export async function ensureAgentDashboardForward(options: {
   try {
     // The manifest names the agent's default API port. This sandbox owns its own,
     // so forward the allocated port instead of the sibling sandbox's default.
-    const resolveDeclaredPort = (port: number): number =>
-      port === HERMES_OPENAI_API_PORT
+    const secondaryAllocation = agent.healthProbe?.secondary_forward;
+    const secondaryDeclaredPort =
+      agent.healthProbe?.port_resolution === "sandbox-secondary-forward"
+        ? agent.healthProbe.port
+        : undefined;
+    const resolveDeclaredPort = (port: number): number => {
+      if (receiptBackedPackage) {
+        if (port !== secondaryDeclaredPort) return port;
+        if (!secondaryAllocation) {
+          throw new Error(
+            "Receipt-backed secondary forwarding is missing its package allocation declaration.",
+          );
+        }
+        return resolveRecordedSecondaryForwardPort({ secondaryForwardPort }, secondaryAllocation);
+      }
+      if (secondaryAllocation && port === secondaryDeclaredPort) {
+        if (secondaryForwardPort == null && hermesApiPort != null) return hermesApiPort;
+        return resolveRecordedSecondaryForwardPort({ secondaryForwardPort }, secondaryAllocation);
+      }
+      return port === HERMES_OPENAI_API_PORT
         ? (hermesApiPort ?? resolveOnboardHermesApiPort(sandboxName, { warn }))
         : port;
+    };
     const declaredPrimaryPort = getAgentPrimaryForwardPort(agent, DASHBOARD_PORT);
     const usesFixedApiPort = agent.dashboard?.kind === "api";
     const agentDashboardPort = usesFixedApiPort
@@ -94,11 +125,7 @@ export async function ensureAgentDashboardForward(options: {
       .filter((port) => port !== declaredPrimaryPort || port === agentDashboardPort)
       .map(resolveDeclaredPort);
     const preservePorts = [
-      ...new Set([
-        agentDashboardPort,
-        ...declaredPorts,
-        optionalDashboardPort,
-      ]),
+      ...new Set([agentDashboardPort, ...declaredPorts, optionalDashboardPort]),
     ].filter(isValidForwardPort);
     const requestedDashboardUrl =
       !usesFixedApiPort && chatUiUrl

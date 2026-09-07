@@ -209,6 +209,7 @@ COPY packages/nemoclaw-langchain-deepagents-code/runtime/agent-launcher.sh /usr/
 COPY packages/nemoclaw-langchain-deepagents-code/runtime/login-profile.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh
 COPY packages/nemoclaw-langchain-deepagents-code/runtime/session-supervisor.py /usr/local/lib/nemoclaw/dcode-session-supervisor.py
 COPY packages/nemoclaw-langchain-deepagents-code/runtime/backup-ready.sh /usr/local/lib/nemoclaw/state-backup-ready
+COPY packages/nemoclaw-langchain-deepagents-code/runtime/selection-qualify.cts /usr/local/lib/nemoclaw/dcode-selection-qualify
 COPY packages/nemoclaw-langchain-deepagents-code/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
 COPY packages/nemoclaw-fabric/pyproject.toml packages/nemoclaw-fabric/README.md /opt/nemoclaw-fabric-runner/
 COPY packages/nemoclaw-fabric/src/ /opt/nemoclaw-fabric-runner/src/
@@ -242,7 +243,8 @@ RUN test -f /usr/local/bin/nemoclaw-managed-bootstrap \
     && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/generate-config)" = '0:0:555' \
     && chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/config/generate-config.ts /opt/nemoclaw-deepagents-code/package.json /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts /opt/nemoclaw-deepagents-code/runtime/managed-runtime.py /opt/nemoclaw-deepagents-code/compat/runtime-patch.py /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py /opt/nemoclaw-deepagents-code/runtime/tool-disclosure.py /opt/nemoclaw-deepagents-code/runtime/observability.py /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py /opt/nemoclaw-deepagents-code/validate-observability.py /opt/nemoclaw-deepagents-code/validate-read-only-mcp-call.py /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh /usr/local/lib/nemoclaw/dcode-agent-status.sh /usr/local/lib/nemoclaw/nemoclaw_read_only_mcp.py \
     && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/dcode-agent-status.sh)" = "0:0:444" \
-    && chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-managed-startup-hold /usr/local/bin/nemoclaw-managed-bootstrap /usr/local/lib/nemoclaw/dcode-wrapper.sh /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-session-supervisor.py /usr/local/lib/nemoclaw/state-backup-ready \
+    && chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-managed-startup-hold /usr/local/bin/nemoclaw-managed-bootstrap /usr/local/lib/nemoclaw/dcode-wrapper.sh /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-session-supervisor.py /usr/local/lib/nemoclaw/dcode-selection-qualify /usr/local/lib/nemoclaw/state-backup-ready \
+    && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/dcode-selection-qualify)" = "0:0:755" \
     && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/dcode-session-supervisor.py)" = "0:0:755" \
     && install -o root -g root -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-managed-exec \
     && test -f /usr/local/lib/nemoclaw/dcode-managed-exec \

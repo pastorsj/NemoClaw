@@ -3,11 +3,16 @@
 
 import type { ChildProcess } from "node:child_process";
 
-import { launchVoiceGateway, type VoiceGatewayLaunchOptions } from "../../voice-gateway/launcher";
+import {
+  launchVoiceGateway,
+  type VoiceGatewayLauncherDependencies,
+  type VoiceGatewayLaunchOptions,
+} from "../../voice-gateway/launcher";
 
 /** Start the voice gateway for a trusted external integration. */
 export async function runVoiceGatewayLaunch(
   options: VoiceGatewayLaunchOptions,
+  dependencies?: VoiceGatewayLauncherDependencies,
 ): Promise<ChildProcess> {
-  return launchVoiceGateway(options);
+  return launchVoiceGateway(options, dependencies);
 }

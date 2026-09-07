@@ -55,6 +55,10 @@ vi.mock("../agent/defs.js", () => ({
   })),
 }));
 
+vi.mock("../onboard/package/package-authority.js", () => ({
+  resolveRecordedSandboxAgentAuthority: vi.fn(),
+}));
+
 vi.mock("child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("child_process")>();
   return { ...actual, spawnSync: vi.fn() };
@@ -63,7 +67,8 @@ vi.mock("child_process", async (importOriginal) => {
 import { spawnSync } from "child_process";
 import { captureSandboxSshConfigCommand } from "../adapters/openshell/client.js";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
-import type { AgentDefinition } from "../agent/defs.js";
+import { loadAgent, type AgentDefinition } from "../agent/defs.js";
+import { resolveRecordedSandboxAgentAuthority } from "../onboard/package/package-authority.js";
 
 // state/registry captures the registry path at module scope, so HOME must be
 // redirected before it loads. Static ESM imports are hoisted above this
@@ -99,6 +104,7 @@ describe("registry isolation", () => {
 describe("checkAgentVersion", () => {
   beforeEach(() => {
     resetTestRegistry();
+    vi.mocked(resolveRecordedSandboxAgentAuthority).mockReset();
   });
 
   afterEach(() => {
@@ -222,6 +228,81 @@ describe("checkAgentVersion", () => {
     const sshArgs = vi.mocked(spawnSync).mock.calls[0]?.[1] as string[];
     expect(sshArgs).toContain("installed-hermes --version");
     expect(sshArgs).not.toContain("hermes --version");
+  });
+
+  it("resolves same-ID receipt version metadata and command by default", () => {
+    const receipt = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    } as const;
+    registry.registerSandbox({
+      name: "receipt-sb",
+      agent: "openclaw",
+      harnessPackage: receipt,
+    });
+    vi.mocked(resolveRecordedSandboxAgentAuthority).mockReturnValue({
+      recordedAgent: "openclaw",
+      effectiveAgentId: "openclaw",
+      definition: {
+        name: "openclaw",
+        displayName: "Receipt OpenClaw",
+        versionCommand: "receipt-openclaw --build-version",
+        expectedVersion: "9.8.7",
+        versionScheme: "semver",
+      } as AgentDefinition,
+      harnessPackage: receipt,
+      harnessPackageMigration: null,
+    });
+    vi.mocked(captureSandboxSshConfigCommand).mockReturnValue({
+      status: 0,
+      output: "Host openshell-receipt-sb\n  HostName 127.0.0.1\n",
+    });
+    vi.mocked(spawnSync).mockReturnValue({
+      status: 0,
+      stdout: "Receipt OpenClaw 9.8.7\n",
+      stderr: "",
+      pid: 1234,
+      output: [],
+      signal: null,
+    });
+    vi.mocked(loadAgent).mockClear();
+
+    const result = checkAgentVersion("receipt-sb", { forceProbe: true });
+
+    expect(result).toMatchObject({
+      sandboxVersion: "9.8.7",
+      expectedVersion: "9.8.7",
+      detectionMethod: "ssh-exec",
+      isStale: false,
+    });
+    const sshArgs = vi.mocked(spawnSync).mock.calls[0]?.[1] as string[];
+    expect(sshArgs).toContain("receipt-openclaw --build-version");
+    expect(sshArgs).not.toContain("openclaw --version");
+    expect(loadAgent).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of catalogue-falling back when receipt authority is invalid", () => {
+    const receipt = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    } as const;
+    registry.registerSandbox({
+      name: "receipt-sb",
+      agent: "openclaw",
+      harnessPackage: receipt,
+    });
+    vi.mocked(resolveRecordedSandboxAgentAuthority).mockImplementation(() => {
+      throw new Error("receipt bytes unavailable");
+    });
+    vi.mocked(loadAgent).mockClear();
+
+    expect(() => checkAgentVersion("receipt-sb")).toThrow("receipt bytes unavailable");
+    expect(loadAgent).not.toHaveBeenCalled();
+    expect(spawnSync).not.toHaveBeenCalled();
   });
 
   it("probes the sandbox's own recorded gateway, not OpenShell's ambient selection (#7429)", () => {

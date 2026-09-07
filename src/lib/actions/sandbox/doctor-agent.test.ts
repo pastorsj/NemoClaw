@@ -84,10 +84,9 @@ describe("doctor agent authority", () => {
       },
     });
 
-    expect(result.kind).toBe("unsupported");
-    if (result.kind === "unsupported") {
-      expect(result.reason).not.toContain("\n");
-      expect(result.reason.length).toBeLessThanOrEqual(240);
-    }
+    expect(result).toMatchObject({ kind: "unsupported" });
+    const reason = (result as Extract<typeof result, { kind: "unsupported" }>).reason;
+    expect(reason).not.toContain("\n");
+    expect(reason.length).toBeLessThanOrEqual(240);
   });
 });

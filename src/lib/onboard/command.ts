@@ -10,6 +10,7 @@ import {
   resolveAgentNameAlias,
   type AgentAliasTarget,
 } from "../agent/aliases";
+import type { AgentDefinition } from "../agent-runtime/manifest-types";
 import { readAgentAliasTargets } from "../agent/manifest-inventory";
 import { withCredentialOverrides } from "../credentials/scoped-overrides";
 import { loadServingCatalog } from "../inference/serving/catalog-loader";
@@ -53,9 +54,8 @@ import {
   LOCAL_MODEL_PROFILE_RUNTIME_ENV,
   resolveLocalModelProfilePlan,
 } from "./local-model-profile/plan";
-import { managedSandboxFeatureIssue } from "./managed-sandbox-feature";
 import { parseReadOnlyHostMounts, requireReadOnlyHostMountRuntimeSupport } from "./host-mount";
-import { DCODE_OBSERVABILITY_FEATURE } from "./observability-policy-presets";
+import { observabilityRequestAgentError } from "./managed-startup/observability-request";
 import { NOTICE_ACCEPT_ENV, NOTICE_ACCEPT_FLAG_NAME } from "./usage-notice";
 import {
   OnboardRestoreSnapshotDriftError,
@@ -106,6 +106,8 @@ export interface ResolveOnboardOptionsDeps {
   arch?: NodeJS.Architecture;
   runtimeProviders?: import("./runtime-provider/access").RuntimeProviderBundleRegistry;
   listAgents?: () => string[];
+  /** Resolve the selected package declaration for early finite-control validation. */
+  loadAgent?: (name: string, env?: NodeJS.ProcessEnv) => AgentDefinition;
   listAgentAliasTargets?: () => readonly AgentAliasTarget[];
   listServingProfiles?: () => ServingProfileListEntry[];
   loadServingCatalog?: () => CompiledServingCatalog;
@@ -192,11 +194,10 @@ function resolveAgent(
 
 function resolveAgentsManifest(
   requestedManifest: string | undefined,
-  agent: string | null,
   deps: ResolveOnboardOptionsDeps,
 ): string | null {
   try {
-    return resolveAgentsManifestPath(requestedManifest, agent);
+    return resolveAgentsManifestPath(requestedManifest);
   } catch (error) {
     fail(deps, `  ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -266,15 +267,8 @@ function validateObservabilityAgent(
   agent: string | null,
   deps: ResolveOnboardOptionsDeps,
 ): void {
-  if (
-    agent &&
-    managedSandboxFeatureIssue(DCODE_OBSERVABILITY_FEATURE, {
-      agent,
-      requested,
-    }) === "unsupported-request"
-  ) {
-    fail(deps, "  --observability is supported only with --agent langchain-deepagents-code.");
-  }
+  const error = observabilityRequestAgentError(requested, agent, deps);
+  if (error) fail(deps, error);
 }
 
 function resolveExperimentalProfile(
@@ -510,7 +504,7 @@ export function resolveOnboardOptions(
     acceptThirdPartySoftware:
       flags[NOTICE_ACCEPT_FLAG_NAME] === true || String(deps.env[NOTICE_ACCEPT_ENV] || "") === "1",
     agent,
-    agentsManifest: resolveAgentsManifest(flags.agents, agent, deps),
+    agentsManifest: resolveAgentsManifest(flags.agents, deps),
     toolDisclosure,
     observabilityEnabled: typeof flags.observability === "boolean" ? flags.observability : null,
     controlUiPort: flags["control-ui-port"] ?? null,

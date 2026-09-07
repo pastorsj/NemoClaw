@@ -39,7 +39,10 @@ import {
   snapshotOpenShellEnv,
 } from "./rebuild-flow-helpers";
 import { mcpRebuildRequiresRuntimeSelection } from "./rebuild-mcp-phase";
-import { stageMessagingManifestPlanForRebuild } from "./rebuild-messaging-phase";
+import {
+  listRebuildMessagingManifests,
+  stageMessagingManifestPlanForRebuild,
+} from "./rebuild-messaging-phase";
 import {
   type HermesCronRestoreIdentity,
   type ScheduledWorkRestoreIdentity,
@@ -499,10 +502,16 @@ async function rebuildSandboxUnlocked(
 
       const preservedEnv = backup.backupManifest?.preservedEnv ?? [];
       if (preparedImage && messagingPlan && preservedEnv.length > 0) {
+        const receiptMessagingManifests = targetConfig.agentAuthority.harnessPackage
+          ? listRebuildMessagingManifests(targetConfig.agentAuthority)
+          : undefined;
         const finalizedImage = finalizePreparedRebuildImageMessagingPlan(
           preparedImage,
           messagingPlan,
           preservedEnv,
+          receiptMessagingManifests === undefined
+            ? {}
+            : { messagingManifests: receiptMessagingManifests },
         );
         if (!finalizedImage.ok) {
           printRebuildPreflightFailure(
@@ -842,6 +851,7 @@ async function rebuildSandboxUnlocked(
           hasHermesToolGateways,
           policySourcePath: backup.policySourcePath,
           credentialEnv,
+          providerAuthMethod: targetConfig.providerAuthMethod,
           baseImagePreflight,
           recoveryRecreate,
           preparedBackupRecovery,

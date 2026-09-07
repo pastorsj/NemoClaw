@@ -4,7 +4,14 @@
 import { redactSensitiveText } from "../../security/redact";
 import { buildTrustedProxyEnvSourceShell } from "./trusted-proxy-env";
 
-export type InferenceRouteProbeAgent = { name: string } | null;
+export type InferenceRouteProbeAgent = {
+  name: string;
+  runtime?: {
+    smoke_boundary?:
+      | { kind: "login-shell" }
+      | { kind: "managed-launcher"; launcher: string; home: string };
+  };
+} | null;
 
 export type ParsedInferenceRouteProbe = {
   healthy: boolean;
@@ -102,12 +109,13 @@ export function buildSandboxInferenceRouteProbeArgs(
     sandboxName,
     ...(gatewayName ? ["-g", gatewayName] : []),
   ];
-  if (agent?.name === "langchain-deepagents-code") {
+  const boundary = agent?.runtime?.smoke_boundary;
+  if (boundary?.kind === "managed-launcher") {
     return [
       ...targetArgs,
       "--no-tty",
       "--env",
-      "HOME=/usr/local/lib/nemoclaw",
+      `HOME=${boundary.home}`,
       "--env",
       "BASH_ENV=",
       "--env",
@@ -116,7 +124,7 @@ export function buildSandboxInferenceRouteProbeArgs(
       // The trusted launcher ignores ambient proxy overrides and does not add
       // another startup-file read or rewrite persistent runtime state. The
       // OpenShell transport-level login shell remains tracked in OpenShell#2668.
-      DCODE_MANAGED_EXEC_LAUNCHER,
+      boundary.launcher,
       "/bin/sh",
       "-c",
       INFERENCE_ROUTE_PROBE_SCRIPT,

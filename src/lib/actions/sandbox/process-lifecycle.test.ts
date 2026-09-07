@@ -54,7 +54,7 @@ describe("sandbox process lifecycle plans", () => {
     (action) => {
       const agent = futureGateway({
         support: "managed",
-        command: ["/opt/future/bin/process-control", "--structured"],
+        command: ["/usr/local/bin/future-process-control", "--structured"],
       });
       const { deps, executeCommand } = executorDeps(agent);
 
@@ -71,7 +71,7 @@ describe("sandbox process lifecycle plans", () => {
       });
       expect(executeCommand).toHaveBeenCalledWith(
         "future-box",
-        ["/opt/future/bin/process-control", "--structured", action, NONCE],
+        ["/usr/local/bin/future-process-control", "--structured", action, NONCE],
         {
           sanitizeEnvironment: true,
           expectedResourceHandle: "container-42",
@@ -102,6 +102,20 @@ describe("sandbox process lifecycle plans", () => {
     expect(executeSandboxProcessLifecycle("future-box", "probe", { timeout: 1000, deps })).toEqual({
       kind: "unsupported",
       reason: "the exact package process lifecycle declaration is unavailable",
+    });
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before privileged execution for a mutable package controller", () => {
+    const { deps, executeCommand } = executorDeps(
+      futureGateway({ support: "managed", command: ["/sandbox/process-control"] }),
+    );
+
+    expect(
+      executeSandboxProcessLifecycle("future-box", "restart", { timeout: 1000, deps }),
+    ).toEqual({
+      kind: "unsupported",
+      reason: "the package process lifecycle command is not stored in the immutable image",
     });
     expect(executeCommand).not.toHaveBeenCalled();
   });

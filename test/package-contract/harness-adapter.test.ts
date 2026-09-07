@@ -6,6 +6,7 @@ import path from "node:path";
 
 import type { HarnessMcpAdapterCommandPlan } from "@nvidia/nemoclaw-harness-contract";
 import { describe, expect, it } from "vitest";
+import YAML from "yaml";
 
 import { loadHarnessAdapter } from "../../dist/lib/agent-runtime/adapter/loader.js";
 import { HARNESS_CONFIG_ADAPTER_CONTRACT } from "../../dist/lib/agent-runtime/adapter/config.js";
@@ -24,6 +25,18 @@ const COMPILED_PACKAGE_IDS = fs
   )
   .map((entry) => entry.name.slice("nemoclaw-".length))
   .sort();
+const COMPILED_MCP_PACKAGE_IDS = COMPILED_PACKAGE_IDS.filter((packageId) => {
+  const packageRoot = path.join(COMPILED_HARNESS_ROOT, `nemoclaw-${packageId}`);
+  const envelope = JSON.parse(
+    fs.readFileSync(path.join(packageRoot, "nemoclaw-package.json"), "utf8"),
+  ) as { manifest: string };
+  const manifest = YAML.parse(
+    fs.readFileSync(path.join(packageRoot, envelope.manifest), "utf8"),
+  ) as {
+    mcp?: { support?: string };
+  };
+  return manifest.mcp?.support === "bridge";
+});
 const TEST_PARENT = path.join(
   REPOSITORY_ROOT,
   "node_modules/.cache/nemoclaw-package-contract-adapter",
@@ -40,18 +53,14 @@ fs.mkdirSync(TEST_PARENT, { recursive: true, mode: 0o700 });
 fs.chmodSync(TEST_PARENT, 0o700);
 
 function expectNonEmptyMcpCommandPlan(command: HarnessMcpAdapterCommandPlan): void {
-  if (command.kind === "argv") {
-    expect(command.argv.length).toBeGreaterThan(0);
-    return;
-  }
-  expect(command.script.length).toBeGreaterThan(0);
-  expect(command.shellTrust).toBe("package-authored-code");
+  expect(command.kind === "argv" ? command.argv.length : command.script.length).toBeGreaterThan(0);
+  expect(command.kind === "argv" || command.shellTrust === "package-authored-code").toBe(true);
 }
 
 describe("compiled harness adapter boundary", () => {
-  it("loads every declared MCP bridge through the same typed contract", () => {
-    let bridgeCount = 0;
-    for (const packageId of COMPILED_PACKAGE_IDS) {
+  it.each(COMPILED_MCP_PACKAGE_IDS)(
+    "loads %s MCP bridge through the same typed contract",
+    (packageId) => {
       const fixtureRoot = fs.mkdtempSync(path.join(TEST_PARENT, "fixture-"));
       fs.chmodSync(fixtureRoot, 0o700);
       const storeRoot = path.join(fixtureRoot, "store");
@@ -70,8 +79,7 @@ describe("compiled harness adapter boundary", () => {
         const mcp = installed.packageManifest.manifest.mcp as
           | { readonly support?: unknown }
           | undefined;
-        if (mcp?.support !== "bridge") continue;
-        bridgeCount += 1;
+        expect(mcp?.support).toBe("bridge");
         const adapter = loadHarnessAdapter(installed.identity, HARNESS_MCP_ADAPTER_CONTRACT, {
           storeRoot,
         });
@@ -130,9 +138,13 @@ describe("compiled harness adapter boundary", () => {
       } finally {
         fs.rmSync(fixtureRoot, { recursive: true, force: true });
       }
-    }
-    expect(bridgeCount).toBeGreaterThan(0);
-  }, 30_000);
+    },
+    30_000,
+  );
+
+  it("discovers at least one compiled MCP bridge declaration", () => {
+    expect(COMPILED_MCP_PACKAGE_IDS.length).toBeGreaterThan(0);
+  });
 
   it.each(COMPILED_PACKAGE_IDS)(
     "loads %s configuration through the same compiled contract",

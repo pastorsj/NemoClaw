@@ -69,24 +69,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     const localPackageRoot = path.join(tmp, "packages", "nemoclaw-openclaw");
     const generatorPath = path.join(localPackageRoot, "config", "generate-config.mts");
     const toolSearchValidatorPath = path.join(localScripts, "validate-openclaw-tool-search.mts");
-    const toolDisclosurePath = path.join(localSrc, "lib", "tool-disclosure.ts");
-    const applierPath = path.join(
-      localSrc,
-      "lib",
-      "messaging",
-      "applier",
-      "build",
-      "messaging-build-applier.mts",
-    );
-    const messagingHookPath = path.join(
-      localSrc,
-      "lib",
-      "messaging",
-      "channels",
-      "fixture",
-      "hooks",
-      "example.ts",
-    );
+    const toolDisclosurePath = path.join(localPackageRoot, "config", "tool-disclosure.ts");
     const pluginDir = path.join(localShare, "openclaw-plugins", "kimi-inference-compat");
     const pluginFile = path.join(pluginDir, "index.js");
     const nestedPluginDir = path.join(pluginDir, "lib");
@@ -118,8 +101,6 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       generatorPath,
       toolSearchValidatorPath,
       toolDisclosurePath,
-      applierPath,
-      messagingHookPath,
       pluginFile,
       nestedPluginFile,
     ];
@@ -131,8 +112,6 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       fs.mkdirSync(localScripts, { recursive: true });
       fs.mkdirSync(path.dirname(generatorPath), { recursive: true });
       fs.mkdirSync(nestedPluginDir, { recursive: true });
-      fs.mkdirSync(path.dirname(applierPath), { recursive: true });
-      fs.mkdirSync(path.dirname(messagingHookPath), { recursive: true });
       files.forEach((file) => {
         fs.writeFileSync(file, "# fixture\n", { mode: 0o600 });
         fs.chmodSync(file, 0o600);
@@ -151,17 +130,12 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
         fs.chmodSync(directory, 0o700);
       }
 
-      const messagingPermissionCommand = dockerRunCommandBetween(
-        dockerfile,
-        "# Add messaging source after the non-messaging install",
-        "# Bake reduced messaging runtime metadata for the entrypoint",
-      );
       const runtimePermissionCommand = dockerRunCommandBetween(
         dockerfile,
         "# Copy startup script and shared sandbox initialisation library",
         "# Lock down npm for the next RUN",
       );
-      const command = `${messagingPermissionCommand}\n${runtimePermissionCommand}`
+      const command = runtimePermissionCommand
         .replaceAll("/usr/local/bin", localBin)
         .replaceAll("/usr/local/lib/nemoclaw", localLib)
         .replaceAll("/usr/local/share/nemoclaw", localShare)
@@ -186,8 +160,6 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       }
       expect((fs.statSync(toolSearchValidatorPath).mode & 0o777).toString(8)).toBe("755");
       expect((fs.statSync(toolDisclosurePath).mode & 0o777).toString(8)).toBe("444");
-      expect((fs.statSync(applierPath).mode & 0o777).toString(8)).toBe("755");
-      expect((fs.statSync(messagingHookPath).mode & 0o777).toString(8)).toBe("644");
       expect(
         (
           fs.statSync(path.join(localLib, "openclaw_device_approval_policy.py")).mode & 0o777
@@ -210,6 +182,14 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       expect((fs.statSync(managedGatewayControlPath).mode & 0o777).toString(8)).toBe("500");
       expect((fs.statSync(managedGatewayProfilePath).mode & 0o777).toString(8)).toBe("400");
     } finally {
+      // The fixture intentionally starts this directory without search permission.
+      // Restore it even when the replayed Docker command fails so cleanup cannot
+      // hide the original assertion.
+      try {
+        fs.chmodSync(startupDirectory, 0o755);
+      } catch {
+        // It may already have been removed by a successful cleanup path.
+      }
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

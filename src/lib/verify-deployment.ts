@@ -8,10 +8,9 @@
  *
  * Probes:
  *   1. Gateway reachable (HTTP /health returns 200 or 401)
- *   2. Gateway version retrieval
- *   3. Dashboard port reachable from the host (port forward working)
- *   4. Inference route working (sandbox can reach inference.local)
- *   5. Messaging bridges healthy (if configured)
+ *   2. Dashboard port reachable from the host (port forward working)
+ *   3. Inference route working (sandbox can reach inference.local)
+ *   4. Messaging bridges healthy (if configured)
  *
  * Fixes #2342 — users no longer see "AGENT IS LIVE" followed by
  * "Health Offline" in the dashboard.
@@ -19,7 +18,6 @@
 
 import os from "node:os";
 
-import { parseVersionFromText } from "./adapters/openshell/client";
 import { compareChannelSets, type RuntimeChannelStatus } from "./channel-runtime-status";
 import type { DashboardDeliveryChain } from "./dashboard/contract";
 import { listMessagingChannelsWithoutCredentials } from "./messaging/channels";
@@ -41,6 +39,7 @@ export type AccessMethod = "localhost" | "proxy" | "ssh-tunnel";
 
 export interface DeploymentVerification {
   gatewayReachable: boolean;
+  /** Retained for response-shape compatibility; generic verification does not run an agent CLI. */
   gatewayVersion: string | null;
   inferenceRouteWorking: boolean;
   dashboardReachable: boolean;
@@ -222,16 +221,6 @@ async function verifyGatewayInSandbox(
     retryDelaysMs,
     sleep,
   });
-}
-
-/**
- * Retrieve the gateway version from inside the sandbox.
- */
-function fetchGatewayVersion(sandboxName: string, deps: VerifyDeploymentDeps): string | null {
-  const script = "openclaw --version 2>/dev/null";
-  const result = deps.executeSandboxCommand(sandboxName, script);
-  if (!result || result.status !== 0 || !result.stdout.trim()) return null;
-  return parseVersionFromText(result.stdout, "openclaw --version");
 }
 
 type InferenceRouteStatus = "ok" | "unreachable" | "unhealthy";
@@ -583,10 +572,7 @@ export async function verifyDeployment(
       : buildGatewayLogHint(sandboxName, customRuntimeHints?.gateway ?? null),
   });
 
-  // 2. Gateway version (cosmetic — not a health signal)
-  const gatewayVersion = gateway.reachable ? fetchGatewayVersion(sandboxName, deps) : null;
-
-  // 3. Dashboard reachable from host (port forward)
+  // 2. Dashboard reachable from host (port forward)
   // A port forward cannot repair an image that has no managed gateway runtime,
   // so avoid spending a second retry budget on the dependent dashboard probe.
   const dashboardRetryDelays = customRuntimeHints ? [] : retryDelaysMs;
@@ -601,7 +587,7 @@ export async function verifyDeployment(
         `Port forward on ${chain.port} is not working. Run: nemoclaw ${sandboxName} recover`),
   });
 
-  // 3b. Agent OpenAI-compatible API reachable from the host (second port
+  // 2b. Agent OpenAI-compatible API reachable from the host (second port
   // forward). Skipped for agents that publish no separate API port, so the
   // OpenClaw path keeps exactly one host probe. A dead host forward cannot be
   // repaired by retrying when the sandbox gateway itself never came up, so it
@@ -657,7 +643,10 @@ export async function verifyDeployment(
 
   const verification: DeploymentVerification = {
     gatewayReachable: gateway.reachable,
-    gatewayVersion,
+    // The field remains for callers that consume the older structured shape.
+    // Version display was cosmetic and could not be implemented generically
+    // without invoking one harness's executable from the core verifier.
+    gatewayVersion: null,
     inferenceRouteWorking,
     dashboardReachable: dashboard.reachable,
     agentApiReachable: agentApi ? agentApi.reachable : null,
@@ -696,9 +685,6 @@ export function formatVerificationDiagnostics(result: VerifyDeploymentResult): s
     lines.push(
       `  ${G}✓${RESET} Deployment verified — gateway, dashboard, and inference route are healthy.`,
     );
-    if (result.verification.gatewayVersion) {
-      lines.push(`    OpenClaw version: ${result.verification.gatewayVersion}`);
-    }
     // The overall result is healthy when gateway + dashboard are reachable,
     // but the run can still carry warn-level diagnostics (#4156: configured
     // channels missing from the runtime registry would otherwise pass

@@ -52,6 +52,9 @@ harness-agnostic control plane.
 10. **Quarantine compatibility.** Legacy readers may identify old OpenClaw, Hermes, or Deep Agents
     state only long enough to migrate it to package authority. They must not become the behavior
     fallback for a receipt-backed sandbox.
+11. **Keep live evidence proportional.** Run the short install/onboard/Fabric-turn/cleanup smoke
+    journey for every package. Run the harness-neutral upgrade, pinning, rollback, deactivation,
+    and restart lifecycle once per release environment rather than once per harness.
 
 ## Definition of done
 

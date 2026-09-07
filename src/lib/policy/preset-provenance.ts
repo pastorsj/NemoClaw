@@ -1,15 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { HERMES_TOOL_GATEWAY_PRESET_NAMES } from "../onboard/hermes-managed-tools";
-import { OPENCLAW_ONLY_POLICY_PRESETS } from "../onboard/openclaw-otel-policy-presets";
+import { isLegacyAgentOwnedPreset } from "./legacy-policy";
 
-export type PresetProvenance =
-  | { source: "agent"; agent: "openclaw" | "hermes" }
-  | { source: "user" };
+export type PresetProvenance = { source: "agent"; agent: string } | { source: "user" };
 
 export interface PresetProvenanceContext {
   agentName?: string | null;
+  /** Present only when an exact package receipt supplied this declaration. */
+  ownedPresetNames?: readonly string[];
 }
 
 export interface PresetVerificationState {
@@ -27,11 +26,11 @@ export function classifyPresetProvenance(
 ): PresetProvenance {
   const name = presetName.trim().toLowerCase();
   const agentName = context.agentName?.trim().toLowerCase() ?? null;
-  if (agentName === "openclaw" && OPENCLAW_ONLY_POLICY_PRESETS.has(name)) {
-    return { source: "agent", agent: "openclaw" };
-  }
-  if (agentName === "hermes" && HERMES_TOOL_GATEWAY_PRESET_NAMES.has(name)) {
-    return { source: "agent", agent: "hermes" };
+  const agentOwned = context.ownedPresetNames
+    ? context.ownedPresetNames.includes(name)
+    : isLegacyAgentOwnedPreset(agentName, name);
+  if (agentName && agentOwned) {
+    return { source: "agent", agent: agentName };
   }
   return { source: "user" };
 }

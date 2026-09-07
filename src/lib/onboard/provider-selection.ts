@@ -10,6 +10,10 @@ export {
   readVllmInstallResumeModel,
   vllmInstallRecoveryOptions,
 } from "./provider-recovery";
+export {
+  resolveRequestedServingProfileModel,
+  type RequestedServingProfileModel,
+} from "../inference/serving/requested-profile-model";
 
 export type ProviderSelectionFailureReason =
   | {
@@ -67,8 +71,9 @@ export interface ProviderSelectionRecoveryReaders {
   readRecordedModel(sandboxName: string | null | undefined): string | null;
 }
 
-export interface ResolveRequestedProviderSelectionInput<T extends ProviderOption>
-  extends ProviderSelectionRecoveryReaders {
+export interface ResolveRequestedProviderSelectionInput<
+  T extends ProviderOption,
+> extends ProviderSelectionRecoveryReaders {
   options: T[];
   requestedProvider: string | null;
   sandboxName: string | null;

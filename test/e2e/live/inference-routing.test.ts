@@ -18,7 +18,6 @@ import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compati
 import { OPENSHELL_V0106_QUALIFICATION } from "../fixtures/openshell-v0106-qualification.ts";
 import { REPO_ROOT } from "../fixtures/paths.ts";
 import { resolveVerifiedCloudflaredBinary } from "./cloudflared-prerequisite.ts";
-import { runFabricCompatibleEndpointJourney } from "./fabric-routing.ts";
 import {
   remapDnsRebindingHostname,
   restoreDnsRebindingHostsFixture,
@@ -1010,28 +1009,141 @@ test("TC-INF-09 Deep Agents Code uses a local compatible endpoint through infere
   meta: {
     e2ePhases: [
       "confirm compatible-endpoint prerequisites",
-      "install and verify the Deep Agents Code harness package",
       "start the local compatible endpoint",
       "onboard Deep Agents Code to the endpoint",
       "inspect the compatible provider route",
       "request sandbox chat through inference.local",
       "request a dcode completion through the route",
-      "verify the installed Fabric identity",
-      "request a Fabric completion through the public agent command",
-      "write and remove a workspace artifact through the public agent command",
-      "reject unsafe Fabric arguments without spawning a request process",
-      "verify compatible credential custody",
     ],
   },
 }, async ({ artifacts, cleanup, host, progress, runtimeProvider, sandbox }) => {
-  await runFabricCompatibleEndpointJourney({
-    artifacts,
-    cleanup,
-    host,
+  const model = "nemoclaw-e2e-compatible";
+  const apiKey = "sk-compatible-TEST-NOT-A-REAL-VALUE";
+    await requireLivePrerequisites(host, runtimeProvider);
+  const sandboxName = inferenceSandboxName("e2e-compat");
+    cleanup.add(
+      `best-effort inference-routing compatible-endpoint cleanup for ${sandboxName}`,
+      () => cleanupSandbox(host, sandbox, sandboxName),
+  );
+  cleanup.add(`strict inference-routing compatible-endpoint cleanup for ${sandboxName}`, () =>
+    cleanupSandbox(host, sandbox, sandboxName, { strict: true }),
+  );
+  await cleanupSandbox(host, sandbox, sandboxName);
+  progress.phase("start the local compatible endpoint");
+  const fake = await startFakeOpenAiCompatibleServer({
+    apiKey,
+    chatContent: "PONG",
+    host: "0.0.0.0",
+    model,
+    port: 8000,
     progress,
-    runtimeProvider,
-    sandbox,
+    publicHost: "localhost",
+    requireAuth: true,
+    requireAuthModels: true,
   });
+  cleanup.add("close inference-routing compatible endpoint", async () => {
+    try {
+      await artifacts.writeJson("tc-inf-09-compatible-endpoint-requests.json", fake.requests());
+    } finally {
+      await fake.close();
+    }
+  });
+
+  await artifacts.target.declare({
+    id: "inference-routing-compatible-endpoint",
+    contract: [
+      "Deep Agents Code custom OpenAI-compatible endpoint onboards",
+      "sandbox inference.local routes chat to compatible endpoint",
+      "dcode returns the compatible endpoint response through the rewritten gateway route",
+    ],
+    endpointUrl: fake.baseUrl,
+    model,
+  });
+
+  progress.phase("onboard Deep Agents Code to the endpoint");
+  const onboard = await onboardSandbox(
+    artifacts,
+    sandboxName,
+    {
+      COMPATIBLE_API_KEY: apiKey,
+      NEMOCLAW_AGENT: "langchain-deepagents-code",
+      NEMOCLAW_ENDPOINT_URL: fake.baseUrl,
+      NEMOCLAW_MODEL: model,
+      NEMOCLAW_PREFERRED_API: "openai-completions",
+      NEMOCLAW_PROVIDER: "custom",
+    },
+    [apiKey],
+    "tc-inf-09-onboard-compatible-endpoint",
+    progress,
+    ONBOARD_FINAL_HANDOFF_COMMAND_TIMEOUT_MS,
+  );
+  expectOnboardSuccess(onboard, "TC-INF-09 compatible-endpoint onboard");
+  progress.phase("inspect the compatible provider route");
+  const provider = await sandbox.openshell(
+    ["provider", "get", "-g", "nemoclaw", "compatible-endpoint"],
+    {
+      artifactName: "tc-inf-09-provider-get-compatible-endpoint",
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: 30_000,
+    },
+  );
+  const providerText = resultText(provider).replace(/\u001b\[[0-9;]*m/g, "");
+  expect(provider.exitCode, providerText).toBe(0);
+  expect(providerText).toContain("Type: openai");
+  expect(providerText).toContain("Credential keys: COMPATIBLE_API_KEY");
+  expect(providerText).toContain("Config keys: OPENAI_BASE_URL");
+  expect(fake.requests()).toContainEqual(
+    expect.objectContaining({
+      auth: "ok",
+      hostHeader: "localhost:8000",
+    }),
+  );
+
+  progress.phase("request sandbox chat through inference.local");
+  const sandboxRequestOffset = fake.requests().length;
+  await expectOpenAiChatThroughSandbox(
+    sandbox,
+    sandboxName,
+    model,
+    [apiKey],
+    "compatible-endpoint-inference-local-chat",
+  );
+  expect(fake.requests().slice(sandboxRequestOffset)).toContainEqual(
+    expect.objectContaining({
+      auth: "ok",
+      hostHeader: "host.openshell.internal:8000",
+      method: "POST",
+      model,
+      path: "/v1/chat/completions",
+    }),
+  );
+
+  progress.phase("request a dcode completion through the route");
+  const dcodeRequestOffset = fake.requests().length;
+  const dcode = await runNemoclawCli(
+    [sandboxName, "exec", "--", "dcode", "-n", "Reply with exactly one word: PONG"],
+    {
+      artifactName: "tc-inf-09-dcode-compatible-endpoint",
+      artifacts,
+      env: buildAvailabilityProbeEnv(),
+      progress,
+      redactionValues: [apiKey],
+      timeoutMs: 3 * 60_000,
+    },
+  );
+  const dcodeText = redactedResultText(dcode);
+  expect(dcode.timedOut, `TC-INF-09 dcode timed out\n${dcodeText}`).toBe(false);
+  expect(dcode.exitCode, `TC-INF-09 dcode failed\n${dcodeText}`).toBe(0);
+  expect(dcodeText).toMatch(/\bPONG\b/);
+  expect(fake.requests().slice(dcodeRequestOffset)).toContainEqual(
+    expect.objectContaining({
+      auth: "ok",
+      hostHeader: "host.openshell.internal:8000",
+      method: "POST",
+      model,
+      path: "/v1/chat/completions",
+    }),
+  );
 });
 
 test("TC-INF-11 DNS-backed HTTPS custom endpoint routes through the local pinning adapter (#6141)", {

@@ -69,6 +69,7 @@ export const portableAgentLifecycle = requireDist(
 export const processRecovery = requireDist("./process-recovery.js");
 export const { rebuildOnboardDependencies } = requireDist("./rebuild-onboard-dependencies.js");
 export const rebuildCustomImagePreflight = requireDist("./rebuild-custom-image-preflight.js");
+export const rebuildAuthority = requireDist("./rebuild/authority.js");
 export const rebuildFlowHelpers = requireDist("./rebuild-flow-helpers.js");
 export const rebuildInference = requireDist("./inference-invocation-probe.js");
 export const rebuildManagedImage = requireDist("./rebuild-managed-image-preflight.js");
@@ -84,6 +85,7 @@ export const sandboxList = requireDist("../../openshell-sandbox-list.js");
 export const sandboxAgent = requireDist("../../onboard/sandbox-agent.js");
 export const sandboxSession = requireDist("../../state/sandbox-session.js");
 export const sandboxState = requireDist("../../state/sandbox.js");
+export const snapshotRestoreAuthority = requireDist("./snapshot/restore-authority.js");
 export const sandboxVersion = requireDist("../../sandbox/version.js");
 export const tempFiles = requireDist("../../onboard/temp-files.js");
 
@@ -171,12 +173,20 @@ const REBUILD_HARNESS_PACKAGE_IDS = new Set([
   "hermes",
   "langchain-deepagents-code",
   "pi",
+  "future-harness",
 ]);
 
 /** Install exact standard-harness authority under an isolated rebuild-test home. */
 export function installRebuildHarnessPackage(
   agentName: string,
-  options: Pick<HarnessPackageFixtureOptions, "agentPolicyAdditionsContent"> = {},
+  options: Pick<
+    HarnessPackageFixtureOptions,
+    | "agentPolicyAdditionsContent"
+    | "messaging"
+    | "postRestoreMutableConfig"
+    | "providerAuth"
+    | "webSearchProviders"
+  > = {},
 ): HarnessPackageIdentity | null {
   if (!REBUILD_HARNESS_PACKAGE_IDS.has(agentName)) return null;
   const testHome = process.env.HOME?.trim();
@@ -188,6 +198,10 @@ export function installRebuildHarnessPackage(
       storeRoot,
       agentExpectedVersion: "0.2.0",
       agentPolicyAdditionsContent: options.agentPolicyAdditionsContent,
+      messaging: options.messaging,
+      postRestoreMutableConfig: options.postRestoreMutableConfig,
+      providerAuth: options.providerAuth,
+      webSearchProviders: options.webSearchProviders,
     });
     state = { fixture, identities: new Map() };
     harnessPackageFixtures.set(storeRoot, state);

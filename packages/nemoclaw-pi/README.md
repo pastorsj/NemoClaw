@@ -8,6 +8,9 @@ This package connects Pi to the agent runtime package contract in
 startup, policy additions, dependency lock, and deterministic package tests. NemoClaw core owns
 package discovery, onboarding, OpenShell coordination, product state, and lifecycle recovery.
 
+This package integration and its typed boundary are a local proof of concept. They do not establish
+Pi product support or an external package compatibility promise.
+
 ## Package workflow
 
 1. `package.json` and `manifest.yaml` identify Pi and declare its data-only capabilities.
@@ -37,9 +40,17 @@ startup entry point, and network policy additions.
 
 | Capability | Package file | Current behavior |
 | --- | --- | --- |
-| Runtime configuration | `host/config-adapter.cts` | Returns `immutable`; re-onboarding must materialize a changed model catalog. |
-| MCP | None | The manifest disables MCP, so core rejects the capability before adapter load. |
-| Configuration restore | None | Pi has no package configuration merge operation. |
+| Command and Fabric | `manifest.runtime` and `fabric/` | Declares terminal and headless commands; Fabric translates a request to Pi's non-session command. |
+| Configuration | `host/config-adapter.cts` | Returns `immutable`; re-onboarding must materialize a changed model catalogue. |
+| Roster | Not declared | Core returns the typed unsupported result for receipt-backed Pi sandboxes. |
+| MCP | Disabled | Core rejects the capability before it loads an MCP adapter. |
+| Messaging | `host/messaging-adapter.cts` | Returns the typed disabled integration. |
+| Sessions | `host/session-adapter.cts` | Returns the declared empty operation set. |
+| Startup | `host/startup-adapter.cts` | Builds and reconciles the managed-image startup profile. |
+| State and restore | `state_lifecycle` and `state_files` | Declares Pi state and a core-owned key-allowlist settings restore. No package restore adapter is needed. |
+| Policy and provider profiles | `manifest.policy` | Owns no optional presets or provider profiles. |
+| Provider auth, broker, and managed tools | The broker is disabled | Provider authentication and managed tools are not declared. |
+| Dashboard and secondary forward | Not declared | Core does not allocate a package UI or secondary endpoint. |
 
 ## Runtime flow
 
@@ -78,14 +89,19 @@ ambient checkout boundary. `npm test` runs the package and ambient composition l
 Fabric lane includes the direct Fabric cases. Use the `composed` in-tree overlay rehearsal in
 [`packages/README.md`](../README.md) with package ID `pi` to pin a supplied core commit.
 
-Pi intentionally does not provide the generic live-package fixture used by
-[`tools/e2e/fabric-package.mts`](../../tools/e2e/fabric-package.mts). That journey performs ordinary
-onboarding. Core exposes Pi only with a published qualification receipt and the matching
-managed-image catalog. The
-[`pi-agent-qualification` journey](../../test/e2e/live/pi-agent-qualification.test.ts) owns Pi's
-live test. It covers package installation, qualified-image onboarding, native and Fabric turns,
-restart and rebuild recovery, and cleanup. Pi can adopt the ordinary package journey after it
-becomes selectable without candidate qualification.
+`test:package` is package-only. It proves package adapters, configuration, Fabric translation, and
+the install artifact without importing NemoClaw source. The revision-pinned `composed` rehearsal
+supplies the host operating system, runtime provider, hardware, and image-selection behavior from
+the selected NemoClaw commit. The Pi qualification journey proves the concrete managed image and
+live OpenShell boundaries.
+
+Pi provides the same generic live-package fixture consumed by
+[`tools/e2e/fabric-package.mts`](../../tools/e2e/fabric-package.mts). Core exposes Pi only when the
+caller also supplies an already-valid protected qualification receipt for the matching managed
+image; the generic runner preserves that authority without adding a Pi branch. The
+[`pi-agent-qualification` journey](../../test/e2e/live/pi-agent-qualification.test.ts) remains the
+producer and full live qualification lane. It covers package installation, qualified-image
+onboarding, native and Fabric turns, restart and rebuild recovery, and cleanup.
 
 `tests/package/materialization.test.ts` uses the public harness-contract builder to validate Pi's
 npm publish set and materialize its read-only install artifact. The test verifies the install

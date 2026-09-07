@@ -12,10 +12,10 @@ export default class SandboxAgentsDeleteCommand extends NemoClawCommand {
   static id = "sandbox:agents:delete";
   static customHelp = true;
   static strict = false;
-  static summary = "Delete an OpenClaw agent inside a sandbox";
+  static summary = "Delete an agent through the installed harness";
   static description =
-    "Pass through to `openclaw agents delete <id>` in the sandbox. The OpenClaw CLI owns gateway dispatch, host-side workspace removal, and config edits. All flags (e.g. `--force`, `--json`) are forwarded verbatim.";
-  static usage = ["<name> <agent-id> [openclaw-agents-delete-flags...]"];
+    "Ask the installed harness package for its native agent-delete command, then run that command through OpenShell. Additional arguments are forwarded verbatim through the typed adapter.";
+  static usage = ["<name> <agent-id> [harness-agents-delete-flags...]"];
   static examples = [
     "<%= config.bin %> sandbox agents delete alpha work",
     "<%= config.bin %> sandbox agents delete alpha work --force --json",

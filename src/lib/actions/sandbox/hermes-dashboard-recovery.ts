@@ -21,7 +21,13 @@ export function getHermesDashboardRecoveryConfig(
   getSandbox: typeof registry.getSandbox = registry.getSandbox,
 ): HermesDashboardRecoveryConfig | null {
   const sandbox = getSandbox(sandboxName);
-  if (sandbox?.agent !== "hermes" || sandbox.hermesDashboardEnabled !== true) return null;
+  if (
+    sandbox?.harnessPackage ||
+    sandbox?.agent !== "hermes" ||
+    sandbox.hermesDashboardEnabled !== true
+  ) {
+    return null;
+  }
   if (!isValidPort(sandbox.hermesDashboardPort)) return null;
   if (!isValidPort(sandbox.hermesDashboardInternalPort)) return null;
   return {

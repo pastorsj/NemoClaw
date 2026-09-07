@@ -21,6 +21,7 @@ import type {
   SandboxMessagingPlan,
   SandboxMessagingRuntimeSetupPlan,
 } from "./manifest";
+import { createChannelManifestRegistry } from "./manifest/registry";
 import {
   hasFullPersistedCredentialBindingShape,
   normalizeFullPersistedCredentialBindings,
@@ -34,7 +35,7 @@ export type PersistedSandboxMessagingInputReference = Pick<
 
 export type PersistedSandboxMessagingChannelPlan = Pick<
   SandboxMessagingChannelPlan,
-  "channelId" | "configured" | "disabled" | "pendingRemoval"
+  "channelId" | "configured" | "disabled" | "pendingRemoval" | "credentialProvider"
 > & {
   readonly inputs?: readonly PersistedSandboxMessagingInputReference[];
 } & Partial<
@@ -96,6 +97,7 @@ export function compactSandboxMessagingPlanForPersistence(
       configured: channel.configured,
       disabled: channel.disabled,
       ...(channel.pendingRemoval === true ? { pendingRemoval: true } : {}),
+      ...(channel.credentialProvider ? { credentialProvider: channel.credentialProvider } : {}),
       inputs: channel.inputs
         .flatMap((input) => {
           const compact: PersistedSandboxMessagingInputReference = {
@@ -129,8 +131,18 @@ export function compactSandboxMessagingPlanForPersistence(
 export function normalizePersistedSandboxMessagingPlanShape(
   plan: MaybeCompactMessagingPlan,
   environment: Readonly<Record<string, string | undefined>> = process.env,
+  manifests?: readonly ChannelManifest[],
 ): SandboxMessagingPlan {
-  const manifestRegistry = createBuiltInChannelManifestRegistry();
+  // A receipt-backed compact plan must never be expanded from the mutable
+  // source catalogue. Callers with exact package authority supply its composed
+  // manifests; callers that only need to parse logical receipt state get no
+  // harness-specific derived fallback.
+  const manifestRegistry =
+    manifests !== undefined
+      ? createChannelManifestRegistry(manifests)
+      : plan.packageBuild !== undefined
+        ? createChannelManifestRegistry()
+        : createBuiltInChannelManifestRegistry();
   const disabledChannels = plan.disabledChannels.filter(
     (channelId) => typeof channelId === "string",
   );
@@ -221,6 +233,11 @@ function normalizePersistedChannel(
     configured,
     disabled,
     ...(channel.pendingRemoval === true ? { pendingRemoval: true } : {}),
+    ...(channel.credentialProvider
+      ? { credentialProvider: channel.credentialProvider }
+      : manifest?.credentialProvider
+        ? { credentialProvider: manifest.credentialProvider }
+        : {}),
     inputs,
     ...(hostForward ? { hostForward } : {}),
     hooks: Array.isArray(channel.hooks) ? [...channel.hooks] : [],
@@ -485,6 +502,9 @@ function cloneHookReference(
     agents: hook.agents ? [...hook.agents] : undefined,
     inputs: hook.inputs ? [...hook.inputs] : undefined,
     outputs: hook.outputs?.map((output) => ({ ...output })),
+    packageOperation: hook.packageOperation
+      ? (JSON.parse(JSON.stringify(hook.packageOperation)) as typeof hook.packageOperation)
+      : undefined,
     onFailure: hook.onFailure,
   };
 }

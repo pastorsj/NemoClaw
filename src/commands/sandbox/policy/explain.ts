@@ -28,8 +28,7 @@ export default class SandboxPolicyExplainCommand extends NemoClawCommand {
       default: false,
     }),
     write: Flags.boolean({
-      description:
-        "Also write the rendered context to the sandbox at /sandbox/.openclaw/workspace/POLICY.md so the in-sandbox agent can read it.",
+      description: "Also write the rendered context to the package-declared sandbox path.",
       default: false,
     }),
   };

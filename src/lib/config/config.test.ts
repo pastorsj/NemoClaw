@@ -79,13 +79,28 @@ describe("NemoClawConfig v1", () => {
   });
 
   it.each(["hermes", "langchain-deepagents-code", "nemocua"])(
-    "rejects unsupported v1 agent type %s (#10938)",
+    "rejects agent type %s without package authority (#10938)",
     (type) => {
       const value = structuredClone(config()) as unknown as Record<string, any>;
       value.spec.sandboxes[0].agents[0].type = type;
-      expect(() => validateNemoClawConfig(value)).toThrow("must be equal to constant");
+      expect(() => validateNemoClawConfig(value)).toThrow("package is required");
     },
   );
+
+  it("validates a package-backed agent and rejects mismatched package authority", () => {
+    const value = structuredClone(config()) as unknown as Record<string, any>;
+    value.spec.sandboxes[0].agents[0].type = "future-harness";
+    value.spec.sandboxes[0].agents[0].package = {
+      kind: "agent-runtime",
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "b".repeat(64),
+    };
+    expect(validateNemoClawConfig(value)).toEqual(value);
+
+    value.spec.sandboxes[0].agents[0].package.id = "other-harness";
+    expect(() => validateNemoClawConfig(value)).toThrow("does not match the agent type");
+  });
 
   it.each(["reasoning", "limits"])(
     "rejects unsupported v1 inference field %s (#10938)",

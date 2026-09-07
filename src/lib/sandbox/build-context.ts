@@ -199,10 +199,6 @@ function stageLegacySandboxBuildContext(
     path.join(buildCtx, "src", "lib", "messaging"),
     { recursive: true },
   );
-  fs.copyFileSync(
-    path.join(rootDir, "src", "lib", "tool-disclosure.ts"),
-    path.join(buildCtx, "src", "lib", "tool-disclosure.ts"),
-  );
   stageManagedStartupRuntimeSources(rootDir, buildCtx);
   normalizeReadModesForDockerCopy(path.join(buildCtx, "src"));
   return {
@@ -317,10 +313,6 @@ function stageOptimizedSandboxBuildContext(
     path.join(rootDir, "src", "lib", "messaging"),
     path.join(buildCtx, "src", "lib", "messaging"),
     { recursive: true },
-  );
-  fs.copyFileSync(
-    path.join(rootDir, "src", "lib", "tool-disclosure.ts"),
-    path.join(buildCtx, "src", "lib", "tool-disclosure.ts"),
   );
   stageManagedStartupRuntimeSources(rootDir, buildCtx);
   normalizeReadModesForDockerCopy(path.join(buildCtx, "src"));

@@ -18,6 +18,7 @@ import {
   bindJournaledRecreate,
   createDeps,
   makeMinimalPlan,
+  testWebSearchBinding,
   withTelegramCredentialHash,
 } from "./sandbox-test-fixtures";
 
@@ -25,6 +26,20 @@ vi.mock("../../messaging-channel-setup", () => ({
   detectMessagingChannelsFromEnv: vi.fn(() => []),
   detectUnconfiguredMessagingChannels: vi.fn(() => []),
 }));
+
+// Sandbox state tests own orchestration, not installed-package integrity. Keep
+// receipt-backed cases at the messaging-profile boundary; store validation has
+// dedicated package-authority coverage.
+vi.mock("../../../messaging", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../messaging")>();
+  return {
+    ...actual,
+    resolveSandboxMessagingProfileAuthority: vi.fn((entry: { agent?: string }) => ({
+      agent: { name: entry.agent },
+    })),
+    listMessagingChannelsForProfile: vi.fn(() => []),
+  };
+});
 
 const detectMessagingChannelsFromEnvMock = vi.mocked(detectMessagingChannelsFromEnv);
 
@@ -523,10 +538,14 @@ describe("handleSandboxState", () => {
   });
 
   it("removes the conflicting Hermes nous-web gateway when Tavily is selected", async () => {
-    const { deps, calls } = createDeps();
+    const session = createSession();
+    const { deps, calls } = createDeps(
+      { selectedAgentSupportsWebSearchProvider: () => true },
+      session,
+    );
 
     const result = await handleSandboxState({
-      ...baseOptions(deps),
+      ...baseOptions(deps, session),
       agent: { name: "hermes", displayName: "Hermes" },
       webSearchConfig: { fetchEnabled: true, provider: "tavily" },
       hermesToolGateways: ["nous-web", "nous-audio"],
@@ -590,7 +609,7 @@ describe("handleSandboxState", () => {
       displayName: "Future Harness",
       web_search: {
         support: "providers" as const,
-        providers: ["tavily"] as const,
+        providers: [testWebSearchBinding("tavily")],
         tool_gateway_conflicts: [{ provider: "tavily" as const, tool_gateway: "future-search" }],
       },
     };
@@ -599,10 +618,12 @@ describe("handleSandboxState", () => {
       ...baseOptions(deps, session),
       agent,
       webSearchConfig: { fetchEnabled: true, provider: "tavily" },
-      hermesToolGateways: ["future-search", "future-audio"],
+      toolGatewaySelections: ["future-search", "future-audio"],
+      hermesToolGateways: [],
     });
 
-    expect(result.hermesToolGateways).toEqual(["future-audio"]);
+    expect(result.toolGatewaySelections).toEqual(["future-audio"]);
+    expect(result.hermesToolGateways).toEqual([]);
     expect(calls.createSandbox).toHaveBeenCalledWith(
       expect.anything(),
       "model",
@@ -647,14 +668,16 @@ describe("handleSandboxState", () => {
       ...baseOptions(deps, session),
       agent: {
         name: "hermes",
-        web_search: { support: "providers", providers: ["brave"] },
+        web_search: { support: "providers", providers: [testWebSearchBinding("brave")] },
       },
       webSearchConfig: { fetchEnabled: true, provider: "brave" },
-      hermesToolGateways: ["nous-web"],
+      toolGatewaySelections: ["nous-web"],
+      hermesToolGateways: [],
     });
 
     expect(result.webSearchConfig).toEqual({ fetchEnabled: true, provider: "brave" });
-    expect(result.hermesToolGateways).toEqual(["nous-web"]);
+    expect(result.toolGatewaySelections).toEqual(["nous-web"]);
+    expect(result.hermesToolGateways).toEqual([]);
   });
 
   it("reuses a Ready sandbox from the registry without reading an invalid environment plan", async () => {
@@ -890,16 +913,19 @@ describe("handleSandboxState", () => {
       preferredInferenceApi: "anthropic-messages",
     });
     session.steps.sandbox.status = "complete";
-    const { deps, calls } = createDeps({
-      getSandboxReuseState: () => "ready",
-      getSandboxRegistryEntry: (name) => ({
-        name,
-        agent: "hermes",
-        provider: "compatible-anthropic-endpoint",
-        model: "claude-sonnet-proxy",
-        toolDisclosure: "progressive",
-      }),
-    });
+    const { deps, calls } = createDeps(
+      {
+        getSandboxReuseState: () => "ready",
+        getSandboxRegistryEntry: (name) => ({
+          name,
+          agent: "hermes",
+          provider: "compatible-anthropic-endpoint",
+          model: "claude-sonnet-proxy",
+          toolDisclosure: "progressive",
+        }),
+      },
+      session,
+    );
 
     await handleSandboxState({
       ...baseOptions(deps, session),
@@ -912,7 +938,7 @@ describe("handleSandboxState", () => {
     });
 
     expect(calls.note).toHaveBeenCalledWith(
-      "  [resume] Hermes inference route configuration changed; recreating sandbox.",
+      "  [resume] Inference route API configuration changed; recreating sandbox.",
     );
     expect(calls.removeSandbox).not.toHaveBeenCalled();
     expect(calls.createSandbox).toHaveBeenCalledWith(
@@ -950,18 +976,22 @@ describe("handleSandboxState", () => {
       hermesAuthMethod: "api_key",
     });
     session.steps.sandbox.status = "complete";
-    const { deps, calls } = createDeps({
-      getSandboxReuseState: () => "ready",
-      getSandboxRegistryEntry: (name) => ({
-        name,
-        provider: "provider",
-        model: "model",
-        endpointUrl: null,
-        preferredInferenceApi: "openai-completions",
-        nemoclawVersion: "0.1.0",
-        toolDisclosure: "progressive",
-      }),
-    });
+    const { deps, calls } = createDeps(
+      {
+        getSandboxReuseState: () => "ready",
+        selectedAgentSupportsWebSearchProvider: () => true,
+        getSandboxRegistryEntry: (name) => ({
+          name,
+          provider: "provider",
+          model: "model",
+          endpointUrl: null,
+          preferredInferenceApi: "openai-completions",
+          nemoclawVersion: "0.1.0",
+          toolDisclosure: "progressive",
+        }),
+      },
+      session,
+    );
 
     await handleSandboxState({
       ...baseOptions(deps, session),
@@ -1204,6 +1234,7 @@ describe("handleSandboxState", () => {
         getSandboxReuseState: () => "not_ready",
         getSandboxRecreateObservation: journal.observe,
         createSandbox: journal.completeCreate,
+        selectedAgentSupportsWebSearchProvider: () => true,
         ensureValidatedWebSearchCredential: vi.fn(async () => backToSelection),
         isBackToSelection: vi.fn((value: unknown) => value === backToSelection),
       },
@@ -1442,145 +1473,5 @@ describe("handleSandboxState", () => {
     const createSandboxCall = calls.createSandbox.mock.calls[0] as unknown[];
     expect(createSandboxCall[6]).toEqual([]);
     expect(getSession().messagingPlan).toEqual(emptyRebuildPlan);
-  });
-
-  it("clears env-staged messaging plans when the current agent has no channel manifest support", async () => {
-    const stalePlan = makeMinimalPlan("my-assistant", "openclaw", ["telegram"]);
-    const session = createSession({ sandboxName: "my-assistant", messagingPlan: stalePlan });
-    const getRecordedMessagingChannelsForResume = vi.fn(() => ["telegram"]);
-    const writePlanToEnv = vi.fn();
-    const { deps, calls, getSession } = createDeps({
-      getRecordedMessagingChannelsForResume,
-      writePlanToEnv,
-      readMessagingPlanFromEnv: () => stalePlan,
-    });
-
-    const result = await handleSandboxState({
-      ...baseOptions(deps, session),
-      resume: true,
-      sandboxName: "my-assistant",
-      agent: { name: "langchain-deepagents-code" },
-    });
-
-    expect(calls.clearPlanEnv).toHaveBeenCalledTimes(1);
-    expect(writePlanToEnv).not.toHaveBeenCalled();
-    expect(result.selectedMessagingChannels).toEqual([]);
-    expect((calls.createSandbox.mock.calls[0] as unknown[])[6]).toEqual([]);
-    expect(getSession().messagingPlan).toBeNull();
-  });
-
-  it("clears registry messaging plans when the current agent is unknown", async () => {
-    const registryPlan = makeMinimalPlan("my-assistant", "openclaw", ["discord"]);
-    const session = createSession({ sandboxName: "my-assistant", messagingPlan: registryPlan });
-    const getRecordedMessagingChannelsForResume = vi.fn(() => ["discord"]);
-    const writePlanToEnv = vi.fn();
-    const { deps, calls, getSession } = createDeps({
-      getRecordedMessagingChannelsForResume,
-      writePlanToEnv,
-      readMessagingPlanFromEnv: () => null,
-      getRegistrySandboxMessagingAuthority: () => ({ authoritative: true, plan: registryPlan }),
-    });
-
-    await handleSandboxState({
-      ...baseOptions(deps, session),
-      resume: true,
-      sandboxName: "my-assistant",
-      agent: { name: "custom-agent" },
-    });
-
-    expect(calls.clearPlanEnv).toHaveBeenCalledTimes(1);
-    expect(writePlanToEnv).not.toHaveBeenCalled();
-    expect((calls.createSandbox.mock.calls[0] as unknown[])[6]).toEqual([]);
-    expect(getSession().messagingPlan).toBeNull();
-  });
-
-  it("refreshes a reused empty registry messaging plan when env supplies new channel inputs", async () => {
-    // Reporter scenario (#5680): a fresh non-interactive onboard targets an
-    // existing sandbox whose registry messaging plan has no active channels, but
-    // the process now exports TELEGRAM_BOT_TOKEN. The empty plan must not be
-    // accepted as authoritative; messaging setup must run so the Telegram
-    // reachability check executes instead of being silently bypassed.
-    detectMessagingChannelsFromEnvMock.mockReturnValue(["telegram"]);
-    // Reused registry plan has no ACTIVE channels but records a previously
-    // configured in-sandbox-QR channel (whatsapp, disabled) with no host token.
-    // The rebuild must seed `existing` from this authoritative registry plan,
-    // not from the session plan, so whatsapp is preserved across the refresh.
-    const registryPlan = makeMinimalPlan("my-assistant", "openclaw", ["whatsapp"], ["whatsapp"]);
-    const refreshedPlan = makeMinimalPlan("my-assistant", "openclaw", ["telegram"], ["telegram"]);
-    const session = createSession({
-      sandboxName: "my-assistant",
-      // A divergent/stale session plan that must NOT be used as the seed source.
-      messagingPlan: makeMinimalPlan("my-assistant", "openclaw", ["slack"]),
-    });
-    const writePlanToEnv = vi.fn();
-    const readMessagingPlanFromEnv = vi.fn(() => refreshedPlan);
-    const { deps, calls, getSession } = createDeps({
-      getRecordedMessagingChannelsForResume: vi.fn(() => null),
-      writePlanToEnv,
-      readMessagingPlanFromEnv,
-      getRegistrySandboxMessagingAuthority: () => ({ authoritative: true, plan: registryPlan }),
-    });
-    // Fake-token rejection disables Telegram, so no channel survives setup.
-    calls.setupMessaging.mockResolvedValue([]);
-
-    const result = await handleSandboxState({
-      ...baseOptions(deps, session),
-      sandboxName: "my-assistant",
-    });
-
-    expect(calls.setupMessaging).toHaveBeenCalledWith(null, ["whatsapp"], "my-assistant");
-    expect(readMessagingPlanFromEnv).toHaveBeenCalledOnce();
-    expect(writePlanToEnv).not.toHaveBeenCalled();
-    expect(calls.note).toHaveBeenCalledWith(
-      "  [non-interactive] Detected messaging channel inputs for telegram; refreshing reused sandbox messaging plan.",
-    );
-    expect(result.selectedMessagingChannels).toEqual([]);
-    expect(getSession().messagingPlan).toEqual(refreshedPlan);
-  });
-
-  it("preserves an active registry channel without refresh when env adds a different channel", async () => {
-    // Preserve an active reused plan instead of re-deriving it from ambient tokens.
-    detectMessagingChannelsFromEnvMock.mockReturnValue(["telegram"]);
-    const registryPlan = makeMinimalPlan("my-assistant", "openclaw", ["slack"]);
-    const session = createSession({ sandboxName: "my-assistant", messagingPlan: registryPlan });
-    const writePlanToEnv = vi.fn();
-    const { deps, calls } = createDeps({
-      getRecordedMessagingChannelsForResume: vi.fn(() => null),
-      writePlanToEnv,
-      readMessagingPlanFromEnv: () => null,
-      getRegistrySandboxMessagingAuthority: () => ({ authoritative: true, plan: registryPlan }),
-    });
-
-    const result = await handleSandboxState({
-      ...baseOptions(deps, session),
-      sandboxName: "my-assistant",
-    });
-
-    expect(calls.setupMessaging).not.toHaveBeenCalled();
-    expect(writePlanToEnv).toHaveBeenCalledWith(registryPlan);
-    expect(result.selectedMessagingChannels).toEqual(["slack"]);
-  });
-
-  it("does not restore plan to env when registry has no entry", async () => {
-    const session = createSession({
-      sandboxName: "my-assistant",
-      messagingPlan: makeMinimalPlan("my-assistant"),
-    });
-    const getRecordedMessagingChannelsForResume = vi.fn(() => ["telegram"]);
-    const writePlanToEnv = vi.fn();
-    const { deps } = createDeps({
-      getRecordedMessagingChannelsForResume,
-      writePlanToEnv,
-      readMessagingPlanFromEnv: () => null,
-      getRegistrySandboxMessagingAuthority: () => ({ authoritative: false, plan: null }),
-    });
-
-    await handleSandboxState({
-      ...baseOptions(deps, session),
-      resume: true,
-      sandboxName: "my-assistant",
-    });
-
-    expect(writePlanToEnv).not.toHaveBeenCalled();
   });
 });

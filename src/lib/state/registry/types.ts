@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
+  HarnessManagedExtension,
+  HarnessStartupApprovalMode,
+} from "@nvidia/nemoclaw-harness-contract";
+
+import type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
 } from "../../agent-runtime/package/identity";
@@ -14,6 +19,8 @@ import type { ToolDisclosure } from "../../tool-disclosure";
 import type { OpenClawImagePluginInstall } from "../openclaw-plugin-restore";
 import type { SandboxMcpState } from "../registry-mcp";
 import type { SandboxMessagingState } from "../registry-messaging";
+import type { SandboxDashboardUiState } from "./dashboard-ui";
+import type { SandboxProviderBrokerOwnership } from "./provider-broker";
 
 /** Bounded identity checkpoint for one incomplete sandbox create. */
 export interface PendingSandboxCreateIdentity {
@@ -102,6 +109,8 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   toolDisclosure?: ToolDisclosure;
   /** Enables backend-neutral trace export to the fixed local OTLP collector boundary. */
   observabilityEnabled?: boolean;
+  /** Receipt-backed package approval selection projected through its startup adapter. */
+  approvalMode?: HarnessStartupApprovalMode;
   /** Image-baked permission to expose DCode's per-thread auto-approval opt-in. */
   dcodeAutoApprovalMode?: DcodeAutoApprovalMode;
   /** Durable provider identity for enabled managed web search. */
@@ -114,6 +123,8 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   agentVersion?: string | null;
   /** Plugin install baseline captured before state is restored into a fresh OpenClaw image. */
   openclawImagePluginInstalls?: OpenClawImagePluginInstall[];
+  /** Receipt-backed image-extension baseline captured before state restoration. */
+  managedImageExtensions?: HarnessManagedExtension[];
   // NemoClaw build fingerprint (the NemoClaw CLI/build version) stamped only on
   // NemoClaw-managed images at create/rebuild time. `upgrade-sandboxes` compares
   // it against the running NemoClaw build so an image/build change with an
@@ -122,6 +133,9 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   // are never auto-rebuilt onto the default image (#5026).
   nemoclawVersion?: string | null;
   fromDockerfile?: string | null;
+  /** Receipt-backed package authentication method; never contains credentials. */
+  providerAuthMethod?: string | null;
+  /** No-receipt compatibility encoding. */
   hermesAuthMethod?: "oauth" | "api_key" | null;
   imageTag?: string | null;
   /**
@@ -136,6 +150,11 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   hostLocalInferenceProvenance?: SandboxHostLocalInferenceProvenance;
   messaging?: SandboxMessagingState;
   mcp?: SandboxMcpState;
+  /** Receipt-backed package managed-tool selections. */
+  toolGatewaySelections?: string[];
+  /** Exact non-secret ownership for one receipt-backed package provider broker. */
+  providerBroker?: SandboxProviderBrokerOwnership;
+  /** No-receipt Hermes compatibility encoding. */
   hermesToolGateways?: string[];
   /** Destination-scoped provider holding the host-minted Hermes inference key. */
   hermesInferenceProvider?: string;
@@ -143,6 +162,8 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   hermesDashboardPort?: number | null;
   hermesDashboardInternalPort?: number | null;
   hermesDashboardTui?: boolean;
+  /** Receipt-backed optional UI settings, independent of the selected harness. */
+  dashboardUi?: SandboxDashboardUiState;
   /**
    * Host port this sandbox exposes its OpenAI-compatible API on. The sandbox
    * and the host forward share the number, so two Hermes sandboxes on one host
@@ -150,6 +171,8 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
    * value and resolve to the range start.
    */
   hermesApiPort?: number | null;
+  /** Host port allocated from a receipt-pinned package's secondary-forward declaration. */
+  secondaryForwardPort?: number | null;
   dashboardPort?: number | null;
   /** Remote dashboard exposure was included in the sandbox's generated config. */
   dashboardRemoteBindPrepared?: boolean;
@@ -165,6 +188,19 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   // different NEMOCLAW_GATEWAY_PORT no longer recreates/kills the first (#4422).
   gatewayName?: string | null;
   gatewayPort?: number | null;
+}
+
+/**
+ * Secret-free startup authority retained when a receipt-backed package is
+ * built from its Dockerfile instead of an immutable managed image.
+ */
+export interface SandboxPackageStartupProfileReceipt {
+  readonly encodedProfile: string;
+  readonly startupProfileSha256: string;
+  /** Re-acquire launch-only proxy credentials from the operator environment when rebuilding. */
+  readonly credentialProxyReplayRequired: boolean;
+  /** Optional canonical standard-base64 public CA bundle bound by the profile digest. */
+  readonly corporateCaB64?: string;
 }
 
 export type SandboxWorkloadReceipt =
@@ -198,6 +234,8 @@ export type SandboxWorkloadReceipt =
       readonly schemaVersion: 1;
       readonly kind: "legacy-dockerfile";
       readonly reference: string | null;
+      /** Present for new receipt-backed packages; absent on no-receipt and historical rows. */
+      readonly packageStartupProfile?: SandboxPackageStartupProfileReceipt;
       readonly shared: false;
     }
   | NativeArtifactWorkloadReceiptV1;

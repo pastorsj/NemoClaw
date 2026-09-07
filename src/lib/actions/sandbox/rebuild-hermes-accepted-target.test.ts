@@ -132,11 +132,22 @@ describe("Hermes accepted replacement recovery", () => {
       stateRecord: null,
       recoveryArtifacts: [],
     });
+    const agentDefinition = { name: "hermes" };
+    const agentAuthority = {
+      recordedAgent: "hermes",
+      effectiveAgentId: "hermes",
+      definition: agentDefinition,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    };
     phaseMocks.runPreflight.mockResolvedValue({
       sandboxEntry: { name: "alpha" },
+      agentAuthority,
       rebuildAgent: "hermes",
       versionCheck: {},
       targetConfig: {
+        agentAuthority,
+        agentDefinition,
         resumeConfig: {},
         sessionSnapshot: null,
         sessionMatchesSandbox: false,

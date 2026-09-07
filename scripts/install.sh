@@ -2199,82 +2199,6 @@ fix_npm_permissions() {
 # ---------------------------------------------------------------------------
 # 3. NemoClaw
 # ---------------------------------------------------------------------------
-# Work around openclaw tarball missing directory entries (GH-503).
-# npm's tar extractor hard-fails because the tarball is missing directory
-# entries for extensions/, skills/, and dist/plugin-sdk/config/. System tar
-# handles this fine. We pre-extract openclaw into node_modules BEFORE npm
-# install so npm sees the dependency is already satisfied and skips it.
-pre_extract_openclaw() {
-  local install_dir="$1"
-  local openclaw_version
-  openclaw_version="$(resolve_openclaw_version "$install_dir")"
-
-  if [[ -z "$openclaw_version" ]]; then
-    warn "Could not determine openclaw version — skipping pre-extraction"
-    return 1
-  fi
-
-  info "Pre-extracting openclaw@${openclaw_version} with system tar (GH-503 workaround)…"
-  local tmpdir
-  tmpdir="$(mktemp -d)"
-  if npm pack "openclaw@${openclaw_version}" --pack-destination "$tmpdir" >/dev/null 2>&1; then
-    local tgz
-    tgz="$(find "$tmpdir" -maxdepth 1 -name 'openclaw-*.tgz' -print -quit)"
-    if [[ -n "$tgz" && -f "$tgz" ]]; then
-      if mkdir -p "${install_dir}/node_modules/openclaw" \
-        && tar xzf "$tgz" -C "${install_dir}/node_modules/openclaw" --strip-components=1; then
-        info "openclaw pre-extracted successfully"
-      else
-        warn "Failed to extract openclaw tarball"
-        rm -rf "$tmpdir"
-        return 1
-      fi
-    else
-      warn "npm pack succeeded but tarball not found"
-      rm -rf "$tmpdir"
-      return 1
-    fi
-  else
-    warn "Failed to download openclaw tarball"
-    rm -rf "$tmpdir"
-    return 1
-  fi
-  rm -rf "$tmpdir"
-}
-
-resolve_openclaw_version() {
-  local install_dir="$1"
-  local package_json dockerfile_base resolved_version
-
-  package_json="${install_dir}/package.json"
-  dockerfile_base="${install_dir}/packages/nemoclaw-openclaw/Dockerfile.base"
-
-  if [[ -f "$package_json" ]]; then
-    resolved_version="$(
-      node -e "const v = require('${package_json}').dependencies?.openclaw; if (v) console.log(v)" \
-        2>/dev/null || true
-    )"
-    if [[ -n "$resolved_version" ]]; then
-      printf '%s\n' "$resolved_version"
-      return 0
-    fi
-  fi
-
-  if [[ -f "$dockerfile_base" ]]; then
-    awk '
-      match($0, /openclaw@[0-9][0-9.]+/) {
-        print substr($0, RSTART + 9, RLENGTH - 9)
-        exit
-      }
-      match($0, /ARG[[:space:]]+OPENCLAW_VERSION[[:space:]]*=[[:space:]]*[0-9][0-9.]+/) {
-        line = substr($0, RSTART, RLENGTH)
-        sub(/^[^=]+=[[:space:]]*/, "", line)
-        print line
-        exit
-      }
-    ' "$dockerfile_base"
-  fi
-}
 
 is_source_checkout() {
   local repo_root="$1"
@@ -2356,11 +2280,10 @@ is_reusable_managed_nemoclaw_install() {
   [[ "$current_revision" == "$expected_revision" ]] || return 1
   git -C "$source_root" diff --quiet --ignore-submodules -- || return 1
   git -C "$source_root" diff --cached --quiet --ignore-submodules -- || return 1
-  [[ -d "${source_root}/node_modules" && -d "${source_root}/packages/nemoclaw-openclaw/plugin/node_modules" ]] || return 1
+  [[ -d "${source_root}/node_modules" ]] || return 1
 
   identity_file="${source_root}/dist/build-identity.json"
   [[ -f "$identity_file" && -s "${source_root}/dist/lib/onboard/preflight.js" ]] || return 1
-  [[ -s "${source_root}/packages/nemoclaw-openclaw/plugin/dist/index.js" ]] || return 1
   identity_revision="$(json_string_field "$identity_file" sourceRevision)"
   identity_version="$(json_string_field "$identity_file" nemoclawVersion)"
   [[ "$identity_revision" == "$expected_revision" ]] || return 1
@@ -2438,13 +2361,8 @@ install_nemoclaw() {
   if is_source_checkout "$repo_root"; then
     info "${_CLI_DISPLAY} package.json found in the selected source checkout — installing from source…"
     NEMOCLAW_SOURCE_ROOT="$repo_root"
-    if [[ -z "${NEMOCLAW_AGENT:-}" || "${NEMOCLAW_AGENT}" == "openclaw" ]]; then
-      spin "Preparing OpenClaw package" bash -c "$(declare -f info warn resolve_openclaw_version pre_extract_openclaw); pre_extract_openclaw \"\$1\"" _ "$NEMOCLAW_SOURCE_ROOT" \
-        || warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
-    fi
     spin "Installing ${_CLI_DISPLAY} dependencies" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\" && npm install --ignore-scripts"
     spin "Building ${_CLI_DISPLAY} CLI modules" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\" && npm run --if-present build:cli"
-    spin "Building ${_CLI_DISPLAY} plugin" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\"/packages/nemoclaw-openclaw/plugin && npm ci --ignore-scripts && npm run build"
     spin "Linking ${_CLI_DISPLAY} CLI" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\" && npm link --ignore-scripts"
 
     _NEMOCLAW_CLI_INSTALL_MODE=source
@@ -2457,9 +2375,6 @@ install_nemoclaw() {
     local release_ref
     release_ref="$(resolve_release_tag)"
     info "Resolved install ref: ${release_ref}"
-    # Clone first so we can pre-extract openclaw before npm install (GH-503).
-    # npm install -g git+https://... does this internally but we can't hook
-    # into its extraction pipeline, so we do it ourselves.
     local nemoclaw_src
     ensure_nemoclaw_state_dir >/dev/null \
       || error "Could not prepare owner-only NemoClaw state for the managed CLI installation."
@@ -2485,13 +2400,8 @@ install_nemoclaw() {
         git -C "$nemoclaw_src" describe --tags --match 'v*' 2>/dev/null \
           | sed 's/^v//' >"$nemoclaw_src/.version" || true
       fi
-      if [[ -z "${NEMOCLAW_AGENT:-}" || "${NEMOCLAW_AGENT}" == "openclaw" ]]; then
-        spin "Preparing OpenClaw package" bash -c "$(declare -f info warn resolve_openclaw_version pre_extract_openclaw); pre_extract_openclaw \"\$1\"" _ "$nemoclaw_src" \
-          || warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
-      fi
       spin "Installing ${_CLI_DISPLAY} dependencies" bash -c "cd \"$nemoclaw_src\" && npm install --ignore-scripts"
       spin "Building ${_CLI_DISPLAY} CLI modules" bash -c "cd \"$nemoclaw_src\" && npm run --if-present build:cli"
-      spin "Building ${_CLI_DISPLAY} plugin" bash -c "cd \"$nemoclaw_src\"/packages/nemoclaw-openclaw/plugin && npm ci --ignore-scripts && npm run build"
       spin "Linking ${_CLI_DISPLAY} CLI" bash -c "cd \"$nemoclaw_src\" && npm link --ignore-scripts"
       restore_managed_source_lockfile "$nemoclaw_src" \
         || warn "Could not restore package-lock.json in ${nemoclaw_src} — the next install re-clones that checkout instead of reusing it."

@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "../agent/defs";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/identity";
 import {
   resolveAgentDefaultCloudModel,
   resolveAgentProviderInferenceApi,
+  resolvePackageProviderInferenceApi,
 } from "../inference/config";
 import type { TrustedPrivateEndpointCapability } from "../inference/endpoint-ssrf-preflight";
 import type { GatewayRouteDiscoveryConstraints } from "../inference/gateway-route-compatibility";
@@ -24,17 +26,17 @@ import {
   listManagedLlamaCppSelectionChoices,
   resolveManagedLlamaCppSelectionForGpu,
 } from "../inference/llama-cpp/managed-selection";
-import { getOllamaContextWindowFloorForAgent } from "../inference/ollama-runtime-context";
 import {
-  type RequestedServingProfileModel,
-  resolveRequestedServingProfileModel,
-} from "../inference/serving/requested-profile-model";
+  getOllamaContextWindowFloorForAgent,
+  getPackageOllamaContextWindowFloor,
+} from "../inference/ollama-runtime-context";
 import type { VllmProfile } from "../inference/vllm";
 import { promptManualModelId } from "../inference/model-prompts";
 import { isBackToSelection } from "../navigation";
 import type { HermesAuthMethod } from "./hermes-auth";
 import { isHermesPortableProduct } from "./experimental/portable-product-qualification";
 import { OnboardInferenceCapabilityCache } from "./inference-capability-cache";
+import { legacyAcceptsHostedInferenceProviderKeyAlias } from "./package/legacy-onboard";
 import {
   createLocalModelProfileIntegration,
   type LocalModelProfilePlan,
@@ -49,8 +51,10 @@ import type { InferenceProviderHostGpu, InferenceProviderHostState } from "./pro
 import { buildInferenceProviderMenu, type ProviderMenuChoice } from "./provider-menu";
 import {
   applyVllmInstallResumeDefaults,
+  type RequestedServingProfileModel,
   resolveSelectedEndpointSource,
   resolveRequestedProviderSelection,
+  resolveRequestedServingProfileModel,
   vllmInstallRecoveryOptions,
 } from "./provider-selection";
 import { reportProviderSelectionFailure } from "./provider-selection-failure";
@@ -100,6 +104,7 @@ export interface SetupNimRemoteSelectionArgs {
   sandboxName: string | null;
   intendedInferenceApi: string | null;
   recoverySessionId: string | null | undefined;
+  harnessPackage: HarnessPackageIdentity | null;
 }
 
 export type SetupNim = (
@@ -113,6 +118,7 @@ export type SetupNim = (
   canProbeRoute?: (provider: string) => boolean,
   recoverySessionId?: string | null,
   revalidateSandboxIdentity?: (route: ProviderInferenceProbeRoute, operation: string) => void,
+  harnessPackage?: HarnessPackageIdentity | null,
 ) => Promise<ProviderSelectionResult>;
 
 export interface SetupNimFlowDeps {
@@ -124,7 +130,10 @@ export interface SetupNimFlowDeps {
   getRuntimeProvider(): RuntimeProviderBundle;
   step(current: number, total: number, label: string): void;
   isNonInteractive(): boolean;
-  getNonInteractiveProvider(): string | null;
+  getNonInteractiveProvider(
+    allowHostedInferenceStaging?: boolean,
+    options?: { readonly allowHostedInferenceProviderKeyAlias?: boolean },
+  ): string | null;
   getVllmInstallResumeModel?(): string | null;
   getNonInteractiveModel(
     providerKey: string,
@@ -370,15 +379,52 @@ function handleSelectedOllama(
   );
 }
 
+function resolveSetupProviderInferenceApi(
+  deps: Pick<SetupNimFlowDeps, "coerceAgentInferenceApi" | "resolveAgentInferenceApi">,
+  agent: AgentDefinition | null,
+  harnessPackage: HarnessPackageIdentity | null | undefined,
+  provider: string,
+  preferredInferenceApi: string | null,
+): string | null {
+  if (harnessPackage) {
+    return resolvePackageProviderInferenceApi(agent, provider, preferredInferenceApi);
+  }
+  return deps.resolveAgentInferenceApi(
+    agent?.name ?? null,
+    provider,
+    deps.coerceAgentInferenceApi(agent, preferredInferenceApi),
+  );
+}
+
+function resolveSetupOllamaContextWindowFloor(
+  agent: AgentDefinition | null,
+  harnessPackage: HarnessPackageIdentity | null | undefined,
+): number {
+  if (harnessPackage) return getPackageOllamaContextWindowFloor(agent);
+  return getOllamaContextWindowFloorForAgent(agent?.name ?? null);
+}
+
 function resolveValidationInferenceApi(
+  deps: Pick<SetupNimFlowDeps, "coerceAgentInferenceApi" | "resolveAgentInferenceApi">,
   selectedKey: string,
   provider: string,
   agent: AgentDefinition | null,
+  harnessPackage: HarnessPackageIdentity | null | undefined,
 ): string | null {
   if (selectedKey !== "anthropicCompatible") return null;
-  return resolveAgentProviderInferenceApi(
-    agent?.name ?? "openclaw",
+  if (!harnessPackage) {
+    // Exact built-in compatibility is intentionally limited to no-receipt sessions.
+    return resolveAgentProviderInferenceApi(
+      agent?.name ?? "openclaw",
+      agent,
+      provider,
+      "anthropic-messages",
+    );
+  }
+  return resolveSetupProviderInferenceApi(
+    deps,
     agent,
+    harnessPackage,
     provider,
     "anthropic-messages",
   );
@@ -597,6 +643,7 @@ async function handleEndpointProviderSelection(input: {
   gatewayName: string | null;
   recoverySessionId: string | null | undefined;
   agent: AgentDefinition | null;
+  harnessPackage: HarnessPackageIdentity | null | undefined;
   recoveredRegistryRoute: RegistryInferenceRoute | null;
 }): Promise<SetupNimSelectionResult> {
   const {
@@ -610,6 +657,7 @@ async function handleEndpointProviderSelection(input: {
     gatewayName,
     recoverySessionId,
     agent,
+    harnessPackage,
     recoveredRegistryRoute,
   } = input;
   if (selected.key === "llama-cpp") {
@@ -630,10 +678,13 @@ async function handleEndpointProviderSelection(input: {
       sandboxName,
       gatewayName,
       recoverySessionId,
+      harnessPackage: harnessPackage ?? null,
       intendedInferenceApi: resolveValidationInferenceApi(
+        deps,
         selected.key,
         remoteConfig.providerName,
         agent,
+        harnessPackage,
       ),
     },
     state,
@@ -710,6 +761,7 @@ function resolveInitialVllmSelectionModel(input: {
 async function resolveFreshHermesPortableOllamaSelection(input: {
   deps: SetupNimFlowDeps;
   agent: AgentDefinition | null;
+  harnessPackage: HarnessPackageIdentity | null | undefined;
   requestedProvider: string | null;
   requestedModel: string | null;
   recoverProvider: boolean;
@@ -718,6 +770,7 @@ async function resolveFreshHermesPortableOllamaSelection(input: {
   inferenceCapabilityCache: OnboardInferenceCapabilityCache;
 }): Promise<ProviderSelectionResult | null> {
   if (
+    input.harnessPackage ||
     !input.agent ||
     !isHermesPortableProduct(input.agent.name) ||
     input.requestedProvider !== "ollama" ||
@@ -764,10 +817,12 @@ async function resolveFreshHermesPortableOllamaSelection(input: {
     credentialEnv: state.credentialEnv,
     hermesAuthMethod: null,
     hermesToolGateways: [],
-    preferredInferenceApi: input.deps.resolveAgentInferenceApi(
-      input.agent.name,
+    preferredInferenceApi: resolveSetupProviderInferenceApi(
+      input.deps,
+      input.agent,
+      input.harnessPackage,
       state.provider,
-      input.deps.coerceAgentInferenceApi(input.agent, state.preferredInferenceApi),
+      state.preferredInferenceApi,
     ),
     compatibleEndpointReasoning: null,
     compatibleEndpointReasoningEffort: null,
@@ -826,8 +881,28 @@ export function createSetupNim(
     canProbeRoute?: (provider: string) => boolean,
     recoverySessionId?: string | null,
     revalidateSandboxIdentity?: (route: ProviderInferenceProbeRoute, operation: string) => void,
+    harnessPackage: HarnessPackageIdentity | null = null,
   ): Promise<ProviderSelectionResult> {
     deps.step(3, 8, "Configuring inference provider");
+
+    const receiptProvider =
+      harnessPackage && agent?.providerAuthCapability?.support === "managed"
+        ? agent.providerAuthCapability.selection
+        : null;
+    const remoteProviderConfig = receiptProvider
+      ? {
+          ...deps.remoteProviderConfig,
+          [receiptProvider.key]: {
+            label: receiptProvider.label,
+            providerName: receiptProvider.provider_name,
+            endpointUrl: receiptProvider.endpoint_url,
+            credentialEnv:
+              agent?.providerAuthCapability?.support === "managed"
+                ? (agent.providerAuthCapability.methods[0]?.credential_env ?? "")
+                : "",
+          },
+        }
+      : deps.remoteProviderConfig;
 
     let model: string | BaseSetupNimSelectionState["model"] = null;
     let provider = deps.remoteProviderConfig.build.providerName;
@@ -835,6 +910,8 @@ export function createSetupNim(
     let endpointUrl: string | null = deps.remoteProviderConfig.build.endpointUrl;
     let credentialEnv: string | null = deps.remoteProviderConfig.build.credentialEnv;
     let hermesAuthMethod: HermesAuthMethod | null = null;
+    let providerAuthMethod: string | null = null;
+    let toolGatewaySelections: string[] = [];
     let hermesToolGateways: string[] = [];
     let preferredInferenceApi: string | null = null;
     let compatibleEndpointReasoning: string | null = null;
@@ -857,13 +934,15 @@ export function createSetupNim(
         endpointUrl,
         credentialEnv,
         hermesAuthMethod,
+        providerAuthMethod,
+        toolGatewaySelections,
         hermesToolGateways,
         preferredInferenceApi,
         compatibleEndpointReasoning,
         compatibleEndpointReasoningEffort,
         nimContainer,
         allowToolsIncompatible,
-        ollamaContextWindowFloor: getOllamaContextWindowFloorForAgent(agent?.name ?? null),
+        ollamaContextWindowFloor: resolveSetupOllamaContextWindowFloor(agent, harnessPackage),
         ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
         ...(endpointTrustedPrivateCapability ? { endpointTrustedPrivateCapability } : {}),
         inferenceCapabilityCache,
@@ -871,10 +950,12 @@ export function createSetupNim(
         openRouterFeaturedModels,
       };
       const effectiveInferenceApi = () =>
-        deps.resolveAgentInferenceApi(
-          agent?.name ?? null,
+        resolveSetupProviderInferenceApi(
+          deps,
+          agent,
+          harnessPackage,
           state.provider,
-          deps.coerceAgentInferenceApi(agent, state.preferredInferenceApi),
+          state.preferredInferenceApi,
         );
       const route = (): ProviderInferenceProbeRoute => ({
         provider: state.provider,
@@ -913,10 +994,14 @@ export function createSetupNim(
       assertRouteCompatible,
       canProbeRoute,
       recoverySessionId,
+      allowHostedInferenceProviderKeyAlias: harnessPackage
+        ? agent?.inference?.provider_key_credential_alias === "hosted-inference"
+        : legacyAcceptsHostedInferenceProviderKeyAlias(agent),
     });
     const freshHermesPortableOllama = await resolveFreshHermesPortableOllamaSelection({
       deps,
       agent,
+      harnessPackage,
       requestedProvider,
       requestedModel,
       recoverProvider,
@@ -960,7 +1045,7 @@ export function createSetupNim(
 
     const blueprintRouterCfg = deps.loadRoutedProfile();
     const { options, hermesProviderAvailable } = buildInferenceProviderMenu({
-      remoteProviderConfig: deps.remoteProviderConfig,
+      remoteProviderConfig,
       agentProviderOptions,
       experimental: deps.experimental,
       gpuNimCapable,
@@ -1031,13 +1116,14 @@ export function createSetupNim(
         let recoveredModel: string | null = null;
         let preparedVllmState: SetupNimSelectionState | null = null;
         hermesAuthMethod = null;
+        providerAuthMethod = null;
 
         if (deps.isNonInteractive() || requestedProvider) {
           const providerSelection = resolveRequestedProviderSelection({
             options,
             requestedProvider,
             sandboxName,
-            remoteProviderConfig: deps.remoteProviderConfig,
+            remoteProviderConfig,
             isWsl: isWslHost,
             isWindowsHostOllama,
             ollamaRunning,
@@ -1084,19 +1170,24 @@ export function createSetupNim(
           windowsOllamaReachable,
         });
         assertVllmGpuProviderSelection(selected, recoveredFromSandbox, deps);
-        if (selected.key !== "hermesProvider") {
+        if (selected.key !== "hermesProvider" && selected.key !== receiptProvider?.key) {
           hermesAuthMethod = null;
+          toolGatewaySelections = [];
           hermesToolGateways = [];
         }
 
-        if (isEndpointProviderSelection(deps, selected.key)) {
+        const endpointProviderDeps =
+          remoteProviderConfig === deps.remoteProviderConfig
+            ? deps
+            : { ...deps, remoteProviderConfig };
+        if (isEndpointProviderSelection(endpointProviderDeps, selected.key)) {
           const state = createSelectionState();
-          prepareEndpointProviderPolicyRoute(deps, selected, state);
+          prepareEndpointProviderPolicyRoute(endpointProviderDeps, selected, state);
           state.revalidateSandboxIdentity?.(
             `configure inference provider ${JSON.stringify(state.provider)}`,
           );
           const result = await handleEndpointProviderSelection({
-            deps,
+            deps: endpointProviderDeps,
             selected,
             state,
             requestedModel,
@@ -1106,6 +1197,7 @@ export function createSetupNim(
             gatewayName,
             recoverySessionId,
             agent,
+            harnessPackage,
             recoveredRegistryRoute,
           });
           ({
@@ -1120,6 +1212,8 @@ export function createSetupNim(
             endpointPinnedAddresses,
             endpointTrustedPrivateCapability,
           } = state);
+          toolGatewaySelections = state.toolGatewaySelections ?? [];
+          providerAuthMethod = state.providerAuthMethod ?? null;
           const reasoningState = readSelectionReasoningState(state);
           compatibleEndpointReasoning = reasoningState.reasoning;
           compatibleEndpointReasoningEffort = reasoningState.effort;
@@ -1199,6 +1293,7 @@ export function createSetupNim(
             preferredInferenceApi,
             nimContainer,
           } = state);
+          toolGatewaySelections = state.toolGatewaySelections ?? [];
           if (result === "retry-selection") continue selectionLoop;
           break;
         } else if (selected.key === "ollama") {
@@ -1402,11 +1497,15 @@ export function createSetupNim(
       endpointSource,
       credentialEnv,
       hermesAuthMethod,
+      ...(providerAuthMethod ? { providerAuthMethod } : {}),
+      ...(harnessPackage ? { toolGatewaySelections } : {}),
       hermesToolGateways,
-      preferredInferenceApi: deps.resolveAgentInferenceApi(
-        agent?.name ?? null,
+      preferredInferenceApi: resolveSetupProviderInferenceApi(
+        deps,
+        agent,
+        harnessPackage,
         provider,
-        deps.coerceAgentInferenceApi(agent, preferredInferenceApi),
+        preferredInferenceApi,
       ),
       compatibleEndpointReasoning,
       compatibleEndpointReasoningEffort,

@@ -4,6 +4,7 @@
 import { isObjectRecord } from "../core/json-types";
 import type { MessagingChannelConfig } from "../messaging-channel-config";
 import type {
+  ChannelManifest,
   MessagingAgentId,
   MessagingChannelId,
   MessagingSerializableValue,
@@ -21,6 +22,8 @@ export interface SandboxMessagingPlanParseOptions {
   supportedChannelIds?: readonly MessagingChannelId[] | readonly string[] | null;
   /** Explicit environment seam for deterministic rehydration without ambient credentials. */
   environment?: Readonly<Record<string, string | undefined>>;
+  /** Exact composed manifests for a receipt-backed plan. */
+  manifests?: readonly ChannelManifest[];
 }
 
 export function parseSandboxMessagingPlan(
@@ -68,14 +71,17 @@ export function parseSandboxMessagingPlan(
     }
     if (Object.hasOwn(channel, "active") && typeof channel.active !== "boolean") return null;
     if (Object.hasOwn(channel, "disabled") && typeof channel.disabled !== "boolean") return null;
-    if (
-      Object.hasOwn(channel, "pendingRemoval") &&
-      typeof channel.pendingRemoval !== "boolean"
-    ) {
+    if (Object.hasOwn(channel, "pendingRemoval") && typeof channel.pendingRemoval !== "boolean") {
       return null;
     }
     if (Object.hasOwn(channel, "inputs") && !Array.isArray(channel.inputs)) return null;
     if (Object.hasOwn(channel, "hostForward") && !isHostForward(channel.hostForward)) return null;
+    if (
+      Object.hasOwn(channel, "credentialProvider") &&
+      !isCredentialProvider(channel.credentialProvider)
+    ) {
+      return null;
+    }
     if (Object.hasOwn(channel, "hooks") && !Array.isArray(channel.hooks)) return null;
     if (
       Array.isArray(channel.inputs) &&
@@ -138,7 +144,63 @@ export function parseSandboxMessagingPlan(
     normalizePersistedSandboxMessagingPlanShape(
       value as MaybeCompactMessagingPlan,
       options.environment,
+      options.manifests,
     ),
+  );
+}
+
+function isCredentialProvider(value: unknown): boolean {
+  if (!isObjectRecord(value)) return false;
+  const allowedKeys = new Set([
+    "profilePath",
+    "profileId",
+    "credentialEnv",
+    "sourceInputId",
+    "sourceSecretEnv",
+    "refresh",
+  ]);
+  if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
+  const refresh = value.refresh;
+  const validRefresh =
+    refresh === undefined ||
+    (isObjectRecord(refresh) &&
+      Object.keys(refresh).every((key) =>
+        ["strategy", "scopes", "secretMaterialKeys"].includes(key),
+      ) &&
+      Object.keys(refresh).length === 3 &&
+      refresh.strategy === "google-service-account-jwt" &&
+      Array.isArray(refresh.scopes) &&
+      refresh.scopes.length > 0 &&
+      refresh.scopes.length <= 16 &&
+      new Set(refresh.scopes).size === refresh.scopes.length &&
+      refresh.scopes.every(
+        (scope) =>
+          typeof scope === "string" && scope.length <= 512 && /^https:\/\/\S+$/u.test(scope),
+      ) &&
+      Array.isArray(refresh.secretMaterialKeys) &&
+      refresh.secretMaterialKeys.length > 0 &&
+      refresh.secretMaterialKeys.length <= 16 &&
+      new Set(refresh.secretMaterialKeys).size === refresh.secretMaterialKeys.length &&
+      refresh.secretMaterialKeys.every(
+        (key) => typeof key === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(key),
+      ));
+  return (
+    typeof value.profilePath === "string" &&
+    value.profilePath.length <= 256 &&
+    /^provider-profiles\/[A-Za-z0-9._-]+\.yaml$/u.test(value.profilePath) &&
+    typeof value.profileId === "string" &&
+    value.profileId.length <= 256 &&
+    /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(value.profileId) &&
+    typeof value.credentialEnv === "string" &&
+    value.credentialEnv.length <= 256 &&
+    /^[A-Z_][A-Z0-9_]*$/u.test(value.credentialEnv) &&
+    typeof value.sourceInputId === "string" &&
+    /^[a-z][A-Za-z0-9-]{0,255}$/u.test(value.sourceInputId) &&
+    typeof value.sourceSecretEnv === "string" &&
+    value.sourceSecretEnv.length <= 256 &&
+    /^[A-Z_][A-Z0-9_]*$/u.test(value.sourceSecretEnv) &&
+    (refresh !== undefined || value.credentialEnv === value.sourceSecretEnv) &&
+    validRefresh
   );
 }
 

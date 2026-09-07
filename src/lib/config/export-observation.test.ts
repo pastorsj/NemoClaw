@@ -57,6 +57,7 @@ function deps(
     sourceTokenFor: vi.fn(() => "stable"),
     readSourceToken: vi.fn(async () => tokens[token++] ?? tokens.at(-1)!),
     readRegistryEntry: vi.fn(async () => entry()),
+    resolveHarnessPackageAuthority: vi.fn(async (source) => source.harnessPackage ?? null),
     readSandboxIdentity: vi.fn(async () => ({
       sandboxId: id,
       fingerprint,
@@ -96,6 +97,52 @@ describe("stable config export source observation (#10938)", () => {
     expect(result.ok && result.source.policyBasis).toBe("verified-effective-state");
     expect(d.readSourceToken).toHaveBeenCalledTimes(1);
     expect(d.readRegistryEntry).toHaveBeenCalledTimes(1);
+  });
+  it("observes a synthetic future package through exact receipt authority", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    };
+    const d = deps(["stable"], {
+      readRegistryEntry: vi.fn(async () => entry({ agent: harnessPackage.id, harnessPackage })),
+      resolveHarnessPackageAuthority: vi.fn(async () => harnessPackage),
+    });
+
+    await expect(observeStableExportSource("alpha", d)).resolves.toMatchObject({
+      ok: true,
+      source: { harnessPackage },
+      attempts: 1,
+    });
+  });
+  it("fails closed on invalid package authority before reading live state", async () => {
+    const d = deps(["stable"], {
+      readRegistryEntry: vi.fn(async () =>
+        entry({
+          agent: "future-harness",
+          harnessPackage: {
+            kind: "agent-runtime",
+            id: "future-harness",
+            packageVersion: "1.0.0",
+            contentDigest: "a".repeat(64),
+          },
+        }),
+      ),
+      resolveHarnessPackageAuthority: vi.fn(async () => {
+        throw new Error("package receipt does not match installed tree");
+      }),
+    });
+
+    await expect(observeStableExportSource("alpha", d)).resolves.toMatchObject({
+      ok: false,
+      category: "live-verification-failed",
+      attempts: 1,
+    });
+    expect(d.readSandboxIdentity).not.toHaveBeenCalled();
+    expect(d.readGateway).not.toHaveBeenCalled();
+    expect(d.readInference).not.toHaveBeenCalled();
+    expect(d.readEffectivePolicy).not.toHaveBeenCalled();
   });
   it("discards one unstable attempt and retries the complete observation", async () => {
     const d = deps(["changed", "stable"]);

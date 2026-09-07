@@ -2,47 +2,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  envConfigKey,
   getEnvConfigValue,
   getStructuredConfigValue,
+  listPackageConfigVisibilityKeys,
   type RenderedChannelConfigParser,
   type RenderedConfigSource,
   type RenderedConfigVisibilityKey,
-  structuredConfigKey,
 } from "../rendered-config-parser-utils";
+import { listLegacyRenderedConfigKeys } from "../legacy/rendered-config";
 
-const OPENCLAW_CHANNELS_KEY = "openclawAllowedChannels";
+const ALLOWED_CHANNEL_IDS_KEY = "allowedChannelIds";
 
 export const slackRenderedConfigParser: RenderedChannelConfigParser = {
   listConfigVisibilityKeys(context) {
-    if (context.agentId === "openclaw") {
-      return [
-        structuredConfigKey("allowedUsers", "openclaw.json", [
-          "channels",
-          "slack",
-          "accounts",
-          "default",
-          "allowFrom",
-        ]),
-        structuredConfigKey(
-          "allowedChannels",
-          "openclaw.json",
-          ["channels", "slack", "accounts", "default", "channels"],
-          OPENCLAW_CHANNELS_KEY,
-        ),
-      ];
-    }
-    if (context.agentId === "hermes") {
-      return [
-        envConfigKey("allowedUsers", "~/.hermes/.env", "SLACK_ALLOWED_USERS"),
-        envConfigKey("allowedChannels", "~/.hermes/.env", "SLACK_ALLOWED_CHANNELS"),
-      ];
-    }
-    return [];
+    return (
+      listPackageConfigVisibilityKeys(context) ?? listLegacyRenderedConfigKeys("slack", context)
+    );
   },
 
   getValue(key, source) {
-    if (key.key === OPENCLAW_CHANNELS_KEY) return slackAllowedChannelIds(source, key);
+    if (key.key === ALLOWED_CHANNEL_IDS_KEY) return slackAllowedChannelIds(source, key);
     return key.kind === "env"
       ? getEnvConfigValue(source, key.envKey)
       : getStructuredConfigValue(source, key.path);

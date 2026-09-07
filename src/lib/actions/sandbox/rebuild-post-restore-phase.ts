@@ -4,7 +4,13 @@
 import { CLI_NAME } from "../../cli/branding";
 import type { HarnessScheduledWorkDeclaration } from "@nvidia/nemoclaw-harness-contract";
 import { D, G, R, YW } from "../../cli/terminal-style";
-import type { SandboxMessagingPlan } from "../../messaging";
+import {
+  createBuiltInChannelManifestRegistry,
+  listMessagingChannelsForProfile,
+  resolveAgentMessagingProfileAuthority,
+  type ChannelManifest,
+  type SandboxMessagingPlan,
+} from "../../messaging";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import * as sandboxVersion from "../../sandbox/version";
 import {
@@ -76,6 +82,16 @@ function probeRebuiltAgentVersion(
 }
 
 const OPENCLAW_DOCTOR_TIMEOUT_MS = 5 * 60_000;
+
+function receiptMessagingManifests(
+  authority: ResolvedSandboxAgent,
+): readonly ChannelManifest[] | undefined {
+  if (!authority.harnessPackage) return undefined;
+  return listMessagingChannelsForProfile(
+    resolveAgentMessagingProfileAuthority(authority),
+    createBuiltInChannelManifestRegistry(),
+  );
+}
 
 function buildSelectedRuntimeOptions(runtimeSelection: McpRebuildPreparation["runtimeSelection"]): {
   runtimeSelection?: McpRebuildPreparation["runtimeSelection"];
@@ -538,6 +554,7 @@ async function runReceiptBackedPackagePostRestore(input: {
     sandboxName,
     effectiveMessagingPlan,
     mcpRuntimeSelection,
+    effectiveMessagingPlan ? receiptMessagingManifests(agentAuthority) : undefined,
   );
   if (integrity?.kind === "commands" && !integrityUnverified) {
     const finalIntegrity = executeReceiptBackedStateCommand(

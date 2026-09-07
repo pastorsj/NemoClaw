@@ -42,6 +42,8 @@ type CreateDcodeRebuildOrchestratorOptions = {
   sandboxName: string;
   entry: RebuildSandboxEntry;
   rebuildAgent: string | null;
+  /** Exact-name compatibility path; receipt-backed packages use the generic rebuild flow. */
+  legacyDcodeRebuild: boolean;
   managedWorkloadRebuild?: boolean;
   log(message: string): void;
   bail: DcodeRebuildPreflightBail;
@@ -111,12 +113,13 @@ export function createDcodeRebuildOrchestrator(
     sandboxName,
     entry,
     rebuildAgent,
+    legacyDcodeRebuild,
     managedWorkloadRebuild = false,
     log,
     bail,
     deps,
   } = options;
-  const scope = createDcodeRebuildPreflightScope(isDcodeRebuildAgent(rebuildAgent), bail);
+  const scope = createDcodeRebuildPreflightScope(legacyDcodeRebuild, bail);
 
   const run = async <T>(action: () => Promise<T>): Promise<T> => {
     try {

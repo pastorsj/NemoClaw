@@ -263,7 +263,7 @@ describe("managed workload authority", () => {
     ).toBeNull();
   });
 
-  it("reconstructs repository authority from a receipt-pinned package declaration", () => {
+  it("rejects a custom repository declaration without an exact package receipt", () => {
     const repository = "registry.example/team/openclaw-qualified";
     const receipt = {
       ...managedReceipt("openclaw", "linux/amd64"),
@@ -271,7 +271,7 @@ describe("managed workload authority", () => {
     } as ManagedWorkloadReceipt;
     const entry = managedEntry("openclaw", "linux/amd64", receipt);
 
-    expect(
+    expect(() =>
       readManagedWorkloadAuthority(entry, {
         name: "openclaw",
         managedImage: {
@@ -279,9 +279,8 @@ describe("managed workload authority", () => {
           architectures: ["linux/amd64"],
           runtime_identity: { uid: 4321, gid: 4322, workdir: "/sandbox" },
         },
-      })?.contract.image,
-    ).toBe(repository);
-    expect(() => readManagedWorkloadAuthority(entry)).toThrow("does not belong to 'openclaw'");
+      }),
+    ).toThrow(/no valid durable workload receipt/u);
   });
 
   it("rejects missing explicit agent identity", () => {
@@ -309,13 +308,13 @@ describe("managed workload authority", () => {
     ).toThrow(/does not belong to 'hermes'/u);
   });
 
-  it("rejects image reference and startup profile agent mismatch", () => {
+  it("rejects image reference and startup profile agent mismatch before reconstruction", () => {
     const hermesReceiptWithOpenClawProfile = managedReceipt("hermes", "linux/amd64", "openclaw");
     expect(() =>
       readManagedWorkloadAuthority(
         managedEntry("hermes", "linux/amd64", hermesReceiptWithOpenClawProfile),
       ),
-    ).toThrow(/recorded startup profile belongs to 'openclaw', not 'hermes'/u);
+    ).toThrow(/no valid durable workload receipt/u);
   });
 
   it("rejects unsupported platform values instead of coercing them", () => {

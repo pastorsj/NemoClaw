@@ -262,7 +262,7 @@ function runHermesDockerfileRuntimePlanGuard(runtimePlan: unknown) {
     "# Apply messaging agent-install hooks",
   )
     .replace(
-      "node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent hermes --phase runtime-setup",
+      /node --experimental-strip-types \/usr\/local\/lib\/nemoclaw\/messaging-build\.mts [^\r\n]*--phase runtime-setup/,
       `node --experimental-strip-types ${shellQuote(applierPath)}`,
     )
     .replaceAll("/usr/local/share/nemoclaw/messaging-runtime-plan.json", runtimePlanPath)

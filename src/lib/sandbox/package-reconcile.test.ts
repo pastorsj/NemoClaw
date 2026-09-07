@@ -15,6 +15,11 @@ import {
   reconcilePackageSandbox,
   resolvePackageRuntimeIdentity,
 } from "./package-reconcile";
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../test/helpers/adapter-fixtures";
 
 const IDENTITY = {
   kind: "agent-runtime",
@@ -90,6 +95,38 @@ describe("package sandbox reconciliation", () => {
         [
           "name: future-harness",
           "display_name: Future Harness",
+          "runtime:",
+          "  kind: terminal",
+          "  interactive_command: future-harness",
+          "  headless_command: future-harness --prompt",
+          "  prompt_transport: stdin",
+          "config:",
+          "  dir: /sandbox/.future-harness",
+          "  config_file: config.json",
+          "  format: json",
+          "inference:",
+          "  config_update:",
+          "    support: unsupported",
+          "    reason: The reconciliation fixture has no mutable inference configuration.",
+          "messaging:",
+          "  support: disabled",
+          "policy:",
+          "  owned_presets: []",
+          "  automatic_presets: []",
+          "  baseline_exclusion_impacts: {}",
+          "state_lifecycle:",
+          "  backup_quiescence:",
+          "    kind: not-required",
+          "  snapshot_restore: []",
+          "  rebuild:",
+          "    managed_extensions:",
+          "      support: disabled",
+          "      reason: The reconciliation fixture has no managed extensions.",
+          "    scheduled_work:",
+          "      support: disabled",
+          "      reason: The reconciliation fixture has no scheduled work.",
+          "    post_restore:",
+          "      kind: not-required",
           "managed_image:",
           "  repository: nvcr.io/nvidia/nemoclaw-future-harness",
           "  architectures: [linux/amd64]",
@@ -101,6 +138,15 @@ describe("package sandbox reconciliation", () => {
         ].join("\n"),
         { mode: 0o600 },
       );
+      const hostDirectory = path.join(path.dirname(manifestPath), "host");
+      fs.mkdirSync(hostDirectory, { recursive: true, mode: 0o700 });
+      for (const [adapter, source] of [
+        ["config-adapter.cts", TEST_CONFIG_ADAPTER_SOURCE],
+        ["messaging-adapter.cts", TEST_MESSAGING_ADAPTER_SOURCE],
+        ["startup-adapter.cts", TEST_STARTUP_ADAPTER_SOURCE],
+      ] as const) {
+        fs.writeFileSync(path.join(hostDirectory, adapter), source, { mode: 0o600 });
+      }
     };
     try {
       fs.mkdirSync(storeRoot, { recursive: true, mode: 0o700 });

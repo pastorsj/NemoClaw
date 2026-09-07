@@ -880,7 +880,7 @@ export function registerOpenClawIntegrityPinTests(group: OpenClawIntegrityPinTes
               [nonExactManifest],
             ),
           ).toThrow(
-            `must use an exact-version OpenClaw plugin package: npm:@openclaw/slack@${version}`,
+            `Trusted profile entry slack must use an exact-version node package: npm:@openclaw/slack@${version}`,
           );
         },
       );

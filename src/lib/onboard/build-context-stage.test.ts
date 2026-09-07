@@ -6,6 +6,11 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../test/helpers/adapter-fixtures";
 import { createAgentSandbox as createManagedAgentSandbox } from "../agent/base-image";
 import type { AgentDefinition } from "../agent/defs";
 import { SandboxBaseImageResolutionError } from "../sandbox-base-image";
@@ -82,9 +87,67 @@ function createManagedPackageIdentityFixture(): {
   writeFixtureFile(
     bundledPackageRoot,
     `packages/${packageDirectoryName}/manifest.yaml`,
-    "name: hermes\ndisplay_name: Hermes\ndescription: Managed package identity fixture\n",
+    [
+      "name: hermes",
+      "display_name: Hermes",
+      "description: Managed package identity fixture",
+      "runtime:",
+      "  kind: gateway",
+      "  interactive_command: hermes",
+      "  process_lifecycle:",
+      "    support: unsupported",
+      "    reason: This fixture does not manage a gateway process.",
+      "gateway_command: hermes gateway run",
+      "health_probe:",
+      "  url: http://127.0.0.1:19090/health",
+      "  port: 19090",
+      "  timeout_seconds: 30",
+      "config:",
+      "  dir: /sandbox/.hermes",
+      "  config_file: config.yaml",
+      "  format: yaml",
+      "inference:",
+      "  config_update:",
+      "    support: unsupported",
+      "    reason: This fixture has fixed inference configuration.",
+      "messaging:",
+      "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: This fixture has no managed extensions.",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: This fixture has no scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
+      "",
+    ].join("\n"),
   );
   writeFixtureFile(bundledPackageRoot, `packages/${packageDirectoryName}/Dockerfile`, dockerfile);
+  writeFixtureFile(
+    bundledPackageRoot,
+    `packages/${packageDirectoryName}/host/config-adapter.cts`,
+    TEST_CONFIG_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    bundledPackageRoot,
+    `packages/${packageDirectoryName}/host/messaging-adapter.cts`,
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    bundledPackageRoot,
+    `packages/${packageDirectoryName}/host/startup-adapter.cts`,
+    TEST_STARTUP_ADAPTER_SOURCE,
+  );
   writeFixtureFile(
     bundledPackageRoot,
     "tools/mcp-tool-discovery-runtime/registry/BUNDLED_PACKAGES.json",
@@ -95,6 +158,12 @@ function createManagedPackageIdentityFixture(): {
     name: "hermes",
     displayName: "Hermes",
     packageRoot: installedPackageRoot,
+    manifestPath: path.join(
+      installedPackageRoot,
+      "packages",
+      packageDirectoryName,
+      "manifest.yaml",
+    ),
     dockerfilePath: path.join(installedPackageRoot, "packages", packageDirectoryName, "Dockerfile"),
   } as AgentDefinition;
   return {
@@ -307,22 +376,25 @@ describe("stageCreateSandboxBuildContext", () => {
 
   it("filters checkout credentials from the staged managed repository-root context (#7205)", () => {
     const repoRoot = fs.realpathSync(makeTmpDir("nemoclaw-managed-context-security-"));
-    const requiredFiles = [
+    const requiredPackageFiles = [
+      ["packages/nemoclaw-hermes/manifest.yaml", "name: hermes\n"],
       ["packages/nemoclaw-hermes/plugin/__init__.py", "required-plugin-bytes"],
-      ["src/lib/tool-disclosure.ts", "required-tool-disclosure-bytes"],
-      ["scripts/lib/reviewed-npm-archive.mts", "required-script-bytes"],
-      ["scripts/lib/bundled-npm-package.mts", "required-package-helper-bytes"],
-      ["scripts/lib/seed-reviewed-npm-cache.mts", "required-cache-seed-bytes"],
-      ["nemoclaw-blueprint/blueprint.yaml", "required-blueprint-bytes"],
+      ["packages/nemoclaw-hermes/config/tool-disclosure.ts", "required-tool-disclosure-bytes"],
+    ] as const;
+    const requiredTrackedCoreFiles = [
+      "scripts/lib/reviewed-npm-archive.mts",
+      "scripts/lib/bundled-npm-package.mts",
+      "scripts/lib/seed-reviewed-npm-cache.mts",
+      "nemoclaw-blueprint/blueprint.yaml",
     ] as const;
     const credentialFiles = [
-      [".env.local", "forbidden-env-canary"],
-      [".ssh/id_ed25519", "forbidden-ssh-canary"],
-      [".aws/credentials", "forbidden-aws-canary"],
-      [".npmrc", "forbidden-npm-canary"],
-      ["secrets/token.txt", "forbidden-secrets-canary"],
-      ["certs/client.pem", "forbidden-pem-canary"],
-      ["keys/client.key", "forbidden-key-canary"],
+      ["packages/nemoclaw-hermes/.env.local", "forbidden-env-canary"],
+      ["packages/nemoclaw-hermes/.ssh/id_ed25519", "forbidden-ssh-canary"],
+      ["packages/nemoclaw-hermes/.aws/credentials", "forbidden-aws-canary"],
+      ["packages/nemoclaw-hermes/.npmrc", "forbidden-npm-canary"],
+      ["packages/nemoclaw-hermes/secrets/token.txt", "forbidden-secrets-canary"],
+      ["packages/nemoclaw-hermes/certs/client.pem", "forbidden-pem-canary"],
+      ["packages/nemoclaw-hermes/keys/client.key", "forbidden-key-canary"],
     ] as const;
     const agentDockerfile = path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile");
     writeFixtureFile(
@@ -330,7 +402,7 @@ describe("stageCreateSandboxBuildContext", () => {
       "packages/nemoclaw-hermes/Dockerfile",
       "FROM scratch\nCOPY packages/nemoclaw-hermes/plugin/ /opt/plugin/\nCOPY src/ /src/\nCOPY scripts/ /scripts/\nCOPY nemoclaw-blueprint/ /blueprint/\n",
     );
-    [...requiredFiles, ...credentialFiles].forEach(([relativePath, contents]) => {
+    [...requiredPackageFiles, ...credentialFiles].forEach(([relativePath, contents]) => {
       writeFixtureFile(repoRoot, relativePath, contents);
     });
     writeFixtureFile(repoRoot, "ignored-by-repo-rule.txt", "forbidden-dockerignore-canary");
@@ -356,6 +428,7 @@ describe("stageCreateSandboxBuildContext", () => {
         name: "hermes",
         displayName: "Hermes",
         packageRoot: repoRoot,
+        manifestPath: path.join(repoRoot, "packages", "nemoclaw-hermes", "manifest.yaml"),
         dockerfileBasePath: null,
         dockerfilePath: agentDockerfile,
       } as any,
@@ -365,18 +438,25 @@ describe("stageCreateSandboxBuildContext", () => {
     });
     tmpDirs.push(result.buildCtx);
 
-    const stagedBytes = readStagedBytes(result.buildCtx);
+    const stagedPackageBytes = readStagedBytes(
+      path.join(result.buildCtx, "packages", "nemoclaw-hermes"),
+    );
     expect(
-      requiredFiles.every(([relativePath, contents]) =>
+      requiredPackageFiles.every(([relativePath, contents]) =>
         Object.is(fs.readFileSync(path.join(result.buildCtx, relativePath), "utf8"), contents),
+      ),
+    ).toBe(true);
+    expect(
+      requiredTrackedCoreFiles.every((relativePath) =>
+        fs.statSync(path.join(result.buildCtx, relativePath)).isFile(),
       ),
     ).toBe(true);
     credentialFiles.forEach(([relativePath, contents]) => {
       expect(fs.existsSync(path.join(result.buildCtx, relativePath))).toBe(false);
-      expect(stagedBytes).not.toContain(contents);
+      expect(stagedPackageBytes).not.toContain(contents);
     });
-    expect(stagedBytes).not.toContain("forbidden-dockerignore-canary");
-  });
+    expect(stagedPackageBytes).not.toContain("forbidden-dockerignore-canary");
+  }, 60_000);
 
   it("stages the managed agent build context when --from reaches the agent Dockerfile through a symlink", () => {
     const repoRoot = makeTmpDir("nemoclaw-repo-symlink-");

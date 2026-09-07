@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
-from nemo_fabric import FabricError
+from nemo_fabric import FabricError, RunResult
 
 from nemoclaw_fabric.command import EXIT_FAILURE
 from nemoclaw_fabric.command import EXIT_SUCCESS
@@ -23,6 +24,8 @@ from nemoclaw_fabric.command import MAX_OUTPUT_BYTES
 from nemoclaw_fabric.command import MAX_PROMPT_BYTES
 from nemoclaw_fabric.command import run_cli
 from nemoclaw_fabric.command import version_text
+from nemoclaw_fabric.output import MAX_OUTPUT_VALUE_DEPTH
+from nemoclaw_fabric.output import MAX_OUTPUT_VALUE_NODES
 
 
 @dataclass
@@ -78,6 +81,29 @@ class StubResult:
                 "message": self.error.message,
             }
         return payload
+
+
+def fabric_run_result() -> RunResult:
+    """Return one native Fabric result that enters the runner cleanup boundary."""
+
+    return RunResult.from_mapping(
+        {
+            "agent_name": "command-test",
+            "harness": "test.command.adapter",
+            "adapter_kind": "python",
+            "adapter_id": "test.command.adapter",
+            "runtime_id": "runtime-test",
+            "invocation_id": "invocation-test",
+            "request_id": "request-test",
+            "status": "succeeded",
+            "output": {"response": "ok"},
+            "error": None,
+            "artifacts": {"root": None, "artifacts": []},
+            "telemetry": [],
+            "events": [],
+            "metadata": {},
+        }
+    )
 
 
 class StubFabricClient:
@@ -730,6 +756,67 @@ class FabricCommandTests(unittest.TestCase):
                 self.assertNotIn(exact_response, combined_output)
                 if output_arguments:
                     self.assertEqual(json.loads(stdout)["error"]["stage"], "output")
+
+    def test_output_normalization_rejects_deep_cyclic_and_many_node_values(self) -> None:
+        deep_value: object = None
+        for _depth in range(MAX_OUTPUT_VALUE_DEPTH + 1):
+            deep_value = {"next": deep_value}
+        cyclic_value: dict[str, object] = {}
+        cyclic_value["next"] = cyclic_value
+        cases = {
+            "deep": deep_value,
+            "cyclic": cyclic_value,
+            "many-nodes": [None] * (MAX_OUTPUT_VALUE_NODES + 1),
+        }
+
+        for case, output in cases.items():
+            with self.subTest(case=case):
+                exit_code, stdout, stderr, _selected = self.invoke(
+                    self.run_arguments("-m", "prompt", "--json"),
+                    client=StubFabricClient(
+                        result=StubResult("succeeded", output=output)
+                    ),
+                )
+
+                self.assertEqual(exit_code, EXIT_FAILURE)
+                self.assertEqual(stderr, "")
+                payload = json.loads(stdout)
+                self.assertEqual(payload["error"]["stage"], "output")
+                self.assertEqual(payload["error"]["code"], "output_limit_exceeded")
+
+    def test_native_result_cleanup_bounds_deep_cyclic_and_many_node_values(self) -> None:
+        deep_value: object = None
+        for _depth in range(MAX_OUTPUT_VALUE_DEPTH + 1):
+            deep_value = {"next": deep_value}
+        cyclic_value: dict[str, object] = {}
+        cyclic_value["next"] = cyclic_value
+        cases = {
+            "deep": deep_value,
+            "cyclic": cyclic_value,
+            "many-nodes": [None] * (MAX_OUTPUT_VALUE_NODES + 1),
+        }
+
+        for case, pathological_value in cases.items():
+            pathological_mapping = {
+                "status": "succeeded",
+                "output": pathological_value,
+                "artifacts": {"root": None, "artifacts": []},
+            }
+            with self.subTest(case=case), patch.object(
+                RunResult,
+                "to_mapping",
+                return_value=pathological_mapping,
+            ):
+                exit_code, stdout, stderr, _selected = self.invoke(
+                    self.run_arguments("-m", "prompt", "--json"),
+                    client=StubFabricClient(result=fabric_run_result()),
+                )
+
+                self.assertEqual(exit_code, EXIT_FAILURE)
+                self.assertEqual(stderr, "")
+                payload = json.loads(stdout)
+                self.assertEqual(payload["error"]["stage"], "output")
+                self.assertEqual(payload["error"]["code"], "output_limit_exceeded")
 
     def test_output_limit_bounds_doctor_reports_and_raised_errors(self) -> None:
         oversized_text = "a" * (MAX_OUTPUT_BYTES + 1)

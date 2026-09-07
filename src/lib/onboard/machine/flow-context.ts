@@ -24,6 +24,7 @@ export interface OnboardFlowContext<Agent = unknown, Gpu = unknown, SandboxGpuCo
   onboardEndpointUrl?: string | null;
   credentialEnv: string | null;
   hermesAuthMethod: Session["hermesAuthMethod"];
+  toolGatewaySelections?: string[];
   hermesToolGateways: string[];
   preferredInferenceApi: string | null;
   compatibleEndpointReasoning: string | null;
@@ -79,6 +80,7 @@ export interface ProviderModelSelectedContextUpdate {
   onboardEndpointUrl?: string | null;
   credentialEnv: string | null;
   hermesAuthMethod: Session["hermesAuthMethod"];
+  toolGatewaySelections?: string[];
   hermesToolGateways: string[];
   preferredInferenceApi: string | null;
   compatibleEndpointReasoning: string | null;
@@ -95,6 +97,7 @@ export interface SandboxCreatedContextUpdate {
   recreateJournalHandoff?: boolean;
   webSearchConfig: WebSearchConfig | null;
   webSearchConfigChanged: boolean;
+  toolGatewaySelections?: string[];
   hermesToolGateways: string[];
   selectedMessagingChannels: string[];
   webSearchSupported: boolean;

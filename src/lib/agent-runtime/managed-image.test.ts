@@ -251,7 +251,7 @@ describe("managed image package declaration", () => {
     expect(result?.startup_profile_environment).toEqual([
       { name: "FUTURE_MAX_TOKENS", value_type: "positive-integer", max_bytes: 10 },
     ]);
-    for (const name of ["FUTURE_AUTH_TOKEN", "FUTURE_AUTH_TOKENS"]) {
+    ["FUTURE_AUTH_TOKEN", "FUTURE_AUTH_TOKENS"].forEach((name) => {
       expect(() =>
         read(
           declaration(`  startup_profile_environment:
@@ -260,7 +260,7 @@ describe("managed image package declaration", () => {
       max_bytes: 10`),
         ),
       ).toThrow(/non-secret, non-authority/u);
-    }
+    });
   });
 
   it.each(["FUTURE_API_KEY", "FUTURE_AUTH_TOKEN", "NEMOCLAW_INFERENCE_BASE_URL"])(

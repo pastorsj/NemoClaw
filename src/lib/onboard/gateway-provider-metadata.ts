@@ -120,13 +120,12 @@ function providerCommandOutput(result: GatewayProviderCommandResult): string {
   return streams.length > 0 ? streams.join("\n") : commandStreamText(result.output);
 }
 
-function inspectGatewayCredentialBinding(
-  expected: GatewayCredentialOnlyProviderBinding,
+function inspectGatewayCredentialBinding<
+  ExpectedBinding extends GatewayCredentialOnlyProviderBinding,
+>(
+  expected: ExpectedBinding,
   runOpenshell: GatewayProviderRunner,
-  matches: (
-    metadata: GatewayProviderMetadata | null,
-    expected: GatewayCredentialOnlyProviderBinding,
-  ) => boolean,
+  matches: (metadata: GatewayProviderMetadata | null, expected: ExpectedBinding) => boolean,
 ): GatewayCredentialOnlyProviderInspection {
   let result: GatewayProviderCommandResult;
   try {
@@ -153,6 +152,26 @@ function inspectGatewayCredentialBinding(
 
   const metadata = parseGatewayProviderMetadata(output);
   return matches(metadata, expected) ? { kind: "exact" } : { kind: "collision" };
+}
+
+/** Distinguish one exact endpoint provider from absence and lookup failure. */
+export function inspectGatewayProviderBinding(
+  expected: GatewayProviderBinding,
+  runOpenshell: GatewayProviderRunner,
+): GatewayCredentialOnlyProviderInspection {
+  return inspectGatewayCredentialBinding(expected, runOpenshell, matchesGatewayProviderBinding);
+}
+
+/** Distinguish one exact credential-only provider from absence and lookup failure. */
+export function inspectGatewayCredentialOnlyProviderBinding(
+  expected: GatewayCredentialOnlyProviderBinding,
+  runOpenshell: GatewayProviderRunner,
+): GatewayCredentialOnlyProviderInspection {
+  return inspectGatewayCredentialBinding(
+    expected,
+    runOpenshell,
+    matchesGatewayCredentialOnlyProviderBinding,
+  );
 }
 
 /** Distinguish a credential family from absence and lookup failure. */

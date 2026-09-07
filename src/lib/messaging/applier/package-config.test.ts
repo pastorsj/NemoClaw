@@ -55,13 +55,15 @@ describe("receipt-backed messaging package config", () => {
     const runOpenshell: MessagingOpenShellRunner = (args, options) => {
       const target = String(args.at(-1));
       const reading = args.includes("cat") && options?.input === undefined;
-      if (reading)
-        return { status: files[target] === undefined ? 1 : 0, stdout: files[target] ?? "" };
-      if (options?.input !== undefined) {
-        files[target] = options.input;
+      const writeInput = () => {
+        files[target] = options!.input!;
         return { status: 0 };
-      }
-      return { status: 1 };
+      };
+      return reading
+        ? { status: files[target] === undefined ? 1 : 0, stdout: files[target] ?? "" }
+        : options?.input !== undefined
+          ? writeInput()
+          : { status: 1 };
     };
 
     const result = await MessagingSetupApplier.applyAgentConfigAtOpenShell(plan, { runOpenshell });

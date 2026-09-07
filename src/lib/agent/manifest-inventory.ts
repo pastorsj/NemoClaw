@@ -79,6 +79,7 @@ export function readAgentAliasTargets(
           : loadLegacyRepositoryManifest(location.manifestPath),
         manifestPath: location.manifestPath,
         packageRoot: location.packageRoot,
+        manifestSource: packageLocation ? "harness-package" : "legacy-repository",
       });
       return [
         {

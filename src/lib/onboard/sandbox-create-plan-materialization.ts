@@ -188,6 +188,7 @@ export function prepareSandboxCreatePolicy(
   intent: SandboxCreateIntent,
   prepareInitialSandboxCreatePolicy: PrepareInitialSandboxCreatePolicy = getInitialSandboxCreatePolicy,
   messagingConfig?: MaterializeSandboxCreatePlanInput["messagingConfig"],
+  packageAgentDefinition?: MaterializeSandboxCreatePlanInput["packageAgentDefinition"],
 ): {
   readonly initialSandboxPolicy: InitialSandboxPolicy;
   readonly compatibilityPolicyPath: string | null;
@@ -202,6 +203,8 @@ export function prepareSandboxCreatePolicy(
         ? intent.policy.options.additionalPresets.filter((name) => name !== "local-inference")
         : [...intent.policy.options.additionalPresets],
       agentName: intent.policy.options.agentName,
+      agentDefinition: packageAgentDefinition,
+      observabilityEnabled: intent.policy.options.observabilityEnabled,
       // Channel presets bind `{sandboxName}-<channel>-bridge`; without the name,
       // composing them throws.
       sandboxName: intent.sandboxName,
@@ -311,6 +314,7 @@ function assertDeferredProviderPlanSupported(
     Boolean(intent.inferenceProvider) ||
     messagingProviders.length > 0 ||
     intent.extraProviders.length > 0 ||
+    (intent.toolGatewaySelections?.length ?? 0) > 0 ||
     intent.hermesToolGateways.length > 0;
   if (!requiresProviderAttachment) return;
   initialSandboxPolicy.cleanup?.();
@@ -322,6 +326,7 @@ function assertDeferredProviderPlanSupported(
 /** Materialize policy, route metadata, resources, and providers from a secretless intent. */
 export function materializeSandboxCreatePlan({
   intent,
+  packageAgentDefinition,
   fromRef,
   managedStateMounts,
   managedStateMountDriverId,
@@ -346,6 +351,7 @@ export function materializeSandboxCreatePlan({
     intent,
     prepareInitialSandboxCreatePolicy,
     messagingConfig,
+    packageAgentDefinition,
   );
   const createArgs = [
     "--from",
@@ -362,7 +368,7 @@ export function materializeSandboxCreatePlan({
   const resolveHermesToolGatewayProvider = (): string | null => {
     if (hermesToolGatewayProvider !== undefined) return hermesToolGatewayProvider;
     hermesToolGatewayProvider =
-      intent.hermesToolGateways.length > 0
+      (intent.toolGatewaySelections?.length ?? 0) > 0 || intent.hermesToolGateways.length > 0
         ? getHermesToolGatewayProviderName(intent.sandboxName)
         : null;
     return hermesToolGatewayProvider;
@@ -459,6 +465,7 @@ export function materializeHermesPortableCreatePlan(input: {
     intent.reusableMessagingProviders.length > 0 ||
     intent.extraProviders.length > 0 ||
     intent.staleExtraProviders.length > 0 ||
+    (intent.toolGatewaySelections?.length ?? 0) > 0 ||
     intent.hermesToolGateways.length > 0
   ) {
     throw new Error(

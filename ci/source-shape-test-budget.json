@@ -375,6 +375,11 @@
       "file": "test/runtime/gateway/gateway-health-honest.test.ts",
       "test": "reports a crashed Docker-driver gateway instead of reporting it healthy (#3111)",
       "category": "compatibility"
+    },
+    {
+      "file": "test/runtime/messaging/asset-parity.test.ts",
+      "test": "keeps every legacy runtime copy byte-identical to its canonical package asset",
+      "category": "compatibility"
     }
   ]
 }

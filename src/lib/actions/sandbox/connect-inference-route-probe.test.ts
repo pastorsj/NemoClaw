@@ -21,6 +21,13 @@ describe("sandbox connect inference route probe argv", () => {
   it("uses the managed DCode proxy boundary without adding a login shell (#6191)", () => {
     const args = buildSandboxInferenceRouteProbeArgs("deep-code", {
       name: "langchain-deepagents-code",
+      runtime: {
+        smoke_boundary: {
+          kind: "managed-launcher",
+          launcher: "/usr/local/lib/nemoclaw/dcode-managed-exec",
+          home: "/usr/local/lib/nemoclaw",
+        },
+      },
     });
 
     expect(args.slice(0, 15)).toEqual([
@@ -138,6 +145,13 @@ describe("sandbox connect inference route probe argv", () => {
       });
       const args = buildSandboxInferenceRouteProbeArgs("deep-code", {
         name: "langchain-deepagents-code",
+        runtime: {
+          smoke_boundary: {
+            kind: "managed-launcher",
+            launcher: "/usr/local/lib/nemoclaw/dcode-managed-exec",
+            home: "/usr/local/lib/nemoclaw",
+          },
+        },
       });
       const delimiter = args.indexOf("--");
       expect(delimiter).toBeGreaterThan(0);
@@ -174,7 +188,6 @@ describe("sandbox connect inference route probe argv", () => {
     }
   });
 });
-
 describe("sandbox inference route probe result", () => {
   it.each([
     [0, "unreachable"],

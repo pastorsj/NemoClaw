@@ -4,14 +4,13 @@
 export const VOICE_GATEWAY_FEATURE_ENV = "NEMOCLAW_EXPERIMENTAL_VOICE_GATEWAY";
 /** Fixed inherited descriptor for the runtime deployment bearer. */
 export const VOICE_GATEWAY_DEPLOYMENT_CREDENTIAL_FD = 3;
-/** Fixed inherited descriptor for the OpenClaw gateway bearer. */
-export const VOICE_GATEWAY_OPENCLAW_CREDENTIAL_FD = 4;
 export const VOICE_GATEWAY_LISTEN_ADDRESS = "127.0.0.1";
 export const DEFAULT_VOICE_GATEWAY_LISTEN_PORT = 18_800;
 export const VOICE_GATEWAY_SESSION_LIFETIME_MS = 5 * 60_000;
 export const VOICE_GATEWAY_TURN_TIMEOUT_MS = 2 * 60_000;
 export const VOICE_GATEWAY_MAX_REQUEST_BYTES = 64 * 1024;
 export const VOICE_GATEWAY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+export const VOICE_GATEWAY_MAX_RESPONSE_EVENTS = 1024;
 
 export type VoiceGatewayFailureReason =
   | "agent_failed"
@@ -57,10 +56,11 @@ export type AgentTurnEvent =
 
 export interface AgentTurnClient {
   runTurn(options: {
+    readonly conversationKey: string;
     readonly idempotencyKey: string;
     readonly message: string;
     readonly onEvent: (event: AgentTurnEvent) => void;
-    readonly sessionKey: string;
+    readonly runtimeTarget: string;
   }): Promise<
     | { readonly outcome: "completed" }
     | {

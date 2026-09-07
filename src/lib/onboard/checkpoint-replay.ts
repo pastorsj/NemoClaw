@@ -20,6 +20,8 @@ import type {
 } from "../state/onboard-checkpoint-types";
 import type { SandboxEntry } from "../state/registry/types";
 import { HERMES_TAVILY_PROVIDER_PROFILE_ID } from "./brave-provider-profile";
+import type { HarnessWebSearchCapability } from "../agent-runtime/manifest-types";
+import { packageWebSearchProviderBinding } from "../agent-runtime/web-search";
 import type { OnboardMachineState } from "./machine/types";
 import { ONBOARD_MACHINE_STATES } from "./machine/types";
 import {
@@ -197,8 +199,18 @@ export function observeProviderEffectFingerprint(
 
 export function requiredWebSearchProviderType(
   provider: "brave" | "tavily",
-  agent: { name?: string } | null,
+  agent: { name?: string; web_search?: HarnessWebSearchCapability } | null,
+  receiptBackedPackage = false,
 ): string {
+  if (receiptBackedPackage) {
+    const binding = packageWebSearchProviderBinding(agent, provider);
+    if (!binding) {
+      throw new Error(`The selected harness package does not declare ${provider} web search.`);
+    }
+    return binding.profile_type;
+  }
+  // Explicit compatibility for receiptless Hermes sessions. Receipt-backed
+  // packages select their profile only from the declaration above.
   return provider === "tavily" && agent?.name?.trim().toLowerCase() === "hermes"
     ? HERMES_TAVILY_PROVIDER_PROFILE_ID
     : provider;
@@ -216,23 +228,49 @@ export function collectRequiredMessagingProviderBindings(
       (channelId) => channelIds === undefined || channelIds.has(channelId),
     ),
   );
-  const profiles = messagingBridgeProfilesForAgent(plan.agent, listMessagingBridgeProfiles());
+  // Receipt-backed plans carry their package's bounded provider projection.
+  // Only old plans without packageBuild may consult the compatibility profile map.
+  const legacyProfiles = plan.packageBuild
+    ? null
+    : messagingBridgeProfilesForAgent(plan.agent, listMessagingBridgeProfiles());
   const bindings: CheckpointProviderBinding[] = [];
   for (const binding of plan.credentialBindings) {
     if (!activeChannels.has(binding.channelId)) continue;
+    const projectedProvider = plan.packageBuild
+      ? plan.channels.find((channel) => channel.channelId === binding.channelId)?.credentialProvider
+      : undefined;
+    const declaredProvider =
+      projectedProvider?.credentialEnv === binding.providerEnvKey ? projectedProvider : undefined;
     bindings.push({
       name: binding.providerName,
       type:
-        staticMessagingProviderTypeForChannel(binding.channelId, plan.agent, profiles) ??
+        declaredProvider?.profileId ??
+        staticMessagingProviderTypeForChannel(
+          binding.channelId,
+          plan.agent,
+          legacyProfiles ?? [],
+          binding.providerEnvKey,
+        ) ??
         MESSAGING_CREDENTIAL_PROVIDER_TYPE,
       credentialEnv: binding.providerEnvKey,
     });
   }
-  for (const profile of profiles) {
+  const refreshingProviders = plan.packageBuild
+    ? plan.channels.flatMap((channel) =>
+        channel.credentialProvider?.refresh
+          ? [{ channelId: channel.channelId, ...channel.credentialProvider }]
+          : [],
+      )
+    : (legacyProfiles ?? []).filter((profile) => profile.strategy !== null);
+  for (const profile of refreshingProviders) {
     if (!activeChannels.has(profile.channelId)) continue;
     const name = `${sandboxName}-${profile.channelId}-bridge`;
     if (bindings.some((binding) => binding.name === name)) continue;
-    bindings.push({ name, type: profile.profileId, credentialEnv: profile.credentialKey });
+    bindings.push({
+      name,
+      type: profile.profileId,
+      credentialEnv: "credentialKey" in profile ? profile.credentialKey : profile.credentialEnv,
+    });
   }
   return bindings;
 }

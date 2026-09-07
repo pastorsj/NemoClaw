@@ -27,7 +27,7 @@ function hermesSessionProbeOutput(options: {
   dashboardSessionCreds: boolean;
 }): string {
   return [
-    "NEMOCLAW_HERMES_WHATSAPP_SESSION_V1",
+    "NEMOCLAW_WHATSAPP_SESSION_V1",
     `GATEWAY_SESSION=${options.gatewaySessionCreds ? "present" : "missing"}`,
     `DASHBOARD_SESSION=${options.dashboardSessionCreds ? "present" : "missing"}`,
   ].join("\n");
@@ -49,7 +49,7 @@ function hermesExec(options: {
         ? { status: 1, stdout: "", stderr: "config unavailable" }
         : {
             status: 0,
-            stdout: `NEMOCLAW_HERMES_WHATSAPP_CONFIG_V1\n${JSON.stringify(options.configuredSessionPath)}`,
+            stdout: `NEMOCLAW_WHATSAPP_CONFIG_V1\n${JSON.stringify(options.configuredSessionPath)}`,
             stderr: "",
           }
       : {

@@ -19,6 +19,8 @@ import { spawn } from "node:child_process";
 import {
   buildVoiceGatewayLaunchContract,
   launchVoiceGateway,
+  type VoiceGatewayLauncherDependencies,
+  type VoiceGatewayProcessAuthority,
   VoiceGatewayTerminationUnconfirmedError,
 } from "./launcher";
 
@@ -34,13 +36,52 @@ function options() {
   const directory = temporaryDirectory();
   return {
     deploymentCredentialPath: path.join(directory, "deployment"),
-    openClawCredentialPath: path.join(directory, "openclaw"),
-    gatewayUrl: "ws://127.0.0.1:18789/ws",
     runtimeIdentity: "voiceclaw-local",
     runtimeProfile: "voiceclaw-pinned",
     sandbox: "repository-fixture",
     agent: "main",
     listenPort: 18800,
+  };
+}
+
+const SEMANTIC_AUTHORITY = Object.freeze({
+  sandboxName: "repository-fixture",
+  packageIdentity: Object.freeze({
+    kind: "agent-runtime" as const,
+    id: "openclaw",
+    packageVersion: "1.2.3",
+    contentDigest: "a".repeat(64),
+  }),
+  declaration: Object.freeze({
+    support: "managed" as const,
+    command: Object.freeze(["/usr/local/bin/openclaw-semantic-turn"]),
+    timeout_seconds: 120,
+    protocol: "semantic-turn-ndjson" as const,
+  }),
+  gatewayName: "nemoclaw-19080",
+  gatewayPort: 19080,
+  lifecycleGeneration: "generation-one",
+  lifecycleLiveIdentityFingerprint: "b".repeat(64),
+});
+
+function processAuthority(): VoiceGatewayProcessAuthority {
+  return {
+    openshellBinary: "/usr/local/bin/openshell",
+    semanticTurn: SEMANTIC_AUTHORITY,
+    sourceEnv: {
+      HOME: "/tmp/voice-home",
+      PATH: "/usr/local/bin:/usr/bin",
+      XDG_CONFIG_HOME: "/tmp/voice-config",
+      NVIDIA_INFERENCE_API_KEY: "must-not-cross",
+    },
+  };
+}
+
+function launcherDependencies(): VoiceGatewayLauncherDependencies {
+  return {
+    env: processAuthority().sourceEnv,
+    resolveOpenShell: () => "/usr/local/bin/openshell",
+    resolveSemanticTurnAuthority: () => SEMANTIC_AUTHORITY,
   };
 }
 
@@ -54,11 +95,17 @@ afterEach(() => {
 describe("voice gateway launcher", () => {
   it("keeps credential source paths and values out of the child contract (#9235)", () => {
     const launchOptions = options();
-    const contract = buildVoiceGatewayLaunchContract(launchOptions);
+    const contract = buildVoiceGatewayLaunchContract(launchOptions, processAuthority());
 
     expect(contract.args).not.toContain(launchOptions.deploymentCredentialPath);
-    expect(contract.args).not.toContain(launchOptions.openClawCredentialPath);
-    expect(contract.env).toEqual({ NEMOCLAW_EXPERIMENTAL_VOICE_GATEWAY: "1" });
+    expect(contract.env).toMatchObject({
+      HOME: "/tmp/voice-home",
+      NEMOCLAW_EXPERIMENTAL_VOICE_GATEWAY: "1",
+      NEMOCLAW_GATEWAY_PORT: "19080",
+      NEMOCLAW_OPENSHELL_BIN: "/usr/local/bin/openshell",
+      XDG_CONFIG_HOME: "/tmp/voice-config",
+    });
+    expect(JSON.stringify(contract.env)).not.toContain("must-not-cross");
   });
 
   it("rejects a symbolic-link credential source before launch (#9235)", async () => {
@@ -66,14 +113,10 @@ describe("voice gateway launcher", () => {
     const target = path.join(path.dirname(launchOptions.deploymentCredentialPath), "target");
     fs.writeFileSync(target, "deployment-credential-for-launcher-012345", { mode: 0o600 });
     fs.symlinkSync(target, launchOptions.deploymentCredentialPath);
-    fs.writeFileSync(
-      launchOptions.openClawCredentialPath,
-      "openclaw-credential-for-launcher-01234567",
-      { mode: 0o600 },
+    await expect(launchVoiceGateway(launchOptions, launcherDependencies())).rejects.toThrow(
+      "symbolic link",
     );
-
-    await expect(launchVoiceGateway(launchOptions)).rejects.toThrow("symbolic link");
-    await expect(launchVoiceGateway(launchOptions)).rejects.toThrowError(
+    await expect(launchVoiceGateway(launchOptions, launcherDependencies())).rejects.toThrowError(
       expect.objectContaining({
         message: expect.not.stringContaining(launchOptions.deploymentCredentialPath),
       }),
@@ -85,11 +128,6 @@ describe("voice gateway launcher", () => {
     fs.writeFileSync(
       launchOptions.deploymentCredentialPath,
       "deployment-credential-for-launcher-012345",
-      { mode: 0o600 },
-    );
-    fs.writeFileSync(
-      launchOptions.openClawCredentialPath,
-      "openclaw-credential-for-launcher-01234567",
       { mode: 0o600 },
     );
     const child = new EventEmitter() as ChildProcess;
@@ -110,10 +148,11 @@ describe("voice gateway launcher", () => {
       })
       .mockImplementation(close);
 
-    await expect(launchVoiceGateway(launchOptions)).rejects.toThrow("close failed");
+    await expect(launchVoiceGateway(launchOptions, launcherDependencies())).rejects.toThrow(
+      "close failed",
+    );
     const stdio = vi.mocked(spawn).mock.calls[0]?.[2]?.stdio as number[];
     expect(() => fs.fstatSync(stdio[3]!)).toThrowError(expect.objectContaining({ code: "EBADF" }));
-    expect(() => fs.fstatSync(stdio[4]!)).toThrowError(expect.objectContaining({ code: "EBADF" }));
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
     expect(child.listenerCount("error")).toBe(0);
     expect(child.listenerCount("exit")).toBe(0);
@@ -125,11 +164,6 @@ describe("voice gateway launcher", () => {
     fs.writeFileSync(
       launchOptions.deploymentCredentialPath,
       "deployment-credential-for-launcher-012345",
-      { mode: 0o600 },
-    );
-    fs.writeFileSync(
-      launchOptions.openClawCredentialPath,
-      "openclaw-credential-for-launcher-01234567",
       { mode: 0o600 },
     );
     const child = new EventEmitter() as ChildProcess;
@@ -147,7 +181,9 @@ describe("voice gateway launcher", () => {
       })
       .mockImplementation(close);
 
-    const launch = launchVoiceGateway(launchOptions).catch((error: unknown) => error);
+    const launch = launchVoiceGateway(launchOptions, launcherDependencies()).catch(
+      (error: unknown) => error,
+    );
     await vi.advanceTimersByTimeAsync(10_000);
 
     const error = await launch;
@@ -169,11 +205,6 @@ describe("voice gateway launcher", () => {
       "deployment-credential-for-launcher-012345",
       { mode: 0o600 },
     );
-    fs.writeFileSync(
-      launchOptions.openClawCredentialPath,
-      "openclaw-credential-for-launcher-01234567",
-      { mode: 0o600 },
-    );
     const child = new EventEmitter() as ChildProcess;
     Object.assign(child, {
       exitCode: null,
@@ -192,7 +223,9 @@ describe("voice gateway launcher", () => {
       })
       .mockImplementation(close);
 
-    const error = await launchVoiceGateway(launchOptions).catch((cause: unknown) => cause);
+    const error = await launchVoiceGateway(launchOptions, launcherDependencies()).catch(
+      (cause: unknown) => cause,
+    );
 
     expect(error).toBeInstanceOf(VoiceGatewayTerminationUnconfirmedError);
     expect(error).toMatchObject({

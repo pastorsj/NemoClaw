@@ -6,6 +6,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import {
   type AgentTurnClient,
   VOICE_GATEWAY_MAX_RESPONSE_BYTES,
+  VOICE_GATEWAY_MAX_RESPONSE_EVENTS,
   VOICE_GATEWAY_SESSION_LIFETIME_MS,
   VOICE_GATEWAY_TURN_TIMEOUT_MS,
   type VoiceGatewayDiagnostic,
@@ -20,7 +21,7 @@ const MAX_TURN_TEXT_BYTES = 48 * 1024;
 interface ActiveSession {
   readonly voiceSessionId: string;
   readonly runtimeConversationId: string;
-  readonly agentSessionKey: string;
+  readonly conversationKey: string;
   readonly grantHash: Buffer;
   readonly expiresAt: number;
   readonly client: AgentTurnClient;
@@ -43,6 +44,7 @@ export interface VoiceSessionServiceOptions {
   readonly sessionLifetimeMs?: number;
   readonly turnTimeoutMs?: number;
   readonly maxResponseBytes?: number;
+  readonly maxResponseEvents?: number;
 }
 
 export interface CreatedVoiceSession {
@@ -66,7 +68,7 @@ function grantMatches(value: string, expectedHash: Buffer): boolean {
   return timingSafeEqual(hashBearer(value), expectedHash);
 }
 
-function deriveAgentSessionKey(
+function deriveConversationKey(
   options: Pick<
     VoiceSessionServiceOptions,
     "agent" | "runtimeIdentity" | "runtimeProfile" | "sandbox"
@@ -80,11 +82,8 @@ function deriveAgentSessionKey(
     options.sandbox,
     runtimeConversationId,
   ]);
-  const bindingHash = createHash("sha256")
-    .update(binding)
-    .digest("base64url")
-    .toLowerCase();
-  return `agent:${options.agent}:nemoclaw-voice:${bindingHash}`;
+  const bindingHash = createHash("sha256").update(binding).digest("base64url").toLowerCase();
+  return `nemoclaw-voice:${bindingHash}`;
 }
 
 /** Owns one runtime-neutral voice session and its single committed turn. */
@@ -98,6 +97,7 @@ export class VoiceSessionService {
       | "sessionLifetimeMs"
       | "turnTimeoutMs"
       | "maxResponseBytes"
+      | "maxResponseEvents"
     >
   > &
     Omit<
@@ -108,6 +108,7 @@ export class VoiceSessionService {
       | "sessionLifetimeMs"
       | "turnTimeoutMs"
       | "maxResponseBytes"
+      | "maxResponseEvents"
     >;
   private session: ActiveSession | null = null;
 
@@ -120,6 +121,7 @@ export class VoiceSessionService {
       sessionLifetimeMs: options.sessionLifetimeMs ?? VOICE_GATEWAY_SESSION_LIFETIME_MS,
       turnTimeoutMs: options.turnTimeoutMs ?? VOICE_GATEWAY_TURN_TIMEOUT_MS,
       maxResponseBytes: options.maxResponseBytes ?? VOICE_GATEWAY_MAX_RESPONSE_BYTES,
+      maxResponseEvents: options.maxResponseEvents ?? VOICE_GATEWAY_MAX_RESPONSE_EVENTS,
     };
     validateRuntimeValue(options.runtimeIdentity, "runtime identity");
     validateRuntimeValue(options.runtimeProfile, "runtime profile");
@@ -134,13 +136,13 @@ export class VoiceSessionService {
 
     const now = this.options.now();
     const voiceSessionId = this.options.randomId();
-    const agentSessionKey = deriveAgentSessionKey(this.options, runtimeConversationId);
+    const conversationKey = deriveConversationKey(this.options, runtimeConversationId);
     const grant = this.options.randomGrant().toString("base64url");
     const expiresAt = now + this.options.sessionLifetimeMs;
     const session: ActiveSession = {
       voiceSessionId,
       runtimeConversationId,
-      agentSessionKey,
+      conversationKey,
       grantHash: hashBearer(grant),
       expiresAt,
       client: this.options.createClient(),
@@ -197,6 +199,7 @@ export class VoiceSessionService {
     const startedAt = this.options.now();
     let sequence = 0;
     let responseBytes = 0;
+    let responseEvents = 0;
     let forcedReason: VoiceGatewayFailureReason | null = null;
     let terminalSent = false;
     let startedSent = false;
@@ -249,7 +252,7 @@ export class VoiceSessionService {
     const runResult = Promise.resolve()
       .then(() =>
         session.client.runTurn({
-          sessionKey: session.agentSessionKey,
+          conversationKey: session.conversationKey,
           idempotencyKey: turnId,
           message: options.text,
           onEvent: (event) => {
@@ -274,6 +277,12 @@ export class VoiceSessionService {
               session.client.close();
               return;
             }
+            responseEvents += 1;
+            if (responseEvents > this.options.maxResponseEvents) {
+              forcedReason = "response_too_large";
+              session.client.close();
+              return;
+            }
             responseBytes += Buffer.byteLength(event.text);
             if (responseBytes > this.options.maxResponseBytes) {
               forcedReason = "response_too_large";
@@ -289,14 +298,13 @@ export class VoiceSessionService {
               text: event.text,
             });
           },
+          runtimeTarget: this.options.agent,
         }),
       )
-      .catch(
-        (): Awaited<ReturnType<AgentTurnClient["runTurn"]>> => ({
-          outcome: "failed",
-          reason: "agent_gateway_unavailable",
-        }),
-      );
+      .catch((): Awaited<ReturnType<AgentTurnClient["runTurn"]>> => ({
+        outcome: "failed",
+        reason: "agent_gateway_unavailable",
+      }));
 
     const result = await Promise.race([runResult, timeoutResult]);
     if (timeout) clearTimeout(timeout);

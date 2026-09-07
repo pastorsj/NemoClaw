@@ -7,13 +7,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-const NEMOCLAW_ROOT = path.resolve(import.meta.dirname, "../../../..");
+const OPENCLAW_PACKAGE = path.resolve(import.meta.dirname, "../..");
 const PRELOAD_SOURCE = path.join(
-  NEMOCLAW_ROOT,
-  "src",
-  "lib",
+  OPENCLAW_PACKAGE,
   "messaging",
-  "channels",
+  "runtime",
   "whatsapp",
   "runtime",
   "whatsapp-qr-compact.ts",

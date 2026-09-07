@@ -7,6 +7,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../test/helpers/adapter-fixtures";
+import {
   HarnessPackageUnavailableError,
   listHarnessPackageInventory,
   planHarnessPackageInstall,
@@ -51,10 +56,38 @@ function writeFixtureFile(root: string, relativePath: string, contents: string):
   fs.chmodSync(target, 0o600);
 }
 
+function writeRequiredAdapters(root: string, manifestPath: string): void {
+  const manifestDirectory = path.posix.dirname(manifestPath);
+  writeFixtureFile(
+    root,
+    path.posix.join(manifestDirectory, "host/config-adapter.cts"),
+    TEST_CONFIG_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    root,
+    path.posix.join(manifestDirectory, "host/messaging-adapter.cts"),
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    root,
+    path.posix.join(manifestDirectory, "host/startup-adapter.cts"),
+    TEST_STARTUP_ADAPTER_SOURCE,
+  );
+}
+
 function requiredManifestFields(id: string): readonly string[] {
   return [
     "runtime:",
     "  kind: gateway",
+    "  interactive_command: openclaw",
+    "  process_lifecycle:",
+    "    support: unsupported",
+    "    reason: This fixture does not manage a gateway process.",
+    `gateway_command: ${id} gateway run`,
+    "health_probe:",
+    "  url: http://127.0.0.1:19090/health",
+    "  port: 19090",
+    "  timeout_seconds: 30",
     "config:",
     `  dir: /sandbox/.${id}`,
     "  config_file: config.json",
@@ -64,7 +97,9 @@ function requiredManifestFields(id: string): readonly string[] {
     "    kind: not-required",
     "  snapshot_restore: []",
     "  rebuild:",
-    "    image_plugin_provenance: not-required",
+    "    managed_extensions:",
+    "      support: disabled",
+    "      reason: Test package has no managed extensions.",
     "    scheduled_work:",
     "      support: disabled",
     "      reason: This package does not run scheduled work.",
@@ -76,6 +111,10 @@ function requiredManifestFields(id: string): readonly string[] {
     "    reason: This synthetic package has fixed inference configuration.",
     "messaging:",
     "  support: disabled",
+    "policy:",
+    "  owned_presets: []",
+    "  automatic_presets: []",
+    "  baseline_exclusion_impacts: {}",
   ];
 }
 
@@ -83,7 +122,7 @@ function writeReviewedBundle(): void {
   fs.mkdirSync(bundledRoot, { recursive: true, mode: 0o700 });
   REVIEWED_FIXTURES.forEach((declaration) => {
     const packageRoot = path.join(bundledRoot, `nemoclaw-${declaration.id}`);
-    const manifestPath = `packages/nemoclaw-${declaration.id}/manifest.yaml`;
+    const manifestPath = "manifest.yaml";
     fs.mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
     writeFixtureFile(
       packageRoot,
@@ -113,6 +152,7 @@ function writeReviewedBundle(): void {
         "",
       ].join("\n"),
     );
+    writeRequiredAdapters(packageRoot, manifestPath);
     writeFixtureFile(packageRoot, "runtime/payload.txt", `${declaration.id}\n`);
   });
   writeFixtureFile(
@@ -124,7 +164,7 @@ function writeReviewedBundle(): void {
 
 function writePiBundle(): void {
   const packageRoot = path.join(bundledRoot, "nemoclaw-pi");
-  const manifestPath = "packages/nemoclaw-pi/manifest.yaml";
+  const manifestPath = "manifest.yaml";
   fs.mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
   writeFixtureFile(
     packageRoot,
@@ -151,6 +191,7 @@ function writePiBundle(): void {
       "",
     ].join("\n"),
   );
+  writeRequiredAdapters(packageRoot, manifestPath);
   writeFixtureFile(packageRoot, "runtime/payload.txt", "pi\n");
 }
 
@@ -185,6 +226,7 @@ function writeLocalPackage(id = "future-harness"): string {
       "",
     ].join("\n"),
   );
+  writeRequiredAdapters(packageRoot, manifestPath);
   writeFixtureFile(packageRoot, "runtime/payload.txt", "local package\n");
   writeFixtureFile(
     packageRoot,
@@ -249,7 +291,7 @@ afterEach(() => {
 });
 
 describe("harness install oclif command", () => {
-  it("installs an exact reviewed ID without executing package-owned code", async () => {
+  it("installs an exact reviewed ID without running package lifecycle scripts", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const dependencies = wirePrivateDependencies();
 
@@ -282,6 +324,26 @@ describe("harness install oclif command", () => {
     expect(log).toHaveBeenCalledWith(
       expect.stringMatching(/^Installed trusted local harness package 'future-harness'/),
     );
+  });
+
+  it("lets an explicitly trusted local package receipt supersede a repository candidate gate", async () => {
+    const localRoot = writeLocalPackage("pi");
+    const requireCandidate = vi.spyOn(
+      harnessInstallCommandDependencies,
+      "requireCandidateAgentSelectable",
+    );
+    wirePrivateDependencies();
+
+    await HarnessInstallCommand.run(
+      ["pi", "--from", localRoot, "--yes-i-trust-local-package"],
+      process.cwd(),
+    );
+
+    expect(requireCandidate).not.toHaveBeenCalled();
+    expect(installedIds()).toEqual(["pi"]);
+    expect(readInstalledHarnessPackage("pi", { storeRoot })?.receipt.sourceIdentity).toEqual({
+      kind: "local",
+    });
   });
 
   it("requires an exact id and explicit trust before reading a local package", async () => {

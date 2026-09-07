@@ -10,10 +10,11 @@ import type { SandboxLogsOptions } from "../../domain/sandbox/log-options";
 import {
   buildEnableSandboxAuditLogsArgs,
   buildSandboxLogsArgs,
-  buildSandboxOpenclawGatewayLogsArgs,
+  buildSandboxManagedGatewayLogsArgs,
   describeLogProbeResult,
   getLogsProbeTimeoutMs,
   isBrokenPipeRelayError,
+  LEGACY_MANAGED_GATEWAY_LOG_PATH,
   LOG_RELAY_BROKEN_PIPE_EXIT_CODE,
   type LogProbeResult,
   mergeTailLogLines,
@@ -118,12 +119,13 @@ export type SandboxLogsRuntimeDeps = {
   writeStdout?: (chunk: string) => boolean | void;
 };
 
-function runOpenclawGatewayLogs(
+function runManagedGatewayLogs(
   sandboxName: string,
   options: SandboxLogsOptions,
+  gatewayLogPath: string,
   deps: SandboxLogsRuntimeDeps,
 ): LogProbeResult {
-  const args = buildSandboxOpenclawGatewayLogsArgs(sandboxName, options);
+  const args = buildSandboxManagedGatewayLogsArgs(sandboxName, options, gatewayLogPath);
   // Capture stdout so the caller can merge with the OpenShell source
   // (closes #4100). stderr still inherits so warnings print directly.
   const result = (deps.runOpenshell ?? runOpenshell)(args, {
@@ -133,17 +135,25 @@ function runOpenclawGatewayLogs(
   });
   if (result.status !== 0) {
     console.error(
-      `  OpenClaw log source unavailable (${describeLogProbeResult(result)}): ` +
+      `  Managed gateway log source unavailable (${describeLogProbeResult(result)}): ` +
         `openshell ${args.join(" ")}`,
     );
   }
   return result;
 }
 
-function shouldIncludeGatewayLogSource(sandboxName: string, deps: SandboxLogsRuntimeDeps): boolean {
+function resolveManagedGatewayLogPath(
+  sandboxName: string,
+  deps: SandboxLogsRuntimeDeps,
+): string | null {
   const getSessionAgent = deps.getSessionAgent ?? agentRuntime.getSessionAgent;
   const agent = getSessionAgent(sandboxName);
-  return agentRuntime.hasGatewayRuntime(agent);
+  if (!agentRuntime.hasGatewayRuntime(agent)) return null;
+  // A resolved definition is package or explicit manifest authority. It opts
+  // into its own log source; a missing declaration must not select another
+  // harness's conventional path. Only the historical null/OpenClaw lane keeps
+  // the pre-contract fallback.
+  return agent?.runtime?.gateway_log_path ?? (agent ? null : LEGACY_MANAGED_GATEWAY_LOG_PATH);
 }
 
 function streamSandboxFollowLogs(
@@ -151,10 +161,11 @@ function streamSandboxFollowLogs(
   options: SandboxLogsOptions,
   deps: SandboxLogsRuntimeDeps,
 ): void {
-  const openclawArgs =
-    options.since || !shouldIncludeGatewayLogSource(sandboxName, deps)
+  const gatewayLogPath = resolveManagedGatewayLogPath(sandboxName, deps);
+  const managedGatewayArgs =
+    options.since || !gatewayLogPath
       ? null
-      : buildSandboxOpenclawGatewayLogsArgs(sandboxName, options);
+      : buildSandboxManagedGatewayLogsArgs(sandboxName, options, gatewayLogPath);
   const openshellArgs = buildSandboxLogsArgs(sandboxName, options);
   const exit = deps.exit ?? process.exit;
   const outputStream = deps.stdout ?? process.stdout;
@@ -448,8 +459,8 @@ function streamSandboxFollowLogs(
     });
   };
 
-  if (openclawArgs) {
-    addSource("OpenClaw log source", openclawArgs, true);
+  if (managedGatewayArgs) {
+    addSource("Managed gateway log source", managedGatewayArgs, true);
   }
   enableSandboxAuditLogs(sandboxName, deps);
   addSource("OpenShell log source", openshellArgs);
@@ -519,8 +530,9 @@ export function showSandboxLogsWithDeps(
   // to the merged stream rather than independently per source
   // (which previously returned up to 2*N lines). Closes #4100.
   let gatewayResult: LogProbeResult | null = null;
-  if (!logsOptions.since && shouldIncludeGatewayLogSource(sandboxName, deps)) {
-    gatewayResult = runOpenclawGatewayLogs(sandboxName, logsOptions, deps);
+  const gatewayLogPath = resolveManagedGatewayLogPath(sandboxName, deps);
+  if (!logsOptions.since && gatewayLogPath) {
+    gatewayResult = runManagedGatewayLogs(sandboxName, logsOptions, gatewayLogPath, deps);
   }
 
   const openshellArgs = buildSandboxLogsArgs(sandboxName, logsOptions);

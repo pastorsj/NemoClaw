@@ -3,8 +3,10 @@
 
 import type { AgentDefinition } from "../agent/defs";
 import {
+  createChannelManifestRegistry,
   createBuiltInChannelManifestRegistry,
   getMessagingManifestAvailabilityContext,
+  type ChannelManifest,
 } from "../messaging";
 import { channelUsesInSandboxQrPairing, type ChannelDef } from "../sandbox/channels";
 
@@ -26,10 +28,13 @@ export function resolveQrSelectedChannels(
 export function filterEnabledChannelsByAgent<T extends string[] | null | undefined>(
   enabledChannels: T,
   agent: AgentDefinition | null,
+  manifests?: readonly ChannelManifest[],
 ): T {
   if (!Array.isArray(enabledChannels)) return enabledChannels;
   if (!agent) return enabledChannels;
-  const registry = createBuiltInChannelManifestRegistry();
+  const registry = manifests
+    ? createChannelManifestRegistry(manifests)
+    : createBuiltInChannelManifestRegistry();
   const available = registry.listAvailable(
     getMessagingManifestAvailabilityContext(agent, registry.list()),
   );

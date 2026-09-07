@@ -18,8 +18,10 @@ import type { HarnessPackageIdentity } from "../../agent-runtime/package/types.t
 import { HARNESS_STARTUP_PLAN_ADAPTER_CONTRACT } from "../../agent-runtime/adapter/startup.ts";
 import {
   HarnessAdapterError,
+  loadHarnessAdapter,
   loadHarnessAdapterFromSource,
 } from "../../agent-runtime/adapter/loader.ts";
+import type { HarnessPackageStoreOptions } from "../../agent-runtime/package/store.ts";
 import {
   isManagedStartupPackageProfile,
   type ManagedStartupDurableProfile,
@@ -488,6 +490,25 @@ export function buildHarnessStartupPlanFromSource(
 ): ManagedStartupAgentEnvironment {
   requireMatchingPackageAuthority(request, source);
   return validateHarnessStartupPlan(invokeStartupAdapter(source, request), request.packageId);
+}
+
+/** Build one finite startup plan from the adapter pinned by a package profile receipt. */
+export function buildInstalledStartupPlan(
+  profile: ManagedStartupDurableProfile,
+  environment: ApplicationEnvironment = EMPTY_APPLICATION_ENVIRONMENT,
+  options: HarnessPackageStoreOptions = {},
+): ManagedStartupAgentEnvironment {
+  const validatedProfile = validateManagedStartupDurableProfile(profile);
+  if (!isManagedStartupPackageProfile(validatedProfile)) {
+    return fail("installed startup plans require a receipt-backed package profile");
+  }
+  const request = startupRequest(validatedProfile, environment);
+  const adapter = loadHarnessAdapter(
+    validatedProfile.harnessPackage,
+    HARNESS_STARTUP_PLAN_ADAPTER_CONTRACT,
+    options,
+  );
+  return validateHarnessStartupPlan(adapter.buildPlan(request), validatedProfile.harnessPackage.id);
 }
 
 function startupRequest(

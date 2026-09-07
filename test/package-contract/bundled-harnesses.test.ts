@@ -7,10 +7,12 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { materializeHarnessPackageArtifact } from "../../harness-contract/build-package.mts";
 import { listBundledAgentRuntimeSources } from "../../scripts/build-harnesses.mts";
 import { buildAgentDefinition } from "../../dist/lib/agent-runtime/manifest-loader.js";
 import { parseHarnessPackageManifest } from "../../dist/lib/agent-runtime/package/manifest.js";
 import { validateHarnessPackageTree } from "../../dist/lib/agent-runtime/package/tree.js";
+import { MANAGED_STARTUP_MESSAGING_RUNTIME } from "../../dist/lib/onboard/managed-startup/image-runtime.js";
 
 const REPOSITORY_ROOT = path.join(import.meta.dirname, "..", "..");
 const BUNDLED_ROOT = path.join(REPOSITORY_ROOT, "dist", "harnesses");
@@ -22,6 +24,7 @@ materializeBundledHarnesses(process.argv[1] ?? "", process.argv[2]);
 
 type PackResult = Array<{ files: Array<{ path: string }> }>;
 type BundledAgentRuntimeSource = ReturnType<typeof listBundledAgentRuntimeSources>[number];
+const PACKED_FILES_BY_ROOT = new Map<string, readonly string[]>();
 
 function bundledPackageIds(): readonly string[] {
   return listBundledAgentRuntimeSources().map(({ id }) => id);
@@ -94,6 +97,14 @@ function writeFutureHarnessPackage(repositoryRoot: string): void {
       {
         name: "@fixture/nemoclaw-future-harness",
         version: "9.8.7",
+        files: [
+          "Dockerfile",
+          "Dockerfile.base",
+          "host/",
+          "manifest.yaml",
+          "policy-additions.yaml",
+          "start.sh",
+        ],
         nemoclaw: {
           harnessManifest: "manifest.yaml",
           minimumNemoClawVersion: "0.0.113",
@@ -111,6 +122,15 @@ function writeFutureHarnessPackage(repositoryRoot: string): void {
       'display_name: "Future Harness"',
       "runtime:",
       "  kind: gateway",
+      "  interactive_command: future-harness",
+      "  process_lifecycle:",
+      "    support: unsupported",
+      "    reason: This fixture does not manage a gateway process.",
+      "gateway_command: future-harness gateway run",
+      "health_probe:",
+      "  url: http://127.0.0.1:19090/health",
+      "  port: 19090",
+      "  timeout_seconds: 30",
       "config:",
       "  dir: /sandbox/.future-harness",
       "  config_file: config.json",
@@ -121,12 +141,18 @@ function writeFutureHarnessPackage(repositoryRoot: string): void {
       "    reason: This synthetic package has fixed inference configuration.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This package does not run scheduled work.",
@@ -144,6 +170,19 @@ function writeFutureHarnessPackage(repositoryRoot: string): void {
     mode: 0o755,
   });
   fs.writeFileSync(path.join(packageRoot, "policy-additions.yaml"), "version: 1\n");
+  fs.mkdirSync(path.join(packageRoot, "host"));
+  fs.writeFileSync(
+    path.join(packageRoot, "host", "config-adapter.cts"),
+    '"use strict"; module.exports = { prepareConfigUpdate() { return { kind: "immutable", reason: "Fixture config is immutable." }; } };\n',
+  );
+  fs.writeFileSync(
+    path.join(packageRoot, "host", "messaging-adapter.cts"),
+    '"use strict"; module.exports = { describeMessagingIntegration() { return { kind: "disabled", packageId: "future-harness", reason: "Messaging is disabled." }; } };\n',
+  );
+  fs.writeFileSync(
+    path.join(packageRoot, "host", "startup-adapter.cts"),
+    '"use strict"; module.exports = { buildStartupPlan() { return {}; }, prepareStartupProfile() { return { kind: "unsupported", reason: "Fixture startup is unsupported." }; }, buildInitialStartupProfile() { return { kind: "unsupported", reason: "Fixture startup is unsupported." }; }, reconcileStartupProfile() { return { kind: "unsupported", reason: "Fixture startup is unsupported." }; } };\n',
+  );
 }
 
 function runBundledBuild(...args: readonly string[]): void {
@@ -172,33 +211,49 @@ function runPrivateBundledBuild(outputRoot: string, authoringRepositoryRoot?: st
   expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
 }
 
-function packedFileList(): readonly string[] {
-  const result = JSON.parse(
-    execFileSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
-      cwd: REPOSITORY_ROOT,
-      encoding: "utf8",
-      maxBuffer: 32 * 1024 * 1024,
-    }),
-  ) as PackResult;
-  return result[0]?.files.map(({ path: filePath }) => filePath) ?? [];
+function packedFileList(packageRoot = REPOSITORY_ROOT): readonly string[] {
+  const canonicalPackageRoot = fs.realpathSync.native(packageRoot);
+  const files =
+    PACKED_FILES_BY_ROOT.get(canonicalPackageRoot) ??
+    Object.freeze(
+      (
+        JSON.parse(
+          execFileSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
+            cwd: packageRoot,
+            encoding: "utf8",
+            maxBuffer: 32 * 1024 * 1024,
+          }),
+        ) as PackResult
+      )[0]?.files.map(({ path: filePath }) => filePath) ?? [],
+    );
+  PACKED_FILES_BY_ROOT.set(canonicalPackageRoot, files);
+  return files;
 }
 
-function missingPackedAssets(
-  source: BundledAgentRuntimeSource,
-  packed: readonly string[],
-): string[] {
-  const prefix = `${artifactPackPrefix(source.id)}/`;
-  return source.mappings.flatMap(({ sourcePath, destinationPath }) => {
-    const repositoryAsset = path.join(REPOSITORY_ROOT, sourcePath);
-    const expected = `${prefix}${destinationPath}`;
-    const isPacked = fs.statSync(repositoryAsset).isDirectory()
-      ? packed.some((filePath) => filePath.startsWith(`${expected}/`))
-      : packed.includes(expected);
-    return isPacked ? [] : [sourcePath];
-  });
+function artifactPublishedFiles(source: BundledAgentRuntimeSource): readonly string[] {
+  return validateHarnessPackageTree(artifactRoot(source.id))
+    .entries.filter(({ type }) => type === "file")
+    .map(({ relativePath }) => relativePath)
+    .sort();
 }
 
 describe("bundled harness package artifacts", () => {
+  it.each(["openclaw", "hermes"])(
+    "installs the %s messaging runtime at the managed-startup contract path",
+    (packageId) => {
+      const dockerfile = fs.readFileSync(path.join(artifactRoot(packageId), "Dockerfile"), "utf8");
+      const packageRuntime = `packages/nemoclaw-${packageId}/messaging/messaging-build.mts`;
+
+      expect(dockerfile).toContain(packageRuntime);
+      expect(dockerfile).toContain(MANAGED_STARTUP_MESSAGING_RUNTIME);
+      expect(
+        dockerfile.includes(
+          `COPY --chmod=0555 ${packageRuntime} ${MANAGED_STARTUP_MESSAGING_RUNTIME}`,
+        ) || dockerfile.includes(`chmod 555 ${MANAGED_STARTUP_MESSAGING_RUNTIME}`),
+      ).toBe(true);
+    },
+  );
+
   it("discovers and bundles a metadata-declared package without an ID registry", () => {
     const temporaryRoot = fs.mkdtempSync(
       path.join(fs.realpathSync.native(path.dirname(REPOSITORY_ROOT)), ".nemoclaw-discovery-"),
@@ -216,7 +271,7 @@ describe("bundled harness package artifacts", () => {
           packageVersion: "9.8.7",
           minimumNemoClawVersion: "0.0.113",
           maximumNemoClawVersionExclusive: "0.0.121",
-          manifestPath: "packages/nemoclaw-future-harness/manifest.yaml",
+          manifestPath: "manifest.yaml",
         },
       ]);
 
@@ -230,7 +285,7 @@ describe("bundled harness package artifacts", () => {
         packageVersion: "9.8.7",
         minimumNemoClawVersion: "0.0.113",
         maximumNemoClawVersionExclusive: "0.0.121",
-        manifest: "packages/nemoclaw-future-harness/manifest.yaml",
+        manifest: "manifest.yaml",
       });
       expect(validateHarnessPackageTree(packageRoot).contentDigest).toMatch(/^[a-f0-9]{64}$/u);
     } finally {
@@ -278,7 +333,6 @@ describe("bundled harness package artifacts", () => {
       expect(envelopeSummaries).toEqual(
         packageIds.map((id) => {
           const source = sources.find((candidate) => candidate.id === id)!;
-          const packagePath = `packages/nemoclaw-${id}`;
           return {
             keys: [
               "displayName",
@@ -291,13 +345,13 @@ describe("bundled harness package artifacts", () => {
               "schemaVersion",
             ],
             id,
-            manifest: `${packagePath}/manifest.yaml`,
+            manifest: "manifest.yaml",
             manifestName: id,
             packageVersion: source.packageVersion,
             minimumNemoClawVersion: source.minimumNemoClawVersion,
             maximumNemoClawVersionExclusive: source.maximumNemoClawVersionExclusive,
-            dockerfile: `${packagePath}/Dockerfile`,
-            baseDockerfile: `${packagePath}/Dockerfile.base`,
+            dockerfile: "Dockerfile",
+            baseDockerfile: "Dockerfile.base",
             legacyDockerfile: null,
             legacyBaseDockerfile: null,
           };
@@ -323,20 +377,51 @@ describe("bundled harness package artifacts", () => {
     const temporaryRoot = fs.mkdtempSync(
       path.join(fs.realpathSync.native(path.dirname(REPOSITORY_ROOT)), ".nemoclaw-bundles-"),
     );
+    const fixtureRepositoryRoot = path.join(temporaryRoot, "repository");
     const firstRoot = path.join(temporaryRoot, "first");
     const secondRoot = path.join(temporaryRoot, "second");
     try {
-      runPrivateBundledBuild(firstRoot);
-      const first = packageTreeSnapshots(firstRoot);
+      fs.mkdirSync(path.join(fixtureRepositoryRoot, "packages"), { recursive: true });
+      writeFutureHarnessPackage(fixtureRepositoryRoot);
+      runPrivateBundledBuild(firstRoot, fixtureRepositoryRoot);
+      const first = validateHarnessPackageTree(artifactRoot("future-harness", firstRoot));
       expect(sharedBundleSnapshot()).toEqual(sharedBefore);
 
-      runPrivateBundledBuild(secondRoot);
-      expect(packageTreeSnapshots(secondRoot)).toEqual(first);
+      runPrivateBundledBuild(secondRoot, fixtureRepositoryRoot);
+      const second = validateHarnessPackageTree(artifactRoot("future-harness", secondRoot));
+      expect(second.entries).toEqual(first.entries);
+      expect(second.contentDigest).toBe(first.contentDigest);
       expect(sharedBundleSnapshot()).toEqual(sharedBefore);
 
-      expect(() => runPrivateBundledBuild(firstRoot)).toThrow();
+      expect(() => runPrivateBundledBuild(firstRoot, fixtureRepositoryRoot)).toThrow();
       expect(() => runBundledBuild("--unsupported")).toThrow();
       expect(sharedBundleSnapshot()).toEqual(sharedBefore);
+    } finally {
+      makeTreeWritable(temporaryRoot);
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("matches the public package builder file set and content digest", () => {
+    const temporaryRoot = fs.mkdtempSync(
+      path.join(fs.realpathSync.native(path.dirname(REPOSITORY_ROOT)), ".nemoclaw-public-builds-"),
+    );
+    const fixtureRepositoryRoot = path.join(temporaryRoot, "repository");
+    const bundledRoot = path.join(temporaryRoot, "bundled");
+    const publicArtifactRoot = path.join(temporaryRoot, "public");
+    try {
+      fs.mkdirSync(path.join(fixtureRepositoryRoot, "packages"), { recursive: true });
+      writeFutureHarnessPackage(fixtureRepositoryRoot);
+      runPrivateBundledBuild(bundledRoot, fixtureRepositoryRoot);
+      materializeHarnessPackageArtifact(
+        path.join(fixtureRepositoryRoot, "packages", "nemoclaw-future-harness"),
+        publicArtifactRoot,
+      );
+      const bundled = validateHarnessPackageTree(artifactRoot("future-harness", bundledRoot));
+      const publicArtifact = validateHarnessPackageTree(publicArtifactRoot);
+
+      expect(publicArtifact.entries).toEqual(bundled.entries);
+      expect(publicArtifact.contentDigest).toBe(bundled.contentDigest);
     } finally {
       makeTreeWritable(temporaryRoot);
       fs.rmSync(temporaryRoot, { recursive: true, force: true });
@@ -383,21 +468,22 @@ describe("bundled harness package artifacts", () => {
     }
   });
 
-  it("publishes every accepted artifact and locally referenced build asset", () => {
+  it("publishes every package-only artifact in the root npm payload", () => {
     const packed = packedFileList();
-    const missingArtifacts = listBundledAgentRuntimeSources().flatMap((source) => {
-      const required = [
-        `${artifactPackPrefix(source.id)}/nemoclaw-package.json`,
-        `${artifactPackPrefix(source.id)}/${source.manifestPath}`,
-      ];
-      return required.filter((filePath) => !packed.includes(filePath));
-    });
-    const missingAssets = listBundledAgentRuntimeSources().flatMap((source) =>
-      missingPackedAssets(source, packed).map((asset) => `${source.id}:${asset}`),
+    const missingArtifacts = listBundledAgentRuntimeSources().flatMap((source) =>
+      artifactPublishedFiles(source)
+        .map((relativePath) => `${artifactPackPrefix(source.id)}/${relativePath}`)
+        .filter((filePath) => !packed.includes(filePath)),
     );
 
     expect(missingArtifacts).toEqual([]);
-    expect(missingAssets).toEqual([]);
+
+    const leakedRepositoryPaths = listBundledAgentRuntimeSources().flatMap((source) =>
+      artifactPublishedFiles(source).filter((filePath) =>
+        /^(?:nemoclaw-blueprint|packages|scripts|src)\//u.test(filePath),
+      ),
+    );
+    expect(leakedRepositoryPaths).toEqual([]);
   }, 120_000);
 
   it("omits excluded candidates, authoring files, credentials, and host callbacks", () => {
@@ -426,9 +512,7 @@ describe("bundled harness package artifacts", () => {
         expect.stringContaining("nemoclaw-blueprint/router/llm-router/"),
       ]),
     );
-    expect(artifactFiles).toContain(
-      `${artifactPackPrefix("openclaw")}/packages/nemoclaw-openclaw/host/config-adapter.cts`,
-    );
+    expect(artifactFiles).toContain(`${artifactPackPrefix("openclaw")}/host/config-adapter.cts`);
     expect(artifactFiles.some((filePath) => filePath.includes("/host/source/"))).toBe(false);
     const envelopeKeys = bundledPackageIds().flatMap((id) =>
       Object.keys(

@@ -7,10 +7,9 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { readPrivateBearerDescriptors } from "./credential-file";
+import { readPrivateBearerDescriptor } from "./credential-file";
 
 const DEPLOYMENT_CREDENTIAL = "voice-gateway-deployment-credential-0123456789";
-const OPENCLAW_CREDENTIAL = "voice-gateway-openclaw-credential-9876543210";
 const directories: string[] = [];
 
 function temporaryDirectory(): string {
@@ -26,10 +25,6 @@ function credentialDescriptor(value: string, mode = 0o600): number {
   return fs.openSync(file, fs.constants.O_RDONLY);
 }
 
-function readPair(deployment: number, openClaw: number) {
-  return readPrivateBearerDescriptors({ deployment, openClaw });
-}
-
 afterEach(() => {
   vi.restoreAllMocks();
   for (const directory of directories.splice(0)) {
@@ -37,75 +32,33 @@ afterEach(() => {
   }
 });
 
-describe("voice gateway credential descriptors", () => {
-  it("reads each owner-only regular descriptor once and closes both (#9235)", () => {
-    const deployment = credentialDescriptor(`${DEPLOYMENT_CREDENTIAL}\n`);
-    const openClaw = credentialDescriptor(OPENCLAW_CREDENTIAL);
+describe("voice gateway deployment credential descriptor", () => {
+  it("reads the owner-only regular descriptor once and closes it (#9235)", () => {
+    const descriptor = credentialDescriptor(`${DEPLOYMENT_CREDENTIAL}\n`);
     const read = vi.spyOn(fs, "readSync");
 
-    expect(readPair(deployment, openClaw)).toEqual({
-      deploymentCredential: DEPLOYMENT_CREDENTIAL,
-      openClawCredential: OPENCLAW_CREDENTIAL,
-    });
-    expect(read).toHaveBeenCalledTimes(2);
-    expect(() => fs.fstatSync(deployment)).toThrow();
-    expect(() => fs.fstatSync(openClaw)).toThrow();
+    expect(readPrivateBearerDescriptor(descriptor)).toBe(DEPLOYMENT_CREDENTIAL);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(() => fs.fstatSync(descriptor)).toThrow();
   });
 
-  it("rejects two descriptors for the same credential file and closes both (#9235)", () => {
-    const deployment = credentialDescriptor(DEPLOYMENT_CREDENTIAL);
-    const openClaw = credentialDescriptor(OPENCLAW_CREDENTIAL);
-    const deploymentStat = fs.fstatSync(deployment);
-    vi.spyOn(fs, "fstatSync")
-      .mockReturnValueOnce(deploymentStat)
-      .mockReturnValueOnce(deploymentStat);
-
-    expect(() => readPair(deployment, openClaw)).toThrow("different files");
-    expect(() => fs.fstatSync(deployment)).toThrow();
-    expect(() => fs.fstatSync(openClaw)).toThrow();
-  });
-
-  it("rejects a missing descriptor without reading the other credential (#9235)", () => {
-    const deployment = credentialDescriptor(DEPLOYMENT_CREDENTIAL);
-    const openClaw = credentialDescriptor(OPENCLAW_CREDENTIAL);
-    fs.closeSync(deployment);
+  it("rejects a missing or non-regular descriptor without reading it (#9235)", () => {
+    const missing = credentialDescriptor(DEPLOYMENT_CREDENTIAL);
+    fs.closeSync(missing);
     const read = vi.spyOn(fs, "readSync");
-
-    expect(() => readPair(deployment, openClaw)).toThrow("descriptor is not open");
+    expect(() => readPrivateBearerDescriptor(missing)).toThrow("descriptor is not open");
     expect(read).not.toHaveBeenCalled();
-    expect(() => fs.fstatSync(openClaw)).toThrow();
-  });
 
-  it("rejects a non-regular descriptor before reading either credential (#9235)", () => {
     const directory = fs.openSync(temporaryDirectory(), fs.constants.O_RDONLY);
-    const openClaw = credentialDescriptor(OPENCLAW_CREDENTIAL);
-    const read = vi.spyOn(fs, "readSync");
-
-    expect(() => readPair(directory, openClaw)).toThrow("not a regular file");
-    expect(read).not.toHaveBeenCalled();
+    expect(() => readPrivateBearerDescriptor(directory)).toThrow("not a regular file");
   });
-
-  it.each(["device", "socket", "pipe"])(
-    "rejects a representative %s descriptor before reading credentials (#9235)",
-    () => {
-      const deployment = credentialDescriptor(DEPLOYMENT_CREDENTIAL);
-      const openClaw = credentialDescriptor(OPENCLAW_CREDENTIAL);
-      const fstatSync = fs.fstatSync;
-      vi.spyOn(fs, "fstatSync")
-        .mockReturnValueOnce({ isFile: () => false } as fs.Stats)
-        .mockImplementation(fstatSync);
-
-      expect(() => readPair(deployment, openClaw)).toThrow("not a regular file");
-    },
-  );
 
   it("rejects a descriptor not owned by the current user (#9235)", () => {
-    const deployment = credentialDescriptor(DEPLOYMENT_CREDENTIAL);
-    const openClaw = credentialDescriptor(OPENCLAW_CREDENTIAL);
+    const descriptor = credentialDescriptor(DEPLOYMENT_CREDENTIAL);
     const uid = process.getuid?.() ?? 0;
     vi.spyOn(process, "getuid").mockReturnValue(uid + 1);
 
-    expect(() => readPair(deployment, openClaw)).toThrow("not owned by the current user");
+    expect(() => readPrivateBearerDescriptor(descriptor)).toThrow("not owned by the current user");
   });
 
   it.each([
@@ -114,49 +67,27 @@ describe("voice gateway credential descriptors", () => {
     ["whitespace", `${DEPLOYMENT_CREDENTIAL} extra`, 0o600, "malformed"],
     ["oversized", "a".repeat(4098), 0o600, "invalid size"],
   ])("rejects a %s deployment credential (#9235)", (_name, value, mode, message) => {
-    const deployment = credentialDescriptor(value, mode);
-    const openClaw = credentialDescriptor(OPENCLAW_CREDENTIAL);
-
-    expect(() => readPair(deployment, openClaw)).toThrow(message);
+    const descriptor = credentialDescriptor(value, mode as number);
+    expect(() => readPrivateBearerDescriptor(descriptor)).toThrow(message);
   });
 
   it("does not include descriptor contents in validation errors (#9235)", () => {
-    const deploymentSecret = `${DEPLOYMENT_CREDENTIAL} secret`;
-    const deployment = credentialDescriptor(deploymentSecret);
-    const openClaw = credentialDescriptor(OPENCLAW_CREDENTIAL);
+    const secret = `${DEPLOYMENT_CREDENTIAL} secret`;
+    const descriptor = credentialDescriptor(secret);
 
-    expect(() => readPair(deployment, openClaw)).toThrowError(
-      expect.objectContaining({ message: expect.not.stringContaining(deploymentSecret) }),
+    expect(() => readPrivateBearerDescriptor(descriptor)).toThrowError(
+      expect.objectContaining({ message: expect.not.stringContaining(secret) }),
     );
   });
 
-  it("preserves a credential error when descriptor cleanup also fails (#9235)", () => {
-    const deployment = credentialDescriptor("short");
-    const openClaw = credentialDescriptor(OPENCLAW_CREDENTIAL);
-    const closeSync = fs.closeSync;
-    vi.spyOn(fs, "closeSync")
-      .mockImplementationOnce((descriptor) => {
-        closeSync(descriptor);
-        throw new Error("cleanup failed");
-      })
-      .mockImplementationOnce(closeSync);
+  it("reports a cleanup error after a successful credential read (#9235)", () => {
+    const descriptor = credentialDescriptor(DEPLOYMENT_CREDENTIAL);
+    const close = fs.closeSync.bind(fs);
+    vi.spyOn(fs, "closeSync").mockImplementationOnce((value) => {
+      close(value);
+      throw new Error("cleanup failed");
+    });
 
-    expect(() => readPair(deployment, openClaw)).toThrow("invalid size");
-    expect(() => fs.fstatSync(openClaw)).toThrow();
-  });
-
-  it("reports a cleanup error after successful credential reads (#9235)", () => {
-    const deployment = credentialDescriptor(DEPLOYMENT_CREDENTIAL);
-    const openClaw = credentialDescriptor(OPENCLAW_CREDENTIAL);
-    const closeSync = fs.closeSync;
-    vi.spyOn(fs, "closeSync")
-      .mockImplementationOnce((descriptor) => {
-        closeSync(descriptor);
-        throw new Error("cleanup failed");
-      })
-      .mockImplementationOnce(closeSync);
-
-    expect(() => readPair(deployment, openClaw)).toThrow("cleanup failed");
-    expect(() => fs.fstatSync(openClaw)).toThrow();
+    expect(() => readPrivateBearerDescriptor(descriptor)).toThrow("cleanup failed");
   });
 });

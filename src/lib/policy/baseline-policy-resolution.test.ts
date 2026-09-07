@@ -16,6 +16,7 @@ import {
   resolveAgentBaselinePolicy,
   resolveAgentDefinitionBaselinePolicy,
   resolveSandboxBaselinePolicy,
+  listSetupPolicyPresets,
   sandboxUsesNpmCompatibility,
 } from "./index";
 
@@ -121,6 +122,35 @@ network_policies:
 });
 
 describe("agent definition baseline policy resolution", () => {
+  it("does not fall back to central presets when a receipt-pinned package is unavailable", () => {
+    const fixtureParent = fs.mkdtempSync(
+      path.join(process.cwd(), "node_modules/.cache/nemoclaw-policy-catalog-tests-"),
+    );
+    tempDirs.push(fixtureParent);
+    const home = path.join(fixtureParent, "home");
+    const storeRoot = path.join(home, ".nemoclaw", "harnesses");
+    const fixture = createHarnessPackageFixture({
+      fixtureParent: path.join(fixtureParent, "fixture"),
+      storeRoot,
+    });
+    const installed = fixture.installLocal({
+      id: "synthetic-policy-harness",
+      packageVersion: "1.0.0",
+    });
+    vi.stubEnv("HOME", home);
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "alpha",
+      agent: "synthetic-policy-harness",
+      harnessPackage: installed.identity,
+    } as never);
+    fs.rmSync(
+      path.join(storeRoot, "objects", "sha256", installed.identity.contentDigest),
+      { recursive: true, force: true },
+    );
+
+    expect(() => listSetupPolicyPresets("alpha")).toThrow();
+  });
+
   it("uses a synthetic sandbox receipt after its active package advances", () => {
     const fixtureParent = path.join(
       process.cwd(),

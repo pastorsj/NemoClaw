@@ -14,7 +14,6 @@ import { withLegacyMessagingPlanEnv } from "../../../../test/messaging-plan-test
 
 const BASE_ENV = baseOpenClawGenerationEnv();
 const OPENCLAW_PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
-const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../../../..");
 
 const TOOLS_OK = { profile: "minimal", allow: ["read"], deny: ["exec"] };
 
@@ -107,10 +106,8 @@ describe("generate-openclaw-config.mts: extra-agents path defaulting", () => {
     const imagePackageRoot = path.join(imageRoot, "packages", "nemoclaw-openclaw");
     const imageConfigDir = path.join(imagePackageRoot, "config");
     const imageHostDir = path.join(imagePackageRoot, "host");
-    const imageSourceDir = path.join(imageRoot, "src", "lib");
     fs.mkdirSync(imageConfigDir, { recursive: true });
     fs.mkdirSync(imageHostDir, { recursive: true });
-    fs.mkdirSync(imageSourceDir, { recursive: true });
 
     const packageRoot = OPENCLAW_PACKAGE_ROOT;
     fs.copyFileSync(
@@ -130,8 +127,8 @@ describe("generate-openclaw-config.mts: extra-agents path defaulting", () => {
       path.join(imageHostDir, "config-runtime.cts"),
     );
     fs.copyFileSync(
-      path.join(REPOSITORY_ROOT, "src", "lib", "tool-disclosure.ts"),
-      path.join(imageSourceDir, "tool-disclosure.ts"),
+      path.join(packageRoot, "config", "tool-disclosure.ts"),
+      path.join(imageConfigDir, "tool-disclosure.ts"),
     );
 
     const imageGenerator = fs.realpathSync(path.join(imageConfigDir, "generate-config.mts"));

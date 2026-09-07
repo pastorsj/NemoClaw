@@ -227,6 +227,7 @@ export const discordManifest = {
       phase: "health-check",
       handler: "discord.openclawBridgeHealth",
       agents: ["openclaw"],
+      packageOperationRequired: true,
       onFailure: "abort",
     },
     {

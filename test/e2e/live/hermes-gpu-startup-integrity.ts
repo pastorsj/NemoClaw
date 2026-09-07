@@ -154,18 +154,17 @@ if strict_mcp_state[0] != strict_mcp_state[1]:
     fail("Hermes strict hash contains pending MCP state")
 if compat_mcp_state != strict_mcp_state:
     fail("Hermes compatibility hash MCP state differs from the strict anchor")
-if not secrets.compare_digest(strict_config_digest, digest(config_bytes)):
-    fail("Hermes config differs from the strict startup base")
-if not secrets.compare_digest(strict_env_digest, digest(base_env_bytes)):
-    fail("Hermes environment differs from the strict startup base beyond the generated API key")
-if not secrets.compare_digest(compat_config_digest, digest(config_bytes)):
-    fail("Hermes compatibility hash does not match the current config")
-if not secrets.compare_digest(compat_env_digest, digest(env_bytes)):
-    fail("Hermes compatibility hash does not match the current environment")
-if not secrets.compare_digest(strict_fabric_digest, digest(fabric_bytes)):
-    fail("Hermes Fabric config differs from the strict startup base")
-if not secrets.compare_digest(compat_fabric_digest, digest(fabric_bytes)):
-    fail("Hermes compatibility hash does not match the current Fabric config")
+hash_checks = (
+    ("Hermes config differs from the strict startup base", strict_config_digest, digest(config_bytes)),
+    ("Hermes environment differs from the strict startup base beyond the generated API key", strict_env_digest, digest(base_env_bytes)),
+    ("Hermes compatibility hash does not match the current config", compat_config_digest, digest(config_bytes)),
+    ("Hermes compatibility hash does not match the current environment", compat_env_digest, digest(env_bytes)),
+    ("Hermes Fabric config differs from the strict startup base", strict_fabric_digest, digest(fabric_bytes)),
+    ("Hermes compatibility hash does not match the current Fabric config", compat_fabric_digest, digest(fabric_bytes)),
+)
+for message, recorded_digest, actual_digest in hash_checks:
+    if not secrets.compare_digest(recorded_digest, actual_digest):
+        fail(message)
 
 startup_log = startup_log_bytes.decode("utf-8", "replace")
 if (

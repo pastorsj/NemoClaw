@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { type MessagingStatusHookRunResult, readChannelHealthOutputs } from "./status-runner";
+import { whatsappManifest } from "../channels/whatsapp/manifest";
+import type { MessagingHookContext } from "./types";
+import { MessagingHookRegistry } from "./registry";
+import {
+  type MessagingStatusHookRunResult,
+  readChannelHealthOutputs,
+  runMessagingStatusHooks,
+} from "./status-runner";
 
 function runResult(
   outputs: Record<string, { kind: string; value: unknown }>,
@@ -35,6 +42,47 @@ describe("readChannelHealthOutputs (#6888)", () => {
       }),
     );
     expect(out).toEqual([VALID_REPORT]);
+  });
+
+  it("threads a receipt-backed unknown package's finite status declaration", () => {
+    let captured: MessagingHookContext | undefined;
+    const statusHook = whatsappManifest.hooks.find(({ phase }) => phase === "status");
+    expect(statusHook).toBeDefined();
+    const statusProbe = {
+      kind: "channel-status-json",
+      command: { argv: ["futurectl", "status", "--json"] },
+      pairingCommand: { argv: ["futurectl", "pair"] },
+    } as const;
+    const manifest = {
+      ...whatsappManifest,
+      supportedAgents: ["future-harness"],
+      packageBuild: { configRoot: "~/.future-harness", packageManagers: [] },
+      hooks: [{ ...statusHook!, agents: ["future-harness"], statusProbe }],
+    };
+    const hookRegistry = new MessagingHookRegistry([
+      {
+        id: "whatsapp.statusHealth",
+        handler: (context) => {
+          captured = context;
+          return {};
+        },
+      },
+    ]);
+
+    runMessagingStatusHooks({
+      agent: "future-harness",
+      currentSandbox: "future-sandbox",
+      manifests: [manifest],
+      hookRegistry,
+    });
+
+    expect(captured?.inputs).toMatchObject({
+      agent: "future-harness",
+      currentSandbox: "future-sandbox",
+      packageConfigRoot: "~/.future-harness",
+      receiptBackedProfile: true,
+      statusProbe,
+    });
   });
 
   it("drops a malformed report (missing signals) instead of passing it through", () => {

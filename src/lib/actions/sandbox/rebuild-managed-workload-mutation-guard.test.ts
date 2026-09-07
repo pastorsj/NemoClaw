@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { managedStartupE2eProfile } from "../../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
 import { mapManagedStartupProfileToAgentEnvironment as mapManagedStartupProfileWithAdapter } from "../../onboard/managed-startup/agent-environment";
 import { managedStartupSettingsFromProfile } from "../../onboard/managed-startup/package-profile";
+import type { ManagedStartupProfile } from "../../onboard/managed-startup/profile";
 import * as managedWorkload from "../../onboard/workload/rebuild";
 import * as registry from "../../state/registry";
 import type { SandboxEntry } from "../../state/registry/types";
@@ -61,7 +62,7 @@ describe("managed workload rebuild mutation guard", () => {
       previousReceipt: { credentialProxyReplayRequired: false },
       previousDashboardRemoteBindPrepared: false,
       corporateCa: null,
-    } as unknown as managedWorkload.ManagedWorkloadRebuildCatalogHandoff;
+    } as unknown as managedWorkload.PackageManagedWorkloadRebuildCatalogHandoff;
     const targetConfig = {
       agentDefinition: { runtime: { kind: "terminal" } },
       resumeConfig: {
@@ -129,7 +130,7 @@ describe("managed workload rebuild mutation guard", () => {
       previousReceipt: { credentialProxyReplayRequired: false },
       previousDashboardRemoteBindPrepared: false,
       corporateCa: null,
-    } as unknown as managedWorkload.ManagedWorkloadRebuildCatalogHandoff;
+    } as unknown as managedWorkload.LegacyManagedWorkloadRebuildCatalogHandoff;
     const targetConfig = {
       agentDefinition: { runtime: { kind: "terminal" } },
       resumeConfig: {
@@ -223,8 +224,8 @@ describe("managed workload rebuild mutation guard", () => {
         inference: { model: "previous-model", upstreamProvider: "nvidia-prod" },
         dashboard: { agent: "openclaw", bindAddress: "127.0.0.1", wslExposure: false },
       },
-    } as unknown as managedWorkload.ManagedWorkloadRebuildCatalogHandoff;
-    if (catalogHandoff.harnessPackage) throw new Error("expected legacy handoff");
+    } as unknown as managedWorkload.LegacyManagedWorkloadRebuildCatalogHandoff;
+    expect(catalogHandoff.harnessPackage).toBeNull();
     const targetConfig = {
       agentDefinition: {},
       resumeConfig: {
@@ -319,8 +320,8 @@ describe("managed workload rebuild mutation guard", () => {
       },
       previousReceipt: { credentialProxyReplayRequired: false },
       corporateCa: null,
-    } as unknown as managedWorkload.ManagedWorkloadRebuildCatalogHandoff;
-    if (catalogHandoff.harnessPackage) throw new Error("expected legacy handoff");
+    } as unknown as managedWorkload.LegacyManagedWorkloadRebuildCatalogHandoff;
+    expect(catalogHandoff.harnessPackage).toBeNull();
     const targetConfig = {
       agentDefinition: {},
       resumeConfig: {
@@ -380,19 +381,18 @@ describe("managed workload rebuild mutation guard", () => {
       messagingPlan: null,
       environment,
     });
-    if ("profileKind" in prepared.replacementProfile.profile) {
-      throw new Error("expected legacy replacement profile");
-    }
+    expect(prepared.replacementProfile.profile).not.toHaveProperty("profileKind");
+    const replacementProfile = prepared.replacementProfile.profile as ManagedStartupProfile;
 
-    expect(prepared.replacementProfile.profile.dashboard).toMatchObject({
+    expect(replacementProfile.dashboard).toMatchObject({
       agent: "hermes",
       browserUrl,
       publicPort: 29_443,
       url: "http://127.0.0.1:29443",
     });
     expect(
-      mapManagedStartupProfileToAgentEnvironment(prepared.replacementProfile.profile, {})
-        .runtimeEnvironment.CHAT_UI_URL,
+      mapManagedStartupProfileToAgentEnvironment(replacementProfile, {}).runtimeEnvironment
+        .CHAT_UI_URL,
     ).toBe(browserUrl);
 
     const loopbackBrowserUrl = "http://127.0.0.2:18789/dashboard";
@@ -409,17 +409,17 @@ describe("managed workload rebuild mutation guard", () => {
       messagingPlan: null,
       environment,
     });
-    if ("profileKind" in loopbackPrepared.replacementProfile.profile) {
-      throw new Error("expected legacy replacement profile");
-    }
+    expect(loopbackPrepared.replacementProfile.profile).not.toHaveProperty("profileKind");
+    const loopbackReplacementProfile = loopbackPrepared.replacementProfile
+      .profile as ManagedStartupProfile;
 
-    expect(loopbackPrepared.replacementProfile.profile.dashboard).toMatchObject({
+    expect(loopbackReplacementProfile.dashboard).toMatchObject({
       browserUrl: "http://127.0.0.2:29443/dashboard",
       publicPort: 29_443,
     });
     expect(
-      mapManagedStartupProfileToAgentEnvironment(loopbackPrepared.replacementProfile.profile, {})
-        .runtimeEnvironment.CHAT_UI_URL,
+      mapManagedStartupProfileToAgentEnvironment(loopbackReplacementProfile, {}).runtimeEnvironment
+        .CHAT_UI_URL,
     ).toBe("http://127.0.0.2:29443/dashboard");
   });
 });

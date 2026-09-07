@@ -19,7 +19,7 @@ import {
   resolveSandboxGatewayName,
 } from "./onboard/gateway-binding";
 
-export { resolveGatewayName, resolveSandboxGatewayName };
+export { resolveGatewayName, resolveGatewayPortFromName, resolveSandboxGatewayName };
 export {
   captureOpenshell,
   captureOpenshellForStatus,

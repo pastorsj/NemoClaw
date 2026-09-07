@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentDefinition } from "../agent/defs";
+import { discordManifest } from "../messaging/channels/built-ins";
 import { filterEnabledChannelsByAgent, resolveQrSelectedChannels } from "./messaging-state";
 
 function agent(name: string): AgentDefinition {
@@ -28,6 +29,22 @@ describe("filterEnabledChannelsByAgent", () => {
     expect(filterEnabledChannelsByAgent(["whatsapp", "telegram"], agent("custom-agent"))).toEqual(
       [],
     );
+  });
+
+  it("retains a known service declared by an unknown package's exact profile", () => {
+    expect(
+      filterEnabledChannelsByAgent(["discord"], agent("future-harness"), [
+        { ...discordManifest, supportedAgents: ["future-harness"] },
+      ]),
+    ).toEqual(["discord"]);
+  });
+
+  it("does not borrow an ambient channel from a same-id package profile", () => {
+    expect(
+      filterEnabledChannelsByAgent(["telegram"], agent("openclaw"), [
+        { ...discordManifest, supportedAgents: ["openclaw"] },
+      ]),
+    ).toEqual([]);
   });
 
   it("returns null/undefined inputs unchanged", () => {

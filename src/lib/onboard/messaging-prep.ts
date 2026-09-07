@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WebSearchConfig } from "../inference/web-search";
+import type { HarnessWebSearchProviderBinding } from "@nvidia/nemoclaw-harness-contract";
 import * as webSearch from "../inference/web-search";
 import { listMessagingCredentialMetadata } from "../messaging/channels";
 import { MESSAGING_CREDENTIAL_PROVIDER_TYPE } from "../messaging/provider-profile";
@@ -13,6 +14,7 @@ import {
   collectMessagingBridgeTokenDefs,
   messagingBridgeProfilesForAgent,
   staticMessagingProviderTypeForChannel,
+  type MessagingBridgeProfile,
 } from "./messaging-bridge-provider";
 
 export type NamedMessagingChannel = { name: string } & ChannelDef;
@@ -22,6 +24,10 @@ export interface MessagingTokenDef {
   envKey: string;
   token: string | null;
   providerType?: string;
+  /** Exact package-owned profile selected from a receipt-backed declaration. */
+  providerProfilePath?: string;
+  /** Receipt-owned messaging provider projection used for profile registration and refresh. */
+  messagingProviderProfile?: MessagingBridgeProfile;
   additionalCredentials?: Array<{ envKey: string; token: string | null }>;
 }
 
@@ -41,6 +47,11 @@ export interface CreateSandboxMessagingPrepInput {
   sandboxName: string;
   agentName?: string | null;
   requireExactProviderBinding?: boolean;
+  receiptBackedPackage?: boolean;
+  webSearchProviderBinding?: HarnessWebSearchProviderBinding | null;
+  webSearchProviderProfilePath?: string | null;
+  /** Receipt-owned custom profiles. Omitted and empty both mean none; neither enables legacy lookup. */
+  messagingProviderProfiles?: readonly MessagingBridgeProfile[];
   channels: readonly NamedMessagingChannel[];
   enabledChannels: readonly string[] | null;
   disabledChannels: readonly string[];
@@ -59,7 +70,12 @@ export interface CreateSandboxMessagingPrepInput {
   ): string[];
   getMessagingChannelForEnvKey(envKey: string): string | null;
   providerExistsInGateway(name: string): boolean;
-  providerMatchesGatewayCredential(name: string, type: string, credentialEnv: string): boolean;
+  providerMatchesGatewayCredential(
+    name: string,
+    type: string,
+    credentialEnv: string,
+    messagingProviderProfile?: MessagingBridgeProfile,
+  ): boolean;
 }
 
 export interface CreateSandboxMessagingPrepResult {
@@ -77,9 +93,11 @@ export interface CreateSandboxMessagingPrepResult {
 export function prepareCreateSandboxMessaging(
   input: CreateSandboxMessagingPrepInput,
 ): CreateSandboxMessagingPrepResult {
-  const requiresExactOpenClawProviderBinding =
+  const requiresExactWebSearchProviderBinding =
     input.requireExactProviderBinding === true &&
-    (!input.agentName || input.agentName.trim().toLowerCase() === "openclaw");
+    (input.receiptBackedPackage === true ||
+      !input.agentName ||
+      input.agentName.trim().toLowerCase() === "openclaw");
   const enabledEnvKeys =
     input.enabledChannels != null
       ? new Set(
@@ -95,7 +113,10 @@ export function prepareCreateSandboxMessaging(
       .filter((c) => disabledChannelNames.has(c.name))
       .flatMap((c) => getChannelTokenKeys(c)),
   );
-  const messagingProviderProfiles = messagingBridgeProfilesForAgent(input.agentName);
+  const messagingProviderProfiles =
+    input.receiptBackedPackage === true
+      ? [...(input.messagingProviderProfiles ?? [])]
+      : messagingBridgeProfilesForAgent(input.agentName);
 
   const messagingCredentialDefs: MessagingCredentialDef[] = listMessagingCredentialMetadata()
     .map((credential) => {
@@ -103,11 +124,19 @@ export function prepareCreateSandboxMessaging(
         credential.channelId,
         input.agentName,
         messagingProviderProfiles,
+        credential.providerEnvKey,
       );
       return {
         name: credential.providerNameTemplate.replaceAll("{sandboxName}", input.sandboxName),
         envKey: credential.providerEnvKey,
         providerType: staticProviderType ?? MESSAGING_CREDENTIAL_PROVIDER_TYPE,
+        ...(input.receiptBackedPackage === true && staticProviderType
+          ? {
+              messagingProviderProfile: messagingProviderProfiles.find(
+                (profile) => profile.channelId === credential.channelId,
+              ),
+            }
+          : {}),
         retainWhileDisabled: staticProviderType !== null,
       };
     })
@@ -127,11 +156,29 @@ export function prepareCreateSandboxMessaging(
 
   const webSearchEnabled = braveProviderProfile.shouldEnableWebSearch(input.webSearchConfig);
   const webSearchProvider = webSearch.webSearchProviderForConfig(input.webSearchConfig);
-  const webSearchCredentialEnv = webSearch.webSearchEnvFor(webSearchProvider);
+  const receiptBinding =
+    input.receiptBackedPackage === true ? input.webSearchProviderBinding : null;
+  if (webSearchEnabled && input.receiptBackedPackage === true) {
+    if (!receiptBinding || receiptBinding.provider !== webSearchProvider) {
+      throw new Error(
+        `The selected harness package does not declare ${webSearch.webSearchLabelFor(webSearchProvider)}.`,
+      );
+    }
+    if (!input.webSearchProviderProfilePath) {
+      throw new Error(
+        `The selected harness package is missing provider profile '${receiptBinding.profile_type}'.`,
+      );
+    }
+  }
+  const webSearchCredentialEnv =
+    receiptBinding?.credential_env ?? webSearch.webSearchEnvFor(webSearchProvider);
   const webSearchProviderType =
-    webSearchProvider === "tavily" && input.agentName?.trim().toLowerCase() === "hermes"
+    receiptBinding?.profile_type ??
+    // Explicit compatibility for receiptless Hermes sandboxes. A receipt must
+    // have selected a complete binding before reaching this fallback.
+    (webSearchProvider === "tavily" && input.agentName?.trim().toLowerCase() === "hermes"
       ? braveProviderProfile.HERMES_TAVILY_PROVIDER_PROFILE_ID
-      : webSearchProvider;
+      : webSearchProvider);
   const webSearchProviderName = `${input.sandboxName}-${webSearchProvider}-search`;
   const webSearchApiKey = webSearchEnabled
     ? input.getCredential(webSearchCredentialEnv) ||
@@ -139,7 +186,7 @@ export function prepareCreateSandboxMessaging(
       null
     : null;
   const reusableWebSearchProvider =
-    requiresExactOpenClawProviderBinding &&
+    requiresExactWebSearchProviderBinding &&
     webSearchEnabled &&
     !webSearchApiKey &&
     input.providerMatchesGatewayCredential(
@@ -170,6 +217,9 @@ export function prepareCreateSandboxMessaging(
       envKey: webSearchCredentialEnv,
       token: webSearchApiKey,
       providerType: webSearchProviderType,
+      ...(input.webSearchProviderProfilePath
+        ? { providerProfilePath: input.webSearchProviderProfilePath }
+        : {}),
     });
   }
 
@@ -192,6 +242,8 @@ export function prepareCreateSandboxMessaging(
       enabledChannels: input.enabledChannels,
       disabledChannelNames,
       profiles: messagingProviderProfiles,
+      includeUnconfiguredProfiles: input.receiptBackedPackage === true,
+      includeProviderProjection: input.receiptBackedPackage === true,
     }),
   );
 
@@ -234,9 +286,20 @@ export function prepareCreateSandboxMessaging(
       // A static credential-bound policy must instead retain the exact gateway
       // provider already holding that authority.
       if (token && !channelDisabled) continue;
+      const expectedMessagingProfile =
+        input.receiptBackedPackage === true
+          ? messagingProviderProfiles.find((profile) => profile.profileId === providerType)
+          : undefined;
       const providerReusable = providerType
-        ? input.providerMatchesGatewayCredential(name, providerType, envKey)
-        : requiresExactOpenClawProviderBinding
+        ? expectedMessagingProfile
+          ? input.providerMatchesGatewayCredential(
+              name,
+              providerType,
+              envKey,
+              expectedMessagingProfile,
+            )
+          : input.providerMatchesGatewayCredential(name, providerType, envKey)
+        : requiresExactWebSearchProviderBinding
           ? input.providerMatchesGatewayCredential(name, "generic", envKey)
           : input.providerExistsInGateway(name);
       if (!providerReusable) continue;
@@ -261,8 +324,20 @@ export function prepareCreateSandboxMessaging(
       for (const name of bridgeProviderNamesForChannel(input.sandboxName, channel, [profile])) {
         if (messagingTokenDefs.some((def) => def.name === name && def.token)) continue;
         if (reusableMessagingProviders.includes(name)) continue;
-        if (!input.providerMatchesGatewayCredential(name, profile.profileId, profile.credentialKey))
-          continue;
+        const matches =
+          input.receiptBackedPackage === true
+            ? input.providerMatchesGatewayCredential(
+                name,
+                profile.profileId,
+                profile.credentialKey,
+                profile,
+              )
+            : input.providerMatchesGatewayCredential(
+                name,
+                profile.profileId,
+                profile.credentialKey,
+              );
+        if (!matches) continue;
         reusableMessagingProviders.push(name);
         if (!reusableMessagingChannels.includes(channel)) {
           reusableMessagingChannels.push(channel);

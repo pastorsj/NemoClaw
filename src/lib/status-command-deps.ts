@@ -16,13 +16,19 @@ import type {
   MessagingOverlap,
   ShowStatusCommandDeps,
 } from "./inventory";
-import { findAllOverlaps } from "./messaging/applier";
-import { createBuiltInMessagingHookRegistry } from "./messaging/hooks";
 import {
-  type MessagingStatusHookRunResult,
+  createBuiltInChannelManifestRegistry,
+  createBuiltInMessagingHookRegistry,
+  findAllOverlaps,
+  hydrateMessagingRegistryEntriesForAuthority,
+  listLegacyMessagingChannels,
+  listMessagingChannelsForProfile,
+  resolveSandboxMessagingProfileAuthority,
   runMessagingStatusHooks,
-} from "./messaging/hooks/status-runner";
-import type { MessagingAgentId } from "./messaging/manifest";
+  type ChannelManifest,
+  type MessagingAgentId,
+  type MessagingStatusHookRunResult,
+} from "./messaging/status";
 import { resolveGatewayName } from "./onboard/gateway-binding";
 import { defaultPortableDemoStateDir } from "./onboard/experimental/portable-runtime-receipt-readiness";
 import { getQualifiedHermesPortablePhase } from "./actions/sandbox/portable-status";
@@ -34,6 +40,46 @@ import { createSystemDeps, parseSshProcesses } from "./state/sandbox-session";
 import { getServiceStatuses, showStatus as showServiceStatus } from "./tunnel/services";
 
 const INVENTORY_POLICY_PROBE_TIMEOUT_MS = 2_000;
+const statusChannelManifestRegistry = createBuiltInChannelManifestRegistry();
+
+type MessagingStatusProfile = Readonly<{
+  key: string;
+  agent: MessagingAgentId;
+  manifests: readonly ChannelManifest[];
+}>;
+
+function hasRecordedHarnessPackageAuthority(entry: registry.SandboxEntry): boolean {
+  return (
+    Object.prototype.hasOwnProperty.call(entry, "harnessPackage") ||
+    Object.prototype.hasOwnProperty.call(entry, "harnessPackageMigration")
+  );
+}
+
+/** Keep source manifests confined to explicit no-receipt compatibility rows. */
+function resolveMessagingStatusProfile(
+  entry: registry.SandboxEntry | null | undefined,
+  legacyAgent?: string | null,
+): MessagingStatusProfile {
+  if (!entry || !hasRecordedHarnessPackageAuthority(entry)) {
+    const agent = normalizeMessagingAgentId(entry?.agent ?? legacyAgent);
+    return Object.freeze({
+      key: `legacy:${agent}`,
+      agent,
+      manifests: listLegacyMessagingChannels(agent, statusChannelManifestRegistry),
+    });
+  }
+
+  const authority = resolveSandboxMessagingProfileAuthority(entry);
+  const identity = authority.packageAuthority.harnessPackage;
+  if (!identity) {
+    throw new Error("Receipt-backed messaging status requires exact harness package authority");
+  }
+  return Object.freeze({
+    key: `package:${identity.id}:${identity.packageVersion}:${identity.contentDigest}`,
+    agent: authority.agent.name,
+    manifests: listMessagingChannelsForProfile(authority, statusChannelManifestRegistry),
+  });
+}
 
 function captureOpenshell(
   rootDir: string,
@@ -58,11 +104,15 @@ function checkMessagingBridgeHealth(
   agent: string | null | undefined = "openclaw",
 ): MessagingBridgeHealth[] {
   const channelSet = new Set(Array.isArray(channels) ? channels : []);
+  // Validate receipt authority even when the runtime probe is unavailable. A
+  // missing OpenShell binary can suppress a hook, but must not make a damaged
+  // package receipt look like a healthy no-op.
+  const profile = resolveMessagingStatusProfile(registry.getSandbox(sandboxName), agent);
   const openshell = resolveOpenshell();
   if (!openshell) return [];
 
   return runMessagingStatusHooks({
-    agent: normalizeMessagingAgentId(agent),
+    agent: profile.agent,
     channels: channelSet,
     currentSandbox: sandboxName,
     registryEntries: safeListRegistryEntries(),
@@ -74,25 +124,34 @@ function checkMessagingBridgeHealth(
         },
       },
     }),
+    manifests: profile.manifests,
   }).flatMap(readBridgeHealthOutputs);
 }
 
 function findMessagingOverlaps() {
-  // Non-critical path: status must remain usable even if overlap detection
-  // throws, so any failure yields an empty overlap list.
+  const { sandboxes: storedSandboxes } = registry.listSandboxes();
+  // Receipt and profile resolution is an authority boundary, not an advisory
+  // hook. Let it fail the command instead of turning invalid package state into
+  // an empty (apparently healthy) overlap report.
+  const profiles = uniqueMessagingStatusProfiles(storedSandboxes);
+  const sandboxes = hydrateMessagingRegistryEntriesForAuthority(storedSandboxes);
+  // Hook execution and overlap classification remain non-critical after exact
+  // authority has been established, so those advisory failures yield no rows.
   try {
     // Report both conflict axes independently and without deduping. They are
     // distinct, both-true facts: a shared messaging credential conflicts on any
     // gateway, while channel-owned status hooks can report non-credential
     // runtime exclusivity such as Slack Socket Mode on one gateway.
-    const { sandboxes } = registry.listSandboxes();
     const credentialOverlaps = findAllOverlaps({
       listSandboxes: () => ({ sandboxes }),
     });
-    const statusOverlaps = runMessagingStatusHooks({
-      agents: uniqueAgentsForEntries(sandboxes),
-      registryEntries: sandboxes,
-    }).flatMap(readOverlapOutputs);
+    const statusOverlaps = profiles.flatMap((profile) =>
+      runMessagingStatusHooks({
+        agent: profile.agent,
+        manifests: profile.manifests,
+        registryEntries: sandboxes,
+      }).flatMap(readOverlapOutputs),
+    );
     return [...credentialOverlaps, ...statusOverlaps];
   } catch {
     return [];
@@ -132,22 +191,28 @@ function executeSandboxCommand(
 }
 
 function safeListRegistryEntries(): readonly registry.SandboxEntry[] {
+  let entries: readonly registry.SandboxEntry[];
   try {
-    return registry.listSandboxes().sandboxes;
+    entries = registry.listSandboxes().sandboxes;
   } catch {
     return [];
   }
+  return hydrateMessagingRegistryEntriesForAuthority(entries);
 }
 
-function uniqueAgentsForEntries(
+function uniqueMessagingStatusProfiles(
   entries: readonly registry.SandboxEntry[],
-): ReadonlySet<MessagingAgentId> {
-  const agents = new Set<MessagingAgentId>();
+): MessagingStatusProfile[] {
+  const profiles = new Map<string, MessagingStatusProfile>();
   for (const entry of entries) {
-    agents.add(normalizeMessagingAgentId(entry.agent));
+    const profile = resolveMessagingStatusProfile(entry);
+    if (!profiles.has(profile.key)) profiles.set(profile.key, profile);
   }
-  if (agents.size === 0) agents.add("openclaw");
-  return agents;
+  if (profiles.size === 0) {
+    const profile = resolveMessagingStatusProfile(null, "openclaw");
+    profiles.set(profile.key, profile);
+  }
+  return [...profiles.values()];
 }
 
 function readBridgeHealthOutputs(result: MessagingStatusHookRunResult): MessagingBridgeHealth[] {

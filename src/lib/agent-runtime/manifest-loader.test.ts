@@ -13,6 +13,7 @@ import {
   loadValidatedHarnessManifest,
   parseManifestRecord,
   readDashboard,
+  readInference,
 } from "./manifest-readers";
 
 const TEST_PARENT = path.join(process.cwd(), "node_modules/.cache/nemoclaw-agent-definition-tests");
@@ -26,7 +27,9 @@ const VALID_STATE_LIFECYCLE = [
   "    kind: not-required",
   "  snapshot_restore: []",
   "  rebuild:",
-  "    image_plugin_provenance: not-required",
+  "    managed_extensions:",
+  "      support: disabled",
+  "      reason: Test package has no managed extensions.",
   "    scheduled_work:",
   "      support: disabled",
   "      reason: Test package has no scheduled work.",
@@ -71,6 +74,151 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+describe("inference manifest metadata", () => {
+  it("projects the finite hosted-inference provider-key compatibility declaration", () => {
+    expect(
+      readInference({
+        inference: { provider_key_credential_alias: "hosted-inference" },
+      }),
+    ).toMatchObject({ provider_key_credential_alias: "hosted-inference" });
+  });
+
+  it("rejects an unsupported provider-key credential alias", () => {
+    expect(() =>
+      readInference({
+        inference: { provider_key_credential_alias: "arbitrary-env" },
+      }),
+    ).toThrow(/provider_key_credential_alias.*hosted-inference/);
+  });
+
+  it.each([
+    "/sandbox/.future/../secret",
+    "/sandbox/.future\\config.json",
+    "/sandbox/.future/config\u001b.json",
+  ])("rejects a non-canonical inference smoke config path %j", (configPath) => {
+    expect(() =>
+      readInference({
+        inference: {
+          sandbox_smoke: { kind: "compatible-endpoint", config_path: configPath },
+        },
+      }),
+    ).toThrow(/config path below \/sandbox/);
+  });
+});
+
+describe("policy manifest metadata", () => {
+  it("projects an immutable package policy capability", () => {
+    const manifestPath = writeAgentRoot(fixtureRoot);
+    fs.appendFileSync(
+      manifestPath,
+      [
+        "policy:",
+        "  context_target: /sandbox/.future-terminal/context/POLICY.md",
+        "  owned_presets: [future-tools]",
+        "  automatic_presets:",
+        "    - name: future-tools",
+        "      activation: { kind: always }",
+        "      apply_during_create: false",
+        "      suppress_in_tiers: [restricted]",
+        "  baseline_exclusion_impacts:",
+        "    future_api: Future API access may stop working.",
+        "",
+      ].join("\n"),
+    );
+
+    const definition = buildFromRoot(fixtureRoot, manifestPath);
+
+    expect(definition.policyCapability).toEqual({
+      context_target: "/sandbox/.future-terminal/context/POLICY.md",
+      owned_presets: ["future-tools"],
+      automatic_presets: [
+        {
+          name: "future-tools",
+          activation: { kind: "always" },
+          apply_during_create: false,
+          suppress_in_tiers: ["restricted"],
+        },
+      ],
+      baseline_exclusion_impacts: { future_api: "Future API access may stop working." },
+    });
+    expect(Object.isFrozen(definition.policyCapability)).toBe(true);
+    expect(Object.isFrozen(definition.policyCapability.owned_presets)).toBe(true);
+    expect(Object.isFrozen(definition.policyCapability.automatic_presets)).toBe(true);
+    expect(Object.isFrozen(definition.policyCapability.baseline_exclusion_impacts)).toBe(true);
+  });
+
+  it("uses an empty policy capability when the package omits policy metadata", () => {
+    expect(buildFromRoot(fixtureRoot).policyCapability).toEqual({
+      owned_presets: [],
+      automatic_presets: [],
+      baseline_exclusion_impacts: {},
+    });
+  });
+});
+
+describe("agent roster manifest metadata", () => {
+  it("projects the fixed managed capability without interpreting native behavior", () => {
+    const manifestPath = writeAgentRoot(fixtureRoot);
+    fs.appendFileSync(
+      manifestPath,
+      [
+        "agent_roster:",
+        "  support: managed",
+        "  adapter: agent-roster",
+        "  onboarding_environment: NEMOCLAW_EXTRA_AGENTS_JSON",
+        "",
+      ].join("\n"),
+    );
+
+    expect(buildFromRoot(fixtureRoot, manifestPath).agentRosterCapability).toEqual({
+      support: "managed",
+      adapter: "agent-roster",
+      onboarding_environment: "NEMOCLAW_EXTRA_AGENTS_JSON",
+    });
+  });
+
+  it("projects null when a package omits the optional capability", () => {
+    expect(buildFromRoot(fixtureRoot).agentRosterCapability).toBeNull();
+  });
+});
+
+describe("managed tool gateway manifest metadata", () => {
+  it("projects the finite package declaration without interpreting harness IDs", () => {
+    const manifestPath = writeAgentRoot(fixtureRoot);
+    fs.appendFileSync(
+      manifestPath,
+      [
+        "tool_gateways:",
+        "  support: managed",
+        "  selection_label: Future managed tools",
+        "  selection_prompt: Managed tools",
+        "  request_environment: [NEMOCLAW_FUTURE_TOOLS]",
+        "  incompatible_auth_message: Future tools require browser login.",
+        "  gateways:",
+        "    - id: future-search",
+        "      aliases: [search]",
+        "      label: Future search",
+        "      description: Search with the future provider",
+        "      default_selected: true",
+        "      authentication_methods: [browser-login]",
+        "      policy_presets: [future-egress]",
+        "",
+      ].join("\n"),
+    );
+
+    const capability = buildFromRoot(fixtureRoot, manifestPath).toolGatewayCapability;
+    expect(capability).toMatchObject({
+      support: "managed",
+      gateways: [{ id: "future-search", aliases: ["search"] }],
+    });
+    expect(Object.isFrozen(capability)).toBe(true);
+  });
+
+  it("projects null when the optional declaration is absent", () => {
+    expect(buildFromRoot(fixtureRoot).toolGatewayCapability).toBeNull();
+  });
 });
 
 describe("dashboard manifest metadata", () => {
@@ -120,6 +268,42 @@ describe("dashboard manifest metadata", () => {
 });
 
 describe("buildAgentDefinition", () => {
+  it("defaults missing lifecycle behavior only for a repository-owned legacy manifest", () => {
+    const manifestPath = writeFile(
+      fixtureRoot,
+      "agents/legacy-test/manifest.yaml",
+      "name: legacy-test\ndisplay_name: Legacy Test\n",
+    );
+    const manifest = loadLegacyRepositoryManifest(manifestPath);
+    const input = { manifest, manifestPath, packageRoot: fixtureRoot };
+
+    expect(() => buildAgentDefinition(input)).toThrow(
+      "Agent manifest field 'state_lifecycle' must be an object",
+    );
+
+    const definition = buildAgentDefinition({
+      ...input,
+      manifestSource: "legacy-repository",
+    });
+
+    expect(definition.stateLifecycle).toEqual({
+      backup_quiescence: { kind: "not-required" },
+      snapshot_restore: [],
+      rebuild: {
+        managed_extensions: {
+          support: "disabled",
+          reason: "The legacy repository manifest does not declare managed extensions.",
+        },
+        scheduled_work: {
+          support: "disabled",
+          reason: "The legacy repository manifest does not declare scheduled work.",
+        },
+        post_restore: { kind: "not-required" },
+      },
+    });
+    expect(Object.isFrozen(definition.stateLifecycle)).toBe(true);
+  });
+
   it("preserves repository definition behavior through the explicit-root builder", () => {
     const packageRoot = path.join(ROOT, "packages/nemoclaw-openclaw");
     const manifestPath = path.join(packageRoot, "manifest.yaml");
@@ -147,11 +331,16 @@ describe("buildAgentDefinition", () => {
           timeout_seconds: 130,
         },
       },
-      web_search: { support: "providers", providers: ["brave", "tavily"] },
+      web_search: {
+        support: "providers",
+        providers: [{ provider: "brave" }, { provider: "tavily" }],
+      },
       inference: {
         refresh_route_for_messaging_providers: ["compatible-endpoint"],
       },
     });
+    expect(definition.inference?.providerApiOverrides).toEqual([]);
+    expect(definition.inference?.contextWindowRequirements).toBeUndefined();
     expect(definition).toMatchObject({
       dockerfileBasePath: path.join(packageRoot, "Dockerfile.base"),
       dockerfilePath: path.join(packageRoot, "Dockerfile"),
@@ -160,6 +349,25 @@ describe("buildAgentDefinition", () => {
       pluginDir: path.join(packageRoot, "plugin"),
       legacyPaths: null,
     });
+  });
+
+  it("projects package inference requirements without using the harness ID", () => {
+    const packageRoot = path.join(ROOT, "packages/nemoclaw-hermes");
+    const manifestPath = path.join(packageRoot, "manifest.yaml");
+    const definition = buildAgentDefinition({
+      manifest: loadValidatedHarnessManifest(manifestPath, "hermes"),
+      manifestPath,
+      packageRoot,
+    });
+
+    expect(definition.inference).toMatchObject({
+      providerApiOverrides: [
+        { provider: "compatible-anthropic-endpoint", api: "openai-completions" },
+      ],
+      contextWindowRequirements: [{ provider: "ollama-local", minimumTokens: 64_000 }],
+    });
+    expect(Object.isFrozen(definition.inference?.providerApiOverrides)).toBe(true);
+    expect(Object.isFrozen(definition.inference?.contextWindowRequirements)).toBe(true);
   });
 
   it("resolves ordinary and legacy assets only from the selected package root", () => {

@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Explicit extension: the Hermes image boundary loads this as native ESM.
 import {
   getMessagingCredentialEnvKeysByChannel,
   listMessagingCredentialEnvAssignments,
 } from "../channels/metadata.ts";
+import { listLegacyMessagingEnvTargets } from "./legacy-credential-cleanup.ts";
 
 /** The single env target every channel renders into. */
 export const HERMES_ENV_RENDER_TARGET = "~/.hermes/.env";
@@ -13,9 +13,14 @@ export const HERMES_ENV_RENDER_TARGET = "~/.hermes/.env";
 /** The parts of a messaging plan this cleanup reads, in either applier's shape. */
 export type CredentialEnvCleanupPlan = {
   readonly agent: string;
+  readonly packageBuild?: unknown;
   readonly credentialBindings: readonly {
     readonly channelId: string;
     readonly providerEnvKey?: unknown;
+  }[];
+  readonly agentRender?: readonly {
+    readonly kind: string;
+    readonly target: string;
   }[];
 };
 
@@ -89,9 +94,13 @@ export function migrationOnlyEnvTargets(
   plan: CredentialEnvCleanupPlan,
   renderedTargets: ReadonlySet<string>,
 ): readonly string[] {
-  const owned =
-    plan.agent === "hermes" &&
-    !renderedTargets.has(HERMES_ENV_RENDER_TARGET) &&
-    ownedCredentialEnvKeys(plan).size > 0;
-  return owned ? [HERMES_ENV_RENDER_TARGET] : [];
+  if (ownedCredentialEnvKeys(plan).size === 0) return [];
+  const declaredTargets = (plan.agentRender ?? [])
+    .filter((entry) => entry.kind === "env-lines")
+    .map((entry) => entry.target);
+  const candidateTargets =
+    declaredTargets.length > 0 || plan.packageBuild !== undefined
+      ? declaredTargets
+      : listLegacyMessagingEnvTargets(plan.agent);
+  return [...new Set(candidateTargets)].filter((target) => !renderedTargets.has(target));
 }

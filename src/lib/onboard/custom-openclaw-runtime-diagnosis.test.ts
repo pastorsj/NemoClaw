@@ -89,10 +89,16 @@ describe("classifyOpenClawRuntimeFailure", () => {
 
 describe("shouldDiagnoseCustomOpenClawRuntime", () => {
   it.each([
-    ["custom OpenClaw Dockerfile", "/tmp/Dockerfile", "openclaw", true],
-    ["stock OpenClaw image", null, "openclaw", false],
-    ["custom Hermes Dockerfile", "/tmp/Dockerfile", "hermes", false],
-  ])("returns the expected gate for a %s", (_name, dockerfile, agent, expected) => {
-    expect(shouldDiagnoseCustomOpenClawRuntime(dockerfile, agent)).toBe(expected);
-  });
+    ["legacy custom OpenClaw Dockerfile", "/tmp/Dockerfile", "openclaw", false, true],
+    ["receipt-backed custom OpenClaw Dockerfile", "/tmp/Dockerfile", "openclaw", true, false],
+    ["stock OpenClaw image", null, "openclaw", false, false],
+    ["custom Hermes Dockerfile", "/tmp/Dockerfile", "hermes", false, false],
+  ])(
+    "returns the expected gate for a %s",
+    (_name, dockerfile, agent, receiptBackedPackage, expected) => {
+      expect(shouldDiagnoseCustomOpenClawRuntime(dockerfile, agent, receiptBackedPackage)).toBe(
+        expected,
+      );
+    },
+  );
 });

@@ -20,22 +20,31 @@ import { describe, expect, test } from "../helpers/owned-test-resources";
 const CORE_COMMIT = "a".repeat(40);
 const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../..");
 
-function writePackage(
-  packagesRoot: string,
-  directoryName: string,
-  packageName: string,
-  harness = true,
-): string {
+function writePackage(packagesRoot: string, directoryName: string, packageName: string): string {
   const packageRoot = path.join(packagesRoot, directoryName);
   fs.mkdirSync(packageRoot, { recursive: true });
   fs.writeFileSync(
     path.join(packageRoot, "package.json"),
     `${JSON.stringify({
       name: packageName,
-      ...(harness ? { nemoclaw: { harnessManifest: "manifest.yaml" } } : {}),
+      nemoclaw: { harnessManifest: "manifest.yaml" },
     })}\n`,
   );
-  if (harness) fs.writeFileSync(path.join(packageRoot, "manifest.yaml"), "name: fixture\n");
+  fs.writeFileSync(path.join(packageRoot, "manifest.yaml"), "name: fixture\n");
+  return packageRoot;
+}
+
+function writeNonHarnessPackage(
+  packagesRoot: string,
+  directoryName: string,
+  packageName: string,
+): string {
+  const packageRoot = path.join(packagesRoot, directoryName);
+  fs.mkdirSync(packageRoot, { recursive: true });
+  fs.writeFileSync(
+    path.join(packageRoot, "package.json"),
+    `${JSON.stringify({ name: packageName })}\n`,
+  );
   return packageRoot;
 }
 
@@ -52,7 +61,7 @@ describe("agent runtime package rehearsal matrix", () => {
     const packagesRoot = resources.temporaryDirectory("nemoclaw-rehearsal-matrix-");
     const zetaRoot = writePackage(packagesRoot, "zeta-directory", "@example/nemoclaw-zeta");
     const alphaRoot = writePackage(packagesRoot, "alpha-directory", "@example/nemoclaw-alpha");
-    writePackage(packagesRoot, "shared-runner", "@example/shared-runner", false);
+    writeNonHarnessPackage(packagesRoot, "shared-runner", "@example/shared-runner");
 
     const plans = buildPackageRehearsalMatrix({
       packagesRoot,

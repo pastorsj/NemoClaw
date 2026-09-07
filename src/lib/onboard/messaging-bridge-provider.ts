@@ -17,8 +17,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import YAML from "yaml";
 
+import { parseMessagingCredentialProviderProfile } from "../agent-runtime/messaging-provider";
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "../adapters/openshell/provider-command";
 import {
   exportedProviderProfileMatchesContract,
@@ -28,9 +28,11 @@ import { registerCheckedInProviderProfile } from "../adapters/openshell/provider
 import { compactText } from "../core/url-utils";
 import { createBuiltInChannelManifestRegistry } from "../messaging/channels";
 import type {
+  ChannelCredentialProviderSpec,
   ChannelManifest,
   ChannelSecretInputSpec,
   MessagingAgentId,
+  SandboxMessagingPlan,
 } from "../messaging/manifest";
 import { ROOT } from "../state/paths";
 import { sleepMs, waitUntil } from "./readiness-wait";
@@ -55,7 +57,22 @@ type RunOpenshell = (
   opts: any,
 ) => { status: number | null; stderr?: string | Buffer | null; stdout?: string | Buffer | null };
 
-type TokenDefShape = { name: string; providerType?: string; token: string | null };
+type TokenDefShape = {
+  name: string;
+  providerType?: string;
+  token: string | null;
+  messagingProviderProfile?: MessagingBridgeProfile;
+};
+
+/** Preserve the package-owned provider projection carried by receipt token definitions. */
+export function messagingBridgeProfilesFromTokenDefs(
+  tokenDefs: readonly TokenDefShape[],
+): MessagingBridgeProfile[] {
+  const profiles = tokenDefs.flatMap((definition) =>
+    definition.messagingProviderProfile ? [definition.messagingProviderProfile] : [],
+  );
+  return [...new Map(profiles.map((profile) => [profile.profileId, profile] as const)).values()];
+}
 
 /** Discovered bridge profile for one channel/agent, parsed from its profile YAML. */
 export interface MessagingBridgeProfile {
@@ -109,6 +126,10 @@ export interface CollectMessagingBridgeTokenDefsInput extends MessagingBridgeSec
   readonly disabledChannelNames: ReadonlySet<string>;
   /** Injected for tests; defaults to convention discovery. */
   readonly profiles?: readonly MessagingBridgeProfile[];
+  /** Keep a secret-free definition so receipt profile checks can validate provider reuse. */
+  readonly includeUnconfiguredProfiles?: boolean;
+  /** Carry the exact receipt projection into core's provider executor. */
+  readonly includeProviderProjection?: boolean;
 }
 
 export interface EnsureMessagingBridgeProfilesDeps {
@@ -240,46 +261,86 @@ function primarySecretEnv(manifest: ChannelManifest): string | null {
   return input?.envKey ?? null;
 }
 
-function parseProfileYaml(
+function parseLegacyProfileYaml(
   content: string,
 ): Omit<MessagingBridgeProfile, "channelId" | "agent" | "profilePath" | "sourceSecretEnv"> | null {
-  let doc: Record<string, unknown> | null;
-  try {
-    doc = YAML.parse(content) as Record<string, unknown> | null;
-  } catch {
-    return null;
+  const parsed = parseMessagingCredentialProviderProfile(content);
+  if (!parsed) return null;
+  return {
+    profileId: parsed.profileId,
+    credentialKey: parsed.credentialEnv,
+    strategy: parsed.refresh?.strategy ?? null,
+    scopes: parsed.refresh?.scopes ?? [],
+    secretMaterialKeys: parsed.refresh?.secretMaterialKeys ?? [],
+  };
+}
+
+function materializeCredentialProvider(
+  channelId: string,
+  agent: MessagingAgentId,
+  packageDirectory: string,
+  provider: ChannelCredentialProviderSpec,
+): MessagingBridgeProfile {
+  const profilePath = path.resolve(packageDirectory, ...provider.profilePath.split("/"));
+  const relative = path.relative(packageDirectory, profilePath);
+  if (relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) {
+    throw new Error("Installed harness messaging provider profile escaped its package directory");
   }
-  const profileId = doc?.id;
-  if (typeof profileId !== "string" || !profileId) return null;
-  const credentials = Array.isArray(doc?.credentials) ? doc?.credentials : null;
-  const credential = credentials?.[0] as Record<string, unknown> | undefined;
-  if (!credential) return null;
-  const envVars = Array.isArray(credential.env_vars) ? credential.env_vars : [];
-  const credentialKey = typeof envVars[0] === "string" ? envVars[0] : null;
-  if (!credentialKey) return null;
-  const refresh = credential.refresh as Record<string, unknown> | undefined;
-  const strategy =
-    typeof refresh?.strategy === "string" && refresh.strategy ? refresh.strategy : null;
-  if (strategy === null && (!Array.isArray(doc?.endpoints) || doc.endpoints.length !== 0)) {
-    return null;
-  }
-  const scopes = Array.isArray(refresh?.scopes)
-    ? refresh.scopes.filter((s): s is string => typeof s === "string")
-    : [];
-  const material = Array.isArray(refresh?.material) ? refresh.material : [];
-  const secretMaterialKeys = material
-    .filter(
-      (m): m is { name: string; secret: true } =>
-        !!m &&
-        (m as { secret?: unknown }).secret === true &&
-        typeof (m as { name?: unknown }).name === "string",
-    )
-    .map((m) => m.name);
-  return { profileId, credentialKey, strategy, scopes, secretMaterialKeys };
+  return Object.freeze({
+    channelId,
+    agent,
+    profilePath,
+    profileId: provider.profileId,
+    credentialKey: provider.credentialEnv,
+    strategy: provider.refresh?.strategy ?? null,
+    scopes: provider.refresh?.scopes ?? [],
+    secretMaterialKeys: provider.refresh?.secretMaterialKeys ?? [],
+    sourceSecretEnv: provider.sourceSecretEnv,
+  });
+}
+
+/** Materialize only package-declared provider profiles from projected channel manifests. */
+export function messagingBridgeProfilesFromChannelManifests(
+  manifests: readonly ChannelManifest[],
+  agent: MessagingAgentId,
+  packageDirectory: string,
+): MessagingBridgeProfile[] {
+  return manifests.flatMap((manifest) =>
+    manifest.credentialProvider
+      ? [
+          materializeCredentialProvider(
+            manifest.id,
+            agent,
+            packageDirectory,
+            manifest.credentialProvider,
+          ),
+        ]
+      : [],
+  );
+}
+
+/** Materialize receipt provider profiles carried by a compiled messaging plan. */
+export function messagingBridgeProfilesFromPlan(
+  plan: SandboxMessagingPlan | null | undefined,
+  packageDirectory: string,
+): MessagingBridgeProfile[] {
+  if (!plan?.packageBuild) return [];
+  return plan.channels.flatMap((channel) =>
+    channel.credentialProvider
+      ? [
+          materializeCredentialProvider(
+            channel.channelId,
+            plan.agent,
+            packageDirectory,
+            channel.credentialProvider,
+          ),
+        ]
+      : [],
+  );
 }
 
 /**
- * Discover the bridge provider profiles by convention: every channel manifest
+ * Legacy-only discovery by convention: every channel manifest
  * whose co-located `provider-profile/<agent>.yaml` exists and parses. Injectable
  * for tests; defaults to the built-in registry + real filesystem.
  */
@@ -298,7 +359,7 @@ export function listMessagingBridgeProfiles(
     for (const agent of manifest.supportedAgents) {
       const profilePath = channelProviderProfilePath(root, manifest.id, agent);
       if (!profilePath || !existsSync(profilePath)) continue;
-      const parsed = parseProfileYaml(readFileSync(profilePath));
+      const parsed = parseLegacyProfileYaml(readFileSync(profilePath));
       if (!parsed) continue;
       profiles.push({ channelId: manifest.id, agent, profilePath, sourceSecretEnv, ...parsed });
     }
@@ -340,10 +401,14 @@ export function staticMessagingProviderTypeForChannel(
   channelId: string,
   agent: string | null | undefined,
   profiles: readonly MessagingBridgeProfile[] = listMessagingBridgeProfiles(),
+  credentialEnv?: string,
 ): string | null {
   return (
     messagingBridgeProfilesForAgent(agent, profiles).find(
-      (profile) => profile.channelId === channelId && profile.strategy === null,
+      (profile) =>
+        profile.channelId === channelId &&
+        profile.strategy === null &&
+        (credentialEnv === undefined || profile.credentialKey === credentialEnv),
     )?.profileId ?? null
   );
 }
@@ -361,24 +426,35 @@ function bridgeProviderNameFor(sandboxName: string, channelId: string): string {
  * until refresh succeeds. The real material is supplied separately by
  * {@link configureMessagingBridgeRefreshes}.
  */
-export function collectMessagingBridgeTokenDefs(
-  input: CollectMessagingBridgeTokenDefsInput,
-): { name: string; envKey: string; token: string; providerType: string }[] {
+export function collectMessagingBridgeTokenDefs(input: CollectMessagingBridgeTokenDefsInput): {
+  name: string;
+  envKey: string;
+  token: string | null;
+  providerType: string;
+  messagingProviderProfile?: MessagingBridgeProfile;
+}[] {
   const profiles = messagingBridgeProfilesForAgent(input.agent, input.profiles).filter(
     hasRefreshStrategy,
   );
-  const defs: { name: string; envKey: string; token: string; providerType: string }[] = [];
+  const defs: {
+    name: string;
+    envKey: string;
+    token: string | null;
+    providerType: string;
+    messagingProviderProfile?: MessagingBridgeProfile;
+  }[] = [];
   for (const profile of profiles) {
     if (input.disabledChannelNames.has(profile.channelId)) continue;
     if (input.enabledChannels != null && !input.enabledChannels.includes(profile.channelId))
       continue;
     const secret = resolveBridgeSecret(profile.sourceSecretEnv, input);
-    if (!secret) continue;
+    if (!secret && input.includeUnconfiguredProfiles !== true) continue;
     defs.push({
       name: bridgeProviderNameFor(input.sandboxName, profile.channelId),
       envKey: profile.credentialKey,
-      token: MESSAGING_BRIDGE_PENDING_VALUE,
+      token: secret ? MESSAGING_BRIDGE_PENDING_VALUE : null,
       providerType: profile.profileId,
+      ...(input.includeProviderProjection ? { messagingProviderProfile: profile } : {}),
     });
   }
   return defs;

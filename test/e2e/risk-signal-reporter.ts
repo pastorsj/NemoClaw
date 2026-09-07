@@ -12,13 +12,12 @@ import {
   type LiveTestOutcome,
   writeLiveTestOutcome,
 } from "../../tools/e2e/live-test-outcome.mts";
-import { readPrivateRegularFile, writePrivateRegularFile } from "../../tools/e2e/private-file.mts";
 import {
-  buildRiskSignal,
   configuredRiskSignalEnvironment,
   type E2eRiskSignal,
   RISK_SIGNAL_FILE,
   type RiskSignalEnvironment,
+  writeRiskSignalCounts,
 } from "../../tools/e2e/risk-signal.ts";
 
 export { RISK_SIGNAL_FILE, type RiskSignalEnvironment };
@@ -101,42 +100,6 @@ export function outcomeForRun(
   });
 }
 
-function mergeSignal(previous: E2eRiskSignal | null, current: E2eRiskSignal): E2eRiskSignal {
-  if (!previous) return current;
-  if (
-    previous.version !== current.version ||
-    previous.jobId !== current.jobId ||
-    previous.shardId !== current.shardId ||
-    previous.expectedSha !== current.expectedSha ||
-    previous.testedSha !== current.testedSha ||
-    previous.correlationId !== current.correlationId
-  ) {
-    throw new Error("risk signal metadata changed between Vitest invocations");
-  }
-  // Each call represents a separate Vitest command in the same job/shard;
-  // Vitest has already collapsed retries inside that command. Summing keeps
-  // failures sticky, because any failed or unhandled count makes the gate red.
-  return {
-    ...current,
-    passed: previous.passed + current.passed,
-    failed: previous.failed + current.failed,
-    skipped: previous.skipped + current.skipped,
-    pending: previous.pending + current.pending,
-    unhandledErrors: previous.unhandledErrors + current.unhandledErrors,
-    runReason:
-      previous.runReason === "failed" || current.runReason === "failed"
-        ? "failed"
-        : previous.runReason === "interrupted" || current.runReason === "interrupted"
-          ? "interrupted"
-          : "passed",
-  };
-}
-
-function readPrevious(file: string): E2eRiskSignal | null {
-  const contents = readPrivateRegularFile(file, { allowMissing: true, maxBytes: 64 * 1024 });
-  return contents === null ? null : (JSON.parse(contents) as E2eRiskSignal);
-}
-
 export function writeRiskSignal(
   environment: RiskSignalEnvironment,
   testModules: ReadonlyArray<TestModule>,
@@ -144,16 +107,11 @@ export function writeRiskSignal(
   runReason: TestRunEndReason,
   testNamePattern?: RegExp,
 ): E2eRiskSignal {
-  const signal = buildRiskSignal(environment, {
+  return writeRiskSignalCounts(environment, {
     ...counts(testModules, testNamePattern),
     unhandledErrors: unhandledErrors.length,
     runReason,
   });
-  fs.mkdirSync(environment.artifactDir, { recursive: true });
-  const file = path.join(environment.artifactDir, RISK_SIGNAL_FILE);
-  const merged = mergeSignal(readPrevious(file), signal);
-  writePrivateRegularFile(file, `${JSON.stringify(merged, null, 2)}\n`);
-  return merged;
 }
 
 export default class E2eRiskSignalReporter implements Reporter {

@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { HarnessWebSearchProviderBinding } from "@nvidia/nemoclaw-harness-contract";
 
 import {
   classifyWebSearchEnvBoundary,
@@ -27,7 +30,141 @@ function deps(output: string | null | Array<string | null>) {
   } satisfies WebSearchVerifyDeps;
 }
 
+const FUTURE_SEARCH_BINDING: HarnessWebSearchProviderBinding = {
+  provider: "tavily",
+  credential_env: "TAVILY_API_KEY",
+  profile_type: "future-search",
+  config_verification: {
+    path: "/sandbox/.future/search.json",
+    format: "json",
+    assertions: [
+      { path: ["integration", "enabled"], equals: true },
+      { path: ["integration", "provider"], equals: "tavily" },
+    ],
+    credential_paths: [["integration", "apiKey"]],
+  },
+  egress_verification: {
+    method: "POST",
+    url: "https://search.example.test/query",
+    parameters: [
+      { name: "query", value: "NVIDIA" },
+      { name: "limit", value: 1 },
+    ],
+    credential: { kind: "header", name: "Authorization", prefix: "bearer" },
+    result_array_path: ["payload", "items"],
+  },
+};
+
+const FUTURE_SEARCH_AGENT = {
+  name: "future-harness",
+  packageRoot: path.join(process.cwd(), "node_modules/.cache/nemoclaw-web-search-verify"),
+  web_search: { support: "providers" as const, providers: [FUTURE_SEARCH_BINDING] },
+};
+
 describe("verifyWebSearchInsideSandbox", () => {
+  beforeAll(() => {
+    const profileDirectory = path.join(FUTURE_SEARCH_AGENT.packageRoot, "provider-profiles");
+    fs.mkdirSync(profileDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(profileDirectory, "future-search.yaml"),
+      [
+        "id: future-search",
+        "credentials:",
+        "  - name: api_key",
+        "    env_vars: [TAVILY_API_KEY]",
+        "    auth_style: bearer",
+        "    header_name: authorization",
+        "endpoints:",
+        "  - host: search.example.test",
+        "    port: 443",
+        "binaries: [/usr/bin/curl]",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  afterAll(() => fs.rmSync(FUTURE_SEARCH_AGENT.packageRoot, { recursive: true, force: true }));
+
+  it("verifies a future receipt-backed package entirely from its declaration", () => {
+    const d = deps([
+      "__nemoclaw_wsenv__:absent",
+      JSON.stringify({
+        integration: {
+          enabled: true,
+          provider: "tavily",
+          apiKey: "openshell:resolve:env:TAVILY_API_KEY",
+        },
+      }),
+      `${JSON.stringify({ payload: { items: [{ title: "NVIDIA" }] } })}\nHTTP_STATUS:200\n`,
+    ]);
+
+    const safe = verifyWebSearchInsideSandbox("alpha", FUTURE_SEARCH_AGENT, "tavily", d, true);
+
+    expect(safe).toBe(true);
+    expect(d.runCaptureOpenshell.mock.calls[1][0].slice(0, 7)).toEqual([
+      "sandbox",
+      "exec",
+      "-n",
+      "alpha",
+      "--",
+      "sh",
+      "-c",
+    ]);
+    expect(d.runCaptureOpenshell.mock.calls[1][0][7]).toContain('test ! -L "$1"');
+    expect(d.runCaptureOpenshell.mock.calls[1][0][7]).toContain('test "$resolved" = "$1"');
+    expect(d.runCaptureOpenshell.mock.calls[1][0].at(-1)).toBe("/sandbox/.future/search.json");
+    const probeArguments = d.runCaptureOpenshell.mock.calls[2][0];
+    expect(probeArguments[5]).toBe("/usr/bin/curl");
+    expect(probeArguments).toContain("https://search.example.test/query");
+    expect(probeArguments).not.toContain("--location");
+    expect(probeArguments).toContain("Authorization: Bearer openshell:resolve:env:TAVILY_API_KEY");
+    expect(d.log).toHaveBeenCalledWith("  ✓ Tavily Search egress verified inside sandbox");
+    expect(d.warn).not.toHaveBeenCalledWith(expect.stringContaining("not implemented"));
+  });
+
+  it("never copies a receipt-backed config secret into commands or diagnostics", () => {
+    const secret = "literal-secret-must-not-leave-config";
+    const d = deps([
+      "__nemoclaw_wsenv__:absent",
+      JSON.stringify({
+        integration: { enabled: true, provider: "tavily", apiKey: secret },
+      }),
+    ]);
+
+    const safe = verifyWebSearchInsideSandbox("alpha", FUTURE_SEARCH_AGENT, "tavily", d, true);
+
+    expect(safe).toBe(true);
+    expect(d.runCaptureOpenshell).toHaveBeenCalledTimes(2);
+    expect(d.runCaptureOpenshell.mock.calls.flatMap(([args]) => args).join("\n")).not.toContain(
+      secret,
+    );
+    expect(d.warn.mock.calls.flat().join("\n")).not.toContain(secret);
+    expect(d.warn).toHaveBeenCalledWith(
+      "  ⚠ Tavily Search config does not contain its declared OpenShell placeholder.",
+    );
+  });
+
+  it("rejects a receipt recipe whose host is outside the package-owned profile", () => {
+    const outsideUrl: `https://${string}` = "https://outside.example.test/query";
+    const d = deps("should-not-run");
+    const outsideAgent = {
+      ...FUTURE_SEARCH_AGENT,
+      web_search: {
+        support: "providers" as const,
+        providers: [
+          {
+            ...FUTURE_SEARCH_BINDING,
+            egress_verification: { ...FUTURE_SEARCH_BINDING.egress_verification, url: outsideUrl },
+          },
+        ],
+      },
+    };
+
+    expect(verifyWebSearchInsideSandbox("alpha", outsideAgent, "tavily", d, true)).toBe(false);
+    expect(d.runCaptureOpenshell).not.toHaveBeenCalled();
+    expect(d.warn.mock.calls.flat().join("\n")).not.toContain(outsideUrl);
+  });
+
   it("verifies Hermes Tavily egress through JSON body credential rewriting", () => {
     // Before config diagnostics and the egress probe, the secret-boundary check
     // classifies the selected env var in-sandbox.
@@ -456,7 +593,9 @@ describe("verifyWebSearchInsideSandbox", () => {
 
     verifyWebSearchInsideSandbox("alpha", { name: "openclaw" }, "brave", d);
 
-    expect(d.warn.mock.calls.every((call) => !String(call[0] ?? "").includes("SECURITY"))).toBe(true);
+    expect(d.warn.mock.calls.every((call) => !String(call[0] ?? "").includes("SECURITY"))).toBe(
+      true,
+    );
     expect(d.log).toHaveBeenCalledWith("  ✓ Brave Search egress verified inside sandbox");
   });
 });

@@ -3570,9 +3570,13 @@ For contributor guidance on how these command files are structured, refer to `sr
 | `$$nemoclaw internal dns fix-coredns` | onboarding / sandbox setup | Patch CoreDNS to use a non-loopback upstream resolver. |
 | `$$nemoclaw internal dev npm-link-or-shim` | `scripts/npm-link-or-shim.sh` (development) | Run `npm link`, falling back to a user-local NemoClaw development shim. |
 
-These commands do not appear in the command-level parity check, which compares `$$nemoclaw --help` against the public command headings in this reference; hidden commands are excluded from both. The table above is the canonical reference for the script-backed family. The experimental adapter is documented separately because it has no owning script.
+These commands do not appear in the command-level parity check, which compares `$$nemoclaw --help` against the public command headings in this reference; hidden commands are excluded from both.
+The table above is the canonical reference for the script-backed family.
+The experimental adapter is documented separately because it has no owning script.
 
-`$$nemoclaw internal voice-gateway serve` is registered for the OpenClaw-only experimental adapter described below. Hermes and Deep Agents Code do not have an equivalent adapter.
+`$$nemoclaw internal voice-gateway serve` is registered for the experimental adapter described below.
+The current OpenClaw package declares the required semantic-turn command.
+Hermes and Deep Agents Code do not declare one.
 
 <AgentOnly variant="openclaw">
 
@@ -3580,38 +3584,86 @@ These commands do not appear in the command-level parity check, which compares `
 
 <Warning>
 
-This hidden command is an experimental implementation detail, not a supported NemoClaw product surface or public protocol. Do not expose its listener through a port forward, proxy, or public ingress.
+This hidden command is an experimental implementation detail, not a supported NemoClaw product surface or public protocol.
+Do not expose its listener through a port forward, proxy, or public ingress.
 
 </Warning>
 
-This foreground command runs a private HTTP adapter that streams newline-delimited JSON (NDJSON) responses. It accepts one authenticated runtime deployment and at most one active voice session. Each voice session accepts one committed text turn. NemoClaw selects the runtime profile, sandbox, and OpenClaw agent from command-line configuration. The runtime cannot select an agent, OpenClaw session key, upstream URL, or forwarding destination.
+This foreground command runs a private HTTP adapter that streams newline-delimited JSON (NDJSON) responses.
+It accepts one authenticated runtime deployment and at most one active voice session.
+Each voice session accepts one committed text turn.
+The trusted launcher fixes the runtime deployment, runtime profile, sandbox, and package target.
+It resolves the semantic-turn command, timeout, package receipt, gateway, and sandbox lifecycle authority from NemoClaw state.
+The runtime cannot select an agent, package session key, native endpoint, or forwarding destination.
 
-The command requires the exact feature gate `NEMOCLAW_EXPERIMENTAL_VOICE_GATEWAY=1`. Any other value stops the command before argument parsing, credential reads, or listener creation. Other experimental feature gates do not enable this command.
+The launcher sets the exact feature gate `NEMOCLAW_EXPERIMENTAL_VOICE_GATEWAY=1` for its child.
+Any other value stops the command before argument parsing, credential reads, or listener creation.
+Other experimental feature gates do not enable this command.
 
-Before starting the adapter, the bounded voice-gateway launcher opens two owner-only regular files without following symbolic links and maps only these inherited file descriptors into the child process:
+Before starting the adapter, the bounded voice-gateway launcher opens one owner-only regular file without following symbolic links.
+It maps only this inherited file descriptor into the child process:
 
 - Descriptor `3` supplies the deployment credential used during session admission.
-- Descriptor `4` supplies the OpenClaw credential with `operator.read` and `operator.write` scopes.
 
-The descriptor numbers are fixed and are not configurable flags. The command rejects missing, duplicate, non-regular, wrong-owner, group-accessible, malformed, and oversized inputs. It reads each descriptor once and closes both before accepting traffic. Both credential values remain in process memory until the voice-gateway process stops. The launcher does not place credential source paths or values in arguments or environment variables. It intentionally inherits only credential descriptors `3` and `4` across this exec, then closes its parent copies. To rotate either credential, stop the command and restart it with newly opened descriptors. NemoClaw does not send the OpenClaw credential to the runtime. The trusted caller selects each credential source path and invokes the launcher. That caller must create, replace, and remove each source file and revoke old credential values. The launcher opens each source file, maps the inherited child descriptors, and closes its parent copies. The child validates, reads, and closes descriptors `3` and `4` before it accepts traffic. Closing the descriptors or stopping the gateway does not remove a source file or revoke its credential.
+The descriptor number is fixed and is not a configurable flag.
+The command rejects a missing, non-regular, wrong-owner, group-accessible, malformed, or oversized input.
+It reads the descriptor once and closes it before accepting traffic.
+The deployment credential remains in process memory until the voice-gateway process stops.
+The launcher does not place its credential source path or value in arguments or environment variables.
+It inherits only credential descriptor `3` across this exec, then closes its parent copy.
+To rotate the deployment credential, stop the command and restart it with a newly opened descriptor.
+The trusted caller must create, replace, remove, and revoke the credential source.
+Closing the descriptor or stopping the gateway does not remove the source file or revoke its value.
 
-The launcher is an internal library boundary for trusted external integrations, not another CLI command and not part of normal NemoClaw managed startup. Callers use the shipped `runVoiceGatewayLaunch()` action with trusted source paths and runtime fields; package-contract coverage launches the real internal command through that production entry point and verifies descriptor cleanup and restart-based credential rotation. If parent descriptor cleanup fails and bounded termination does not observe child exit, the action throws `VoiceGatewayTerminationUnconfirmedError` with the retained child handle and original cleanup failure. The trusted caller must recognize that error, terminate and reap its `child`, and confirm exit before starting another gateway. The launcher emits the following child-process contract with no credential paths or values in its arguments or environment. Do not run this child command directly because it requires the launcher's descriptor mapping.
+The launcher is an internal library boundary for trusted external integrations, not another public CLI command or part of normal NemoClaw managed startup.
+Callers use the shipped `runVoiceGatewayLaunch()` action with trusted source paths and runtime fields.
+Package-contract coverage launches the real internal command through that production entry point and verifies descriptor cleanup and restart-based credential rotation.
+If parent descriptor cleanup fails and bounded termination does not observe child exit, the action throws `VoiceGatewayTerminationUnconfirmedError` with the retained child handle and original cleanup failure.
+The trusted caller must recognize that error, terminate and reap its `child`, and confirm exit before starting another gateway.
+The launcher emits the following child-process contract with no credential paths or values in its arguments or environment.
+The authority and timeout arguments are generated by core and are not caller configuration.
+Do not run this child command directly because it requires the launcher's descriptor mapping and captured authority.
 
 ```text
 NEMOCLAW_EXPERIMENTAL_VOICE_GATEWAY=1 $$nemoclaw internal voice-gateway serve \
-  --gateway-url ws://127.0.0.1:18789/ws \
   --runtime-identity <deployment-identity> \
   --runtime-profile <runtime-profile-id> \
   --sandbox <sandbox-name> \
-  --agent <openclaw-agent-id> \
+  --sandbox-authority <launcher-generated-binding> \
+  --agent <package-agent-id> \
+  --turn-timeout-ms <receipt-declared-timeout-ms> \
   --listen-port 18800
 ```
 
-The `--gateway-url` value must use `ws://`, an explicit port, the `/ws` path, and a loopback IP address literal. The URL must not contain credentials, a query string, or a fragment. The adapter binds only to `127.0.0.1` and uses port `18800` when you omit `--listen-port`. The JSON diagnostic with `"event":"voice_gateway"` and `"state":"listening"` confirms that the adapter acquired the configured loopback listener.
+The adapter binds only to `127.0.0.1` and uses port `18800` when you omit `--listen-port`.
+The JSON diagnostic with `"event":"voice_gateway"` and `"state":"listening"` confirms that the adapter acquired the configured loopback listener.
 
-The runtime must keep the raw session grant in process memory. NemoClaw keeps only the digest needed for constant-time grant validation. Sequential sessions for the same runtime conversation reuse the same internal OpenClaw context. A different runtime conversation, runtime identity, runtime profile, sandbox, or agent uses a separate context. NemoClaw derives the internal context key without exposing the raw runtime conversation ID. When the session closes or expires, the runtime must discard the raw grant, and NemoClaw removes its validation digest from active session state. The process owns the OpenClaw session binding, turn state, and response correlation. It clears that state when the session closes or expires and when the foreground process stops. Normal onboarding and managed startup do not start or supervise this command.
+For each committed turn, NemoClaw takes the sandbox mutation lock and resolves the published sandbox authority again.
+The package must declare a managed `runtime.semantic_turn` command that uses the `semantic-turn-ndjson` protocol.
+NemoClaw refuses a change to the sandbox, exact package receipt, gateway name or port, lifecycle generation, or live identity fingerprint.
+It sends the request through OpenShell standard input, enforces the package timeout and core stream limits, and cancels the command when the session closes.
+The package command can return only `started`, `text`, `completed`, or `failed` events.
+An absent declaration, unpublished registration, changed receipt, malformed event, or native command failure fails the turn without loading harness code into core.
 
-The adapter exchanges committed text and normalized response events only. It does not implement audio, WebRTC, RTVI, voice activity detection, speech recognition, speech synthesis, playback, or runtime-specific UI behavior. It also does not establish VoiceClaw, ElevenLabs, Hermes, or general voice support.
+The OpenClaw package implements this command with `runtime/semantic-turn.sh` and `runtime/semantic-turn.mts`.
+The shell wrapper accepts only the protected gateway environment created by OpenClaw managed startup.
+The TypeScript adapter maps the opaque conversation key and package target into OpenClaw's session grammar.
+It keeps the OpenClaw credential, WebSocket frames, native traffic limits, response correlation, and run ID inside the package.
+
+The runtime must keep the raw session grant in process memory.
+NemoClaw keeps only the digest needed for constant-time grant validation.
+Sequential sessions for the same runtime conversation reuse the same internal package context.
+A different runtime conversation, runtime identity, runtime profile, sandbox, or agent uses a separate context.
+NemoClaw derives the internal context key without exposing the raw runtime conversation ID.
+When the session closes or expires, the runtime must discard the raw grant, and NemoClaw removes its validation digest from active session state.
+The core gateway process owns voice-session admission, the one-turn state machine, and the opaque conversation key.
+The package command owns only its native session mapping and response correlation for that turn.
+Core clears the voice-session state when the session closes or expires and when the foreground process stops.
+Normal onboarding and managed startup do not start or supervise this command.
+
+The adapter exchanges committed text and normalized response events only.
+It does not implement audio, WebRTC, RTVI, voice activity detection, speech recognition, speech synthesis, playback, or runtime-specific UI behavior.
+It also does not establish VoiceClaw, ElevenLabs, Hermes, or general voice support.
 
 </AgentOnly>
 <AgentOnly variant="hermes,deepagents">

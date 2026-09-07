@@ -13,7 +13,7 @@ import { fingerprintBuildContext } from "../../adapters/fs/build-context-fingerp
 import type { AgentDefinition } from "../../agent/defs";
 import { createAgentSandbox } from "../../agent/onboard";
 import type { WebSearchConfig } from "../../inference/web-search";
-import type { SandboxMessagingPlan } from "../../messaging";
+import type { ChannelManifest, SandboxMessagingPlan } from "../../messaging";
 import { stageCreateSandboxBuildContext } from "../../onboard/build-context-stage";
 import { patchStagedDockerfileMessagingPlan } from "../../onboard/dockerfile-patch";
 import {
@@ -31,6 +31,7 @@ import {
 } from "../../sandbox-base-image";
 import type { PreservedEnvFile } from "../../state/preserved-env";
 import type { ToolDisclosure } from "../../tool-disclosure";
+import type { PackageDockerfilePlan } from "../../onboard/package/dockerfile-patch";
 import {
   createBuildContextVerifier,
   createIdempotentBuildContextCleanup,
@@ -48,6 +49,10 @@ type PreflightInput = {
   compatibleEndpointReasoning: "true" | "false" | null;
   compatibleEndpointReasoningEffort: ReasoningEffort | null;
   webSearchConfig: WebSearchConfig | null;
+  /** Exact composed manifests required when the staged environment plan is receipt-backed. */
+  messagingManifests?: readonly ChannelManifest[];
+  /** Complete fallback inputs rendered by the receipt-pinned package adapter. */
+  packageDockerfilePlan?: PackageDockerfilePlan;
   toolDisclosure: ToolDisclosure;
   hermesToolGateways: string[];
   sandboxGpuConfig: SandboxGpuConfig;
@@ -77,6 +82,8 @@ export type RebuildImagePreflightResult =
 
 type FinalizePreparedImageDeps = {
   patchMessagingPlan?: typeof patchStagedDockerfileMessagingPlan;
+  /** Exact composed manifests required when the rebuild plan is receipt-backed. */
+  messagingManifests?: readonly ChannelManifest[];
   buildImage?: typeof dockerBuild;
   removeImage?: typeof dockerRmi;
   registerExitHandler?: (listener: () => void) => void;
@@ -210,6 +217,8 @@ export async function preflightRebuildImage(
       provider: input.provider,
       preferredInferenceApi: input.preferredInferenceApi,
       webSearchConfig: input.webSearchConfig,
+      messagingManifests: input.messagingManifests,
+      packageDockerfilePlan: input.packageDockerfilePlan,
       toolDisclosure: input.toolDisclosure,
       hermesToolGateways: input.hermesToolGateways,
       sandboxGpuConfig: input.sandboxGpuConfig,
@@ -291,7 +300,12 @@ export function finalizePreparedRebuildImageMessagingPlan(
   const imageTag = `nemoclaw-rebuild-finalize:${String(process.pid)}-${String(Date.now())}`;
   let imageBuilt = false;
   try {
-    patchMessagingPlan(prepared.stagedDockerfile, messagingPlan, preservedEnv);
+    patchMessagingPlan(
+      prepared.stagedDockerfile,
+      messagingPlan,
+      preservedEnv,
+      deps.messagingManifests,
+    );
     const contextFingerprint = fingerprintBuildContext(prepared.buildCtx);
     const result = buildReplacementImage(
       prepared.stagedDockerfile,

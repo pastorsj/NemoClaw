@@ -82,7 +82,18 @@
       "required": ["name", "type", "inference"],
       "properties": {
         "name": { "$ref": "#/$defs/name" },
-        "type": { "const": "openclaw" },
+        "type": { "$ref": "#/$defs/name" },
+        "package": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id", "packageVersion", "contentDigest"],
+          "properties": {
+            "kind": { "const": "agent-runtime" },
+            "id": { "$ref": "#/$defs/name" },
+            "packageVersion": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "contentDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
         "inference": {
           "type": "object",
           "additionalProperties": false,

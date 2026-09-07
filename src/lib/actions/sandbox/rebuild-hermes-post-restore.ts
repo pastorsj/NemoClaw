@@ -5,6 +5,7 @@ import { CLI_NAME } from "../../cli/branding";
 import type { OpenShellRuntimeSelection } from "../../adapters/openshell/runtime";
 import type { AgentDefinition } from "../../agent/defs";
 import type { HarnessScheduledWorkDeclaration } from "@nvidia/nemoclaw-harness-contract";
+import { isImmutableSandboxCommandPath } from "@nvidia/nemoclaw-harness-contract/manifest-validator";
 import { isDirectSandboxFallbackUnavailableError } from "../../sandbox/privileged-exec";
 import type { GatewayRestartResult } from "./gateway-restart";
 import {
@@ -643,6 +644,9 @@ function executeCronRestoreControl(
   replacementIdentity?: HermesCronRestoreIdentity,
 ): string {
   const controllerLabel = scheduledWorkControllerLabel(declaration);
+  if (!isImmutableSandboxCommandPath(declaration.controller.command[0] as string)) {
+    throw new Error(`${controllerLabel} command is not stored in the immutable image`);
+  }
   const command = [...declaration.controller.command, action];
   if (identity) {
     command.push("--pid", String(identity.pid), "--start-time", String(identity.start_time));

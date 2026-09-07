@@ -146,11 +146,37 @@ describe("rebuild filesystem restore", () => {
       agentDefinition: HERMES_DEFINITION,
       targetImageIsCustom: false,
       backupManifest,
+      reconcileLegacyDashboard: true,
       log,
     });
 
     expect(migrate).toHaveBeenCalledWith("hermes", target);
-    expect(log).toHaveBeenCalledWith("Hermes dashboard state after restore: converged");
+    expect(log).toHaveBeenCalledWith("Legacy dashboard state after restore: converged");
+    expect(result).toEqual({ restoreSucceeded: true });
+  });
+
+  it("leaves receipt-backed Hermes dashboard reconciliation to the package post-restore hook", () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(snapshotRestore, "restoreRecreatedSandboxStateWithManagedAuthority").mockReturnValue({
+      success: true,
+      restoredDirs: ["dashboard-home"],
+      restoredFiles: [],
+      failedDirs: [],
+      failedFiles: [],
+    });
+    const resolveConfig = vi.spyOn(sandboxConfig, "resolveAgentConfig");
+    const migrate = vi.spyOn(sandboxConfig, "restoreHermesDashboardConfig");
+
+    const result = runRebuildRestorePhase({
+      sandboxName: "hermes",
+      agentDefinition: HERMES_DEFINITION,
+      targetImageIsCustom: false,
+      backupManifest,
+      log: vi.fn(),
+    });
+
+    expect(resolveConfig).not.toHaveBeenCalled();
+    expect(migrate).not.toHaveBeenCalled();
     expect(result).toEqual({ restoreSucceeded: true });
   });
 
@@ -178,6 +204,7 @@ describe("rebuild filesystem restore", () => {
       agentDefinition: HERMES_DEFINITION,
       targetImageIsCustom: false,
       backupManifest,
+      reconcileLegacyDashboard: true,
       log: vi.fn(),
     });
 

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
+import { requireResolvedContainerId } from "../../../tools/e2e/container-id.mts";
 import { assertExitZero as expectExitZero } from "../fixtures/clients/command.ts";
 import { type HostCliClient, resultText } from "../fixtures/clients/index.ts";
 import { expect } from "../fixtures/e2e-test.ts";
@@ -38,7 +39,6 @@ const RESOLVE_SANDBOX_CONTAINER_PROGRAM = [
   "const { resolveDirectSandboxContainer } = require(modulePath);",
   'process.stdout.write(`${resolveDirectSandboxContainer(sandboxName, "docker")}\\n`);',
 ].join("\n");
-const DOCKER_CONTAINER_ID = /^[a-f0-9]{64}$/u;
 
 type JsonObject = Record<string, unknown>;
 
@@ -260,12 +260,7 @@ export async function resolveHermesSandboxContainer({
       timeoutMs,
     },
   );
-  expectExitZero(result, `resolve registered sandbox container for ${sandboxName}`);
-  const containerId = result.stdout.trim();
-  if (!DOCKER_CONTAINER_ID.test(containerId)) {
-    fail(`registered sandbox container resolver returned an invalid immutable ID`);
-  }
-  return containerId;
+  return requireResolvedContainerId(result, sandboxName);
 }
 
 function scriptContent(executionMarker: string, executionToken: string): string {

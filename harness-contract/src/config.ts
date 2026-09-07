@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { HarnessManagedExtension } from "./state.js";
+
 /** Inference and mutable-configuration requests translated by a package adapter. */
 export type HarnessSandboxReconcileTrigger = "after-config-sync" | "when-config-changes";
 
@@ -23,6 +25,12 @@ export interface HarnessInferencePostCommitDeclaration {
 export interface HarnessInferenceApiOverride {
   readonly provider: string;
   readonly api: HarnessInferenceApi;
+}
+
+/** One harness requirement that a core-owned local inference runtime must satisfy. */
+export interface HarnessInferenceContextWindowRequirement {
+  readonly provider: "ollama-local";
+  readonly minimum_tokens: number;
 }
 
 export type HarnessInferenceConfigDeclaration =
@@ -188,17 +196,12 @@ export type HarnessMutableConfigPlan =
     }
   | { readonly kind: "probe"; readonly probe: HarnessExitZeroCommand };
 
-export interface HarnessImagePluginInstall {
-  readonly id: string;
-  readonly loadPaths: readonly string[];
-}
-
 export interface HarnessConfigRestoreRequest {
   readonly backupContent: string;
   readonly currentContent: string | null;
   readonly managedChannelNames: readonly string[];
-  readonly previousImagePluginInstalls: readonly HarnessImagePluginInstall[] | null;
-  readonly freshImagePluginInstalls: readonly HarnessImagePluginInstall[] | null;
+  readonly previousManagedExtensions: readonly HarnessManagedExtension[] | null;
+  readonly freshManagedExtensions: readonly HarnessManagedExtension[] | null;
 }
 
 export type HarnessConfigRestoreWritePlan =

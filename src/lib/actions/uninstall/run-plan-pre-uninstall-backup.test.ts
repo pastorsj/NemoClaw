@@ -261,4 +261,43 @@ describe("pre-uninstall sandbox backup", () => {
     expect(backup).not.toHaveBeenCalled();
     expect(fixture.events).toEqual(["delete"]);
   });
+
+  it("stops a no-backup uninstall when the locked registration replaced its snapshot", async () => {
+    const fixture = createFixture();
+    const withSandboxMutationLock: NonNullable<
+      UninstallRunDeps["withSandboxMutationLock"]
+    > = async (_sandboxName, operation) => {
+      const registry = JSON.parse(fs.readFileSync(fixture.registryFile, "utf8"));
+      registry.sandboxes.alpha.lifecycleGeneration = "replacement-generation";
+      registry.sandboxes.alpha.harnessPackage = {
+        kind: "agent-runtime",
+        id: "replacement-harness",
+        packageVersion: "2.0.0",
+        contentDigest: "d".repeat(64),
+      };
+      fs.writeFileSync(fixture.registryFile, `${JSON.stringify(registry)}\n`);
+      return operation();
+    };
+
+    const result = await runUninstallPlanProduction(
+      {
+        assumeYes: true,
+        deleteModels: false,
+        destroyUserData: true,
+        keepOpenShell: true,
+      },
+      { ...fixture.deps, withSandboxMutationLock },
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(fixture.events).toEqual([]);
+    expect(fixture.errors).toContain(
+      "Sandbox registrations changed while acquiring mutation locks. Uninstall stopped before cleanup; rerun it to capture current sandbox state.",
+    );
+    const current = JSON.parse(fs.readFileSync(fixture.registryFile, "utf8"));
+    expect(current.sandboxes.alpha).toMatchObject({
+      lifecycleGeneration: "replacement-generation",
+      harnessPackage: { id: "replacement-harness", packageVersion: "2.0.0" },
+    });
+  });
 });

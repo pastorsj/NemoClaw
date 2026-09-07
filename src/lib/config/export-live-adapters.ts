@@ -16,6 +16,7 @@ import { syncCliOpenShellSandboxPolicyReader } from "../adapters/openshell/sandb
 import { getLiveGatewayInference } from "../inference/live";
 import { normalizeInferenceSelection } from "../inference/selection";
 import { resolveGatewayName } from "../onboard/gateway-binding/identity";
+import { resolveSandboxAgent } from "../onboard/sandbox-agent/authority";
 import {
   managedGatewayStateRootOwnershipFailure,
   resolveGatewayStateDirForPort,
@@ -225,6 +226,16 @@ export function createLiveExportObservationDependencies(): ExportObservationDepe
   return {
     sourceTokenFor,
     readRegistryEntry: async (sandboxName) => loadRegistry().sandboxes[sandboxName] ?? null,
+    resolveHarnessPackageAuthority: async (entry) => {
+      if (entry.harnessPackage === undefined && entry.harnessPackageMigration === undefined) {
+        return null;
+      }
+      const authority = resolveSandboxAgent(entry);
+      if (!authority.harnessPackage) {
+        throw new Error("The registry row has no current harness package authority.");
+      }
+      return authority.harnessPackage;
+    },
     readSandboxIdentity: async (sandboxName) => {
       const entry = loadRegistry().sandboxes[sandboxName] ?? null;
       if (!entry) throw new Error("The source sandbox is not registered.");

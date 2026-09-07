@@ -18,51 +18,29 @@ import * as stateLifecycle from "./state-lifecycle";
 import { runRebuildPostRestorePhase } from "./rebuild-post-restore-phase";
 import * as sessionModels from "./reconcile-session-models";
 import * as restoredGatewayPairing from "./restore-gateway-pairing";
+import {
+  createPostRestoreAgentAuthority,
+  createPostRestoreInput,
+  createPostRestoreOnboardSession,
+  createPostRestoreRegistryEntry,
+  type RebuildPostRestoreAgent,
+} from "../../../../test/helpers/rebuild-post-restore-fixture";
 
 describe("rebuild post-restore phase", () => {
-  let agentName: "openclaw" | "hermes" | "langchain-deepagents-code" | "pi";
+  let agentName: RebuildPostRestoreAgent;
   let agentExpectedVersion: string | undefined;
   let order: string[];
 
   function currentAgentAuthority() {
-    const legacyProfile = makeRebuildAgentAuthority(agentName === "openclaw" ? null : agentName);
-    // The native action-list cases below are historical compatibility tests.
-    // Keep them on explicit repository/no-receipt authority so a receipt can
-    // never select the native OpenClaw or Hermes implementations.
-    const authority = makeRebuildAgentAuthority("nemocua");
-    const definition = {
-      ...authority.definition,
-      displayName:
-        agentName === "openclaw" ? "OpenClaw" : agentName === "hermes" ? "Hermes" : agentName,
-      runtime: legacyProfile.definition.runtime,
-      stateLifecycle: legacyProfile.definition.stateLifecycle,
-    };
-    return agentExpectedVersion
-      ? {
-          ...authority,
-          definition: { ...definition, expectedVersion: agentExpectedVersion },
-        }
-      : { ...authority, definition };
+    return createPostRestoreAgentAuthority(agentName, agentExpectedVersion);
   }
 
   function currentRegistryEntry() {
-    const authority = currentAgentAuthority();
-    return {
-      name: "alpha",
-      agent: authority.recordedAgent,
-      harnessPackage: authority.harnessPackage,
-      harnessPackageMigration: authority.harnessPackageMigration,
-    } as never;
+    return createPostRestoreRegistryEntry(currentAgentAuthority());
   }
 
   function currentOnboardSession() {
-    const authority = currentAgentAuthority();
-    return {
-      sandboxName: "alpha",
-      agent: authority.recordedAgent,
-      harnessPackage: authority.harnessPackage,
-      harnessPackageMigration: authority.harnessPackageMigration,
-    } as never;
+    return createPostRestoreOnboardSession(currentAgentAuthority());
   }
 
   beforeEach(() => {
@@ -164,23 +142,7 @@ describe("rebuild post-restore phase", () => {
   });
 
   function input() {
-    return {
-      sandboxName: "alpha",
-      agentAuthority: currentAgentAuthority(),
-      sandboxEntry: {} as never,
-      messagingPlan: null,
-      backupManifest: null,
-      mcpEntries: [],
-      restoreSucceeded: true,
-      failedPresets: [],
-      finalBuiltinPresets: [],
-      failedPresetRemovals: [],
-      policyPresetReconciliationVerified: true,
-      preparedBackupRecovery: false,
-      versionCheck: { expectedVersion: null } as never,
-      log: vi.fn(),
-      bail: vi.fn() as never,
-    };
+    return createPostRestoreInput(currentAgentAuthority());
   }
 
   it("runs an unknown receipt-backed package only through its typed state declaration", async () => {
@@ -206,7 +168,10 @@ describe("rebuild post-restore phase", () => {
           backup_quiescence: { kind: "not-required" },
           snapshot_restore: [],
           rebuild: {
-            image_plugin_provenance: "not-required",
+            managed_extensions: {
+              support: "disabled",
+              reason: "Test package has no managed extensions.",
+            },
             scheduled_work: { support: "disabled", reason: "No scheduled work." },
             post_restore: {
               kind: "managed",

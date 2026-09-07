@@ -42,6 +42,15 @@ function validManifest(
     ...identity,
     "runtime:",
     "  kind: gateway",
+    "  interactive_command: openclaw",
+    "  process_lifecycle:",
+    "    support: unsupported",
+    "    reason: This fixture does not manage a gateway process.",
+    "gateway_command: openclaw gateway run",
+    "health_probe:",
+    "  url: http://127.0.0.1:18789/health",
+    "  port: 18789",
+    "  timeout_seconds: 30",
     "config:",
     "  dir: /sandbox/.openclaw",
     "  config_file: openclaw.json",
@@ -52,12 +61,18 @@ function validManifest(
     "    reason: This synthetic package has fixed inference configuration.",
     "messaging:",
     "  support: disabled",
+    "policy:",
+    "  owned_presets: []",
+    "  automatic_presets: []",
+    "  baseline_exclusion_impacts: {}",
     "state_lifecycle:",
     "  backup_quiescence:",
     "    kind: not-required",
     "  snapshot_restore: []",
     "  rebuild:",
-    "    image_plugin_provenance: not-required",
+    "    managed_extensions:",
+    "      support: disabled",
+    "      reason: Test package has no managed extensions.",
     "    scheduled_work:",
     "      support: disabled",
     "      reason: This package does not run scheduled work.",
@@ -180,11 +195,9 @@ describe("parseHarnessPackageManifest", () => {
   ])("rejects %s", (_label, maximumNemoClawVersionExclusive) => {
     const root = makeRoot();
     const envelope = validEnvelope();
-    if (maximumNemoClawVersionExclusive === undefined) {
-      delete envelope.maximumNemoClawVersionExclusive;
-    } else {
-      envelope.maximumNemoClawVersionExclusive = maximumNemoClawVersionExclusive;
-    }
+    maximumNemoClawVersionExclusive === undefined
+      ? Reflect.deleteProperty(envelope, "maximumNemoClawVersionExclusive")
+      : Object.assign(envelope, { maximumNemoClawVersionExclusive });
     writePackage(root, { envelope });
 
     expect(() => parseHarnessPackageManifest(root)).toThrow(
@@ -195,7 +208,10 @@ describe("parseHarnessPackageManifest", () => {
   it.each([
     {
       name: "a terminal runtime without a command",
-      manifest: validManifest().replace("runtime:\n  kind: gateway", "runtime:\n  kind: terminal"),
+      manifest: validManifest().replace(
+        "runtime:\n  kind: gateway\n  interactive_command: openclaw",
+        "runtime:\n  kind: terminal",
+      ),
       field: "runtime",
     },
     {
@@ -328,7 +344,15 @@ describe("parseHarnessPackageManifest", () => {
     },
     {
       name: "a health probe without its URL",
-      manifest: validManifestWith(["health_probe:", "  port: 8080", "  timeout_seconds: 30"]),
+      manifest: validManifest().replace(
+        [
+          "health_probe:",
+          "  url: http://127.0.0.1:18789/health",
+          "  port: 18789",
+          "  timeout_seconds: 30",
+        ].join("\n"),
+        ["health_probe:", "  port: 8080", "  timeout_seconds: 30"].join("\n"),
+      ),
       field: "health_probe.url",
     },
     {

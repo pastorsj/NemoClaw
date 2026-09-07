@@ -77,6 +77,9 @@ export interface HarnessPackageStoreDependencies {
   readonly onPublicationCheckpoint?: (checkpoint: HarnessPackagePublicationCheckpoint) => void;
 }
 
+/** Trusted core callback that initializes a retained package's fixed adapter surfaces. */
+export type HarnessPackageAdapterQualifier = (installed: InstalledHarnessPackage) => void;
+
 export type HarnessPackagePointerMutationCheckpoint = "before-active-pointer-replacement";
 
 export interface HarnessPackagePointerMutationDependencies {
@@ -105,6 +108,7 @@ export interface PublishHarnessPackageInput extends HarnessPackageStoreOptions {
   readonly validatedTree: ValidatedHarnessPackageTree;
   readonly expectedIdentity: HarnessPackageIdentity;
   readonly sourceIdentity: HarnessPackageSourceIdentity;
+  readonly qualifyAdapterInitialization: HarnessPackageAdapterQualifier;
   readonly dependencies?: HarnessPackageStoreDependencies;
 }
 
@@ -134,6 +138,11 @@ export class HarnessPackageVersionConflictError extends Error {
 
 export function getHarnessPackageStoreRoot(home: string = resolveHome()): string {
   return path.join(getNemoclawBaseStateRoot(home), HARNESS_PACKAGE_STORE_DIRECTORY);
+}
+
+/** Resolve the package store against an explicit operation environment. */
+export function getHarnessPackageStoreRootForEnvironment(env: NodeJS.ProcessEnv): string {
+  return getHarnessPackageStoreRoot(resolveHome(env));
 }
 
 function selectedStoreRoot(options: HarnessPackageStoreOptions): string {
@@ -629,6 +638,21 @@ function replacePointer(
   }
 }
 
+function qualifyInstalledPackageAdapters(
+  installed: InstalledHarnessPackage,
+  qualifyAdapterInitialization: HarnessPackageAdapterQualifier,
+): void {
+  try {
+    qualifyAdapterInitialization(installed);
+  } catch (error) {
+    const message =
+      error instanceof Error && error.name === "HarnessAdapterQualificationError"
+        ? error.message
+        : "Harness package adapter initialization failed";
+    throw new HarnessPackageStoreIntegrityError(message);
+  }
+}
+
 function publishUnderLock(
   input: PublishHarnessPackageInput,
   paths: HarnessPackageStorePaths,
@@ -653,6 +677,12 @@ function publishUnderLock(
   } finally {
     copied?.removeStagingRoot();
   }
+  const retained = resolvePinnedWithAuthority(
+    input.expectedIdentity,
+    paths,
+    capturePinnedAuthority(paths),
+  );
+  qualifyInstalledPackageAdapters(retained, input.qualifyAdapterInitialization);
   replacePointer(input.expectedIdentity, paths, authority, current, () =>
     input.dependencies?.onPublicationCheckpoint?.("before-active-pointer-replacement"),
   );
@@ -719,9 +749,10 @@ function captureMutableStoreAuthority(
 }
 
 /** Select an existing immutable package receipt as the active package. */
-export function activateHarnessPackage(
+export function activateStoredHarnessPackage(
   idValue: unknown,
   digestValue: unknown,
+  qualifyAdapterInitialization: HarnessPackageAdapterQualifier,
   options: HarnessPackagePointerMutationOptions = {},
 ): InstalledHarnessPackage {
   try {
@@ -743,6 +774,7 @@ export function activateHarnessPackage(
       const selected = resolvePinnedWithAuthority(receipt.identity, paths, authority);
       assertInstalledPackageCompatible(selected, options);
       const current = validateCurrentPointer(paths, authority);
+      qualifyInstalledPackageAdapters(selected, qualifyAdapterInitialization);
       replacePointer(selected.identity, paths, authority, current, () =>
         options.dependencies?.onPointerMutationCheckpoint?.("before-active-pointer-replacement"),
       );

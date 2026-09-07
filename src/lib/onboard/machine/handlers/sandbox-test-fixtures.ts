@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { expect, vi } from "vitest";
+import type {
+  HarnessSandboxCreateDeclaration,
+  HarnessWebSearchCapability,
+  HarnessWebSearchProviderBinding,
+} from "@nvidia/nemoclaw-harness-contract";
 
 import type { HarnessPackageAuthority } from "../../../agent-runtime/package/identity";
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
@@ -21,7 +26,6 @@ import type { SandboxStateOptions } from "./sandbox";
 import {
   filterSelectedAgentWebSearchToolGateways,
   selectedAgentResumesSandboxPrompts,
-  selectedAgentSupportsWebSearchProvider,
 } from "../../web-search/support";
 
 export function makeMinimalPlan(
@@ -54,6 +58,29 @@ export function makeMinimalPlan(
     buildSteps: [],
     stateUpdates: [],
     healthChecks: [],
+  };
+}
+
+export function testWebSearchBinding(
+  provider: "brave" | "tavily",
+): HarnessWebSearchProviderBinding {
+  return {
+    provider,
+    credential_env: provider === "brave" ? "BRAVE_API_KEY" : "TAVILY_API_KEY",
+    profile_type: `${provider}-test`,
+    config_verification: {
+      path: "/sandbox/.future/config.json",
+      format: "json",
+      assertions: [{ path: ["search", "provider"], equals: provider }],
+      credential_paths: [["search", "apiKey"]],
+    },
+    egress_verification: {
+      method: "GET",
+      url: "https://search.example.test/query",
+      parameters: [{ name: "q", value: "NVIDIA" }],
+      credential: { kind: "header", name: "Authorization", prefix: "bearer" },
+      result_array_path: ["results"],
+    },
   };
 }
 
@@ -167,16 +194,9 @@ type Gpu = { type: string } | null;
 type Agent = {
   displayName?: string;
   name?: string;
-  web_search?:
-    | {
-        support: "providers";
-        providers: readonly ("brave" | "tavily")[];
-        tool_gateway_conflicts?: readonly {
-          provider: "brave" | "tavily";
-          tool_gateway: string;
-        }[];
-      }
-    | { support: "disabled"; reason: string };
+  packageRoot?: string;
+  sandbox_create?: HarnessSandboxCreateDeclaration;
+  web_search?: HarnessWebSearchCapability;
 } | null;
 type WebSearchConfig = { fetchEnabled: true; provider?: "brave" | "tavily" };
 type MessagingChannelConfig = Record<string, string>;
@@ -306,7 +326,10 @@ export function createDeps(
       agentSupportsWebSearch: () => true,
       filterSelectedAgentWebSearchToolGateways,
       selectedAgentResumesSandboxPrompts,
-      selectedAgentSupportsWebSearchProvider,
+      // Filesystem capability probing is covered at the web-search support
+      // boundary. Sandbox orchestration fixtures opt in unless a case
+      // explicitly exercises unsupported behavior.
+      selectedAgentSupportsWebSearchProvider: () => true,
       note: calls.note,
       cliName: () => "nemoclaw",
       loadSession: calls.loadSession,

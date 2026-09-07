@@ -5,6 +5,42 @@ import { describe, expect, it } from "vitest";
 
 import { readAgentRuntime } from "./manifest";
 
+describe("agent runtime gateway log source", () => {
+  it("reads a package-owned canonical gateway log path", () => {
+    expect(
+      readAgentRuntime({
+        runtime: {
+          kind: "gateway",
+          gateway_log_path: "/var/log/future-agent/gateway.log",
+        },
+      }).gateway_log_path,
+    ).toBe("/var/log/future-agent/gateway.log");
+  });
+
+  it.each(["relative/gateway.log", "/var/log/../secret", "/var//log/gateway.log"])(
+    "rejects the non-canonical gateway log path %s",
+    (gatewayLogPath) => {
+      expect(() =>
+        readAgentRuntime({
+          runtime: { kind: "gateway", gateway_log_path: gatewayLogPath },
+        }),
+      ).toThrow("must be a canonical absolute path");
+    },
+  );
+
+  it("rejects a gateway log path for a terminal runtime", () => {
+    expect(() =>
+      readAgentRuntime({
+        runtime: {
+          kind: "terminal",
+          interactive_command: "future-agent",
+          gateway_log_path: "/var/log/future-agent/gateway.log",
+        },
+      }),
+    ).toThrow("requires runtime.kind gateway");
+  });
+});
+
 describe("agent runtime startup environment", () => {
   it("reads sorted public constants for the initial agent process", () => {
     const runtime = readAgentRuntime({
@@ -115,6 +151,33 @@ describe("agent runtime prompt transport", () => {
       }),
     ).toThrow("runtime.prompt_transport' requires runtime.headless_command");
   });
+
+  it.each(["fabric-cli", "raw-stdin"] as const)(
+    "reads the explicit %s prompt protocol",
+    (promptProtocol) => {
+      expect(
+        readAgentRuntime({
+          runtime: {
+            headless_command: "example-agent run",
+            prompt_transport: "stdin",
+            prompt_protocol: promptProtocol,
+          },
+        }).prompt_protocol,
+      ).toBe(promptProtocol);
+    },
+  );
+
+  it("rejects a prompt protocol without stdin transport", () => {
+    expect(() =>
+      readAgentRuntime({
+        runtime: {
+          headless_command: "example-agent run",
+          prompt_transport: "argv",
+          prompt_protocol: "fabric-cli",
+        },
+      }),
+    ).toThrow("runtime.prompt_protocol' requires runtime.prompt_transport to be stdin");
+  });
 });
 
 describe("agent runtime native command declaration", () => {
@@ -124,6 +187,7 @@ describe("agent runtime native command declaration", () => {
         agent_command: {
           argv: ["future-agent", "run"],
           output_mode: "bounded-text",
+          output_interpretation: "structured-turn-envelope",
           selector_options: ["--session"],
           selector_required: true,
           value_options: ["--message", "--timeout"],
@@ -137,6 +201,7 @@ describe("agent runtime native command declaration", () => {
     expect(runtime.agent_command).toEqual({
       argv: ["future-agent", "run"],
       output_mode: "bounded-text",
+      output_interpretation: "structured-turn-envelope",
       selector_options: ["--session"],
       selector_required: true,
       value_options: ["--message", "--timeout"],
@@ -151,6 +216,10 @@ describe("agent runtime native command declaration", () => {
   it.each([
     [{ argv: [], output_mode: "direct" }, "argv"],
     [{ argv: ["agent"], output_mode: "stream" }, "output_mode"],
+    [
+      { argv: ["agent"], output_mode: "direct", output_interpretation: "structured-turn-envelope" },
+      "output_interpretation",
+    ],
     [
       { argv: ["agent"], output_mode: "direct", selector_required: true },
       "requires selector_options",
@@ -183,7 +252,7 @@ describe("agent runtime process lifecycle declaration", () => {
       runtime: {
         process_lifecycle: {
           support: "managed",
-          command: ["/opt/future/process-control", "--structured"],
+          command: ["/usr/local/bin/future-process-control", "--structured"],
           revalidate_running_gateway: true,
         },
       },
@@ -191,7 +260,7 @@ describe("agent runtime process lifecycle declaration", () => {
 
     expect(runtime.process_lifecycle).toEqual({
       support: "managed",
-      command: ["/opt/future/process-control", "--structured"],
+      command: ["/usr/local/bin/future-process-control", "--structured"],
       revalidate_running_gateway: true,
     });
     expect(Object.isFrozen(runtime.process_lifecycle)).toBe(true);
@@ -216,6 +285,22 @@ describe("agent runtime process lifecycle declaration", () => {
 
   it.each([
     [{ support: "managed", command: ["relative-command"] }, "canonical absolute path"],
+    [
+      { support: "managed", command: ["/sandbox/future-process-control"] },
+      "immutable image-owned executable path",
+    ],
+    [
+      { support: "managed", command: ["/usr/local/bin/../sandbox/process-control"] },
+      "canonical absolute path",
+    ],
+    [
+      { support: "managed", command: ["/usr/local/bin/future\\process-control"] },
+      "immutable image-owned executable path",
+    ],
+    [
+      { support: "managed", command: ["/usr/local/bin/future\u001b-process-control"] },
+      "immutable image-owned executable path",
+    ],
     [{ support: "managed", command: [] }, "non-empty bounded argument array"],
     [{ support: "unsupported", reason: "line one\nline two" }, "single-line string"],
     [{ support: "automatic" }, "must be managed or unsupported"],
@@ -233,7 +318,7 @@ describe("agent runtime process lifecycle declaration", () => {
           interactive_command: "future-terminal",
           process_lifecycle: {
             support: "managed",
-            command: ["/opt/future/process-control"],
+            command: ["/usr/local/bin/future-process-control"],
           },
         },
       }),
@@ -268,5 +353,90 @@ describe("agent runtime device-pairing settlement declaration", () => {
     expect(() => readAgentRuntime({ runtime: { device_pairing_settlement: declaration } })).toThrow(
       message,
     );
+  });
+});
+
+describe("agent runtime semantic-turn declaration", () => {
+  it("reads and freezes a managed semantic-turn command", () => {
+    const runtime = readAgentRuntime({
+      runtime: {
+        semantic_turn: {
+          support: "managed",
+          command: ["/usr/local/bin/future-semantic-turn"],
+          timeout_seconds: 120,
+          protocol: "semantic-turn-ndjson",
+        },
+      },
+    });
+
+    expect(runtime.semantic_turn).toEqual({
+      support: "managed",
+      command: ["/usr/local/bin/future-semantic-turn"],
+      timeout_seconds: 120,
+      protocol: "semantic-turn-ndjson",
+    });
+    expect(Object.isFrozen(runtime.semantic_turn)).toBe(true);
+    expect(
+      runtime.semantic_turn?.support === "managed" &&
+        Object.isFrozen(runtime.semantic_turn.command),
+    ).toBe(true);
+  });
+
+  it("preserves an explicit unsupported declaration", () => {
+    expect(
+      readAgentRuntime({
+        runtime: {
+          semantic_turn: {
+            support: "unsupported",
+            reason: "This runtime does not accept semantic turns.",
+          },
+        },
+      }).semantic_turn,
+    ).toEqual({
+      support: "unsupported",
+      reason: "This runtime does not accept semantic turns.",
+    });
+  });
+
+  it.each([
+    [
+      {
+        support: "managed",
+        command: ["relative-semantic-turn"],
+        timeout_seconds: 120,
+        protocol: "semantic-turn-ndjson",
+      },
+      "canonical absolute path",
+    ],
+    [
+      {
+        support: "managed",
+        command: ["/sandbox/semantic-turn"],
+        timeout_seconds: 120,
+        protocol: "semantic-turn-ndjson",
+      },
+      "immutable image-owned executable path",
+    ],
+    [
+      {
+        support: "managed",
+        command: ["/usr/local/bin/future-semantic-turn"],
+        timeout_seconds: 0,
+        protocol: "semantic-turn-ndjson",
+      },
+      "integer from 1 through 300",
+    ],
+    [
+      {
+        support: "managed",
+        command: ["/usr/local/bin/future-semantic-turn"],
+        timeout_seconds: 120,
+        protocol: "native-events",
+      },
+      "must be semantic-turn-ndjson",
+    ],
+    [{ support: "unsupported", reason: "line one\nline two" }, "single-line string"],
+  ] as const)("rejects an invalid semantic-turn declaration %#", (declaration, message) => {
+    expect(() => readAgentRuntime({ runtime: { semantic_turn: declaration } })).toThrow(message);
   });
 });

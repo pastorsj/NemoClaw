@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type {
+  HarnessPolicyCapability,
+  HarnessToolGatewayCapability,
+} from "@nvidia/nemoclaw-harness-contract";
+
 import { type WebSearchConfig, webSearchProviderForConfig } from "../inference/web-search";
 import * as policies from "../policy";
 import * as tiers from "../policy/tiers";
@@ -15,6 +20,7 @@ import {
   setupPolicyPresetAppliesToAgent,
 } from "./agent-policy-presets";
 import { HERMES_TOOL_GATEWAY_PRESET_NAMES } from "./hermes-managed-tools";
+import { resolveHarnessToolGatewayPolicyPresets } from "../agent-runtime/tool-gateway";
 import {
   allMessagingChannelPolicyPresets,
   mergePolicyMessagingChannels,
@@ -26,6 +32,7 @@ import {
   requiredObservabilityPolicyPresets,
 } from "./observability-policy-presets";
 import { seedInitialPolicyContext } from "./policy-context-seed";
+import { evaluatePackagePolicyPresets } from "./policy-authority/package-activation";
 import {
   createUnavailablePolicyPresetPruner,
   isStaleBuiltinWebSearchPolicyPreset,
@@ -96,9 +103,16 @@ export type SetupPresetSuggestionOptions = {
   knownPresetNames?: string[] | null;
   webSearchSupported?: boolean | null;
   hermesToolGateways?: string[] | null;
+  toolGatewaySelections?: readonly string[] | null;
+  toolGatewayCapability?: Extract<
+    HarnessToolGatewayCapability,
+    { readonly support: "managed" }
+  > | null;
   packagePolicyPresets?: readonly string[] | null;
   customPresetNames?: ReadonlySet<string> | null;
   customOwnsObservability?: boolean;
+  packagePolicyCapability?: HarnessPolicyCapability | null;
+  overriddenPackagePolicyNames?: ReadonlySet<string> | null;
   env?: NodeJS.ProcessEnv;
 };
 
@@ -115,7 +129,13 @@ export type SetupPolicySelectionOptions = {
   knownPresetNames?: string[];
   webSearchSupported?: boolean | null;
   hermesToolGateways?: string[] | null;
+  toolGatewaySelections?: readonly string[] | null;
+  toolGatewayCapability?: Extract<
+    HarnessToolGatewayCapability,
+    { readonly support: "managed" }
+  > | null;
   packagePolicyPresets?: readonly string[] | null;
+  packagePolicyCapability?: HarnessPolicyCapability | null;
   disabledChannels?: string[] | null;
   /** Process-local exclusions imposed by a narrower runtime route authority. */
   excludedPresets?: readonly string[];
@@ -247,11 +267,20 @@ export function computeSetupPresetSuggestions(
   } = options;
   const known = Array.isArray(options.knownPresetNames) ? new Set(options.knownPresetNames) : null;
   const supportOptions = { webSearchSupported: options.webSearchSupported };
+  const packageEvaluation = evaluatePackagePolicyPresets(options.packagePolicyCapability, {
+    observabilityEnabled,
+    tierName,
+    env,
+    knownPresetNames: options.knownPresetNames,
+    overriddenPolicyNames: options.overriddenPackagePolicyNames,
+  });
   const suggestions = pruneInactiveMessagingPolicyPresets(
     deps.tiers
       .resolveTierPresets(tierName)
       .map((preset) => preset.name)
-      .filter((name) => setupPolicyPresetAppliesToAgent(name, agent))
+      .filter((name) =>
+        setupPolicyPresetAppliesToAgent(name, agent, options.packagePolicyCapability),
+      )
       .filter(
         (name) =>
           !isStaleBuiltinWebSearchPolicyPreset(name, {
@@ -259,25 +288,38 @@ export function computeSetupPresetSuggestions(
             customPresetNames: options.customPresetNames,
             tierName,
             agentName: agent,
+            packagePolicyCapability: options.packagePolicyCapability,
           }),
       )
-      .filter(
-        (name) =>
-          !isInactiveObservabilityPolicyPreset(name, {
-            agent,
-            observabilityEnabled,
-            customPresetNames: options.customPresetNames,
-            customOwnsObservability: options.customOwnsObservability,
-          }),
-      )
+      .filter((name) => {
+        if (options.packagePolicyCapability) {
+          return (
+            !packageEvaluation.inactivePresets.has(name) &&
+            !packageEvaluation.suppressedPresets.has(name)
+          );
+        }
+        return !isInactiveObservabilityPolicyPreset(name, {
+          agent,
+          observabilityEnabled,
+          customPresetNames: options.customPresetNames,
+          customOwnsObservability: options.customOwnsObservability,
+        });
+      })
       .filter((name) => deps.policies.setupPolicyPresetSupported(name, supportOptions))
       .filter((name) => !known || known.has(name)),
     enabledChannels,
     options.customPresetNames,
   );
   const add = (name: string) => {
-    if (!setupPolicyPresetAppliesToAgent(name, agent)) return;
-    if (
+    if (!setupPolicyPresetAppliesToAgent(name, agent, options.packagePolicyCapability)) return;
+    if (options.packagePolicyCapability) {
+      if (
+        packageEvaluation.inactivePresets.has(name) ||
+        packageEvaluation.suppressedPresets.has(name)
+      ) {
+        return;
+      }
+    } else if (
       isInactiveObservabilityPolicyPreset(name, {
         agent,
         observabilityEnabled,
@@ -293,6 +335,7 @@ export function computeSetupPresetSuggestions(
         customPresetNames: options.customPresetNames,
         tierName,
         agentName: agent,
+        packagePolicyCapability: options.packagePolicyCapability,
       })
     ) {
       return;
@@ -304,7 +347,9 @@ export function computeSetupPresetSuggestions(
   };
   if (webSearchConfig) add(webSearchProviderForConfig(webSearchConfig));
   if (provider && deps.localInferenceProviders.includes(provider)) add("local-inference");
-  if (tierName !== RESTRICTED_TIER_NAME) {
+  if (options.packagePolicyCapability) {
+    for (const preset of packageEvaluation.activePresets) add(preset);
+  } else if (tierName !== RESTRICTED_TIER_NAME) {
     for (const preset of agentRequiredPresetAdditions(agent, env)) add(preset);
     for (const preset of requiredObservabilityPolicyPresets(agent, observabilityEnabled)) {
       add(preset);
@@ -322,11 +367,19 @@ export function computeSetupPresetSuggestions(
     // (#5967).
     for (const preset of allMessagingChannelPolicyPresets(enabledChannels)) add(preset);
   }
-  if (Array.isArray(options.hermesToolGateways)) {
+  if (options.toolGatewayCapability) {
+    for (const preset of resolveHarnessToolGatewayPolicyPresets(
+      options.toolGatewayCapability,
+      options.toolGatewaySelections,
+    )) {
+      add(preset);
+    }
+  } else if (Array.isArray(options.hermesToolGateways)) {
     for (const preset of options.hermesToolGateways) {
       if (HERMES_TOOL_GATEWAY_PRESET_NAMES.has(preset)) add(preset);
     }
   }
+  if (options.packagePolicyCapability) return suggestions;
   return filterSuppressedAgentRequiredPresets(suggestions, tierName, agent);
 }
 
@@ -398,9 +451,12 @@ async function setupPoliciesWithSelectionInner(
   const provider = options.provider || null;
   const agent = options.agent || null;
   const observabilityEnabled = options.observabilityEnabled === true;
+  const packagePolicyCapability = options.packagePolicyCapability ?? null;
   const hermesToolGateways = Array.isArray(options.hermesToolGateways)
     ? options.hermesToolGateways
     : null;
+  const toolGatewaySelections = options.toolGatewaySelections ?? null;
+  const toolGatewayCapability = options.toolGatewayCapability ?? null;
   const disabledChannels = Array.isArray(options.disabledChannels)
     ? options.disabledChannels
     : null;
@@ -411,6 +467,7 @@ async function setupPoliciesWithSelectionInner(
   const allPresets = filterSetupPolicyPresetsForAgent(
     deps.policies.listSetupPolicyPresets(sandboxName, supportOptions),
     agent,
+    packagePolicyCapability,
   ).filter((preset) => !excludedPresets.has(preset.name));
   const knownPresets = new Set(allPresets.map((preset) => preset.name));
   const customPresetNames = new Set(
@@ -421,6 +478,13 @@ async function setupPoliciesWithSelectionInner(
       sandboxName,
       OBSERVABILITY_OTLP_LOCAL_POLICY_PRESET,
     ) === true;
+  const overriddenPackagePolicyNames = new Set(
+    (packagePolicyCapability?.automatic_presets ?? [])
+      .map((rule) => rule.name)
+      .filter(
+        (name) => deps.policies.customPresetOwnsNetworkPolicyKey?.(sandboxName, name) === true,
+      ),
+  );
   const rawCurrentAppliedPresets = deps.policies.getAppliedPresets(sandboxName);
   const currentAppliedPresets = customOwnsObservability
     ? [...new Set(rawCurrentAppliedPresets)].filter(
@@ -431,11 +495,11 @@ async function setupPoliciesWithSelectionInner(
     : rawCurrentAppliedPresets;
   const selectablePresets = [
     ...allPresets,
-    ...filterSetupPolicyPresetNamesForAgent(excludePresets(currentAppliedPresets), agent).map(
-      (name) => ({
-        name,
-      }),
-    ),
+    ...filterSetupPolicyPresetNamesForAgent(
+      excludePresets(currentAppliedPresets),
+      agent,
+      packagePolicyCapability,
+    ).map((name) => ({ name })),
   ];
   const applied = deps.policies.clampSetupPolicyPresetNames(
     excludePresets(currentAppliedPresets),
@@ -451,9 +515,16 @@ async function setupPoliciesWithSelectionInner(
     webSearchConfig,
     customPresetNames,
     customOwnsObservability,
+    packagePolicyCapability,
+    overriddenPackagePolicyNames,
+    env: deps.env,
   });
   const filterSupportedPresetNames = (presetNames: string[]) =>
-    filterSetupPolicyPresetNamesForAgent(excludePresets(presetNames), agent).filter(
+    filterSetupPolicyPresetNamesForAgent(
+      excludePresets(presetNames),
+      agent,
+      packagePolicyCapability,
+    ).filter(
       (name) =>
         customPresetNames.has(name) ||
         deps.policies.setupPolicyPresetSupported(name, supportOptions),
@@ -476,6 +547,8 @@ async function setupPoliciesWithSelectionInner(
     chosen = mergeRequiredSetupPolicyPresets(chosen, {
       enabledChannels,
       hermesToolGateways,
+      toolGatewaySelections,
+      toolGatewayCapability,
       agent,
       observabilityEnabled,
       knownPresetNames: knownSelectablePresets,
@@ -484,6 +557,8 @@ async function setupPoliciesWithSelectionInner(
       webSearchConfig,
       customPresetNames,
       customOwnsObservability,
+      packagePolicyCapability,
+      overriddenPackagePolicyNames,
     });
     // Pass the requested tier so the pruner exempts that tier's egress defaults
     // (e.g. `brave` on Balanced) via provenance — a reconcile-triggered reuse
@@ -525,19 +600,36 @@ async function setupPoliciesWithSelectionInner(
         webSearchConfig,
         customPresetNames,
         customOwnsObservability,
+        packagePolicyCapability,
+        overriddenPackagePolicyNames,
         provider,
         agent,
         observabilityEnabled,
         knownPresetNames: allPresets.map((preset) => preset.name),
         webSearchSupported: options.webSearchSupported,
         hermesToolGateways,
+        toolGatewaySelections,
+        toolGatewayCapability,
         packagePolicyPresets: options.packagePolicyPresets,
         env: deps.env,
       }),
       { preserveExplicitWebSearch: personalTier },
     ),
   );
-  const suppressedNames = emitSuppressedAgentRequiredPresetsNote(tierName, agent, deps.note);
+  const packageEvaluation = evaluatePackagePolicyPresets(packagePolicyCapability, {
+    observabilityEnabled,
+    tierName,
+    env: deps.env,
+    overriddenPolicyNames: overriddenPackagePolicyNames,
+  });
+  const suppressedNames = packagePolicyCapability
+    ? new Set(packageEvaluation.suppressedPresets)
+    : emitSuppressedAgentRequiredPresetsNote(tierName, agent, deps.note);
+  if (packagePolicyCapability && suppressedNames.size > 0) {
+    deps.note(
+      `  ${tierName === PERSONAL_POLICY_TIER_NAME ? "Personal" : "Restricted"} tier suppresses package-required preset(s): ${[...suppressedNames].join(", ")}.`,
+    );
+  }
 
   if (deps.isNonInteractive()) {
     const policyMode = (deps.env?.NEMOCLAW_POLICY_MODE || "suggested").trim().toLowerCase();
@@ -545,18 +637,21 @@ async function setupPoliciesWithSelectionInner(
     let isAuthoritative = false;
 
     if (policyMode === "skip" || policyMode === "none" || policyMode === "no") {
+      const availableAppliedPresets = excludePresets(
+        pruneUnavailablePresets(currentAppliedPresets, { tierName }),
+      );
       const retainedPresets = mergeRequiredSetupPolicyPresets(
         ensureRequiredTierPolicyPresets(
           tierName,
-          filterSuppressedAgentRequiredPresets(
-            excludePresets(pruneUnavailablePresets(currentAppliedPresets, { tierName })),
-            tierName,
-            agent,
-          ),
+          packagePolicyCapability
+            ? availableAppliedPresets
+            : filterSuppressedAgentRequiredPresets(availableAppliedPresets, tierName, agent),
         ),
         {
           enabledChannels,
           hermesToolGateways,
+          toolGatewaySelections,
+          toolGatewayCapability,
           agent,
           observabilityEnabled,
           knownPresetNames: knownPresets,
@@ -565,6 +660,8 @@ async function setupPoliciesWithSelectionInner(
           webSearchConfig,
           customPresetNames,
           customOwnsObservability,
+          packagePolicyCapability,
+          overriddenPackagePolicyNames,
         },
       );
       const selectionChanged =
@@ -619,6 +716,8 @@ async function setupPoliciesWithSelectionInner(
     chosen = mergeRequiredSetupPolicyPresets(chosen, {
       enabledChannels,
       hermesToolGateways,
+      toolGatewaySelections,
+      toolGatewayCapability,
       agent,
       observabilityEnabled,
       knownPresetNames: knownPresets,
@@ -627,6 +726,8 @@ async function setupPoliciesWithSelectionInner(
       webSearchConfig,
       customPresetNames,
       customOwnsObservability,
+      packagePolicyCapability,
+      overriddenPackagePolicyNames,
     });
     chosen = excludePresets(
       pruneUnavailablePresets(chosen, {
@@ -693,6 +794,8 @@ async function setupPoliciesWithSelectionInner(
           {
             enabledChannels,
             hermesToolGateways,
+            toolGatewaySelections,
+            toolGatewayCapability,
             agent,
             observabilityEnabled,
             knownPresetNames: knownNames,
@@ -701,6 +804,8 @@ async function setupPoliciesWithSelectionInner(
             webSearchConfig,
             customPresetNames,
             customOwnsObservability,
+            packagePolicyCapability,
+            overriddenPackagePolicyNames,
           },
         ),
         { preserveExplicitWebSearch: true },

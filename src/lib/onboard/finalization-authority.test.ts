@@ -3,6 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import type { SandboxEntry } from "../state/registry";
 import type { RebuildManifest } from "../state/sandbox";
 import { finalizeCreatedSandbox } from "./created-sandbox-finalization";
 
@@ -37,6 +38,14 @@ function openClawManifest(): RebuildManifest {
   };
 }
 
+function preparedRestoreAuthority(sandboxName: string) {
+  const prepared = { name: sandboxName } as SandboxEntry;
+  return {
+    prepareRegistration: () => prepared,
+    revalidatePreparedRegistration: (target: SandboxEntry) => target,
+  };
+}
+
 describe("created OpenClaw restore authority", () => {
   it("restores an ordinary schema-v2 recreate with exact package authority", () => {
     const order: string[] = [];
@@ -54,9 +63,9 @@ describe("created OpenClaw restore authority", () => {
       order.push("register");
     });
     const revalidateHarnessPackageAuthority = vi.fn(() => OPENCLAW_PACKAGE);
-    const restoreRecreatedSandboxState = vi.fn((_name, _backup, options) => {
+    const restoreRecreatedSandboxState = vi.fn((_name, _backup, _options, resolveTarget) => {
       order.push("restore");
-      options.validateBeforeMutation?.();
+      resolveTarget?.();
       return {
         success: true,
         restoredDirs: ["extensions"],
@@ -80,6 +89,7 @@ describe("created OpenClaw restore authority", () => {
         preferredInferenceApi: "openai-completions",
       },
       {
+        ...preparedRestoreAuthority("openclaw"),
         discoverFreshOpenClawImagePluginInstalls: () => {
           order.push("discover");
           return { ok: true, extensionDirs: ["weather"], pluginInstalls: PLUGIN_INSTALLS };
@@ -100,25 +110,36 @@ describe("created OpenClaw restore authority", () => {
     );
 
     expect(order).toEqual(["discover", "restore", "register"]);
-    expect(restoreRecreatedSandboxState).toHaveBeenCalledWith("openclaw", "/tmp/openclaw-backup", {
-      targetAgentType: "openclaw",
-      agentDefinition,
-      freshOpenClawImagePluginInstalls: PLUGIN_INSTALLS,
-      authority,
-      validateBeforeMutation: expect.any(Function),
-    });
-    expect(revalidateHarnessPackageAuthority).toHaveBeenCalledWith(
-      "restore files for sandbox 'openclaw'",
+    expect(restoreRecreatedSandboxState).toHaveBeenCalledWith(
+      "openclaw",
+      "/tmp/openclaw-backup",
+      {
+        targetAgentType: "openclaw",
+        agentDefinition,
+        freshOpenClawImagePluginInstalls: PLUGIN_INSTALLS,
+      },
+      expect.any(Function),
     );
-    expect(register).toHaveBeenCalledWith(PLUGIN_INSTALLS);
+    expect(revalidateHarnessPackageAuthority).toHaveBeenNthCalledWith(
+      1,
+      "preparing state restore for sandbox 'openclaw'",
+    );
+    expect(revalidateHarnessPackageAuthority).toHaveBeenNthCalledWith(
+      2,
+      "restoring files for sandbox 'openclaw'",
+    );
+    expect(register).toHaveBeenCalledWith(
+      PLUGIN_INSTALLS,
+      expect.objectContaining({ name: "openclaw" }),
+    );
   });
 
   it("fails closed when the selected harness package drifts before restore mutation", () => {
     const register = vi.fn();
     const error = vi.fn();
-    const restoreRecreatedSandboxState = vi.fn((_name, _backup, options) => {
+    const restoreRecreatedSandboxState = vi.fn((_name, _backup, _options, resolveTarget) => {
       try {
-        options.validateBeforeMutation?.();
+        resolveTarget?.();
         return {
           success: true,
           restoredDirs: ["extensions"],
@@ -137,6 +158,10 @@ describe("created OpenClaw restore authority", () => {
         };
       }
     });
+    const revalidateHarnessPackageAuthority = vi
+      .fn()
+      .mockReturnValueOnce(OPENCLAW_PACKAGE)
+      .mockReturnValue({ ...OPENCLAW_PACKAGE, contentDigest: "c".repeat(64) });
 
     expect(() =>
       finalizeCreatedSandbox(
@@ -152,6 +177,7 @@ describe("created OpenClaw restore authority", () => {
           preferredInferenceApi: "openai-completions",
         },
         {
+          ...preparedRestoreAuthority("openclaw"),
           discoverFreshOpenClawImagePluginInstalls: vi.fn(),
           restoreRecreatedSandboxState,
           readSandboxStateBackupManifest: openClawManifest,
@@ -160,10 +186,7 @@ describe("created OpenClaw restore authority", () => {
             backupPath: "/tmp/openclaw-backup",
             contentSha256: "b".repeat(64),
           }),
-          revalidateHarnessPackageAuthority: () => ({
-            ...OPENCLAW_PACKAGE,
-            contentDigest: "c".repeat(64),
-          }),
+          revalidateHarnessPackageAuthority,
           revalidateSandboxIdentity: vi.fn(),
           getDcodeSelectionDrift: vi.fn(),
           register,
@@ -179,7 +202,7 @@ describe("created OpenClaw restore authority", () => {
     expect(restoreRecreatedSandboxState).toHaveBeenCalledOnce();
     expect(register).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("snapshot harness package authority changed"),
+      expect.stringContaining("harness package authority changed"),
     );
   });
 
@@ -195,10 +218,10 @@ describe("created OpenClaw restore authority", () => {
             throw new Error("created sandbox live identity changed");
           })(),
     );
-    const restoreRecreatedSandboxState = vi.fn((_name, _backup, options) => {
+    const restoreRecreatedSandboxState = vi.fn((_name, _backup, _options, resolveTarget) => {
       liveIdentity = "replacement-sandbox-id";
       try {
-        options.validateBeforeMutation?.();
+        resolveTarget?.();
         filesystemMutationStarted = true;
         return {
           success: true,
@@ -233,6 +256,7 @@ describe("created OpenClaw restore authority", () => {
           preferredInferenceApi: "openai-completions",
         },
         {
+          ...preparedRestoreAuthority("openclaw"),
           discoverFreshOpenClawImagePluginInstalls: vi.fn(),
           restoreRecreatedSandboxState,
           readSandboxStateBackupManifest: openClawManifest,

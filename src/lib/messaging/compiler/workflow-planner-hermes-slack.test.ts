@@ -9,8 +9,14 @@ import {
   createBuiltInRenderTemplateResolver,
 } from "../channels";
 import { createBuiltInMessagingHookRegistry } from "../hooks";
-import type { SandboxMessagingPlan } from "../manifest";
+import { createChannelManifestRegistry, type SandboxMessagingPlan } from "../manifest";
 import { MessagingWorkflowPlanner } from "./workflow-planner";
+
+const HERMES_BUILD_PROFILE = {
+  configRoot: "~/.hermes",
+  packageManagers: ["python-package"],
+  renderFinalizers: ["inherit-api-server-toolsets"],
+} as const;
 
 const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
   SLACK_BOT_TOKEN: "xoxb-test-slack-token",
@@ -18,8 +24,11 @@ const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
 };
 
 function planner(): MessagingWorkflowPlanner {
+  const manifests = createBuiltInChannelManifestRegistry()
+    .list()
+    .map((manifest) => ({ ...manifest, packageBuild: HERMES_BUILD_PROFILE }));
   return new MessagingWorkflowPlanner(
-    createBuiltInChannelManifestRegistry(),
+    createChannelManifestRegistry(manifests),
     createBuiltInMessagingHookRegistry({
       common: {
         env: {},

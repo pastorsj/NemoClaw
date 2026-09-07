@@ -34,6 +34,7 @@ const source: ObservedExportSource = {
     endpointUrl: "https://api.openai.com/v1",
     credentialEnv: "OPENAI_API_KEY",
   },
+  harnessPackage: null,
   sandbox: {
     sandboxId: "018f47e2-9d93-7d15-9c41-3ecf70b2550f",
     fingerprint: "sha256:sandbox",
@@ -136,6 +137,28 @@ describe("export config builder", () => {
     expect(second.spec.sandboxes[0]?.agents[0]?.inference.routes[0]?.providerRef).toBe(
       "hosted-openai-api",
     );
+  });
+
+  it("preserves exact authority for a synthetic package-backed harness", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "b".repeat(64),
+    };
+    const result = buildExportConfig(
+      {
+        ...source,
+        registry: { ...source.registry, agent: harnessPackage.id, harnessPackage },
+        harnessPackage,
+      },
+      "future",
+    );
+
+    expect(result.spec.sandboxes[0]?.agents[0]).toMatchObject({
+      type: "future-harness",
+      package: harnessPackage,
+    });
   });
 
   it("omits an absent hosted credential reference and validates the complete result (#10938)", () => {

@@ -181,11 +181,10 @@ export function createCredentialProviderRegistration(deps: CredentialProviderReg
     gatewayName: string,
     runOpenshell: OpenshellCliHelpers["runOpenshell"] = gatewayRunner(gatewayName),
   ): string[] {
-    const upserted = providers.upsertMessagingProviders(
-      tokenDefs,
-      runOpenshell,
-      { ...options, gatewayName },
-    ) as string[];
+    const upserted = providers.upsertMessagingProviders(tokenDefs, runOpenshell, {
+      ...options,
+      gatewayName,
+    }) as string[];
     recordMigratedLegacyMessagingCredentials(
       tokenDefs,
       upserted,
@@ -206,17 +205,26 @@ export function createCredentialProviderRegistration(deps: CredentialProviderReg
   function credentialBindingMatchesGateway(
     binding: CheckpointProviderBinding,
     runOpenshell: OpenshellCliHelpers["runOpenshell"],
+    messagingProviderProfile?: messagingBridgeProvider.MessagingBridgeProfile,
   ): boolean {
-    return inspectGatewayCredentialBinding(binding, runOpenshell).kind === "exact";
+    return (
+      inspectGatewayCredentialBinding(binding, runOpenshell, messagingProviderProfile).kind ===
+      "exact"
+    );
   }
 
   function inspectGatewayCredentialBinding(
     binding: CheckpointProviderBinding,
     runOpenshell: OpenshellCliHelpers["runOpenshell"],
+    messagingProviderProfile?: messagingBridgeProvider.MessagingBridgeProfile,
   ): gatewayProviderMetadata.GatewayCredentialOnlyProviderInspection {
     const profileMatches = messagingBridgeProvider.matchesRegisteredMessagingBridgeProfile(
       binding.type,
-      { root: deps.root, runOpenshell },
+      {
+        root: deps.root,
+        runOpenshell,
+        ...(messagingProviderProfile ? { profiles: [messagingProviderProfile] } : {}),
+      },
     );
     if (profileMatches === false) return { kind: "indeterminate" };
     return gatewayProviderMetadata.inspectGatewayCredentialFamilyProviderBinding(
@@ -233,16 +241,26 @@ export function createCredentialProviderRegistration(deps: CredentialProviderReg
     name: string,
     type: string,
     credentialEnv: string,
+    messagingProviderProfile?: messagingBridgeProvider.MessagingBridgeProfile,
   ): gatewayProviderMetadata.GatewayCredentialOnlyProviderInspection {
-    return inspectGatewayCredentialBinding({ name, type, credentialEnv }, gatewayRunner());
+    return inspectGatewayCredentialBinding(
+      { name, type, credentialEnv },
+      gatewayRunner(),
+      messagingProviderProfile,
+    );
   }
 
   function providerMatchesGatewayCredential(
     name: string,
     type: string,
     credentialEnv: string,
+    messagingProviderProfile?: messagingBridgeProvider.MessagingBridgeProfile,
   ): boolean {
-    return credentialBindingMatchesGateway({ name, type, credentialEnv }, gatewayRunner());
+    return credentialBindingMatchesGateway(
+      { name, type, credentialEnv },
+      gatewayRunner(),
+      messagingProviderProfile,
+    );
   }
 
   function preflightRequiredCredentialProviderBindings(
@@ -252,16 +270,19 @@ export function createCredentialProviderRegistration(deps: CredentialProviderReg
     replaceExisting: boolean,
   ): void {
     for (const binding of requiredBindings) {
+      const tokenDef = plannedTokenDefs.get(binding.name);
       if (!providers.providerExistsInGateway(binding.name, runOpenshell)) {
-        const tokenDef = plannedTokenDefs.get(binding.name);
         if (!tokenDef || !hasConfiguredMessagingCredential(tokenDef)) {
           throw new Error(MISSING_BINDING_ERROR);
         }
         continue;
       }
-      const matches = credentialBindingMatchesGateway(binding, runOpenshell);
+      const matches = credentialBindingMatchesGateway(
+        binding,
+        runOpenshell,
+        tokenDef?.messagingProviderProfile,
+      );
       if (matches) continue;
-      const tokenDef = plannedTokenDefs.get(binding.name);
       if (!replaceExisting || !tokenDef || !hasConfiguredMessagingCredential(tokenDef)) {
         throw new Error(EXISTING_BINDING_ERROR);
       }

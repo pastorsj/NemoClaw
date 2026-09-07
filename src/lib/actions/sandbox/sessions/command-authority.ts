@@ -12,7 +12,7 @@ import {
   readRegisteredSandboxAuthority,
   resolvePackageBackedSandboxAgent,
   type RegisteredSandboxAuthority,
-} from "../../../onboard/package/package-authority";
+} from "../authority/package";
 import { withSandboxMutationLock } from "../../../state/mutation-lock";
 import { ensureLiveSandboxOrExit } from "../gateway-state";
 

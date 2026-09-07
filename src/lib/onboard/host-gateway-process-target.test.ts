@@ -176,6 +176,21 @@ function stopScopedTarget(
         [NEMOCLAW_OPENSHELL_SANDBOX_NAMESPACE_ENV]:
           overrides.namespace ?? gatewayIdForStateDir(stateDir),
       }),
+      ...(provider === "podman"
+        ? {
+            resolveRuntimeProvider: () => ({
+              gateway: {
+                supported: true,
+                prepareHostRuntime: () =>
+                  prepareNativePodmanGatewayHostRuntime({
+                    environment: {},
+                    platform: "linux",
+                    socketPath: path.join(stateDir, "podman.sock"),
+                  }),
+              },
+            }) as never,
+          }
+        : {}),
       warn: vi.fn(),
     },
     {

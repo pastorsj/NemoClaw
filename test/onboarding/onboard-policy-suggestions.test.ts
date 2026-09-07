@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { HarnessPolicyCapability } from "@nvidia/nemoclaw-harness-contract";
 import { describe, expect, it } from "vitest";
 import { filterSetupPolicyPresetsForAgent } from "../../src/lib/onboard/agent-policy-presets";
 import {
@@ -25,6 +26,7 @@ const { computeSetupPresetSuggestions, filterSetupPolicyPresets, getSuggestedPol
         hermesToolGateways?: string[] | null;
         packagePolicyPresets?: readonly string[] | null;
         customPresetNames?: ReadonlySet<string> | null;
+        packagePolicyCapability?: HarnessPolicyCapability | null;
         env?: NodeJS.ProcessEnv;
       },
     ) => string[];
@@ -53,6 +55,7 @@ const { mergeRequiredSetupPolicyPresets } =
         knownPresetNames?: string[] | Set<string> | null;
         env?: NodeJS.ProcessEnv;
         tierName?: string | null;
+        packagePolicyCapability?: HarnessPolicyCapability | null;
         webSearchConfig?: { fetchEnabled?: boolean; provider?: "brave" | "tavily" } | null;
       },
     ) => string[];
@@ -98,6 +101,24 @@ function withOpenclawOtelEnv<T>(value: string | undefined, body: () => T): T {
 }
 
 describe("onboard policy preset suggestions", () => {
+  const futurePackagePolicy: HarnessPolicyCapability = {
+    owned_presets: ["future-required", "future-traces"],
+    automatic_presets: [
+      {
+        name: "future-required",
+        activation: { kind: "always" },
+        apply_during_create: false,
+        suppress_in_tiers: [],
+      },
+      {
+        name: "future-traces",
+        activation: { kind: "observability-enabled" },
+        apply_during_create: true,
+        suppress_in_tiers: ["restricted"],
+      },
+    ],
+    baseline_exclusion_impacts: {},
+  };
   const known = [
     "npm",
     "pypi",
@@ -119,7 +140,29 @@ describe("onboard policy preset suggestions", () => {
     "nous-audio",
     "nous-browser",
     "nous-code",
+    "future-required",
+    "future-traces",
   ];
+
+  it("uses typed automatic rules for an unknown receipt package", () => {
+    expect(
+      computeSetupPresetSuggestions("balanced", {
+        agent: "future-harness",
+        observabilityEnabled: true,
+        knownPresetNames: known,
+        packagePolicyCapability: futurePackagePolicy,
+      }),
+    ).toEqual(expect.arrayContaining(["future-required", "future-traces"]));
+
+    expect(
+      mergeRequiredSetupPolicyPresets(["npm", "future-traces"], {
+        agent: "future-harness",
+        observabilityEnabled: false,
+        knownPresetNames: known,
+        packagePolicyCapability: futurePackagePolicy,
+      }),
+    ).toEqual(["npm", "future-required"]);
+  });
 
   it("uses explicit messaging selections for policy suggestions when provided", () => {
     const originalTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;

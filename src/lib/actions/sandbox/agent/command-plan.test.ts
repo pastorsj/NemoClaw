@@ -71,4 +71,49 @@ describe("package agent command plan", () => {
       requestedTimeoutSeconds: null,
     });
   });
+
+  it("selects an explicitly declared finite output interpretation", () => {
+    expect(
+      buildPackageAgentCommandPlan(
+        {
+          argv: ["openclaw", "agent"],
+          output_mode: "bounded-text",
+          output_interpretation: "structured-turn-envelope",
+        },
+        [],
+      ),
+    ).toMatchObject({
+      kind: "dispatch",
+      outputMode: "bounded-text",
+      structuredTurnEnvelope: {
+        output_interpretation: "structured-turn-envelope",
+      },
+    });
+  });
+
+  it("forwards package help through the declared command without selector or envelope parsing", () => {
+    expect(
+      buildPackageAgentCommandPlan(
+        { ...declaration, output_interpretation: "structured-turn-envelope" },
+        ["--help"],
+      ),
+    ).toEqual({
+      kind: "dispatch",
+      argv: ["future-agent", "run", "--help"],
+      outputMode: "bounded-text",
+      requestedTimeoutSeconds: null,
+    });
+  });
+
+  it("does not treat a help token after the argv terminator as native help", () => {
+    const plan = buildPackageAgentCommandPlan({ ...declaration, selector_required: false }, [
+      "--",
+      "--help",
+    ]);
+    expect(plan).toMatchObject({
+      kind: "dispatch",
+      argv: ["future-agent", "run", "--", "--help"],
+    });
+    expect(plan).not.toHaveProperty("structuredTurnEnvelope");
+  });
 });

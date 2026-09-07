@@ -7,6 +7,10 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../test/helpers/adapter-fixtures";
+import {
   HarnessConfigModuleError,
   loadHarnessConfigAdapterHostModule,
   loadHarnessConfigRestoreHostModule,
@@ -142,13 +146,45 @@ function installFuturePackage(
       "  dir: /sandbox/.future",
       "  config_file: config.json",
       "  format: json",
+      "runtime:",
+      "  kind: terminal",
+      "  interactive_command: future-harness",
+      "  prompt_transport: stdin",
+      "  headless_command: future-harness --prompt",
       ...managedImageDeclaration,
       ...inferenceDeclaration,
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: The synthetic package has no image-managed extensions.",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: The synthetic package has no scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
+      "messaging:",
+      "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "",
     ].join("\n"),
   );
   writeFixtureFile("packages/nemoclaw-future-harness/host/config-adapter.cts", configModule);
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/host/messaging-adapter.cts",
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
   writeFixtureFile("packages/nemoclaw-future-harness/host/restore-adapter.cts", restoreModule);
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/host/startup-adapter.cts",
+    TEST_STARTUP_ADAPTER_SOURCE,
+  );
   return installHarnessPackage(
     { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
     { storeRoot },
@@ -234,10 +270,76 @@ describe("installed harness configuration adapter", () => {
         backupContent: "backup",
         currentContent: "current",
         managedChannelNames: [],
-        previousImagePluginInstalls: null,
-        freshImagePluginInstalls: null,
+        previousManagedExtensions: null,
+        freshManagedExtensions: null,
       }),
     ).toEqual({ kind: "merged", content: "currentbackup", write: { kind: "atomic" } });
+  });
+
+  it.each([
+    ["a directory outside /sandbox", { directory: "/etc/future" }],
+    ["a noncanonical directory", { directory: "/sandbox/../etc/future" }],
+    ["an escaping file", { file: "../config.json" }],
+    ["a sensitive file outside /sandbox", { sensitiveFiles: ["/etc/future.env"] }],
+  ])("rejects a config target with %s before package code runs", (_case, replacement) => {
+    const installed = installFuturePackage();
+    const adapter = loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot });
+    const target = {
+      directory: "/sandbox/.future",
+      file: "config.json",
+      format: "json",
+      sensitiveFiles: [],
+      ...replacement,
+    };
+
+    expect(() => adapter.describeInferenceConfig({ target })).toThrow(
+      /request does not satisfy its schema/u,
+    );
+  });
+
+  it.each([
+    ["a transaction directory outside /sandbox", "/etc/future", "config.json"],
+    ["an escaping protected file", "/sandbox/.future", "../config.json"],
+  ])("rejects a config transaction result with %s", (_case, configDirectory, protectedFile) => {
+    const success = `{
+        kind: "config-transaction",
+        action: "write",
+        configDirectory: ${JSON.stringify(configDirectory)},
+        protectedFiles: [${JSON.stringify(protectedFile)}],
+      }`;
+    const installed = installFuturePackage(
+      CONFIG_MODULE.replace('success: { kind: "exit-zero" }', `success: ${success}`),
+    );
+    const adapter = loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot });
+
+    expect(() =>
+      adapter.prepareConfigUpdate({
+        config: {},
+        serializedConfig: "{}",
+        expectedConfigSha256: "a".repeat(64),
+        target: {
+          directory: "/sandbox/.future",
+          file: "config.json",
+          format: "json",
+          sensitiveFiles: [],
+        },
+      }),
+    ).toThrow(/returned an invalid configuration update plan/u);
+  });
+
+  it("rejects an unsafe managed-extension baseline before invoking package restore code", () => {
+    const installed = installFuturePackage(CONFIG_MODULE);
+    const restore = loadHarnessConfigRestoreHostModule(installed.identity, { storeRoot });
+
+    expect(() =>
+      restore.mergeConfigState({
+        backupContent: "backup",
+        currentContent: "current",
+        managedChannelNames: [],
+        previousManagedExtensions: [{ id: "future", directory: "../outside", configPaths: [] }],
+        freshManagedExtensions: [],
+      }),
+    ).toThrow(/restore adapter mergeConfigState request does not satisfy its schema/u);
   });
 
   it("rejects an inference plan outside the finite result schema", () => {
@@ -324,40 +426,33 @@ describe("installed harness configuration adapter", () => {
     ).toThrow(/does not match its manifest declaration/u);
   });
 
-  it("rejects command reconciliation without a managed-image runtime identity at load time", () => {
+  it("rejects command reconciliation without a managed-image runtime identity at installation", () => {
     const configModule = CONFIG_MODULE.replace(
       'sandboxReconcile: { kind: "not-required" },',
       'sandboxReconcile: { kind: "command", trigger: "when-config-changes", command: ["/usr/local/lib/future/reconcile"], timeoutSeconds: 30 },',
     );
-    const installed = installFuturePackage(configModule, RESTORE_MODULE, [
-      "inference:",
-      "  config_update:",
-      "    support: mutable",
-      "    provider_api_overrides: []",
-      "    post_commit:",
-      "      config_sync: required",
-      "      gateway_restart: not-required",
-      "      sandbox_reconcile:",
-      "        kind: command",
-      "        trigger: when-config-changes",
-      "        command:",
-      "          - /usr/local/lib/future/reconcile",
-      "        timeout_seconds: 30",
-    ]);
+    expect(() =>
+      installFuturePackage(configModule, RESTORE_MODULE, [
+        "inference:",
+        "  config_update:",
+        "    support: mutable",
+        "    provider_api_overrides: []",
+        "    post_commit:",
+        "      config_sync: required",
+        "      gateway_restart: not-required",
+        "      sandbox_reconcile:",
+        "        kind: command",
+        "        trigger: when-config-changes",
+        "        command:",
+        "          - /usr/local/lib/future/reconcile",
+        "        timeout_seconds: 30",
+      ]),
+    ).toThrow(/requires a managed_image runtime identity/u);
+  });
 
-    let caught: unknown;
-    try {
-      loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot });
-    } catch (error) {
-      caught = error;
-    }
-
-    expect(caught).toBeInstanceOf(HarnessConfigModuleError);
-    expect((caught as Error).message).toMatch(/integrity validation/u);
-    const validationError = ((caught as Error).cause as Error | undefined)?.cause;
-    expect(validationError).toBeInstanceOf(HarnessConfigModuleError);
-    expect((validationError as Error).message).toMatch(
-      /without a valid managed-image runtime identity/u,
+  it("rejects a package that omits the inference configuration declaration", () => {
+    expect(() => installFuturePackage(CONFIG_MODULE, RESTORE_MODULE, [])).toThrow(
+      /inference.*required/u,
     );
   });
 
@@ -401,25 +496,15 @@ describe("installed harness configuration adapter", () => {
     ).not.toThrow();
   });
 
-  it("rejects a package that omits the inference configuration declaration", () => {
-    const installed = installFuturePackage(CONFIG_MODULE, RESTORE_MODULE, []);
-
-    expect(() => loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot })).toThrow(
-      /manifest does not declare configuration adapter/u,
-    );
-  });
-
   it("rejects a mutable declaration without bounded post-commit authority", () => {
-    const installed = installFuturePackage(CONFIG_MODULE, RESTORE_MODULE, [
-      "inference:",
-      "  config_update:",
-      "    support: mutable",
-      "    provider_api_overrides: []",
-    ]);
-
-    expect(() => loadHarnessConfigAdapterHostModule(installed.identity, { storeRoot })).toThrow(
-      /manifest does not declare configuration adapter/u,
-    );
+    expect(() =>
+      installFuturePackage(CONFIG_MODULE, RESTORE_MODULE, [
+        "inference:",
+        "  config_update:",
+        "    support: mutable",
+        "    provider_api_overrides: []",
+      ]),
+    ).toThrow(/config_update.*must contain exactly/u);
   });
 
   it("rejects inference adapter bytes that no longer match their package receipt", () => {
@@ -584,8 +669,8 @@ describe("installed harness configuration adapter", () => {
         backupContent: "backup",
         currentContent: "current",
         managedChannelNames: [],
-        previousImagePluginInstalls: null,
-        freshImagePluginInstalls: null,
+        previousManagedExtensions: null,
+        freshManagedExtensions: null,
       }),
     ).toThrow(/returned an invalid configuration restore result/u);
   });
@@ -603,8 +688,8 @@ describe("installed harness configuration adapter", () => {
         backupContent: "backup",
         currentContent: "current",
         managedChannelNames: [],
-        previousImagePluginInstalls: null,
-        freshImagePluginInstalls: null,
+        previousManagedExtensions: null,
+        freshManagedExtensions: null,
       }),
     ).toThrow(/returned an invalid configuration restore result/u);
   });
@@ -622,8 +707,8 @@ describe("installed harness configuration adapter", () => {
         backupContent: "backup",
         currentContent: "current",
         managedChannelNames: [],
-        previousImagePluginInstalls: null,
-        freshImagePluginInstalls: null,
+        previousManagedExtensions: null,
+        freshManagedExtensions: null,
       }),
     ).toThrow(/returned an invalid configuration restore result/u);
   });

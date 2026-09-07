@@ -14,6 +14,9 @@ export DSH_HOME=/sandbox/.deepseek-harness
 export DSH_TELEMETRY_MODE=DISABLED
 export DSH_TELEMETRY_DISABLED=1
 
+MANAGED_PROXY_HOST_FILE=/usr/local/share/nemoclaw/deepseek-proxy-host
+MANAGED_PROXY_PORT_FILE=/usr/local/share/nemoclaw/deepseek-proxy-port
+
 verify_state_root() {
   [ -d "$DSH_HOME" ] && [ ! -L "$DSH_HOME" ]
 }
@@ -45,11 +48,25 @@ is_valid_proxy_port() {
   ((10#$1 >= 1 && 10#$1 <= 65535))
 }
 
+read_managed_proxy_value() {
+  local file="$1"
+  local name="$2"
+  if [ ! -f "$file" ] || [ -L "$file" ]; then
+    printf 'Missing trusted managed proxy %s file.\n' "$name" >&2
+    return 1
+  fi
+  if [ "$(stat -c '%u:%g:%a' "$file" 2>/dev/null)" != "0:0:444" ]; then
+    printf 'Unsafe ownership or mode on trusted managed proxy %s file.\n' "$name" >&2
+    return 1
+  fi
+  printf '%s' "$(<"$file")"
+}
+
 # Reconstruct the credential-free OpenShell proxy URL from the two typed,
 # validated startup values. Never persist an ambient proxy URL, which could
 # contain host credentials. inference.local must not appear in NO_PROXY.
-PROXY_HOST="${NEMOCLAW_PROXY_HOST:-}"
-PROXY_PORT="${NEMOCLAW_PROXY_PORT:-}"
+PROXY_HOST="$(read_managed_proxy_value "$MANAGED_PROXY_HOST_FILE" host)"
+PROXY_PORT="$(read_managed_proxy_value "$MANAGED_PROXY_PORT_FILE" port)"
 if ! is_valid_proxy_host "$PROXY_HOST" || ! is_valid_proxy_port "$PROXY_PORT"; then
   printf '%s\n' '[SECURITY] Missing or invalid managed proxy route.' >&2
   exit 1

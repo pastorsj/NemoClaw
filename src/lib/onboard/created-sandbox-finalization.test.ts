@@ -292,6 +292,7 @@ const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const command = process.argv.at(-1)
   .replaceAll("/sandbox/.deepagents", ${JSON.stringify(liveDir)})
+  .replaceAll("/sandbox", ${JSON.stringify(path.dirname(liveDir))})
   .replace("/opt/venv/bin/python3", ${JSON.stringify(python)});
 const result = spawnSync("bash", ["-c", command], { input: fs.readFileSync(0), stdio: ["pipe", "pipe", "pipe"] });
 if (result.stdout) fs.writeSync(1, result.stdout);
@@ -558,6 +559,107 @@ describe("created DCode sandbox finalization", () => {
     expect(register).toHaveBeenCalledOnce();
   });
 
+  it("uses a receipt package qualifier before publishing fresh metadata", () => {
+    const harnessPackage = { ...DCODE_HARNESS_PACKAGE, id: "future-harness" };
+    const getDcodeSelectionDrift = vi.fn();
+    const getPackageSelectionQualification = vi.fn(() => ({
+      changed: false,
+      providerChanged: false,
+      modelChanged: false,
+      existingProvider: "nvidia-prod",
+      existingModel: "model-a",
+      unknown: false,
+    }));
+    const register = vi.fn();
+
+    finalizeCreatedSandbox(
+      {
+        sandboxName: "future",
+        restoreBackupPath: null,
+        preUpgradeBackup: false,
+        targetAgentType: "future-harness",
+        validateManagedDcode: false,
+        selectionQualification: {
+          package: harnessPackage,
+          declaration: { command: ["/usr/local/bin/qualify"], timeout_seconds: 30 },
+        },
+        provider: "nvidia-prod",
+        model: "model-a",
+        preferredInferenceApi: "openai-completions",
+      },
+      {
+        discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+        restoreRecreatedSandboxState: vi.fn(),
+        getDcodeSelectionDrift,
+        getPackageSelectionQualification,
+        revalidateHarnessPackageAuthority: () => harnessPackage,
+        register,
+        note: vi.fn(),
+        error: vi.fn(),
+        exitProcess: (code): never => {
+          throw new Error(`exit ${String(code)}`);
+        },
+      },
+    );
+
+    expect(getPackageSelectionQualification).toHaveBeenCalledWith(
+      "future",
+      "future-harness",
+      expect.objectContaining({ command: ["/usr/local/bin/qualify"] }),
+      "nvidia-prod",
+      "model-a",
+      "openai-completions",
+      null,
+      expect.any(Function),
+    );
+    expect(getDcodeSelectionDrift).not.toHaveBeenCalled();
+    expect(register).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when a receipt package cannot qualify its live selection", () => {
+    const harnessPackage = { ...DCODE_HARNESS_PACKAGE, id: "future-harness" };
+    const register = vi.fn();
+    expect(() =>
+      finalizeCreatedSandbox(
+        {
+          sandboxName: "future",
+          restoreBackupPath: null,
+          preUpgradeBackup: false,
+          targetAgentType: "future-harness",
+          validateManagedDcode: false,
+          selectionQualification: {
+            package: harnessPackage,
+            declaration: { command: ["/usr/local/bin/qualify"], timeout_seconds: 30 },
+          },
+          provider: "nvidia-prod",
+          model: "model-a",
+          preferredInferenceApi: "openai-completions",
+        },
+        {
+          discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+          restoreRecreatedSandboxState: vi.fn(),
+          getDcodeSelectionDrift: vi.fn(),
+          getPackageSelectionQualification: () => ({
+            changed: true,
+            providerChanged: false,
+            modelChanged: false,
+            existingProvider: null,
+            existingModel: null,
+            unknown: true,
+          }),
+          revalidateHarnessPackageAuthority: () => harnessPackage,
+          register,
+          note: vi.fn(),
+          error: vi.fn(),
+          exitProcess: (code): never => {
+            throw new Error(`exit ${String(code)}`);
+          },
+        },
+      ),
+    ).toThrow("exit 1");
+    expect(register).not.toHaveBeenCalled();
+  });
+
   it("passes the fresh create endpoint through the production completion constructor (#9555)", async () => {
     const endpointUrl = "https://openrouter.ai/api/v1";
     const model = "nvidia/nemotron-3-ultra-550b-a55b";
@@ -686,8 +788,9 @@ describe("created DCode sandbox finalization", () => {
       vi.fn(),
       {
         runtimeProvider: null,
+        receiptAgentDefinition: null,
         ensurePreparedWorkload: vi.fn(),
-        ensurePreparedProfile: vi.fn(),
+        ensurePreparedProfile: vi.fn(() => null),
       },
       {
         source: {

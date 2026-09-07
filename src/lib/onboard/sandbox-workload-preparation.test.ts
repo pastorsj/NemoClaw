@@ -462,6 +462,47 @@ describe("sandbox workload preparation", () => {
     expect(resolveCatalog).not.toHaveBeenCalled();
   });
 
+  it("uses the same no-publication fallback for a receipt-backed repository candidate", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "pi",
+      packageVersion: "1.2.3",
+      contentDigest: "9d".repeat(32),
+    } as const satisfies HarnessPackageIdentity;
+    const managedImage = {
+      repository: "registry.example/team/pi",
+      architectures: [MANAGED_IMAGE_PLATFORM],
+      runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+    } as const satisfies HarnessManagedImageDeclaration;
+    const resolveCatalog = vi.fn(async () => {
+      throw new Error("stock catalogue must not be called");
+    });
+
+    const prepared = await prepareSandboxWorkloadSource(
+      {
+        ...input("pi"),
+        harnessPackage,
+        managedImage,
+        runtime: {
+          ...runtime("docker"),
+          managedImageSelectionPolicy: "prefer-managed",
+        },
+      },
+      { resolveCatalog },
+    );
+
+    expect(prepared).toEqual({
+      source: {
+        kind: "legacy-dockerfile",
+        dockerfilePath: "agents/pi/Dockerfile",
+        reason: "contract-unavailable",
+      },
+      release: null,
+      fallbackDiagnostic: "package 'pi' does not declare an immutable managed image publication",
+    });
+    expect(resolveCatalog).not.toHaveBeenCalled();
+  });
+
   it("binds reusable stock publication evidence to an installed package receipt", async () => {
     const harnessPackage = {
       kind: "agent-runtime",

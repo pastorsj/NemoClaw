@@ -10,21 +10,29 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveOnboardOptions, runOnboardCommand } from "./command";
 
 function exitWithCode(code: number): never {
-  throw new Error(`exit:${code}`);
+  throw new Error(`exit:${String(code)}`);
 }
 
 describe("onboard --agents", () => {
-  it("resolves an existing manifest to an absolute path", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-agents-"));
-    const manifestPath = path.join(tmpDir, "agents.yaml");
-    fs.writeFileSync(manifestPath, "agents: []\n");
-    const relativeManifestPath = path.relative(process.cwd(), manifestPath);
+  it("resolves an existing manifest without choosing a harness by ID", () => {
+    const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-agents-"));
+    try {
+      const manifestPath = path.join(temporaryDirectory, "agents.yaml");
+      fs.writeFileSync(manifestPath, "workers: []\n");
+      const relativeManifestPath = path.relative(process.cwd(), manifestPath);
 
-    const result = resolveOnboardOptions(
-      { agents: relativeManifestPath },
-      { env: {}, exit: exitWithCode },
-    );
-    expect(result.agentsManifest).toBe(path.resolve(relativeManifestPath));
+      const result = resolveOnboardOptions(
+        { agent: "future-harness", agents: relativeManifestPath },
+        {
+          env: {},
+          listAgents: () => ["future-harness"],
+          exit: exitWithCode,
+        },
+      );
+      expect(result.agentsManifest).toBe(path.resolve(relativeManifestPath));
+    } finally {
+      fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
   });
 
   it("rejects a missing manifest", () => {
@@ -42,67 +50,25 @@ describe("onboard --agents", () => {
     expect(errors.join("\n")).toContain("--agents path not found");
   });
 
-  it("rejects manifests for non-OpenClaw runtimes before mutating the environment", async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-agents-hermes-"));
-    const manifestPath = path.join(tmpDir, "agents.yaml");
-    fs.writeFileSync(manifestPath, "agents: []\n");
-    const errors: string[] = [];
-    vi.stubEnv("NEMOCLAW_EXTRA_AGENTS_JSON", "unchanged");
-
-    try {
-      await expect(
-        runOnboardCommand({
-          flags: { agent: "hermes", agents: manifestPath },
-          env: {},
-          listAgents: () => ["openclaw", "hermes"],
-          error: (message = "") => errors.push(message),
-          exit: exitWithCode,
-          runOnboard: vi.fn(),
-        }),
-      ).rejects.toThrow("exit:1");
-      expect(errors.join("\n")).toContain("--agents is OpenClaw-specific");
-      expect(process.env.NEMOCLAW_EXTRA_AGENTS_JSON).toBe("unchanged");
-    } finally {
-      vi.unstubAllEnvs();
-    }
-  });
-
-  it("applies the manifest environment before invoking onboard", async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-agents-env-"));
-    const manifestPath = path.join(tmpDir, "agents.yaml");
-    fs.writeFileSync(
-      manifestPath,
-      ["agents:", "  - id: alpha", "    tools:", "      allow: [read]", ""].join("\n"),
-    );
-    const previous = process.env.NEMOCLAW_EXTRA_AGENTS_JSON;
-    delete process.env.NEMOCLAW_EXTRA_AGENTS_JSON;
-    const restoreEnvironment =
-      previous === undefined
-        ? () => delete process.env.NEMOCLAW_EXTRA_AGENTS_JSON
-        : () => {
-            process.env.NEMOCLAW_EXTRA_AGENTS_JSON = previous;
-          };
+  it("transports package-native manifest data without OpenClaw path defaults", async () => {
+    const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-roster-"));
+    const manifestPath = path.join(temporaryDirectory, "agents.yaml");
+    fs.writeFileSync(manifestPath, "workers:\n  - name: planner\n");
     let observedRaw: string | undefined;
-    const runOnboard = vi.fn(async () => {
-      observedRaw = process.env.NEMOCLAW_EXTRA_AGENTS_JSON;
-    });
+    const environment: NodeJS.ProcessEnv = {};
     try {
       await runOnboardCommand({
-        flags: { agents: manifestPath },
-        env: process.env,
-        runOnboard,
+        flags: { agent: "future-harness", agents: manifestPath },
+        env: environment,
+        listAgents: () => ["future-harness"],
+        runOnboard: vi.fn(async () => {
+          observedRaw = environment.NEMOCLAW_EXTRA_AGENTS_JSON;
+        }),
         exit: exitWithCode,
       });
-      expect(observedRaw).toBeDefined();
-      const payload = JSON.parse(observedRaw as string);
-      expect(payload.agents).toHaveLength(1);
-      expect(payload.agents[0]).toMatchObject({
-        id: "alpha",
-        workspace: "/sandbox/.openclaw/workspace-alpha",
-        agentDir: "/sandbox/.openclaw/agents/alpha",
-      });
+      expect(JSON.parse(observedRaw ?? "null")).toEqual({ workers: [{ name: "planner" }] });
     } finally {
-      restoreEnvironment();
+      fs.rmSync(temporaryDirectory, { recursive: true, force: true });
     }
   });
 });

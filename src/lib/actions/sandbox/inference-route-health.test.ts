@@ -70,7 +70,19 @@ describe("sandbox inference route health", () => {
 
   it("uses the DCode agent path while reporting observable route health (#6192)", async () => {
     const captureOpenshellImpl = vi.fn(makeCapture("OK 200"));
-    const getSessionAgentImpl = vi.fn(() => ({ name: "langchain-deepagents-code" }) as never);
+    const getSessionAgentImpl = vi.fn(
+      () =>
+        ({
+          name: "future-protected-terminal",
+          runtime: {
+            smoke_boundary: {
+              kind: "managed-launcher",
+              launcher: DCODE_MANAGED_EXEC_LAUNCHER,
+              home: "/usr/local/lib/nemoclaw",
+            },
+          },
+        }) as never,
+    );
 
     const result = await probeSandboxInferenceGatewayHealth("deep-code", {
       captureOpenshellImpl,
@@ -102,6 +114,35 @@ describe("sandbox inference route health", () => {
         expect.stringContaining("/usr/bin/curl -q"),
       ],
       expect.objectContaining({ ignoreError: true }),
+    );
+  });
+
+  it("uses an explicit synthetic package boundary without ambient catalogue lookup", async () => {
+    const captureOpenshellImpl = vi.fn(makeCapture("OK 200"));
+    const getSessionAgentImpl = vi.fn(() => {
+      throw new Error("receipt-backed probe must not load ambient agent state");
+    });
+
+    await expect(
+      probeSandboxInferenceGatewayHealth("future-box", {
+        agent: {
+          name: "future-terminal",
+          runtime: {
+            smoke_boundary: {
+              kind: "managed-launcher",
+              launcher: "/opt/future/bin/probe-exec",
+              home: "/opt/future/probe-home",
+            },
+          },
+        },
+        captureOpenshellImpl,
+        getSessionAgentImpl,
+      }),
+    ).resolves.toMatchObject({ ok: true, httpStatus: 200 });
+    expect(getSessionAgentImpl).not.toHaveBeenCalled();
+    const invokedArgs = (captureOpenshellImpl.mock.calls as unknown as [string[]][])[0]?.[0];
+    expect(invokedArgs).toEqual(
+      expect.arrayContaining(["HOME=/opt/future/probe-home", "/opt/future/bin/probe-exec"]),
     );
   });
 
@@ -216,6 +257,36 @@ describe("buildSandboxInferenceRouteHealth (#10080)", () => {
       {
         agentName: "langchain-deepagents-code",
         provider: "nvidia-nim",
+      },
+    );
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("uses a synthetic package declaration without recognizing its package id", () => {
+    const result = buildSandboxInferenceRouteHealth(
+      gateway(404),
+      null,
+      { ok: true },
+      {
+        agentName: "future-terminal",
+        provider: "future-provider",
+        models404: "inference-invocation",
+      },
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("does not inherit a legacy id exception when receipt metadata is explicitly absent", () => {
+    const result = buildSandboxInferenceRouteHealth(
+      gateway(404),
+      null,
+      { ok: true },
+      {
+        agentName: "langchain-deepagents-code",
+        provider: "openrouter-api",
+        models404: null,
       },
     );
 

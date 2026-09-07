@@ -17,6 +17,10 @@ The test directory uses execution lanes first and behavior areas second.
 Other `*.test.js` and `*.test.ts` files outside the dedicated lanes above belong to the `integration` project.
 The project globs in `vitest.config.ts` must remain disjoint and exhaustive.
 
+Harness-native runtime behavior belongs in the matching `packages/nemoclaw-*/tests/` tree. Root
+integration tests may exercise the generic messaging planner, applier, and explicit legacy parity
+boundary, but must not become the primary behavior suite for a package-owned preload or adapter.
+
 ## Shared test code
 
 - Put passive inputs in `fixtures/`.

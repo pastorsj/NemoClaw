@@ -62,6 +62,8 @@ export interface DeviceCodeFlowOptions {
   sleep?: (ms: number) => Promise<void>;
   fetch?: typeof fetch;
   log?: (line: string) => void;
+  /** Human-readable package provider label; Hermes remains the legacy default. */
+  providerLabel?: string;
 }
 
 export class OAuthError extends Error {
@@ -354,14 +356,16 @@ export async function mintAgentKeyWithAccessToken(
 
 export async function runDeviceCodeFlow(opts: DeviceCodeFlowOptions = {}): Promise<TokenResponse> {
   const log = opts.log ?? ((line: string) => console.error(line));
+  const providerLabel = opts.providerLabel?.trim() || "Hermes Provider";
+  const portalLabel = new URL(opts.portalBaseUrl ?? DEFAULT_PORTAL_BASE_URL).hostname;
 
   log("");
-  log("  Requesting device code from portal.nousresearch.com...");
+  log(`  Requesting device code from ${portalLabel}...`);
   const deviceCode = await requestDeviceCode(opts);
   const verificationUri = deviceCode.verification_uri_complete ?? deviceCode.verification_uri;
 
   log("");
-  log("  Hermes Provider OAuth");
+  log(`  ${providerLabel} OAuth`);
   log("  Open this URL in your browser to approve:");
   log("");
   log(`    ${verificationUri}`);
@@ -378,7 +382,7 @@ export async function runDeviceCodeFlow(opts: DeviceCodeFlowOptions = {}): Promi
 
   const token = await pollForToken(deviceCode, opts);
   log("");
-  log("  ✓ Hermes Provider authorization complete");
+  log(`  ✓ ${providerLabel} authorization complete`);
   log("");
   return token;
 }

@@ -29,6 +29,7 @@ const {
   assertSelectionMutationAuthority,
   credentialMutationGuardFor,
   withCredentialMutationGuard,
+  readRequestedOrRecoveredModel,
   resolveCompatibleEndpointSelection,
   selectFeaturedModelAfterCredentialPrompt,
 }: typeof import("./onboard/setup-nim-selection") = require("./onboard/setup-nim-selection");
@@ -144,9 +145,7 @@ const {
 const {
   installOllamaOnMacOS,
 }: typeof import("./onboard/install-ollama-macos") = require("./onboard/install-ollama-macos");
-const {
-  OllamaProbeFailureTracker,
-}: typeof import("./onboard/ollama-probe-failure-tracker") = require("./onboard/ollama-probe-failure-tracker");
+const ollamaModelSelection: typeof import("./onboard/selection/ollama-model") = require("./onboard/selection/ollama-model");
 const crypto = require("node:crypto");
 const os = require("os");
 const path = require("path");
@@ -202,9 +201,6 @@ const {
 } = require("./core/ports");
 const localInference: typeof import("./inference/local") = require("./inference/local");
 const {
-  ollamaModelRefsMatch,
-}: typeof import("./inference/ollama/model-discovery") = require("./inference/ollama/model-discovery");
-const {
   resetOllamaHostCache,
   getLocalProviderBaseUrl,
   getLocalProviderHealthCheck,
@@ -225,8 +221,6 @@ const {
   getOllamaProxyToken,
   isProxyHealthy,
   persistAndProbeOllamaProxy,
-  prepareOllamaModel,
-  promptOllamaModel,
   unloadOllamaModels,
 } = require("./inference/ollama/proxy");
 const {
@@ -289,7 +283,10 @@ const {
   OLLAMA_PROXY_CREDENTIAL_ENV: string;
   VLLM_LOCAL_CREDENTIAL_ENV: string;
   getProviderLabel: (key: string) => string;
-  getNonInteractiveProvider: (allowHostedInferenceStaging?: boolean) => string | null;
+  getNonInteractiveProvider: (
+    allowHostedInferenceStaging?: boolean,
+    options?: { readonly allowHostedInferenceProviderKeyAlias?: boolean },
+  ) => string | null;
   getNonInteractiveModel: (providerKey: string) => string | null;
   getSandboxInferenceConfig: (
     model: string,
@@ -393,6 +390,7 @@ const credentialNavigation: typeof import("./onboard/credential-navigation") = r
 const { BACK_TO_SELECTION, createCredentialPromptHelpers, isBackToSelection } =
   credentialNavigation;
 const {
+  readProviderAuthMethod,
   toSessionUpdates,
 }: typeof import("./onboard/session-updates") = require("./onboard/session-updates");
 const gatewayReuse: typeof import("./onboard/gateway-reuse") = require("./onboard/gateway-reuse");
@@ -538,7 +536,6 @@ import {
 } from "./onboard/hermes-managed-tools";
 import { filterEnabledChannelsByAgent } from "./onboard/messaging-state";
 import { getValidatedMessagingTokenByEnvKey } from "./onboard/messaging-token";
-import * as ollamaFlow from "./onboard/ollama-probe-failure";
 import { runOllamaStartupOrGate } from "./onboard/ollama-startup";
 import * as recreateJournal from "./onboard/onboard-recreate-journal";
 import type { OpenShellInstallDeps, OpenShellInstallResult } from "./onboard/openshell-install";
@@ -965,6 +962,16 @@ const { validateSelectedRemoteModel } = createRemoteModelValidator({
 const { promptRemoteModel, promptInputModel } = modelPrompts;
 const { validateAnthropicModel, validateOpenAiLikeModel } = providerModels;
 const nousModels: typeof import("./inference/nous-models") = require("./inference/nous-models");
+const selectAndValidateOllamaModel = ollamaModelSelection.createOllamaModelSelector({
+  abortNonInteractive,
+  isAutoYes,
+  isBackToSelection,
+  isNonInteractive,
+  isSafeModelId,
+  note,
+  promptYesNoOrDefault,
+  validateOpenAiLikeSelection,
+});
 
 // Build context helpers — delegated to src/lib/build-context.ts
 const { shouldIncludeBuildContextPath, copyBuildContextDir, printSandboxCreateRecoveryHints } =
@@ -1029,7 +1036,6 @@ const handleLlamaCppSelection = setupNimFlow.createLlamaCppSelectionHandler({
   log: (message) => console.log(message),
   exitProcess: (code): never => process.exit(code),
 });
-const ollamaModelSize: typeof import("./inference/ollama/model-size") = require("./inference/ollama/model-size");
 function isOpenshellInstalled(): boolean {
   return resolveOpenshell() !== null;
 }
@@ -1513,6 +1519,11 @@ const sandboxCreateOrchestrationRuntime = {
     return getDashboardForwardPort;
   },
   readDcodeSelectionDrift: createDcodeSelectionDriftReader(runCaptureOpenshell, () => GATEWAY_NAME),
+  readPackageSelectionQualification:
+    onboardPackageBoundary.createPackageSelectionQualificationReader(
+      runCaptureOpenshell,
+      () => GATEWAY_NAME,
+    ),
   getDefaultSandboxNameForAgent,
   getDockerDriverGatewayStateDir,
   getHermesToolGatewayBroker,
@@ -1597,7 +1608,7 @@ const createSandboxWithBaseImageResolution =
   );
 
 const { createSandbox, createSandboxWithTemporaryManagedRuntime } =
-  agentOnboard.createHermesApiPortScopedSandboxEntryPoints({
+  agentOnboard.createSecondaryForwardPortScopedSandboxEntryPoints({
     createBaseImageResolutionContext: () =>
       baseImageResolutionFlow.createBaseImageResolutionContext({ fresh: false }),
     createSandboxWithBaseImageResolution,
@@ -1629,114 +1640,8 @@ const {
   warn: (message) => console.warn(message),
 });
 
-async function selectAndValidateOllamaModel(
-  gpu: ReturnType<typeof nim.detectGpu>,
-  provider: string,
-  defaults: OllamaModelSelectionDefaults,
-  onModelSelected?: (model: string) => void,
-): Promise<ollamaFlow.OllamaModelSelectionOutcome> {
-  const { requestedModel, recoveredModel, lockedModel, promptDefaultModel } = defaults;
-  const probeFailures = new OllamaProbeFailureTracker();
-  const confirm = (question: string, defaultIsYes: boolean) =>
-    promptYesNoOrDefault(question, null, defaultIsYes);
-  const interaction = { isNonInteractive, isAutoYes, confirm };
-  while (true) {
-    const installedModels = localInference.getOllamaModelOptions();
-    let model: string | typeof BACK_TO_SELECTION;
-    if (lockedModel) {
-      model = lockedModel;
-    } else if (isNonInteractive()) {
-      model = resolveNonInteractiveModel(requestedModel, recoveredModel, gpu, installedModels);
-    } else {
-      model = await promptOllamaModel(gpu, {
-        defaultModel: isSafeModelId(promptDefaultModel ?? "") ? promptDefaultModel : null,
-        excludeModels: probeFailures.excludedModels(),
-        installedModels,
-      });
-    }
-    if (isBackToSelection(model)) {
-      console.log("  Returning to provider selection.");
-      console.log("");
-      return { outcome: "back-to-selection" };
-    }
-    const selectedModel = requireValue(model, "Expected an Ollama model selection");
-    onModelSelected?.(selectedModel);
-    if (!installedModels.some((listedModel) => ollamaModelRefsMatch(listedModel, selectedModel))) {
-      const lookup = ollamaModelSize.getOllamaModelSize(selectedModel);
-      const sizeLabel = ollamaModelSize.formatModelSize(lookup);
-      if (isAutoYes()) {
-        note(`  Pulling Ollama model '${selectedModel}' (${sizeLabel}).`);
-      } else if (isNonInteractive()) {
-        console.error(
-          `  Ollama model '${selectedModel}' (${sizeLabel}) is not installed and ` +
-            "non-interactive mode cannot prompt for confirmation. " +
-            "Re-run with --yes / -y (or NEMOCLAW_YES=1) to authorise the download.",
-        );
-        process.exit(1);
-      } else {
-        const proceed = await promptYesNoOrDefault(
-          `  Download Ollama model '${selectedModel}' (${sizeLabel})?`,
-          null,
-          false,
-        );
-        if (!proceed) {
-          console.error(
-            `  Skipped pulling Ollama model '${selectedModel}'. Choose another model or re-run with --yes to confirm.`,
-          );
-          console.log("  Choose a different Ollama model or select Other.");
-          console.log("");
-          continue;
-        }
-      }
-    }
-    const probe = await prepareOllamaModel(selectedModel, installedModels, interaction);
-    if (!probe.ok) {
-      const probeFailureLimitReached = probeFailures.recordFailure(selectedModel);
-      const action = ollamaFlow.handleOllamaProbeFailure(probe, selectedModel, isNonInteractive);
-      if (action === "back-to-selection") return { outcome: "back-to-selection" };
-      if (probeFailureLimitReached) {
-        console.error(probeFailures.formatLimitMessage(selectedModel));
-        return { outcome: "back-to-selection" };
-      }
-      continue;
-    }
-    const allowToolsIncompatible = probe.allowToolsIncompatible === true;
-    const validationBaseUrl = getLocalProviderValidationBaseUrl(provider);
-    if (!validationBaseUrl)
-      abortNonInteractive("Local Ollama validation URL could not be determined.");
-    const validation = await validateOpenAiLikeSelection(
-      "Local Ollama",
-      validationBaseUrl!,
-      selectedModel,
-      null,
-      "Choose a different Ollama model or select Other.",
-      null,
-      localInference.buildOllamaProbeOptions(allowToolsIncompatible),
-    );
-    if (validation.retry === "selection") return { outcome: "back-to-selection" };
-    if (!validation.ok) {
-      if (isNonInteractive()) abortNonInteractive(`model '${selectedModel}' failed validation.`);
-      continue;
-    }
-    // Ollama's /v1/responses endpoint does not produce correctly formatted
-    // tool calls — force chat completions like vLLM/NIM.
-    if (validation.api !== "openai-completions") {
-      console.log(
-        "  ℹ Using chat completions API (Ollama tool calls require /v1/chat/completions)",
-      );
-    }
-    return ollamaFlow.completeOllamaRuntimeContextSelection(
-      localInference.applyOllamaRuntimeContextWindow(selectedModel, defaults),
-      { outcome: "selected", model: selectedModel, allowToolsIncompatible },
-      isNonInteractive,
-    );
-  }
-}
-
 type SetupNimSelectionState =
   import("./onboard/setup-nim-selection").SetupNimSelectionState<HermesAuthMethod>;
-type OllamaModelSelectionDefaults =
-  import("./onboard/setup-nim-selection").OllamaModelSelectionDefaults;
 type SetupNimSelectionResult = "selected" | "retry-selection";
 
 type RemoteProviderSelectionArgs = {
@@ -1748,6 +1653,7 @@ type RemoteProviderSelectionArgs = {
   gatewayName: string | null;
   intendedInferenceApi: string | null;
   recoverySessionId: string | null | undefined;
+  harnessPackage: import("./agent-runtime/package/types").HarnessPackageIdentity | null;
 };
 
 async function handleNimLocalSelection(
@@ -1908,13 +1814,23 @@ async function handleRemoteProviderSelection(
     recoveredModel,
     sandboxName,
     intendedInferenceApi,
+    harnessPackage,
   } = args;
-  const remoteConfig = REMOTE_PROVIDER_CONFIG[selected.key];
+  const packageProviderSelection = onboardPackageBoundary.resolvePackageRemoteProviderSelection(
+    harnessPackage,
+    selected.key,
+  );
+  const remoteConfig: RemoteProviderConfigEntry =
+    onboardPackageBoundary.requirePackageRemoteProviderConfig(
+      packageProviderSelection,
+      REMOTE_PROVIDER_CONFIG[selected.key],
+      selected.key,
+    );
   state.provider = remoteConfig.providerName;
   state.credentialEnv = remoteConfig.credentialEnv;
   state.endpointUrl = remoteConfig.endpointUrl;
   state.preferredInferenceApi = null;
-  state.model = requestedModel || (recoveredFromSandbox ? recoveredModel : null);
+  state.model = readRequestedOrRecoveredModel(requestedModel, recoveredFromSandbox, recoveredModel);
 
   if (selected.key === "custom" || selected.key === "anthropicCompatible") {
     const kind = selected.key === "custom" ? "openai" : "anthropic";
@@ -1953,6 +1869,42 @@ async function handleRemoteProviderSelection(
     }
   }
   state.assertRouteCompatible?.();
+  if (packageProviderSelection) {
+    return onboardPackageBoundary.selectPackageProviderRuntime(
+      packageProviderSelection,
+      requestedModel,
+      recoveredFromSandbox,
+      recoveredModel,
+      sandboxName,
+      state,
+      {
+        assertMutationAuthority: (operation) => assertSelectionMutationAuthority(state, operation),
+        getSandbox: registry.getSandbox,
+        providerAuth: {
+          env: process.env,
+          isNonInteractive,
+          prompt,
+          getNavigationChoice,
+          exitOnboardFromPrompt,
+          exitProcess: (code) => process.exit(code),
+          error: (message) => console.error(message),
+          log: (message) => console.log(message),
+          note,
+          validateCredential: (value, environmentName) =>
+            validateNvidiaApiKeyValue(value, environmentName),
+          isBackToSelection,
+          promptRemoteModel,
+        },
+        toolGateways: {
+          env: process.env,
+          prompt,
+          note,
+          log: console.log,
+          isNonInteractive,
+        },
+      },
+    );
+  }
   if (selected.key === "hermesProvider") {
     const selectedHermesAuthMethod = await promptHermesAuthMethod();
     if (isBackToSelection(selectedHermesAuthMethod)) {
@@ -1993,6 +1945,7 @@ async function handleRemoteProviderSelection(
       recordedHermesToolGateways,
       { prompt, note, isNonInteractive },
     );
+    state.toolGatewaySelections = [];
 
     const defaultModel =
       requestedModel ||
@@ -2369,6 +2322,7 @@ function getSetupInferenceDeps(): SetupInferenceDeps {
     isNonInteractive,
     updateSandbox: registry.reserveSandboxInferenceRoute,
     getSandbox: registry.getSandbox,
+    updateSandboxIfCurrent: registry.updateSandboxIfCurrent,
     listSandboxes: registry.listSandboxes,
     unloadOllamaModels,
     hermesProviderAuth,
@@ -2630,7 +2584,8 @@ const wrappedOnboard = onboardEntryOptions.wrapOnboard(runOnboard, onboardSessio
 const onboard = onboardSessionBootstrap.wrapOnboardDeferredExit(wrappedOnboard);
 async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
   const hostMountScope = onboardSessionBootstrap.beginHostMountScope(opts.hostMounts);
-  const hermesApiPortReservationScope = agentOnboard.createHermesApiPortReservationScope();
+  const secondaryForwardPortReservationScope =
+    agentOnboard.createSecondaryForwardPortReservationScope();
   resetGatewayOwnerBinding();
   setupInferenceFactory.assertNoOpenShellGatewayEndpointOverride();
   const runtimeControlRequests = runtimeControlFlow.applyOnboardRuntimeControlRequests(opts);
@@ -2879,7 +2834,9 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         provider: session?.provider || null,
         endpointUrl: session?.endpointUrl || null,
         credentialEnv: session?.credentialEnv || null,
+        providerAuthMethod: readProviderAuthMethod(session?.providerAuthMethod),
         hermesAuthMethod: normalizeHermesAuthMethod(session?.hermesAuthMethod),
+        toolGatewaySelections: session?.toolGatewaySelections ?? [],
         hermesToolGateways: normalizeHermesToolGatewaySelections(session?.hermesToolGateways),
         preferredInferenceApi: session?.preferredInferenceApi || null,
         ...reasoningMode.getCompatibleEndpointReasoningSessionState(session),
@@ -3040,6 +2997,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
               canProbeRoute,
               recoverySessionId,
               revalidateSandboxIdentity,
+              harnessPackage,
             ) =>
               setupNim(
                 g,
@@ -3052,6 +3010,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
                 canProbeRoute,
                 recoverySessionId,
                 revalidateSandboxIdentity,
+                harnessPackage,
               ),
             setupInference,
             resolveHostLocalInferenceStartupSelection:
@@ -3143,6 +3102,8 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
             getSandboxReuseState,
             getSandboxRecreateObservation,
             getDcodeSelectionDrift: sandboxCreateOrchestrationRuntime.readDcodeSelectionDrift,
+            getPackageSelectionQualification:
+              sandboxCreateOrchestrationRuntime.readPackageSelectionQualification,
             hasSandboxGpuDrift,
             getSandboxHermesToolGateways: (name) => registry.getSandbox(name)?.hermesToolGateways,
             getSandboxRegistryEntry: registry.getSandbox,
@@ -3189,7 +3150,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
                   opts.tempManagedRuntime === true,
                   opts.tempManagedRuntimeCatalog ?? null,
                   dashboardPortReservationScope,
-                  hermesApiPortReservationScope,
+                  secondaryForwardPortReservationScope,
                   ...createArgs,
                   selectedEffectiveAgent,
                   opts.allowRemovedImmutabilityStateRecord === true,
@@ -3252,7 +3213,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
               name,
               selectedAgent,
               undefined,
-              hermesApiPortReservationScope,
+              secondaryForwardPortReservationScope,
             ),
           persistDashboardPort: (name, port) =>
             registry.updateSandbox(name, { dashboardPort: port }),
@@ -3335,6 +3296,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
                   verifyDeploymentModule.shouldDiagnoseCustomOpenClawRuntime(
                     liveFinalFlowContext.fromDockerfile,
                     agent?.name,
+                    liveFinalFlowContext.session?.harnessPackage != null,
                   ),
               },
             );
@@ -3372,7 +3334,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
     throw error;
   } finally {
     try {
-      await hermesApiPortReservationScope.release();
+      await secondaryForwardPortReservationScope.release();
       restorePortableEnvScope();
       portableRetirementEntry.release();
       onboardRuntimeBoundary.clear();

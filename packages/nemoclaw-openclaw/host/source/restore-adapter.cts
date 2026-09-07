@@ -152,16 +152,16 @@ function mergeOpenClawPluginSlots(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
-function imagePluginOwnership(installs: any): any {
+function managedExtensionOwnership(installs: any): any {
   if (installs === undefined) return {};
   const ids = new Set();
   const loadPaths = new Set();
   for (const install of installs) {
-    if (!Array.isArray(install.loadPaths)) {
-      throw new Error("OpenClaw image plugin provenance is missing explicit load paths");
+    if (!Array.isArray(install.configPaths)) {
+      throw new Error("OpenClaw managed extension is missing explicit configuration paths");
     }
     ids.add(install.id);
-    for (const loadPath of install.loadPaths) loadPaths.add(loadPath);
+    for (const loadPath of install.configPaths) loadPaths.add(loadPath);
   }
   return { ids, loadPaths };
 }
@@ -383,13 +383,13 @@ function mergeOpenClawRestoredConfig(
     throw new Error("OpenClaw selective config merge requires JSON objects");
   }
   if (
-    (options.previousImagePluginInstalls === undefined) !==
-    (options.freshImagePluginInstalls === undefined)
+    (options.previousManagedExtensions === undefined) !==
+    (options.freshManagedExtensions === undefined)
   ) {
-    throw new Error("Complete previous and fresh OpenClaw image plugin provenance is required");
+    throw new Error("Complete previous and fresh OpenClaw managed extensions are required");
   }
-  const previousOwnership = imagePluginOwnership(options.previousImagePluginInstalls);
-  const freshOwnership = imagePluginOwnership(options.freshImagePluginInstalls);
+  const previousOwnership = managedExtensionOwnership(options.previousManagedExtensions);
+  const freshOwnership = managedExtensionOwnership(options.freshManagedExtensions);
   const merged = mergeJsonObjects(currentConfig, backedUpConfig);
   for (const key of OPENCLAW_CONFIG_RESTORE_OWNERSHIP.runtimeSections) {
     if (key in currentConfig) merged[key] = cloneJson(currentConfig[key]);
@@ -422,24 +422,23 @@ function mergeConfigState(
       reason: "Selective configuration restore requires the current rebuilt configuration",
     };
   }
-  if (
-    (request.previousImagePluginInstalls === null) !==
-    (request.freshImagePluginInstalls === null)
-  ) {
+  if ((request.previousManagedExtensions === null) !== (request.freshManagedExtensions === null)) {
     return {
       kind: "refused",
-      reason: "Complete previous and fresh image plugin provenance is required",
+      reason: "Complete previous and fresh managed extensions are required",
     };
   }
   try {
     const backup = JSON.parse(request.backupContent);
     const current = JSON.parse(request.currentContent);
+    const previousManagedExtensions = request.previousManagedExtensions;
+    const freshManagedExtensions = request.freshManagedExtensions;
     const options =
-      request.previousImagePluginInstalls === null
+      previousManagedExtensions === null || freshManagedExtensions === null
         ? {}
         : {
-            previousImagePluginInstalls: request.previousImagePluginInstalls,
-            freshImagePluginInstalls: request.freshImagePluginInstalls,
+            previousManagedExtensions,
+            freshManagedExtensions,
           };
     const merged = mergeOpenClawRestoredConfig(
       backup,

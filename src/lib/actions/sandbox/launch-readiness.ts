@@ -77,6 +77,10 @@ import {
   type OpenClawPairingSettlementObservation,
 } from "./launch-readiness/openclaw-pairing-qualification";
 import {
+  observePackageSessionQualification,
+  PackageSessionQualificationError,
+} from "./launch-readiness/package-session";
+import {
   buildLaunchReadinessRegistryProjection,
   launchReadinessDigest,
   normalizeLaunchReadinessString as normalizedString,
@@ -139,6 +143,7 @@ export interface LaunchReadinessDeps extends LaunchReadinessHealthDeps {
   observeOpenClawPairingQualification?: typeof observeOpenClawPairingQualification;
   observeOpenClawPairingRepairSettlement?: typeof observeOpenClawPairingRepairSettlement;
   observeOpenClawPairingSettlement?: typeof observeOpenClawPairingSettlement;
+  observePackageSessionQualification?: typeof observePackageSessionQualification;
   runPortablePairingProducer?: typeof runPortableOpenClawPairingRequestProducer;
   runPortablePairingApproval?: typeof runPortableOpenClawPairingApproval;
   classifyPortableLifecycleReceipt?: typeof classifyPortableLifecycleReceipt;
@@ -294,15 +299,14 @@ async function captureLaunchIdentity(
   if (!entry || entry.name !== sandboxName) throw new ObservationError("identity");
   const agentName = normalizedString(entry.agent) ?? "openclaw";
   const agent = resolveTrustedLaunchAgent(entry, deps, agentName);
-  resolveLaunchHarnessPackageAuthority(entry, agent);
-  // Pairing qualification and the Portable receipt are still OpenClaw-owned
-  // compatibility protocols. A generic `device_pairing` flag cannot safely
-  // opt another harness into OpenClaw's state-file format. Keep this selection
-  // explicit until the package contract supplies a typed pairing operation.
+  const packageAuthority = resolveLaunchHarnessPackageAuthority(entry, agent);
+  // The OpenClaw observer remains only for no-receipt and Portable
+  // compatibility rows. Receipt-backed packages declare their own bounded,
+  // read-only session qualification command below.
   const requiresOpenClawPairing = usesOpenClawPairingProtocol(
     entry.agent,
     agent.name,
-    agent.hasDevicePairing,
+    packageAuthority.status === "absent" && agent.hasDevicePairing,
   );
   const ownsPortableReceipt = ownsPortableOpenClawReceipt(entry.agent, agent.name);
   const portableReceipt = (
@@ -426,7 +430,24 @@ async function captureLaunchIdentity(
   );
 
   let session: LaunchReadinessIdentity["session"] = null;
-  if (requiresOpenClawPairing) {
+  if (packageAuthority.status === "valid" && agent.runtime?.session_qualification) {
+    const runtimeIdentity = agent.managedImage?.runtime_identity;
+    if (!runtimeIdentity) throw new PackageSessionQualificationError();
+    try {
+      session = (
+        deps.observePackageSessionQualification ?? observePackageSessionQualification
+      )(
+        sandboxName,
+        packageAuthority.harnessPackage.id,
+        agent.runtime.session_qualification,
+        runtimeIdentity,
+      );
+    } catch {
+      throw new PackageSessionQualificationError();
+    }
+  } else if (packageAuthority.status === "valid" && agent.hasDevicePairing) {
+    throw new PackageSessionQualificationError();
+  } else if (requiresOpenClawPairing) {
     const pairedAgentVersion = normalizedString(entry.agentVersion);
     const stateDirectory = normalizedString(agent.config?.dir);
     // Pairing qualification requires a versioned trusted definition. The
@@ -899,7 +920,8 @@ export async function inspectLaunchReadiness(
           category =
             error instanceof ObservationError
               ? error.category
-              : error instanceof OpenClawPairingQualificationError
+              : error instanceof OpenClawPairingQualificationError ||
+                  error instanceof PackageSessionQualificationError
                 ? "session"
                 : "unsafe";
         } finally {

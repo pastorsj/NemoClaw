@@ -58,6 +58,19 @@ export function resolvePackageBackedSandboxAgent(
   return options === undefined ? resolveSandboxAgent(entry) : resolveSandboxAgent(entry, options);
 }
 
+/** Resolve one exact package identity when no mutable registry row is available. */
+export function resolvePackageIdentityAgent(
+  identity: HarnessPackageIdentity,
+  options?: ResolveSandboxAgentOptions,
+): ResolvedSandboxAgent {
+  const entry = {
+    agent: identity.id,
+    harnessPackage: identity,
+    harnessPackageMigration: undefined,
+  };
+  return options === undefined ? resolveSandboxAgent(entry) : resolveSandboxAgent(entry, options);
+}
+
 /** Resolve the durable agent authority recorded for a package or qualified sandbox. */
 export function resolveRecordedSandboxAgentAuthority(
   entry: Parameters<typeof resolveSandboxAgent>[0],

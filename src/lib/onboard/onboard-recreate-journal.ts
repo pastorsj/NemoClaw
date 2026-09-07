@@ -39,6 +39,8 @@ export interface OnboardRecreateTargetIntent {
   readonly gatewayName: string;
   readonly gatewayPort: number;
   readonly toolDisclosure: string;
+  readonly approvalMode: string | null;
+  /** Legacy no-receipt Deep Agents Code compatibility value. */
   readonly dcodeAutoApprovalMode: string | null;
   readonly observabilityEnabled: boolean;
 }
@@ -50,8 +52,17 @@ export function fingerprintOnboardRecreateTargetIntent(
 }
 
 function fingerprintLegacyOnboardRecreateTargetIntent(intent: OnboardRecreateTargetIntent): string {
-  const { harnessPackage: _harnessPackage, ...legacyIntent } = intent;
+  const { harnessPackage: _harnessPackage, approvalMode: _approvalMode, ...legacyIntent } = intent;
   return fingerprintSandboxRecreateValue({ version: 1, ...legacyIntent });
+}
+
+function fingerprintLegacyPackageApprovalIntent(intent: OnboardRecreateTargetIntent): string {
+  const { approvalMode, ...legacyIntent } = intent;
+  return fingerprintSandboxRecreateValue({
+    version: 2,
+    ...legacyIntent,
+    dcodeAutoApprovalMode: legacyIntent.dcodeAutoApprovalMode ?? approvalMode,
+  });
 }
 
 export interface ManagedMcpRecreateRefusal {
@@ -143,10 +154,20 @@ export function openOnboardRecreateJournal(
   const requestedTargetIntentFingerprint = fingerprintOnboardRecreateTargetIntent(input.intent);
   const active = openingSession.checkpoint?.sandboxRecreate ?? null;
   const legacyTargetIntentFingerprint = fingerprintLegacyOnboardRecreateTargetIntent(input.intent);
+  const legacyPackageApprovalFingerprint = fingerprintLegacyPackageApprovalIntent(input.intent);
   const targetIntentFingerprint =
-    active?.targetIntentFingerprint === legacyTargetIntentFingerprint
+    active?.targetIntentFingerprint === legacyTargetIntentFingerprint ||
+    active?.targetIntentFingerprint === legacyPackageApprovalFingerprint
       ? active.targetIntentFingerprint
       : requestedTargetIntentFingerprint;
+  // Establish the source owner before planning, then let the compare-and-swap
+  // boundary re-read it immediately before the journal write.
+  requireCurrentRegistryPackageOwner(
+    openingSession,
+    target,
+    agentName,
+    "start sandbox recreate without its source registry row",
+  );
   const observe = input.observe ?? observeSandboxOnGateway;
   const gatewayAuthority = createOnboardRecreateGatewayAuthorityRevalidator(target);
   const { authority } = gatewayAuthority;

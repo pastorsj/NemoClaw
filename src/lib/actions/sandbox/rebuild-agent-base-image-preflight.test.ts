@@ -67,6 +67,9 @@ describe("ensureRebuildAgentBaseImage", () => {
       name: "hermes",
       displayName: "Hermes",
       packageRoot: "/installed/hermes",
+      managedImage: {
+        rebuild_base_image: "pinned-remote",
+      },
     } as AgentDefinition;
     const ensureAgentBaseImage = vi
       .spyOn(loadAgentOnboard(), "ensureAgentBaseImage")

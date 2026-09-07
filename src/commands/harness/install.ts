@@ -101,7 +101,6 @@ export default class HarnessInstallCommand extends NemoClawCommand {
         this.error("'--from' accepts a local filesystem directory, not a URL.", { exit: 2 });
       }
       const requestedId = harnessInstallCommandDependencies.parseHarnessPackageId(selector);
-      harnessInstallCommandDependencies.requireCandidateAgentSelectable(requestedId);
       const installed = harnessInstallCommandDependencies.installHarnessPackage({
         packageRoot: flags.from,
         expectedId: requestedId,

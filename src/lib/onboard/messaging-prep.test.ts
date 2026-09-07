@@ -42,6 +42,25 @@ function createInput(
   };
 }
 
+const FUTURE_TAVILY_BINDING = {
+  provider: "tavily" as const,
+  credential_env: "TAVILY_API_KEY",
+  profile_type: "future-search",
+  config_verification: {
+    path: "/sandbox/.future/config.json" as const,
+    format: "json" as const,
+    assertions: [{ path: ["search", "enabled"], equals: true }],
+    credential_paths: [["search", "apiKey"]],
+  },
+  egress_verification: {
+    method: "GET" as const,
+    url: "https://search.example.test/query" as const,
+    parameters: [{ name: "q", value: "NVIDIA" }],
+    credential: { kind: "header" as const, name: "Authorization", prefix: "bearer" as const },
+    result_array_path: ["results"],
+  },
+};
+
 describe("prepareCreateSandboxMessaging", () => {
   it("does not read messaging credentials when no channel is enabled (#9833)", () => {
     const getValidatedMessagingTokenByEnvKey = vi.fn(() => "secret-value");
@@ -336,6 +355,41 @@ describe("prepareCreateSandboxMessaging", () => {
     expect(result.messagingTokenDefs.some(({ envKey }) => envKey === TAVILY_API_KEY_ENV)).toBe(
       false,
     );
+  });
+
+  it("materializes a future receipt-backed package's exact provider binding", () => {
+    const providerProfilePath = "/packages/future/provider-profiles/future-search.yaml";
+    const result = prepareCreateSandboxMessaging(
+      createInput({
+        agentName: "future-harness",
+        receiptBackedPackage: true,
+        webSearchProviderBinding: FUTURE_TAVILY_BINDING,
+        webSearchProviderProfilePath: providerProfilePath,
+        webSearchConfig: { fetchEnabled: true, provider: "tavily" },
+        env: { TAVILY_API_KEY: "tvly-test" },
+      }),
+    );
+
+    expect(result.messagingTokenDefs).toContainEqual({
+      name: "demo-tavily-search",
+      envKey: "TAVILY_API_KEY",
+      token: "tvly-test",
+      providerType: "future-search",
+      providerProfilePath,
+    });
+  });
+
+  it("fails closed when a receipt-backed web-search package omits its binding", () => {
+    expect(() =>
+      prepareCreateSandboxMessaging(
+        createInput({
+          agentName: "future-harness",
+          receiptBackedPackage: true,
+          webSearchConfig: { fetchEnabled: true, provider: "tavily" },
+          env: { TAVILY_API_KEY: "tvly-test" },
+        }),
+      ),
+    ).toThrow(/does not declare Tavily Search/u);
   });
 
   it("adds the Brave provider token from the credential store before host env fallback", () => {

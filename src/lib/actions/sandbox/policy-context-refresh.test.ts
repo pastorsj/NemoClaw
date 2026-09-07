@@ -38,19 +38,36 @@ describe("refreshSandboxPolicyContextFile", () => {
     expect(unexpected).not.toHaveBeenCalled();
   });
 
+  it("silently skips a receipt-backed package that does not declare a context target", () => {
+    const warn = vi.fn();
+    const unexpected = vi.fn();
+    const write = vi.fn(() => ({
+      written: false,
+      reason: "the selected harness package does not declare a policy context target",
+      failure: "unsupported" as const,
+    }));
+
+    const outcome = refreshSandboxPolicyContextFile("alpha", { warn, unexpected, write });
+
+    expect(outcome.outcome).toBe("unsupported");
+    expect(warn).not.toHaveBeenCalled();
+    expect(unexpected).not.toHaveBeenCalled();
+  });
+
   it("warns about explicit `failed` outcomes when the sandbox returns a non-zero exit", () => {
     const warn = vi.fn();
     const unexpected = vi.fn();
     const write = vi.fn(() => ({
       written: false,
       reason: "write failed (status 13): denied",
+      targetPath: "/sandbox/.future-agent/context/POLICY.md",
     }));
 
     const outcome = refreshSandboxPolicyContextFile("alpha", { warn, unexpected, write });
 
     expect(outcome.outcome).toBe("failed");
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain(POLICY_CONTEXT_SANDBOX_PATH);
+    expect(warn.mock.calls[0][0]).toContain("/sandbox/.future-agent/context/POLICY.md");
     expect(warn.mock.calls[0][0]).toContain("status 13");
     expect(unexpected).not.toHaveBeenCalled();
   });

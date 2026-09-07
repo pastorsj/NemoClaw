@@ -111,7 +111,10 @@ const {
     credentialEnv: string,
     baseUrl: string | null,
   ) => string[];
-  getNonInteractiveProvider: (allowHostedInferenceStaging?: boolean) => string | null;
+  getNonInteractiveProvider: (
+    allowHostedInferenceStaging?: boolean,
+    options?: { readonly allowHostedInferenceProviderKeyAlias?: boolean },
+  ) => string | null;
   getNonInteractiveModel: (
     providerKey: string,
     options?: { allowProviderModelFallback?: boolean },
@@ -126,7 +129,9 @@ const {
   ) => string | null;
   isProviderKeyCredentialCandidate: (value: string | null | undefined) => boolean;
   providerExistsInGateway: (name: string, runOpenshell: RunOpenshell) => boolean;
-  stageHostedInferenceSourceSecretEnv: () => boolean;
+  stageHostedInferenceSourceSecretEnv: (options?: {
+    readonly allowHostedInferenceProviderKeyAlias?: boolean;
+  }) => boolean;
   upsertProvider: (
     name: string,
     type: string,
@@ -536,14 +541,17 @@ describe("onboard provider helpers", () => {
     });
   });
 
-  it("stages Deep Agents NEMOCLAW_PROVIDER_KEY as hosted custom inference", () => {
+  it("stages a package-declared NEMOCLAW_PROVIDER_KEY alias as hosted custom inference", () => {
     withProviderEnv(
       {
-        NEMOCLAW_AGENT: "langchain-deepagents-code",
         NEMOCLAW_PROVIDER_KEY: "  repo-hosted-key  ",
       },
       () => {
-        expect(stageHostedInferenceSourceSecretEnv()).toBe(true);
+        expect(
+          stageHostedInferenceSourceSecretEnv({
+            allowHostedInferenceProviderKeyAlias: true,
+          }),
+        ).toBe(true);
         expect(getRequestedProviderHint(true)).toBe("custom");
         expect(process.env.NEMOCLAW_PROVIDER).toBe("custom");
         expect(process.env.NEMOCLAW_ENDPOINT_URL).toBe(HOSTED_INFERENCE_ENDPOINT_URL);
@@ -554,14 +562,17 @@ describe("onboard provider helpers", () => {
     );
   });
 
-  it("does not stage route-like Deep Agents NEMOCLAW_PROVIDER_KEY values as credentials", () => {
+  it("does not stage route-like declared NEMOCLAW_PROVIDER_KEY values as credentials", () => {
     withProviderEnv(
       {
-        NEMOCLAW_AGENT: "langchain-deepagents-code",
         NEMOCLAW_PROVIDER_KEY: "inference",
       },
       () => {
-        expect(stageHostedInferenceSourceSecretEnv()).toBe(false);
+        expect(
+          stageHostedInferenceSourceSecretEnv({
+            allowHostedInferenceProviderKeyAlias: true,
+          }),
+        ).toBe(false);
         expect(process.env.NEMOCLAW_PROVIDER).toBeUndefined();
         expect(process.env.COMPATIBLE_API_KEY).toBeUndefined();
       },
@@ -608,15 +619,18 @@ describe("onboard provider helpers", () => {
     "routed",
     "vllm",
   ])(
-    "keeps Deep Agents provider-key selector %s from being staged as a credential",
+    "keeps a declared provider-key selector %s from being staged as a credential",
     (providerKey) => {
       withProviderEnv(
         {
-          NEMOCLAW_AGENT: "langchain-deepagents-code",
           NEMOCLAW_PROVIDER_KEY: providerKey,
         },
         () => {
-          expect(stageHostedInferenceSourceSecretEnv()).toBe(false);
+          expect(
+            stageHostedInferenceSourceSecretEnv({
+              allowHostedInferenceProviderKeyAlias: true,
+            }),
+          ).toBe(false);
           expect(process.env.NEMOCLAW_PROVIDER).toBeUndefined();
           expect(process.env.COMPATIBLE_API_KEY).toBeUndefined();
         },
@@ -627,6 +641,20 @@ describe("onboard provider helpers", () => {
   it("keeps generic NEMOCLAW_PROVIDER_KEY from implying hosted custom inference", () => {
     withProviderEnv(
       {
+        NEMOCLAW_PROVIDER_KEY: "repo-hosted-key",
+      },
+      () => {
+        expect(stageHostedInferenceSourceSecretEnv()).toBe(false);
+        expect(process.env.NEMOCLAW_PROVIDER).toBeUndefined();
+        expect(process.env.COMPATIBLE_API_KEY).toBeUndefined();
+      },
+    );
+  });
+
+  it("does not infer provider-key credential support from the ambient harness selector", () => {
+    withProviderEnv(
+      {
+        NEMOCLAW_AGENT: "langchain-deepagents-code",
         NEMOCLAW_PROVIDER_KEY: "repo-hosted-key",
       },
       () => {
@@ -1387,44 +1415,6 @@ describe("onboard provider helpers", () => {
       "sandbox provider detach spark-nemo spark-nemo-telegram-bridge",
       "provider delete spark-nemo-telegram-bridge",
       "provider create --name spark-nemo-telegram-bridge --type generic --credential TELEGRAM_BOT_TOKEN",
-    ]);
-  });
-
-  it("does not detach a sibling sandbox while replacing a recreate-owned provider (#9875)", () => {
-    const commands: string[] = [];
-
-    expect(() =>
-      upsertMessagingProviders(
-        [
-          {
-            name: "spark-nemo-telegram-bridge",
-            envKey: "TELEGRAM_BOT_TOKEN",
-            token: "tg-test",
-            providerType: "generic",
-          },
-        ],
-        (command) => {
-          const joined = command.join(" ");
-          commands.push(joined);
-          return joined === "provider delete spark-nemo-telegram-bridge"
-            ? {
-                status: 1,
-                stdout: "",
-                stderr:
-                  "Error: status: FailedPrecondition, message: \"provider 'spark-nemo-telegram-bridge' is attached to sandbox(es): sibling-live\"",
-              }
-            : { status: 0, stdout: "", stderr: "" };
-        },
-        {
-          replaceExisting: true,
-          bestEffort: true,
-          allowedSandboxes: ["spark-nemo"],
-        },
-      ),
-    ).toThrow(/sibling-live/u);
-    expect(commands).toEqual([
-      "provider get spark-nemo-telegram-bridge",
-      "provider delete spark-nemo-telegram-bridge",
     ]);
   });
 

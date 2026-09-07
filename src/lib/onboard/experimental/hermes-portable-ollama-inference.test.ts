@@ -548,6 +548,17 @@ describe("Hermes Portable Ollama inference activation", () => {
     expect(
       resolver({ ...freshPortableInput, application: "langchain-deepagents-code" }),
     ).toBeNull();
+    expect(
+      resolver({
+        ...freshPortableInput,
+        application: {
+          kind: "agent-runtime",
+          id: "hermes",
+          packageVersion: "1.0.0-test",
+          contentDigest: "9".repeat(64),
+        },
+      }),
+    ).toBeNull();
     expect(resolver({ ...freshPortableInput, provider: "compatible-endpoint" })).toBeNull();
   });
 

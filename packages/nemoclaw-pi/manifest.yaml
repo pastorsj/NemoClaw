@@ -43,6 +43,7 @@ runtime:
   interactive_command: "pi"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.pi/agent/fabric.json"
   prompt_transport: stdin
+  prompt_protocol: fabric-cli
   smoke_boundary:
     kind: login-shell
   smoke_commands:
@@ -65,7 +66,9 @@ state_lifecycle:
     kind: not-required
   snapshot_restore: []
   rebuild:
-    image_plugin_provenance: not-required
+    managed_extensions:
+      support: disabled
+      reason: Pi does not preserve image-owned extensions during rebuild.
     scheduled_work:
       support: disabled
       reason: Pi does not run scheduled work.
@@ -123,6 +126,10 @@ inference:
   base_url_config_key: "providers.openshell.baseUrl"
   model_config_key: "defaultModel"
   proxy_support: implicit
+policy:
+  owned_presets: []
+  automatic_presets: []
+  baseline_exclusion_impacts: {}
 mcp:
   support: disabled
 sessions:

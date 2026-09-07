@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type SandboxStateModule = typeof import("./sandbox");
 type RegistryModule = typeof import("./registry");
 type DefsModule = typeof import("../agent/defs");
+type PackageAuthorityModule = typeof import("../onboard/package/package-authority");
 type ProbeModule = typeof import("./user-managed-files-probe");
 type OpenShellClientModule = typeof import("../adapters/openshell/client");
 type OpenShellResolveModule = typeof import("../adapters/openshell/resolve");
@@ -20,6 +21,7 @@ const requireDist = createRequire(import.meta.url);
 const sandboxStatePath = "./sandbox.js";
 const registryPath = "./registry.js";
 const defsPath = "../agent/defs.js";
+const packageAuthorityPath = "../onboard/package/package-authority.js";
 const probePath = "./user-managed-files-probe.js";
 const openshellClientPath = "../adapters/openshell/client.js";
 const openshellResolvePath = "../adapters/openshell/resolve.js";
@@ -41,6 +43,10 @@ function loadDefs(): DefsModule {
   return requireDist(defsPath);
 }
 
+function loadPackageAuthority(): PackageAuthorityModule {
+  return requireDist(packageAuthorityPath);
+}
+
 function loadOpenShellClient(): OpenShellClientModule {
   return requireDist(openshellClientPath);
 }
@@ -49,9 +55,12 @@ function loadOpenShellResolve(): OpenShellResolveModule {
   return requireDist(openshellResolvePath);
 }
 
-function makeFakeAgent(declared: string[]): ReturnType<DefsModule["loadAgent"]> {
+function makeFakeAgent(
+  declared: string[],
+  name = "fake-agent",
+): ReturnType<DefsModule["loadAgent"]> {
   return {
-    name: "fake-agent",
+    name,
     displayName: "Fake Agent",
     description: null,
     binaryPath: null,
@@ -162,6 +171,71 @@ describe("probeUserManagedFiles", () => {
     expect(probeCmd).not.toContain("/sandbox/.fake/");
   });
 
+  it("uses same-ID receipt declarations instead of the source catalogue", () => {
+    const receipt = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    } as const;
+    const registry = loadRegistry();
+    const defs = loadDefs();
+    vi.mocked(registry.getSandbox).mockReturnValue({
+      name: "alpha",
+      agent: "openclaw",
+      harnessPackage: receipt,
+    } as unknown as ReturnType<RegistryModule["getSandbox"]>);
+    const sourceLoad = vi.mocked(defs.loadAgent);
+    sourceLoad.mockReturnValue(makeFakeAgent(["source-only.env"], "openclaw"));
+    vi.spyOn(loadPackageAuthority(), "resolveRecordedSandboxAgentAuthority").mockReturnValue({
+      recordedAgent: "openclaw",
+      effectiveAgentId: "openclaw",
+      definition: makeFakeAgent(["receipt-only.env"], "openclaw"),
+      harnessPackage: receipt,
+      harnessPackageMigration: null,
+    });
+    stubSpawnSync("receipt-only.env\n", 0);
+    const { probeUserManagedFiles } = loadProbe();
+
+    const result = probeUserManagedFiles("alpha");
+
+    expect(result).toEqual({
+      declared: ["receipt-only.env"],
+      existing: ["receipt-only.env"],
+    });
+    const probeCmd = recordedArgs[0]?.at(-1) ?? "";
+    expect(probeCmd).toContain("/sandbox/receipt-only.env");
+    expect(probeCmd).not.toContain("source-only.env");
+    expect(sourceLoad).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when receipt authority cannot be resolved", () => {
+    const receipt = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    } as const;
+    const registry = loadRegistry();
+    const sourceLoad = vi.mocked(loadDefs().loadAgent);
+    vi.mocked(registry.getSandbox).mockReturnValue({
+      name: "alpha",
+      agent: "openclaw",
+      harnessPackage: receipt,
+    } as unknown as ReturnType<RegistryModule["getSandbox"]>);
+    vi.spyOn(loadPackageAuthority(), "resolveRecordedSandboxAgentAuthority").mockImplementation(
+      () => {
+        throw new Error("receipt bytes unavailable");
+      },
+    );
+    stubSpawnSync("", 0);
+    const { probeUserManagedFiles } = loadProbe();
+
+    expect(() => probeUserManagedFiles("alpha")).toThrow("receipt bytes unavailable");
+    expect(sourceLoad).not.toHaveBeenCalled();
+    expect(spawnSpy).not.toHaveBeenCalled();
+  });
+
   it("pins SSH config and ProxyCommand environment to the frozen target (#10514)", () => {
     vi.stubEnv("OPENSHELL_GATEWAY", "hostile-gateway");
     vi.stubEnv("OPENSHELL_WORKSPACE", "hostile-workspace");
@@ -264,10 +338,12 @@ describe("probeUserManagedFiles", () => {
     probeUserManagedFiles("alpha");
     expect(tempSshFiles.size).toBeGreaterThan(0);
     const tmpdir = path.resolve(os.tmpdir());
-    expect([...tempSshFiles].every((dir) => {
+    expect(
+      [...tempSshFiles].every((dir) => {
         const resolved = path.resolve(dir);
         return resolved.startsWith(tmpdir + path.sep) || resolved === tmpdir;
-      })).toBe(true);
+      }),
+    ).toBe(true);
   });
 
   it("shell-quotes unusual but permitted filenames safely", () => {

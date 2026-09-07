@@ -41,6 +41,10 @@ import {
   type OpenShellGatewayEndpointEnvironment,
 } from "../adapters/openshell/gateway-scope";
 import { withSandboxMutationLock } from "../state/mcp-lifecycle-lock";
+import {
+  resolveHarnessProviderAuthCapability,
+  resolveHarnessProviderAuthMethod,
+} from "../agent-runtime/provider-auth";
 import type { Session } from "../state/onboard-session";
 import { createSandboxHostLocalInferenceProvenance } from "../state/registry/host-local-inference";
 import { resolveModelRouterPort } from "./model-router";
@@ -224,6 +228,7 @@ export type SetupInferenceDeps = ProviderBranchDeps & {
   // #9110 optional GPU-release seams; omitted by test literals that build deps
   // by hand, so every read below must stay optional-chained.
   getSandbox?: typeof import("../state/registry").getSandbox;
+  updateSandboxIfCurrent?: typeof import("../state/registry").updateSandboxIfCurrent;
   listSandboxes?: typeof import("../state/registry").listSandboxes;
   unloadOllamaModels?: (onlyModels: readonly string[]) => OllamaUnloadResult | void;
   withOllamaModelOwnershipLock?: typeof withOllamaModelOwnershipLock;
@@ -262,12 +267,11 @@ export function bindGatewayUpsertProvider(
   gatewayName: string,
   revalidateSandboxIdentity?: (operation: string) => void,
 ): CommonDeps["upsertProvider"] {
-  return (name, type, credentialEnv, baseUrl, env) =>
-    revalidateSandboxIdentity
-      ? upsertProvider(name, type, credentialEnv, baseUrl, env, gatewayName, {
-          revalidateSandboxIdentity,
-        })
-      : upsertProvider(name, type, credentialEnv, baseUrl, env, gatewayName);
+  return (name, type, credentialEnv, baseUrl, env, options) =>
+    upsertProvider(name, type, credentialEnv, baseUrl, env, gatewayName, {
+      ...options,
+      ...(revalidateSandboxIdentity ? { revalidateSandboxIdentity } : {}),
+    });
 }
 
 export function bindOpenAiProviderProfile(
@@ -506,7 +510,7 @@ export type SetupInference = (
   endpointUrl?: string | null,
   credentialEnv?: string | null,
   hermesAuthMethod?: HermesAuthMethod | string | null,
-  hermesToolGateways?: string[],
+  toolGatewaySelections?: string[],
   options?: ProviderInferenceSetupOptions,
 ) => Promise<SetupInferenceResult>;
 
@@ -654,7 +658,7 @@ export function createSetupInference(
     endpointUrl: string | null = null,
     credentialEnv: string | null = null,
     hermesAuthMethod: HermesAuthMethod | string | null = null,
-    hermesToolGateways: string[] = [],
+    toolGatewaySelections: string[] = [],
     options: ProviderInferenceSetupOptions = {},
   ): Promise<SetupInferenceResult> {
     const hasReservationSession = options.reservationSessionId !== undefined;
@@ -819,11 +823,12 @@ export function createSetupInference(
             }
           : deps.error;
         const profiledUpsertProvider = bindOpenAiProviderProfile(
-          (...args) => {
+          (name, type, credentialEnv, baseUrl, env, upsertOptions) => {
             revalidateSandboxIdentity?.("register the inference provider");
-            const selectedUpsertProvider =
-              hostLocalGatewayMutation?.upsertProvider ?? defaultUpsertProvider;
-            return selectedUpsertProvider(...args);
+            const hostLocalUpsertProvider = hostLocalGatewayMutation?.upsertProvider;
+            return hostLocalUpsertProvider
+              ? hostLocalUpsertProvider(name, type, credentialEnv, baseUrl, env)
+              : defaultUpsertProvider(name, type, credentialEnv, baseUrl, env, upsertOptions);
           },
           runGatewayOpenshell,
           providerError,
@@ -849,7 +854,24 @@ export function createSetupInference(
             }),
           isNonInteractive: deps.isNonInteractive,
           registry: {
-            updateSandbox: (name: string) => reserveRoute(name, provider, model),
+            updateSandbox: (
+              name: string,
+              updates: Partial<import("../state/registry/types").SandboxEntry>,
+            ) => {
+              if (!reserveRoute(name, provider, model)) return false;
+              if (!Object.prototype.hasOwnProperty.call(updates, "providerBroker")) return true;
+              const getSandbox = deps.getSandbox;
+              const updateSandboxIfCurrent = deps.updateSandboxIfCurrent;
+              if (!getSandbox || !updateSandboxIfCurrent) return false;
+              const current = getSandbox(name);
+              if (!current) return false;
+              return (
+                updateSandboxIfCurrent(current, {
+                  providerBroker: updates.providerBroker,
+                }) !== false
+              );
+            },
+            ...(deps.getSandbox ? { getSandbox: deps.getSandbox } : {}),
           },
           exitProcess: providerExitProcess,
           error: providerError,
@@ -920,7 +942,58 @@ export function createSetupInference(
         }
 
         const setupSelectedProvider = async (): Promise<SetupInferenceResult | null> => {
-          if (provider === deps.hermesProviderAuth.HERMES_PROVIDER_NAME) {
+          const harnessPackage = options.harnessPackageAuthority?.harnessPackage ?? null;
+          const packageProviderAuth = harnessPackage
+            ? resolveHarnessProviderAuthCapability(harnessPackage)
+            : null;
+          if (harnessPackage && packageProviderAuth?.selection.provider_name === provider) {
+            const requestedMethod =
+              options.providerAuthMethod ??
+              packageProviderAuth.methods.find((method) => method.credential_env === credentialEnv)
+                ?.id ??
+              null;
+            const availableCredentialEnvs = packageProviderAuth.methods
+              .filter(
+                (method) =>
+                  method.kind === "api-key" &&
+                  Boolean(
+                    process.env[method.source_env]?.trim() ||
+                    // check-direct-credential-env-ignore -- receipt-backed setup reads this compatibility bridge only to choose a declared method; core registers and then clears the secret.
+                    process.env.NEMOCLAW_PROVIDER_KEY?.trim(),
+                  ),
+              )
+              .map((method) =>
+                method.kind === "api-key" ? method.source_env : method.credential_env,
+              );
+            const method = resolveHarnessProviderAuthMethod(harnessPackage, {
+              requestedMethod,
+              availableCredentialEnvs,
+            });
+            return inferenceProviders.setupPackageProviderInference(
+              {
+                identity: harnessPackage,
+                sandboxName,
+                model,
+                provider,
+                endpointUrl,
+                credentialEnv,
+                selection: packageProviderAuth.selection,
+                method,
+                toolGatewaySelections,
+              },
+              {
+                ...commonDeps,
+                providerExistsInGateway: (name: string) =>
+                  deps.providerExistsInGateway(name, gatewayName),
+                lookup: deps.lookup,
+                redact: deps.redact,
+                compactText: deps.compactText,
+                revalidateSandboxIdentity,
+              },
+            );
+          }
+
+          if (!harnessPackage && provider === deps.hermesProviderAuth.HERMES_PROVIDER_NAME) {
             return inferenceProviders.setupHermesProviderInference(
               {
                 sandboxName,
@@ -929,8 +1002,8 @@ export function createSetupInference(
                 endpointUrl,
                 credentialEnv,
                 hermesAuthMethod,
-                hermesToolGateways,
-                harnessPackage: options.harnessPackageAuthority?.harnessPackage ?? null,
+                hermesToolGateways: toolGatewaySelections,
+                harnessPackage: null,
               },
               {
                 ...commonDeps,
@@ -1143,7 +1216,7 @@ export function createSetupInference(
             });
           }
           if (sandboxName && !hostLocalRoute) {
-            commonDeps.registry.updateSandbox(sandboxName);
+            commonDeps.registry.updateSandbox(sandboxName, {});
           }
           if (hostLocalRoute) {
             if (!hostLocalGatewayMutation || !hostLocalSelection) {

@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { isPortableExperimentalProfile, PORTABLE_HOST_GATEWAY_IP } from "./docker-driver-platform";
+import type { RuntimeProviderGatewayHostRuntime } from "./runtime-provider/contract";
 import { resolveConfiguredRuntimeProvider } from "./runtime-provider/selection";
 
 // See docs/security/gateway-authentication-controls.mdx for the public compatibility boundary.
@@ -28,6 +29,7 @@ export type DockerDriverGatewayLocalTlsBundle = {
 export interface EnsureDockerDriverGatewayLocalTlsBundleOptions {
   env?: NodeJS.ProcessEnv;
   gatewayBin: string;
+  gatewayHostRuntime?: RuntimeProviderGatewayHostRuntime;
   platform?: NodeJS.Platform;
   spawnSyncImpl?: typeof spawnSync;
   stateDir: string;
@@ -192,6 +194,7 @@ function normalizeDockerDriverGatewayLocalTlsBundlePermissions(
 export function ensureDockerDriverGatewayLocalTlsBundle({
   env = process.env,
   gatewayBin,
+  gatewayHostRuntime,
   platform = process.platform,
   spawnSyncImpl = spawnSync,
   stateDir,
@@ -200,6 +203,8 @@ export function ensureDockerDriverGatewayLocalTlsBundle({
   const portable = isPortableExperimentalProfile(env);
   const requiredProviderIpSans = portable
     ? [PORTABLE_HOST_GATEWAY_IP]
+    : gatewayHostRuntime
+      ? [...gatewayHostRuntime.requiredServerIpSans]
     : (() => {
         const provider = resolveConfiguredRuntimeProvider(platform, process.arch, env);
         if (!provider.gateway.supported) {

@@ -12,10 +12,10 @@ export default class SandboxAgentsAddCommand extends NemoClawCommand {
   static id = "sandbox:agents:add";
   static customHelp = true;
   static strict = false;
-  static summary = "Add an OpenClaw agent inside a sandbox";
+  static summary = "Add an agent through the installed harness";
   static description =
-    "Pass through to `openclaw agents add` in the sandbox. Runs the OpenClaw interactive add wizard via `openshell sandbox exec`; all OpenClaw flags are forwarded verbatim.";
-  static usage = ["<name> [openclaw-agents-add-flags...]"];
+    "Ask the installed harness package for its native agent-add command, then run that command through OpenShell. Additional arguments are forwarded verbatim through the typed adapter.";
+  static usage = ["<name> [harness-agents-add-flags...]"];
   static examples = [
     "<%= config.bin %> sandbox agents add alpha",
     "<%= config.bin %> sandbox agents add alpha work --model gpt-4o",

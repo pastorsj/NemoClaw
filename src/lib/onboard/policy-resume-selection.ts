@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type {
+  HarnessPolicyCapability,
+  HarnessToolGatewayCapability,
+} from "@nvidia/nemoclaw-harness-contract";
+
 import { type WebSearchConfig, webSearchProviderForConfig } from "../inference/web-search";
 import {
   filterSetupPolicyPresetNamesForAgent,
@@ -23,6 +28,7 @@ import {
   ensureRequiredTierPolicyPresets,
   suppressedAgentRequiredPresets,
 } from "./policy-tier-suppression";
+import { evaluatePackagePolicyPresets } from "./policy-authority/package-activation";
 
 type Preset = { name: string; access?: string };
 
@@ -60,6 +66,11 @@ export function preparePolicyPresetResumeSelection(
     disabledChannels?: string[] | null;
     enabledChannels?: string[] | null;
     hermesToolGateways?: string[] | null;
+    toolGatewaySelections?: readonly string[] | null;
+    toolGatewayCapability?: Extract<
+      HarnessToolGatewayCapability,
+      { readonly support: "managed" }
+    > | null;
     agent?: string | null;
     observabilityEnabled?: boolean | null;
     webSearchConfig?: WebSearchConfig | null;
@@ -67,6 +78,7 @@ export function preparePolicyPresetResumeSelection(
     webSearchSupported?: boolean | null;
     env?: NodeJS.ProcessEnv;
     tierName?: string | null;
+    packagePolicyCapability?: HarnessPolicyCapability | null;
   },
 ): PreparedPolicyResumeSelection {
   const supportOptions = { webSearchSupported: options.webSearchSupported, agent: options.agent };
@@ -78,22 +90,37 @@ export function preparePolicyPresetResumeSelection(
       sandboxName,
       OBSERVABILITY_OTLP_LOCAL_POLICY_PRESET,
     ) === true;
+  const packagePolicyCapability = options.packagePolicyCapability ?? null;
+  const overriddenPackagePolicyNames = new Set(
+    (packagePolicyCapability?.automatic_presets ?? [])
+      .map((rule) => rule.name)
+      .filter(
+        (name) => deps.policies.customPresetOwnsNetworkPolicyKey?.(sandboxName, name) === true,
+      ),
+  );
   const rawAppliedPolicyPresets = deps.policies.getAppliedPresets(sandboxName);
-  const appliedPolicyPresets = customOwnsObservability
+  const appliedPolicyPresets = packagePolicyCapability
     ? [...new Set(rawAppliedPolicyPresets)].filter(
-        (name) =>
-          name !== OBSERVABILITY_OTLP_LOCAL_POLICY_PRESET ||
-          customPolicyPresetNames.has(OBSERVABILITY_OTLP_LOCAL_POLICY_PRESET),
+        (name) => !overriddenPackagePolicyNames.has(name) || customPolicyPresetNames.has(name),
       )
-    : rawAppliedPolicyPresets;
+    : customOwnsObservability
+      ? [...new Set(rawAppliedPolicyPresets)].filter(
+          (name) =>
+            name !== OBSERVABILITY_OTLP_LOCAL_POLICY_PRESET ||
+            customPolicyPresetNames.has(OBSERVABILITY_OTLP_LOCAL_POLICY_PRESET),
+        )
+      : rawAppliedPolicyPresets;
   const selectablePolicyPresets = [
     ...filterSetupPolicyPresetsForAgent(
       deps.policies.listSetupPolicyPresets(sandboxName, supportOptions),
       options.agent,
+      packagePolicyCapability,
     ),
-    ...filterSetupPolicyPresetNamesForAgent(appliedPolicyPresets, options.agent).map((name) => ({
-      name,
-    })),
+    ...filterSetupPolicyPresetNamesForAgent(
+      appliedPolicyPresets,
+      options.agent,
+      packagePolicyCapability,
+    ).map((name) => ({ name })),
   ];
   const clampedLivePolicyPresets = deps.policies.clampSetupPolicyPresetNames(
     appliedPolicyPresets,
@@ -111,20 +138,29 @@ export function preparePolicyPresetResumeSelection(
       customPresetNames: customPolicyPresetNames,
       tierName: options.tierName,
       agentName: options.agent,
+      packagePolicyCapability,
     });
-  const isInactiveObservability = (name: string) =>
-    isInactiveObservabilityPolicyPreset(name, {
-      agent: options.agent,
-      observabilityEnabled: options.observabilityEnabled,
-      customPresetNames: customPolicyPresetNames,
-      customOwnsObservability,
-    });
+  const packageEvaluation = evaluatePackagePolicyPresets(packagePolicyCapability, {
+    observabilityEnabled: options.observabilityEnabled,
+    tierName: options.tierName,
+    env: options.env,
+    overriddenPolicyNames: overriddenPackagePolicyNames,
+  });
+  const isInactiveAutomaticPreset = (name: string) =>
+    packagePolicyCapability
+      ? packageEvaluation.inactivePresets.has(name) || packageEvaluation.suppressedPresets.has(name)
+      : isInactiveObservabilityPolicyPreset(name, {
+          agent: options.agent,
+          observabilityEnabled: options.observabilityEnabled,
+          customPresetNames: customPolicyPresetNames,
+          customOwnsObservability,
+        });
   const liveBuiltinWebSearchProviderChanged = clampedLivePolicyPresets.some(
     (name) => (name === "brave" || name === "tavily") && isStaleBuiltinWebSearch(name),
   );
   let policyPresets = pruneDisabledMessagingPolicyPresets(
     clampedLivePolicyPresets.filter(
-      (name) => !isStaleBuiltinWebSearch(name) && !isInactiveObservability(name),
+      (name) => !isStaleBuiltinWebSearch(name) && !isInactiveAutomaticPreset(name),
     ),
     options.disabledChannels,
   );
@@ -135,7 +171,7 @@ export function preparePolicyPresetResumeSelection(
       supportOptions,
       customPolicyPresetNames,
     )
-    .filter((name) => !isStaleBuiltinWebSearch(name) && !isInactiveObservability(name));
+    .filter((name) => !isStaleBuiltinWebSearch(name) && !isInactiveAutomaticPreset(name));
   const disabledMessagingPolicyPresetApplied = hasDisabledMessagingPolicyPreset(
     appliedPolicyPresetsForSupport,
     options.disabledChannels,
@@ -148,6 +184,8 @@ export function preparePolicyPresetResumeSelection(
   policyPresets = mergeRequiredSetupPolicyPresets(policyPresets, {
     enabledChannels: options.enabledChannels,
     hermesToolGateways: options.hermesToolGateways,
+    toolGatewaySelections: options.toolGatewaySelections,
+    toolGatewayCapability: options.toolGatewayCapability,
     agent: options.agent,
     observabilityEnabled: options.observabilityEnabled,
     knownPresetNames: selectablePolicyPresets.map((preset) => preset.name),
@@ -156,6 +194,8 @@ export function preparePolicyPresetResumeSelection(
     webSearchConfig: options.webSearchConfig,
     customPresetNames: customPolicyPresetNames,
     customOwnsObservability,
+    packagePolicyCapability,
+    overriddenPackagePolicyNames,
   });
 
   // Provider switches are build-time changes, but their matching egress
@@ -180,7 +220,9 @@ export function preparePolicyPresetResumeSelection(
     policyPresets.some((name) => !appliedPolicyPresets.includes(name)) ||
     appliedPolicyPresets.some((name) => !policyPresets.includes(name));
   const suppressedForTier = options.tierName
-    ? new Set(suppressedAgentRequiredPresets(options.tierName, options.agent))
+    ? packagePolicyCapability
+      ? packageEvaluation.suppressedPresets
+      : new Set(suppressedAgentRequiredPresets(options.tierName, options.agent))
     : null;
   const suppressedAgentRequiredPresetsLive =
     suppressedForTier !== null &&

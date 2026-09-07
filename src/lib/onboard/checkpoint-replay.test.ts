@@ -283,6 +283,43 @@ describe("requiredWebSearchProviderType", () => {
     expect(requiredWebSearchProviderType("tavily", { name: "openclaw" })).toBe("tavily");
     expect(requiredWebSearchProviderType("brave", { name: "hermes" })).toBe("brave");
   });
+
+  it("uses a future receipt-backed package's declared profile without inspecting its ID", () => {
+    const web_search = {
+      support: "providers" as const,
+      providers: [
+        {
+          provider: "tavily" as const,
+          credential_env: "TAVILY_API_KEY",
+          profile_type: "future-search",
+          config_verification: {
+            path: "/sandbox/.future/config.json" as const,
+            format: "json" as const,
+            assertions: [{ path: ["search", "enabled"], equals: true }],
+            credential_paths: [["search", "apiKey"]],
+          },
+          egress_verification: {
+            method: "GET" as const,
+            url: "https://search.example.test/query" as const,
+            parameters: [{ name: "q", value: "NVIDIA" }],
+            credential: {
+              kind: "header" as const,
+              name: "Authorization",
+              prefix: "bearer" as const,
+            },
+            result_array_path: ["results"],
+          },
+        },
+      ],
+    };
+
+    expect(
+      requiredWebSearchProviderType("tavily", { name: "future-harness", web_search }, true),
+    ).toBe("future-search");
+    expect(requiredWebSearchProviderType("tavily", { name: "hermes", web_search }, true)).toBe(
+      "future-search",
+    );
+  });
 });
 
 describe("requiredMessagingProviderBindings", () => {
@@ -376,6 +413,89 @@ describe("requiredMessagingProviderBindings", () => {
         name: "hermes-discord-discord-bridge",
         type: "discord-hermes-static-v1",
         credentialEnv: "DISCORD_BOT_TOKEN",
+      },
+    ]);
+  });
+
+  it("uses an unknown receipt package's provider projection without a core profile map", () => {
+    const plan: SandboxMessagingPlan = {
+      schemaVersion: 1,
+      sandboxName: "future-box",
+      agent: "future-harness",
+      workflow: "onboard",
+      packageBuild: { configRoot: "~/.future", packageManagers: [] },
+      channels: [
+        {
+          channelId: "discord",
+          displayName: "Future static chat",
+          authMode: "token-paste",
+          active: true,
+          selected: true,
+          configured: true,
+          disabled: false,
+          credentialProvider: {
+            profilePath: "provider-profiles/future-static.yaml",
+            profileId: "future-static-provider",
+            credentialEnv: "FUTURE_STATIC_TOKEN",
+            sourceInputId: "botToken",
+            sourceSecretEnv: "FUTURE_STATIC_TOKEN",
+          },
+          inputs: [],
+          hooks: [],
+        },
+        {
+          channelId: "googlechat",
+          displayName: "Future minted chat",
+          authMode: "token-paste",
+          active: true,
+          selected: true,
+          configured: true,
+          disabled: false,
+          credentialProvider: {
+            profilePath: "provider-profiles/future-minted.yaml",
+            profileId: "future-minted-provider",
+            credentialEnv: "FUTURE_ACCESS_TOKEN",
+            sourceInputId: "serviceAccount",
+            sourceSecretEnv: "FUTURE_SERVICE_ACCOUNT",
+            refresh: {
+              strategy: "google-service-account-jwt",
+              scopes: ["https://example.test/future.scope"],
+              secretMaterialKeys: ["private_key"],
+            },
+          },
+          inputs: [],
+          hooks: [],
+        },
+      ],
+      disabledChannels: [],
+      credentialBindings: [
+        {
+          channelId: "discord",
+          credentialId: "futureToken",
+          sourceInput: "botToken",
+          providerName: "future-box-discord-bridge",
+          providerEnvKey: "FUTURE_STATIC_TOKEN",
+          placeholder: "openshell:resolve:env:FUTURE_STATIC_TOKEN",
+          credentialAvailable: true,
+        },
+      ],
+      networkPolicy: { presets: [], entries: [] },
+      agentRender: [],
+      buildSteps: [],
+      stateUpdates: [],
+      healthChecks: [],
+    };
+
+    expect(requiredMessagingProviderBindings("future-box", plan)).toEqual([
+      {
+        name: "future-box-discord-bridge",
+        type: "future-static-provider",
+        credentialEnv: "FUTURE_STATIC_TOKEN",
+      },
+      {
+        name: "future-box-googlechat-bridge",
+        type: "future-minted-provider",
+        credentialEnv: "FUTURE_ACCESS_TOKEN",
       },
     ]);
   });

@@ -8,6 +8,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
 
+import type { AgentDefinition } from "../agent/defs";
+
 const logPresetScopeMock = vi.hoisted(() => vi.fn());
 vi.mock("../policy", () => ({
   mergePresetNamesIntoPolicy: (policy: string, presetNames: string[]) => {
@@ -878,5 +880,46 @@ network_policies: {}
 
     expect(prepared.appliedPresets).toEqual(["openclaw-diagnostics-otel-local"]);
     expect(prepared.cleanup?.()).toBe(true);
+  });
+
+  it("uses an unknown receipt package's typed create-time policy rule", () => {
+    const basePolicyPath = tmpPolicy("version: 1\nnetwork_policies:\n  base: {}\n");
+    const agentDefinition = {
+      name: "future-harness",
+      policyCapability: {
+        owned_presets: ["future-local"],
+        automatic_presets: [
+          {
+            name: "future-local",
+            activation: {
+              kind: "local-endpoint-enabled",
+              enabled_environment: "FUTURE_LOCAL_ENABLED",
+              endpoint_environment: "FUTURE_LOCAL_ENDPOINT",
+              default_endpoint: "http://host.openshell.internal:9000",
+              local_origin: "http://host.openshell.internal:9000",
+            },
+            apply_during_create: true,
+            suppress_in_tiers: ["restricted"],
+          },
+        ],
+        baseline_exclusion_impacts: {},
+      },
+    } as unknown as AgentDefinition;
+    process.env.FUTURE_LOCAL_ENABLED = "1";
+    process.env.FUTURE_LOCAL_ENDPOINT = "http://host.openshell.internal:9000/v1/events";
+
+    try {
+      const prepared = prepareInitialSandboxCreatePolicy(basePolicyPath, [], {
+        agentName: "future-harness",
+        agentDefinition,
+        policyTier: "balanced",
+      });
+
+      expect(prepared.appliedPresets).toEqual(["future-local"]);
+      expect(prepared.cleanup?.()).toBe(true);
+    } finally {
+      delete process.env.FUTURE_LOCAL_ENABLED;
+      delete process.env.FUTURE_LOCAL_ENDPOINT;
+    }
   });
 });

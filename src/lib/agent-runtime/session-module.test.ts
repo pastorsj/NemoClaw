@@ -6,9 +6,14 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../test/helpers/adapter-fixtures";
 import { installHarnessPackage } from "./package/install";
 import type { InstalledHarnessPackage } from "./package/store";
-import { HarnessSessionModuleError, loadHarnessSessionAdapterHostModule } from "./session-module";
+import { loadHarnessSessionAdapterHostModule } from "./session-module";
 
 const TEST_PARENT = path.join(process.cwd(), "node_modules/.cache/nemoclaw-session-module-tests");
 const SOURCE_IDENTITY = Object.freeze({
@@ -80,16 +85,50 @@ function installFuturePackage(
       "  dir: /sandbox/.future-sessions",
       "  config_file: config.json",
       "  format: json",
+      "runtime:",
+      "  kind: terminal",
+      "  interactive_command: future-sessions",
+      "  headless_command: future-sessions --prompt",
+      "  prompt_transport: stdin",
       "inference:",
       "  config_update:",
       "    support: unsupported",
       "    reason: Future Sessions does not expose mutable inference configuration.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "sessions:",
       `  operations: ${JSON.stringify(operations)}`,
+      "state_lifecycle:",
+      "  backup_quiescence:",
+      "    kind: not-required",
+      "  snapshot_restore: []",
+      "  rebuild:",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: The synthetic package has no managed extensions.",
+      "    scheduled_work:",
+      "      support: disabled",
+      "      reason: The synthetic package has no scheduled work.",
+      "    post_restore:",
+      "      kind: not-required",
       "",
     ].join("\n"),
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-future-sessions/host/config-adapter.cts",
+    TEST_CONFIG_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-future-sessions/host/messaging-adapter.cts",
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-future-sessions/host/startup-adapter.cts",
+    TEST_STARTUP_ADAPTER_SOURCE,
   );
   writeFixtureFile("packages/nemoclaw-future-sessions/host/session-adapter.cts", moduleSource);
   return installHarnessPackage(
@@ -224,19 +263,14 @@ describe("installed harness session adapter", () => {
     ).toThrow(/does not match its declared delete capability/u);
   });
 
-  it("classifies a missing fixed adapter module", () => {
-    const installed = installFuturePackage();
+  it("rejects package installation without the fixed session adapter", () => {
+    installFuturePackage();
     fs.rmSync(path.join(sourceRoot, "packages/nemoclaw-future-sessions/host/session-adapter.cts"));
-    const second = installHarnessPackage(
-      { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
-      { storeRoot: path.join(fixtureRoot, "second-store") },
-    );
-
     expect(() =>
-      loadHarnessSessionAdapterHostModule(second.identity, {
-        storeRoot: path.join(fixtureRoot, "second-store"),
-      }),
-    ).toThrow(HarnessSessionModuleError);
-    expect(installed.identity.id).toBe("future-sessions");
+      installHarnessPackage(
+        { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
+        { storeRoot: path.join(fixtureRoot, "second-store") },
+      ),
+    ).toThrow(/requires a non-empty regular artifact 'host\/session-adapter\.cts'/u);
   });
 });

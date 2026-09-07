@@ -44,6 +44,7 @@ import {
 } from "../sandbox-agent";
 import type { FreshOnboardHarnessBinding } from "../session-bootstrap";
 import { assertCheckpointPackageAuthorityChain } from "../checkpoint-replay";
+import { assertAgentsManifestCapability } from "../agents-manifest";
 import {
   type HarnessPackageSessionAuthority,
   type OnboardHarnessPackageAuthority,
@@ -51,6 +52,15 @@ import {
 } from "./package-authority";
 
 export { describeHarnessProviderBroker, requireCurrentSessionHarnessPackageAuthority };
+export {
+  createPackageSelectionQualificationReader,
+  requirePackageRemoteProviderConfig,
+  resolvePackageRemoteProviderSelection,
+  resolveHarnessProviderAuthCapability,
+  selectPackageProviderAuth,
+  selectPackageProviderRuntime,
+  selectPackageToolGateways,
+} from "./selection";
 
 type SelectedOnboardHarness = Exclude<
   OnboardHarnessPackageSelection,
@@ -656,6 +666,9 @@ export async function prepareOnboardHarnessOperation(
   const beforeRuntimeEffects = (): void => {
     if (authority) throw new Error("Onboarding harness package authority is already bound");
     authority = boundary.bind(prepared);
+    if (environment.NEMOCLAW_EXTRA_AGENTS_JSON !== undefined) {
+      assertAgentsManifestCapability(authority.effectiveDefinition);
+    }
   };
   const operation: PreparedOnboardHarnessOperation = {
     beforeRuntimeEffects,

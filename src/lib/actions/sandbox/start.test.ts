@@ -519,7 +519,7 @@ describe("startSandbox", () => {
       }),
     );
     h.hasPortableLifecycleReceipt.mockReturnValue(true);
-    h.recoverPortableSandbox.mockReturnValue({ kind: "recovered" });
+    h.recoverPortableSandbox.mockReturnValue({ kind: "recovered", portableAgent: "hermes" });
 
     await expect(startSandbox("my-sandbox", h.deps)).resolves.toEqual({ exitCode: 0 });
 
@@ -747,6 +747,46 @@ describe("startSandbox", () => {
     expect(probeInferenceInvocation).toHaveBeenCalledOnce();
     expect(probeInferenceInvocation.mock.invocationCallOrder[0]).toBeGreaterThan(
       h.verifyGateway.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("does not give a receipt-backed same-ID package the legacy DCode probe boundary", async () => {
+    const fixture = futurePackageStartFixture("gateway");
+    const packageIdentity = {
+      ...fixture.entry.harnessPackage!,
+      id: "langchain-deepagents-code",
+    };
+    const receiptEntry = {
+      ...fixture.entry,
+      agent: "langchain-deepagents-code",
+      harnessPackage: packageIdentity,
+    };
+    const receiptAgent = {
+      ...fixture.selectedAgent,
+      recordedAgent: "langchain-deepagents-code",
+      effectiveAgentId: "langchain-deepagents-code",
+      definition: {
+        ...fixture.selectedAgent.definition,
+        name: "langchain-deepagents-code",
+      },
+      harnessPackage: packageIdentity,
+    };
+    const probeInferenceInvocation = vi.fn(() => ({ ok: true }) as const);
+    const h = harness({
+      probeInferenceInvocation,
+      resolveSandboxAgent: vi.fn(() => receiptAgent) as never,
+    });
+    h.getSandbox.mockReturnValue(receiptEntry);
+
+    await expect(startSandbox("my-sandbox", h.deps)).resolves.toEqual({ exitCode: 0 });
+
+    expect(probeInferenceInvocation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentName: "langchain-deepagents-code",
+        probeBoundary: { kind: "login-shell" },
+      }),
+      {},
+      30_000,
     );
   });
 

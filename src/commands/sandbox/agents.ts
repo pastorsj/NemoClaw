@@ -8,10 +8,10 @@ export default class SandboxAgentsCommand extends NemoClawCommand {
   static id = "sandbox:agents";
   static customHelp = true;
   static strict = false;
-  static summary = "Manage OpenClaw agents inside a sandbox";
+  static summary = "Manage the installed harness's agents inside a sandbox";
   static description =
     "Parent for the `agents` subcommand group (`add`, `delete`, `list`). The parent has no runnable default — invoking `nemoclaw <name> agents` with no subcommand or with flags only renders this help screen instead of dispatching a fabricated `sandbox:agents:--<flag>` command id.";
-  static usage = ["<name> <subcommand> [openclaw-agents-flags...]"];
+  static usage = ["<name> <subcommand> [harness-agents-flags...]"];
   static examples = [
     "<%= config.bin %> sandbox agents alpha --help",
     "<%= config.bin %> sandbox agents list alpha --json",

@@ -4,7 +4,7 @@
 import { CLI_NAME } from "../../../cli/branding";
 import { shellQuote } from "../../../core/shell-quote";
 import { sanitizeReadinessText } from "../../../readiness/sanitize";
-import { redactFull } from "../../../security/redact";
+import { redactAgentDiagnostic } from "./diagnostic";
 
 /** Stderr sink for the passthrough's operator-facing failure text. */
 export type AgentPassthroughDiagnosticProcess = {
@@ -36,7 +36,7 @@ export function writeSilentAgentDispatchFailure(
   const rawDirectRun = [CLI_NAME, shellQuote(sandboxName), "exec", "--", ...command.map(shellQuote)]
     .join(" ")
     .trimEnd();
-  const directRun = redactFull(rawDirectRun);
+  const directRun = redactAgentDiagnostic(rawDirectRun);
   const directRunWasRedacted = directRun !== rawDirectRun;
   proc.stderr.write(
     `  The agent dispatch for sandbox '${sandboxName}' exited 0 without producing any output, so the turn was not delivered.\n`,
@@ -81,6 +81,23 @@ export function writeIncompleteAgentTurnFailure(
   proc.stderr.write(`    ${CLI_NAME} ${shellQuote(sandboxName)} sessions export <key>\n`);
   proc.stderr.write(
     "  Inspect the partial JSON trace, exported transcript, and affected resources before retrying.\n",
+  );
+}
+
+/** Receipt-neutral verdict for a package-declared structured turn. */
+export function writeDeclaredAgentTurnIncompleteFailure(
+  proc: AgentPassthroughDiagnosticProcess,
+  sandboxName: string,
+  markers: readonly string[],
+): void {
+  proc.stderr.write(
+    `  The agent turn in sandbox '${sandboxName}' did not complete: ${markers.join(", ")}.\n`,
+  );
+  proc.stderr.write(
+    "  The output above is a partial trace. Tool calls in it may have already applied side effects.\n",
+  );
+  proc.stderr.write(
+    "  Inspect the partial trace and affected resources before retrying with the package's documented recovery path.\n",
   );
 }
 
@@ -135,6 +152,31 @@ export function writeTimedOutAgentTurnFailure(
   proc.stderr.write("  Inspect the partial output and affected resources before retrying.\n");
 }
 
+/** Receipt-neutral timeout verdict for a package-declared structured turn. */
+export function writeDeclaredAgentTurnTimeoutFailure(
+  proc: AgentPassthroughDiagnosticProcess,
+  sandboxName: string,
+  timeoutPhase?: string,
+): void {
+  const sandboxDisplay = sanitizeReadinessText(sandboxName, 200);
+  const diagnosticPhase =
+    timeoutPhase && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(timeoutPhase) ? timeoutPhase : undefined;
+  proc.stderr.write(
+    diagnosticPhase
+      ? `  The agent turn in sandbox '${sandboxDisplay}' timed out in the ${diagnosticPhase} phase before producing a result.\n`
+      : `  The agent turn in sandbox '${sandboxDisplay}' timed out before producing a result.\n`,
+  );
+  proc.stderr.write(
+    "  Reporting this as a failure: the deadline fired and no result reached this command.\n",
+  );
+  proc.stderr.write(
+    "  The output above is a partial trace. Tool calls in it may have already applied side effects.\n",
+  );
+  proc.stderr.write(
+    "  Inspect the partial trace and affected resources, then use the package's documented deadline setting before retrying.\n",
+  );
+}
+
 export function hasAgentPassthroughHelpToken(args: readonly string[]): boolean {
   for (const arg of args) {
     if (arg === "--") break;
@@ -150,7 +192,7 @@ export function printAgentPassthroughHelp(): void {
   console.log(
     "  Run the sandbox's package-declared headless or native command via `openshell sandbox exec`.",
   );
-  console.log("  For non-OpenClaw packages with a Fabric command, a plain prompt or");
+  console.log("  For packages with a Fabric command, a plain prompt or");
   console.log("  -m/--message with optional --json uses private standard input, not host");
   console.log("  process arguments. Bare, help, and option-first calls use the native");
   console.log("  interactive command. This experimental path leaves the native option grammar");
@@ -170,11 +212,11 @@ export function printAgentPassthroughHelp(): void {
     "  non-Ready sandbox the phase guard fires first and exits 1 with recovery commands.",
   );
   console.log("");
-  console.log("  OpenClaw -h/--help prints this wrapper summary locally. Run");
+  console.log("  Legacy no-receipt OpenClaw -h/--help prints this wrapper summary locally. Run");
   console.log(`  \`${CLI_NAME} <name> exec -- openclaw agent --help\` for native OpenClaw help.`);
   console.log("");
-  console.log(`  For non-OpenClaw package help, run \`${CLI_NAME} <name> agent --help\` to view`);
-  console.log("  the native command help from inside the sandbox.");
+  console.log(`  For receipt-backed package help, run \`${CLI_NAME} <name> agent --help\` to view`);
+  console.log("  its declared native command help from inside the sandbox.");
   console.log("");
   console.log(
     "  A Hermes package with a Fabric headless command accepts the common prompt grammar.",

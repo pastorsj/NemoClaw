@@ -16,6 +16,7 @@ import type { SandboxMessagingPlan } from "../../messaging";
 import { cleanupTempDir, secureTempFile } from "../../onboard/temp-files";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import { hasCompleteOpenClawImagePluginProvenance } from "../../state/openclaw-plugin-restore";
+import { parseManagedImageExtensions } from "../../state/snapshot/managed-extensions";
 import {
   hasAuthoritativeOpenClawImagePluginProvenance,
   readRebuildPolicyHandoff,
@@ -63,15 +64,15 @@ export interface RebuildBackupPhaseResult {
   policySourcePath: string;
 }
 
-function bailForUnsafeOpenClawPluginProvenance(input: RebuildBackupPhaseInput): never {
+function bailForUnsafeImageExtensionProvenance(input: RebuildBackupPhaseInput): never {
   console.error(
-    "  Custom-image OpenClaw plugin provenance is missing or invalid; rebuild cannot safely distinguish image-owned plugins from user state.",
+    "  Managed image extension provenance is missing or invalid; rebuild cannot safely distinguish image-owned extensions from user state.",
   );
   console.error("  The sandbox is untouched — no data was lost.");
   console.error(
     "  To preserve state, onboard the custom image under a new sandbox name and manually migrate only user-owned state.",
   );
-  return input.bail("Custom-image OpenClaw plugin provenance is unavailable.");
+  return input.bail("Managed image extension provenance is unavailable.");
 }
 
 export function captureRebuildPolicyDocument(
@@ -125,28 +126,47 @@ export function runRebuildBackupPhase(
 ): RebuildBackupPhaseResult | null {
   const customImageRequiresPluginProvenance = input.agentAuthority.harnessPackage
     ? Boolean(input.sandboxEntry.fromDockerfile) &&
-      input.agentAuthority.definition.stateLifecycle.rebuild.image_plugin_provenance === "required"
+      input.agentAuthority.definition.stateLifecycle.rebuild.managed_extensions.support ===
+        "managed"
     : legacyRebuildRequiresImagePluginProvenance(input.sandboxEntry);
   const preparedRecoveryManifest = input.preparedRecoveryManifest;
   const hasPreparedRecovery = preparedRecoveryManifest !== null;
+  const receiptManagedExtensions = input.agentAuthority.harnessPackage
+    ? input.agentAuthority.definition.stateLifecycle.rebuild.managed_extensions
+    : null;
+  const preparedGenericRecoveryIsAuthoritative =
+    preparedRecoveryManifest !== null &&
+    preparedRecoveryManifest.reconcileManagedImageExtensions === true &&
+    receiptManagedExtensions?.support === "managed" &&
+    parseManagedImageExtensions(
+      preparedRecoveryManifest.managedImageExtensions,
+      receiptManagedExtensions,
+    ).ok;
   const preparedRecoveryIsAuthoritative =
     preparedRecoveryManifest !== null &&
-    hasAuthoritativeOpenClawImagePluginProvenance(preparedRecoveryManifest);
+    (preparedGenericRecoveryIsAuthoritative ||
+      hasAuthoritativeOpenClawImagePluginProvenance(preparedRecoveryManifest));
   const restoresCustomImagePluginState =
     customImageRequiresPluginProvenance && (!input.staleRecovery || hasPreparedRecovery);
   if (
     (hasPreparedRecovery &&
-      preparedRecoveryManifest?.reconcileOpenClawImagePluginProvenance === true &&
+      (preparedRecoveryManifest?.reconcileManagedImageExtensions === true ||
+        preparedRecoveryManifest?.reconcileOpenClawImagePluginProvenance === true) &&
       !preparedRecoveryIsAuthoritative) ||
     (restoresCustomImagePluginState &&
       !preparedRecoveryIsAuthoritative &&
       (hasPreparedRecovery ||
-        !hasCompleteOpenClawImagePluginProvenance(
-          input.sandboxEntry.openclawImagePluginInstalls,
-          "/sandbox/.openclaw",
-        )))
+        !(receiptManagedExtensions?.support === "managed"
+          ? parseManagedImageExtensions(
+              input.sandboxEntry.managedImageExtensions,
+              receiptManagedExtensions,
+            ).ok
+          : hasCompleteOpenClawImagePluginProvenance(
+              input.sandboxEntry.openclawImagePluginInstalls,
+              "/sandbox/.openclaw",
+            ))))
   ) {
-    return bailForUnsafeOpenClawPluginProvenance(input);
+    return bailForUnsafeImageExtensionProvenance(input);
   }
   const preparedRetainedPolicy = preparedRecoveryManifest
     ? readRebuildPolicyHandoff(preparedRecoveryManifest)
@@ -168,11 +188,18 @@ export function runRebuildBackupPhase(
   if (backupManifest === undefined) return null;
   if (
     backupManifest &&
-    (backupManifest.reconcileOpenClawImagePluginProvenance === true ||
+    (backupManifest.reconcileManagedImageExtensions === true ||
+      backupManifest.reconcileOpenClawImagePluginProvenance === true ||
       restoresCustomImagePluginState) &&
-    !hasAuthoritativeOpenClawImagePluginProvenance(backupManifest)
+    !(
+      (backupManifest.reconcileManagedImageExtensions === true &&
+        receiptManagedExtensions?.support === "managed" &&
+        parseManagedImageExtensions(backupManifest.managedImageExtensions, receiptManagedExtensions)
+          .ok) ||
+      hasAuthoritativeOpenClawImagePluginProvenance(backupManifest)
+    )
   ) {
-    return bailForUnsafeOpenClawPluginProvenance(input);
+    return bailForUnsafeImageExtensionProvenance(input);
   }
   const retainedPolicy = backupManifest ? readRebuildPolicyHandoff(backupManifest) : null;
   if (input.staleRecovery && !retainedPolicy) {

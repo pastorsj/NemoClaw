@@ -64,6 +64,7 @@ export interface ObservedExportSandboxIdentity {
 export interface ObservedExportSource {
   readonly sandboxName: string;
   readonly registry: Readonly<SandboxEntry>;
+  readonly harnessPackage: Readonly<NonNullable<SandboxEntry["harnessPackage"]>> | null;
   readonly sandbox: ObservedExportSandboxIdentity;
   readonly gateway: ObservedExportGateway;
   readonly workload: Readonly<SandboxWorkloadReceipt>;
@@ -90,6 +91,9 @@ export interface ExportObservationDependencies {
   ): string;
   readSourceToken(sandboxName: string): Promise<string>;
   readRegistryEntry(sandboxName: string): Promise<Readonly<SandboxEntry> | null>;
+  resolveHarnessPackageAuthority(
+    entry: Readonly<SandboxEntry>,
+  ): Promise<Readonly<NonNullable<SandboxEntry["harnessPackage"]>> | null>;
   readSandboxIdentity(sandboxName: string): Promise<ObservedExportSandboxIdentity>;
   readGateway(entry: Readonly<SandboxEntry>): Promise<ObservedExportGateway>;
   readInference(entry: Readonly<SandboxEntry>): Promise<ObservedExportInference>;
@@ -153,7 +157,8 @@ export function classifyExportRegistryFidelity(
         "V1 export does not support " + capability + ".",
       ),
     );
-  if (entry.agent !== "openclaw")
+  const hasPackageAuthority = entry.harnessPackage !== undefined;
+  if (!hasPackageAuthority && entry.agent !== "openclaw")
     findings.push(
       finding(
         "spec.sandboxes[].agents[0].type",
@@ -380,6 +385,13 @@ async function observeAttempt(
       ],
     };
   }
+  const harnessPackage = await deps.resolveHarnessPackageAuthority(entry);
+  if (
+    (entry.harnessPackage !== undefined || entry.harnessPackageMigration !== undefined) !==
+    (harnessPackage !== null)
+  ) {
+    throw new Error("Resolved harness package authority does not match the registry row.");
+  }
   const sandbox = await deps.readSandboxIdentity(sandboxName);
   const gateway = await deps.readGateway(entry);
   const inference = await deps.readInference(entry);
@@ -409,6 +421,7 @@ async function observeAttempt(
     source: {
       sandboxName,
       registry: entry,
+      harnessPackage,
       sandbox,
       gateway,
       workload: entry.workload!,

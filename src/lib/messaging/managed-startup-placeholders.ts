@@ -22,10 +22,11 @@ export function authorizeMessagingManagedStartupFields(
   if (section === "agentRender") return authorizeTeamsOpenClawWebhookField(entry);
   if (!isPlainDataObject(entry)) return [];
   const contract = WECHAT_OPENCLAW_ACCOUNT_FILE_CONTRACT;
+  const handler = ownDataPropertyValue(entry, "handler");
   if (
     ownDataPropertyValue(entry, "channelId") !== contract.channelId ||
     ownDataPropertyValue(entry, "hookId") !== contract.planHookId ||
-    ownDataPropertyValue(entry, "handler") !== contract.handlerId ||
+    (handler !== contract.handlerId && handler !== contract.packageHandlerId) ||
     ownDataPropertyValue(entry, "outputId") !== contract.outputId ||
     ownDataPropertyValue(entry, "kind") !== contract.kind ||
     ownDataPropertyValue(entry, "required") !== contract.required

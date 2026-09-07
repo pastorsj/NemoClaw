@@ -7,7 +7,7 @@ import { TextDecoder } from "node:util";
 
 import { readString } from "../manifest-readers";
 import type { ManifestRecord } from "../manifest-types";
-import { resolvePinnedHarnessPackage, type HarnessPackageStoreOptions } from "../package/store";
+import { resolvePinnedHarnessPackage, type HarnessPackageStoreOptions } from "../package/pinned";
 import {
   assertTreeAuthority,
   getPackageTreeAuthority,
@@ -24,7 +24,11 @@ import { HarnessAdapterSchemaError, prepareHarnessAdapterValue } from "./schema"
 
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const ADAPTER_MODULE_PATH_PATTERN = /^host\/[a-z][a-z0-9-]*-adapter\.cts$/u;
-const ADAPTER_CHILD_TIMEOUT_MS = 1_000;
+// The VM enforces the adapter's 500 ms execution budget. This outer deadline also includes
+// process startup and scheduler delay, which can exceed several seconds when the test runner or a
+// busy operator host starts several isolated workers at once. Keep this scheduling envelope well
+// above the VM budget so host contention cannot be mistaken for package execution time.
+const ADAPTER_CHILD_TIMEOUT_MS = 15_000;
 const ADAPTER_CHILD_MEMORY_MIB = 256;
 const MAX_ADAPTER_SOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_ADAPTER_VALUE_BYTES = 64 * 1024 * 1024;
@@ -215,10 +219,12 @@ function readReceiptBoundAdapterModule(
 ): { readonly filename: string; readonly source: string } {
   try {
     validateAdapterContract(contract);
-    const installed = resolvePinnedHarnessPackage(
-      identity,
-      options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot },
-    );
+    const installed = resolvePinnedHarnessPackage(identity, {
+      ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+      ...(options.getBuildIdentity === undefined
+        ? {}
+        : { getBuildIdentity: options.getBuildIdentity }),
+    });
     const manifestName = readString(installed.packageManifest.manifest, "name");
     if (manifestName !== installed.identity.id) {
       throw adapterFailure("Installed harness package manifest does not match its receipt");
@@ -262,7 +268,9 @@ function readReceiptBoundAdapterModule(
     const source = readVerifiedFile(moduleEntry, contract.sourceMaxBytes);
     assertTreeAuthority(authority);
     return Object.freeze({
-      filename: moduleEntry.absolutePath,
+      // Package code may observe CommonJS __filename. Give identical immutable package bytes the
+      // same virtual identity across stores instead of exposing a mutable host installation path.
+      filename: `nemoclaw-package:${identity.id}/${contract.modulePath}`,
       source: decodeAdapterModule(source, contract.displayName),
     });
   } catch (error) {
@@ -365,6 +373,23 @@ export function loadHarnessAdapter<
     loadAdapterRuntime(loaded.source, loaded.filename, contract),
     contract,
   );
+}
+
+/**
+ * Evaluate one receipt-pinned adapter and verify all fixed exports without invoking an operation.
+ *
+ * Installation and activation use this narrower boundary before making a package active. Runtime
+ * consumers use `loadHarnessAdapter` when they also need the schema-checked operation wrappers.
+ */
+export function initializeHarnessAdapter<
+  const Contract extends HarnessAdapterContract<HarnessAdapterOperations>,
+>(
+  identity: HarnessPackageIdentity,
+  contract: Contract,
+  options: LoadHarnessAdapterOptions = {},
+): void {
+  const loaded = readReceiptBoundAdapterModule(identity, contract, options);
+  loadAdapterRuntime(loaded.source, loaded.filename, contract);
 }
 
 /** Load caller-authorized image-local bytes through the common constrained adapter boundary. */

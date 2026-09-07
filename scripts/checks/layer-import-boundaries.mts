@@ -69,6 +69,7 @@ const MANAGED_STATE_ROOT_PROVIDER_MODULES = [
 const HARNESS_AGNOSTIC_RUNTIME_PREFIXES = [
   "src/lib/agent-runtime/adapter/",
   "src/lib/agent-runtime/package/",
+  "src/lib/voice-gateway/",
 ] as const;
 // This module translates pre-contract registry records. Keep the exception visible until the
 // compatibility reader can be removed; new package authority must stay package-ID agnostic.
@@ -85,6 +86,7 @@ const RECEIPT_BACKED_CALLBACK_MODULES = new Set([
   "src/lib/agent/base-image.ts",
   "src/lib/agent/onboard.ts",
   "src/lib/onboard/docker-startup-command-env.ts",
+  "src/lib/onboard/providers.ts",
 ]);
 const PACKAGE_RECEIPT_SELECTOR_FUNCTIONS = new Set([
   "activateHarnessPackage",
@@ -97,7 +99,7 @@ const PACKAGE_RECEIPT_SELECTOR_FUNCTIONS = new Set([
   "runHarnessProviderBrokerController",
 ]);
 
-type ReceiptHarnessDecisionKind = "equality" | "membership" | "switch-case";
+type ReceiptHarnessDecisionKind = "equality" | "lookup" | "membership" | "switch-case";
 
 type LayerImportBoundaryOptions = {
   receiptHarnessDecisionBaseline?: ReadonlyMap<string, number>;
@@ -117,6 +119,7 @@ function receiptDecisionKey(
 // The data file keeps audited compatibility debt separate from the enforcement logic.
 const RECEIPT_HARNESS_DECISION_KINDS = new Set<ReceiptHarnessDecisionKind>([
   "equality",
+  "lookup",
   "membership",
   "switch-case",
 ]);
@@ -526,7 +529,7 @@ function checkReceiptBackedHarnessBranch(
   if (!packageAuthorityConsumers.has(repoPath)) return;
   if (
     repoPath.includes("/__test-helpers__/") ||
-    /(?:^|\/)[^/]*(?:test-fixture|test-helpers|test-support)\./u.test(repoPath)
+    /(?:^|\/)[^/]*(?:test-fixtures?|test-helpers|test-support)(?:[.-])/u.test(repoPath)
   ) {
     return;
   }
@@ -562,7 +565,10 @@ function checkReceiptBackedHarnessBranch(
     kind: ReceiptHarnessDecisionKind,
     packageId: string,
   ): string => receiptDecisionKey(repoPath, owner, kind, packageId);
-  const report = (node: ts.StringLiteralLike, kind: ReceiptHarnessDecisionKind): void => {
+  const report = (
+    node: ts.Identifier | ts.StringLiteralLike,
+    kind: ReceiptHarnessDecisionKind,
+  ): void => {
     const owner = decisionOwner(node);
     const key = allowanceKey(owner, kind, node.text);
     const allowance = baseline.get(key) ?? 0;
@@ -600,6 +606,35 @@ function checkReceiptBackedHarnessBranch(
     ) {
       for (const element of node.expression.expression.elements) {
         if (isExactPackageId(element)) report(element, "membership");
+      }
+    } else if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      (node.expression.name.text === "get" || node.expression.name.text === "has") &&
+      node.arguments.length > 0 &&
+      isExactPackageId(node.arguments[0])
+    ) {
+      report(node.arguments[0], "lookup");
+    } else if (ts.isElementAccessExpression(node) && isExactPackageId(node.argumentExpression)) {
+      report(node.argumentExpression, "lookup");
+    } else if (
+      ts.isNewExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      (node.expression.text === "Map" || node.expression.text === "Set") &&
+      node.arguments?.length === 1 &&
+      ts.isArrayLiteralExpression(node.arguments[0])
+    ) {
+      for (const element of node.arguments[0].elements) {
+        if (node.expression.text === "Set" && isExactPackageId(element)) {
+          report(element, "membership");
+        } else if (
+          node.expression.text === "Map" &&
+          ts.isArrayLiteralExpression(element) &&
+          element.elements.length > 0 &&
+          isExactPackageId(element.elements[0])
+        ) {
+          report(element.elements[0], "lookup");
+        }
       }
     }
     ts.forEachChild(node, visit);
@@ -1217,6 +1252,41 @@ export function findPackageImageBoundaryViolations(packagesRoot = PACKAGES_ROOT)
 
   for (const entry of readdirSync(packagesRoot, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const packageRoot = path.join(packagesRoot, entry.name);
+
+    for (const absPath of walk(packageRoot)) {
+      const packageRelativePath = path.relative(packageRoot, absPath);
+      const pathSegments = packageRelativePath.split(path.sep);
+      if (
+        pathSegments.some((segment) => segment === "test" || segment === "tests") ||
+        /^vitest(?:\.|$)/u.test(path.basename(absPath))
+      ) {
+        continue;
+      }
+
+      const sourceFile = sourceFileFor(absPath, readFileSync(absPath, "utf8"));
+      for (const ref of collectImportRefs(sourceFile)) {
+        if (!ref.specifier.startsWith(".")) continue;
+        const target = path.resolve(path.dirname(absPath), ref.specifier);
+        const targetRelativePath = path.relative(packageRoot, target);
+        if (
+          targetRelativePath !== ".." &&
+          !targetRelativePath.startsWith(`..${path.sep}`) &&
+          !path.isAbsolute(targetRelativePath)
+        ) {
+          continue;
+        }
+        addViolation(
+          violations,
+          toRepoPath(absPath),
+          ref.line,
+          ref.column,
+          "package-source-locality",
+          `package production source must not import outside its package root: ${ref.specifier}`,
+        );
+      }
+    }
+
     const dockerfile = path.join(packagesRoot, entry.name, "Dockerfile");
     if (!existsSync(dockerfile) || !lstatSync(dockerfile).isFile()) continue;
     const source = readFileSync(dockerfile, "utf8");
@@ -1242,7 +1312,6 @@ export function findPackageImageBoundaryViolations(packagesRoot = PACKAGES_ROOT)
       }
     });
 
-    const packageRoot = path.join(packagesRoot, entry.name);
     const packageJsonPath = path.join(packageRoot, "package.json");
     const sharedRuntimeArtifacts = [
       {

@@ -19,6 +19,64 @@ export interface RenderedConfigVisibilityKey {
   readonly envKey?: string;
 }
 
+function effectiveInputValue(
+  context: RenderedChannelConfigParserContext,
+  inputId: string,
+  fallback?: string,
+): string | undefined {
+  const value = context.inputs.find((input) => input.inputId === inputId)?.value;
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function safeTargetInput(value: string | undefined): value is string {
+  return Boolean(
+    value &&
+    value !== "." &&
+    value !== ".." &&
+    !value.includes("..") &&
+    /^[A-Za-z0-9._-]+$/u.test(value),
+  );
+}
+
+/**
+ * Project receipt-backed package visibility metadata into the fixed core reader.
+ * `null` means this is a pre-package manifest and permits the explicit legacy map;
+ * an empty array is an authoritative package declaration of no readable config.
+ */
+export function listPackageConfigVisibilityKeys(
+  context: RenderedChannelConfigParserContext,
+): readonly RenderedConfigVisibilityKey[] | null {
+  const declared = context.manifest.configVisibility;
+  if (declared === undefined) return null;
+  return declared.flatMap((entry) => {
+    if (entry.whenInput) {
+      const actual = effectiveInputValue(
+        context,
+        entry.whenInput.inputId,
+        entry.whenInput.defaultValue,
+      );
+      if (actual !== entry.whenInput.equals) return [];
+    }
+    let target = entry.target;
+    if (entry.targetInputId) {
+      const input = effectiveInputValue(context, entry.targetInputId);
+      if (!safeTargetInput(input)) return [];
+      target = target.replace("{{input}}", input);
+      if (target.includes("{{input}}")) return [];
+    }
+    return [
+      {
+        key: entry.key ?? entry.inputId,
+        inputId: entry.inputId,
+        target,
+        kind: entry.kind,
+        ...(entry.path ? { path: entry.path } : {}),
+        ...(entry.envKey ? { envKey: entry.envKey } : {}),
+      },
+    ];
+  });
+}
+
 export type RenderedConfigSource =
   | {
       readonly kind: "structured";

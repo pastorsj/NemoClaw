@@ -57,6 +57,7 @@ import {
   needsLegacyManagedGatewayDeliveryProof,
   resolveLegacyDcodeAutoApprovalMode,
   resolveLegacyInferenceProbeAgentName,
+  resolveLegacyModels404Probe,
 } from "./status-legacy";
 import {
   probeTerminalRuntimeCgroupOom,
@@ -630,7 +631,12 @@ export async function collectSandboxStatusSnapshot(
         opts.deps?.probeSandboxInferenceGatewayHealthImpl ?? probeSandboxInferenceGatewayHealth;
       await retryUntilAsync(
         async () => {
-          gatewayChain = gatewayName ? await probe(sandboxName, { gatewayName }) : null;
+          gatewayChain = gatewayName
+            ? await probe(sandboxName, {
+                gatewayName,
+                ...(receiptBackedAgent ? { agent: statusAgent.agentDefinition } : {}),
+              })
+            : null;
           invocation =
             gatewayChain?.ok && canProbeInvocation
               ? runSandboxInferenceInvocationProbe(
@@ -638,6 +644,9 @@ export async function collectSandboxStatusSnapshot(
                     sandboxName,
                     gatewayName: gatewayName ?? undefined,
                     ...(inferenceProbeAgentName ? { agentName: inferenceProbeAgentName } : {}),
+                    ...(receiptBackedAgent && statusAgent.agentDefinition?.runtime?.smoke_boundary
+                      ? { probeBoundary: statusAgent.agentDefinition.runtime.smoke_boundary }
+                      : {}),
                     provider: invocationProvider,
                     model: invocationModel,
                     preferredInferenceApi: invocationRoute.preferredInferenceApi,
@@ -686,8 +695,10 @@ export async function collectSandboxStatusSnapshot(
       invocation = null;
     }
     inferenceHealth = buildSandboxInferenceRouteHealth(gatewayChain, providerHealth, invocation, {
-      agentName: observedAgentName,
       provider: invocationRoute.provider ?? null,
+      models404: receiptBackedAgent
+        ? (statusAgent.agentDefinition?.inference?.route_probe?.models_404 ?? null)
+        : resolveLegacyModels404Probe(sb, invocationRoute.provider),
     });
   }
   const terminalRuntimeHealth =

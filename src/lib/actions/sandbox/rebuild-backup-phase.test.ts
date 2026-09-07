@@ -43,6 +43,7 @@ function runRebuildBackupPhase(
   input: BackupPhaseTestInput,
   backupStateForRebuild?: Parameters<typeof runRebuildBackupPhaseWithAuthority>[1],
 ) {
+  const agentAuthority = makeRebuildAgentAuthority(input.sandboxEntry.agent ?? null);
   const authoritativeInput: RebuildBackupPhaseInput = {
     ...input,
     packageAuthority: input.packageAuthority ?? {
@@ -50,7 +51,7 @@ function runRebuildBackupPhase(
       harnessPackageMigration: null,
     },
     backupRegistryEntry: input.sandboxEntry,
-    agentAuthority: makeRebuildAgentAuthority(input.sandboxEntry.agent ?? null),
+    agentAuthority: { ...agentAuthority, harnessPackage: null },
   };
   return backupStateForRebuild
     ? runRebuildBackupPhaseWithAuthority(authoritativeInput, backupStateForRebuild)
@@ -263,13 +264,13 @@ describe("rebuild backup safety", () => {
     } as BackupPhaseTestInput;
   }
 
-  it("blocks a live custom image with missing plugin provenance before backup", () => {
+  it("blocks a live custom image with missing extension provenance before backup", () => {
     const backup = vi.fn();
     const input = customOpenClawInput();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     expect(() => runRebuildBackupPhase(input, backup)).toThrow(
-      "Custom-image OpenClaw plugin provenance is unavailable.",
+      "Managed image extension provenance is unavailable.",
     );
     expect(backup).not.toHaveBeenCalled();
   });
@@ -302,7 +303,7 @@ describe("rebuild backup safety", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     expect(() => runRebuildBackupPhase(input, backup)).toThrow(
-      "Custom-image OpenClaw plugin provenance is unavailable.",
+      "Managed image extension provenance is unavailable.",
     );
     expect(backup).not.toHaveBeenCalled();
   });
@@ -325,7 +326,7 @@ describe("rebuild backup safety", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     expect(() => runRebuildBackupPhase(input, backup as never)).toThrow(
-      "Custom-image OpenClaw plugin provenance is unavailable.",
+      "Managed image extension provenance is unavailable.",
     );
     expect(backup).toHaveBeenCalledOnce();
   });

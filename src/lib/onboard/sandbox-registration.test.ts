@@ -189,6 +189,51 @@ function createdRegistryEntryInput(
 }
 
 describe("buildCreatedSandboxRegistryEntry", () => {
+  it("registers receipt-backed managed tools only in neutral state", () => {
+    const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+      harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+    } as never);
+    try {
+      const entry = buildCreatedSandboxRegistryEntry(
+        createdRegistryEntryInput({
+          toolGatewaySelections: ["future-search"],
+          hermesToolGateways: ["nous-web"],
+        }),
+      );
+
+      expect(entry.toolGatewaySelections).toEqual(["future-search"]);
+      expect(entry.hermesToolGateways).toBeUndefined();
+    } finally {
+      loadSession.mockRestore();
+    }
+  });
+
+  it("records receipt-backed approval state without a package-specific field", () => {
+    const entry = buildCreatedSandboxRegistryEntry(
+      createdRegistryEntryInput({ approvalMode: "thread-opt-in" }),
+    );
+
+    expect(entry.approvalMode).toBe("thread-opt-in");
+    expect(entry).not.toHaveProperty("dcodeAutoApprovalMode");
+  });
+
+  it("clones a receipt-backed managed-extension baseline into registry state", () => {
+    const managedImageExtensions = [
+      { id: "future", directory: "future", configPaths: ["/opt/future"] },
+    ];
+
+    const entry = buildCreatedSandboxRegistryEntry(
+      createdRegistryEntryInput({ managedImageExtensions }),
+    );
+
+    expect(entry.managedImageExtensions).toEqual(managedImageExtensions);
+    expect(entry.managedImageExtensions).not.toBe(managedImageExtensions);
+    expect(entry.managedImageExtensions?.[0]).not.toBe(managedImageExtensions[0]);
+    expect(entry.managedImageExtensions?.[0]?.configPaths).not.toBe(
+      managedImageExtensions[0]?.configPaths,
+    );
+  });
+
   it("records explicit OpenClaw identity for a managed workload receipt (#9356)", () => {
     const workload = managedWorkloadReceipt("openclaw");
     const entry = buildCreatedSandboxRegistryEntry(
@@ -200,6 +245,70 @@ describe("buildCreatedSandboxRegistryEntry", () => {
 
     expect(entry.agent).toBe("openclaw");
     expect(authority.readManagedWorkloadAuthority(entry)?.agent).toBe("openclaw");
+  });
+
+  it("records a package-declared secondary forward in the neutral registry field", () => {
+    const agentDefs = requireDist("../agent/defs.js") as typeof import("../agent/defs");
+    const entry = buildCreatedSandboxRegistryEntry(
+      createdRegistryEntryInput({
+        agent: agentDefs.loadAgent("hermes"),
+        secondaryForwardPort: 8644,
+      }),
+    );
+
+    expect(entry.secondaryForwardPort).toBe(8644);
+    expect(entry.hermesApiPort).toBeUndefined();
+  });
+
+  it("records a receipt-backed dashboard without package-specific registry fields", () => {
+    const entry = buildCreatedSandboxRegistryEntry(
+      createdRegistryEntryInput({
+        agent: { name: "future-harness", expectedVersion: null } as never,
+        hermesDashboardState: {
+          packageOwned: true,
+          declaration: {
+            label: "Future console",
+            path: "/console",
+            port: 9120,
+            enableEnv: "FUTURE_CONSOLE_ENABLED",
+            portEnv: "FUTURE_CONSOLE_PORT",
+            internalPort: 19120,
+            internalPortEnv: "FUTURE_CONSOLE_INTERNAL_PORT",
+            tuiEnv: "FUTURE_CONSOLE_TUI",
+          },
+          enabled: true,
+          config: {
+            enabled: true,
+            port: 9121,
+            internalPort: 19121,
+            tuiEnabled: true,
+          },
+        },
+      }),
+    );
+
+    expect(entry.dashboardUi).toEqual({
+      enabled: true,
+      publicPort: 9121,
+      internalPort: 19121,
+      tuiEnabled: true,
+    });
+    expect(entry).not.toHaveProperty("hermesDashboardEnabled");
+    expect(entry).not.toHaveProperty("hermesDashboardPort");
+    expect(entry).not.toHaveProperty("hermesDashboardInternalPort");
+    expect(entry).not.toHaveProperty("hermesDashboardTui");
+  });
+
+  it("rejects a neutral secondary forward outside the package declaration", () => {
+    const agentDefs = requireDist("../agent/defs.js") as typeof import("../agent/defs");
+    expect(() =>
+      buildCreatedSandboxRegistryEntry(
+        createdRegistryEntryInput({
+          agent: agentDefs.loadAgent("hermes"),
+          secondaryForwardPort: 9000,
+        }),
+      ),
+    ).toThrow(/does not match its package declaration/u);
   });
 
   it("keeps the legacy OpenClaw registry identity for a custom image (#9356)", () => {
@@ -668,7 +777,7 @@ describe("registerCreatedSandbox", () => {
         registerSandbox,
       });
 
-      expect(entry.agent).toBeNull();
+      expect(entry.agent).toBe("openclaw");
       expect(entry.harnessPackage).toEqual(OPENCLAW_PACKAGE_IDENTITY);
       expect(resolvePinned).toHaveBeenCalledExactlyOnceWith(OPENCLAW_PACKAGE_IDENTITY);
       expect(registerSandbox).toHaveBeenCalledExactlyOnceWith(entry, fixture.reservation, {

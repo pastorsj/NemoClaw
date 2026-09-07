@@ -40,7 +40,15 @@ export interface NemoClawInferenceRouteConfig {
 
 export interface NemoClawAgentConfig {
   readonly name: string;
-  readonly type: "openclaw";
+  /** Canonical harness identifier. Receiptless compatibility permits only OpenClaw. */
+  readonly type: string;
+  /** Exact immutable authority for a package-backed harness. */
+  readonly package?: Readonly<{
+    kind: "agent-runtime";
+    id: string;
+    packageVersion: string;
+    contentDigest: string;
+  }>;
   readonly inference: Readonly<{ routes: readonly NemoClawInferenceRouteConfig[] }>;
 }
 

@@ -44,9 +44,7 @@ export function enforceHermesSecretBoundaryOnRunningGateway(
   if (!required) return null;
   if (!agent) {
     console.error("");
-    console.error(
-      `  ${R}Agent definition could not be loaded for sandbox '${sandboxName}'.${R}`,
-    );
+    console.error(`  ${R}Agent definition could not be loaded for sandbox '${sandboxName}'.${R}`);
     console.error("  Refusing recovery to keep the validator-enforced boundary intact.");
     return { refused: true, reason: "agent-missing", stderr: "" };
   }

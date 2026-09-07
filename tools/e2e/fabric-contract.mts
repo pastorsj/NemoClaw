@@ -42,12 +42,15 @@ const TARGET_ENVIRONMENT = {
   descriptorGlob: "E2E_FABRIC_DESCRIPTOR_GLOB",
   descriptorPathPrefix: "E2E_FABRIC_DESCRIPTOR_ROOT",
   descriptorRunnerModule: "E2E_FABRIC_RUNNER_MODULE",
+  journey: "E2E_FABRIC_PACKAGE_JOURNEY",
   packageId: "E2E_FABRIC_PACKAGE_ID",
   packageArtifact: "E2E_FABRIC_PACKAGE_ARTIFACT",
   upgradePackageArtifact: "E2E_FABRIC_UPGRADE_PACKAGE_ARTIFACT",
   processMarkers: "E2E_FABRIC_PROCESS_MARKERS",
   sandboxName: "NEMOCLAW_SANDBOX_NAME",
 } as const;
+
+export type FabricPackageJourney = "smoke" | "lifecycle";
 
 export interface FabricHarnessE2eContract {
   readonly packageId: string;
@@ -62,9 +65,17 @@ export interface FabricHarnessE2eContract {
 
 export interface FabricPackageE2eTarget {
   readonly contract: FabricHarnessE2eContract;
-  readonly packageArtifact?: string;
+  readonly journey: FabricPackageJourney;
+  readonly packageArtifact: string;
   readonly upgradePackageArtifact?: string;
   readonly sandboxName: string;
+}
+
+function validateFabricPackageJourney(value: string): FabricPackageJourney {
+  if (value !== "smoke" && value !== "lifecycle") {
+    throw new Error("Fabric package journey must be 'smoke' or 'lifecycle'");
+  }
+  return value;
 }
 
 export interface InstalledFabricPackageReference {
@@ -78,6 +89,11 @@ export interface InstalledFabricE2eBinding {
   readonly descriptorAuthority: "nemo-fabric" | "package";
   readonly packageId: string;
   readonly runnerModule: string;
+}
+
+export interface BoundFabricPackageArtifact {
+  readonly binding: InstalledFabricE2eBinding;
+  readonly reference: InstalledFabricPackageReference;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -285,7 +301,6 @@ export function validateFabricHarnessE2eContract(value: unknown): FabricHarnessE
   const descriptorPathPrefix = requiredString(value, "descriptorPathPrefix");
   const descriptorRunnerModule = requiredString(value, "descriptorRunnerModule");
   const processMarkers = validateProcessMarkers(value.processMarkers);
-  const descriptorRelative = descriptorGlob.slice(descriptorPathPrefix.length);
   const descriptorName = descriptorGlob.slice(descriptorGlob.lastIndexOf("/") + 1);
   const invalid =
     !isBoundedSafeText(adapterId, PROCESS_MARKER_MAX_BYTES) ||
@@ -294,7 +309,7 @@ export function validateFabricHarnessE2eContract(value: unknown): FabricHarnessE
     !isCanonicalAbsolutePath(configPath) ||
     !isCanonicalAbsolutePath(descriptorGlob) ||
     !isCanonicalAbsolutePath(descriptorPathPrefix) ||
-    !descriptorRelative.startsWith("/") ||
+    !descriptorGlob.startsWith(`${descriptorPathPrefix}/`) ||
     !isBoundedSafeText(descriptorName, PROCESS_MARKER_MAX_BYTES) ||
     !isBoundedSafeText(descriptorRunnerModule, PROCESS_MARKER_MAX_BYTES) ||
     !PYTHON_MODULE_PATTERN.test(descriptorRunnerModule);
@@ -313,9 +328,10 @@ export function validateFabricHarnessE2eContract(value: unknown): FabricHarnessE
 }
 
 /** Bind package-owned live expectations to the exact immutable object selected by its receipt. */
-export function requireInstalledFabricE2eBinding(
+function requireFabricE2eBinding(
   contractValue: FabricHarnessE2eContract,
   reference: InstalledFabricPackageReference,
+  requireDigestDirectory: boolean,
 ): InstalledFabricE2eBinding {
   try {
     const contract = validateFabricHarnessE2eContract(contractValue);
@@ -323,7 +339,7 @@ export function requireInstalledFabricE2eBinding(
     if (
       !path.isAbsolute(reference.packageRoot) ||
       path.resolve(reference.packageRoot) !== reference.packageRoot ||
-      path.basename(reference.packageRoot) !== identity.contentDigest
+      (requireDigestDirectory && path.basename(reference.packageRoot) !== identity.contentDigest)
     ) {
       throw new Error("Installed Fabric package receipt is invalid");
     }
@@ -383,6 +399,39 @@ export function requireInstalledFabricE2eBinding(
   }
 }
 
+/** Bind the immutable object selected by an installed package receipt. */
+export function requireInstalledFabricE2eBinding(
+  contractValue: FabricHarnessE2eContract,
+  reference: InstalledFabricPackageReference,
+): InstalledFabricE2eBinding {
+  return requireFabricE2eBinding(contractValue, reference, true);
+}
+
+/** Bind an exact trusted-local input directory before passing it to the installer. */
+export function requireFabricPackageArtifactE2eBinding(
+  contractValue: FabricHarnessE2eContract,
+  packageRootValue: string,
+): BoundFabricPackageArtifact {
+  try {
+    const packageRoot = validateFabricPackageArtifactPath(packageRootValue);
+    const tree = validateHarnessPackageTree(packageRoot, { sourceTrust: "mutable" });
+    const manifest = parseHarnessPackageManifest(packageRoot);
+    const reference = Object.freeze({
+      identity: parseHarnessPackageIdentity({
+        kind: manifest.envelope.kind,
+        id: manifest.envelope.id,
+        packageVersion: manifest.envelope.packageVersion,
+        contentDigest: tree.contentDigest,
+      }),
+      packageRoot,
+    });
+    const binding = requireFabricE2eBinding(contractValue, reference, false);
+    return Object.freeze({ binding, reference });
+  } catch {
+    throw new Error("Fabric package artifact does not match its package-owned E2E contract");
+  }
+}
+
 /** True only when a target selected the explicit Fabric package journey. */
 export function hasFabricPackageE2eTarget(environment: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(environment[TARGET_ENVIRONMENT.packageId]?.trim());
@@ -413,13 +462,12 @@ export function readFabricPackageE2eTarget(
   });
   return Object.freeze({
     contract,
-    ...(environment[TARGET_ENVIRONMENT.packageArtifact]?.trim()
-      ? {
-          packageArtifact: validateFabricPackageArtifactPath(
-            requiredEnvironmentValue(environment, TARGET_ENVIRONMENT.packageArtifact),
-          ),
-        }
-      : {}),
+    journey: validateFabricPackageJourney(
+      requiredEnvironmentValue(environment, TARGET_ENVIRONMENT.journey),
+    ),
+    packageArtifact: validateFabricPackageArtifactPath(
+      requiredEnvironmentValue(environment, TARGET_ENVIRONMENT.packageArtifact),
+    ),
     ...(environment[TARGET_ENVIRONMENT.upgradePackageArtifact]?.trim()
       ? {
           upgradePackageArtifact: validateFabricPackageArtifactPath(
@@ -440,13 +488,7 @@ export function fabricPackageE2eEnvironment(
   const contract = validateFabricHarnessE2eContract(target.contract);
   return Object.freeze({
     [TARGET_ENVIRONMENT.packageId]: contract.packageId,
-    ...(target.packageArtifact
-      ? {
-          [TARGET_ENVIRONMENT.packageArtifact]: validateFabricPackageArtifactPath(
-            target.packageArtifact,
-          ),
-        }
-      : {}),
+    [TARGET_ENVIRONMENT.packageArtifact]: validateFabricPackageArtifactPath(target.packageArtifact),
     ...(target.upgradePackageArtifact
       ? {
           [TARGET_ENVIRONMENT.upgradePackageArtifact]: validateFabricPackageArtifactPath(
@@ -460,6 +502,7 @@ export function fabricPackageE2eEnvironment(
     [TARGET_ENVIRONMENT.descriptorGlob]: contract.descriptorGlob,
     [TARGET_ENVIRONMENT.descriptorPathPrefix]: contract.descriptorPathPrefix,
     [TARGET_ENVIRONMENT.descriptorRunnerModule]: contract.descriptorRunnerModule,
+    [TARGET_ENVIRONMENT.journey]: validateFabricPackageJourney(target.journey),
     [TARGET_ENVIRONMENT.processMarkers]: JSON.stringify(contract.processMarkers ?? []),
     [TARGET_ENVIRONMENT.sandboxName]: validateFabricPackageSandboxName(target.sandboxName),
   });

@@ -4,21 +4,17 @@
 import { describe, expect, it } from "vitest";
 import {
   configureDcodeSession,
+  createLegacyDcodeRebuildHarness,
   makeDcodeSandboxEntry,
 } from "../../../../test/helpers/rebuild-dcode-flow-helpers";
 import { expectNoSandboxDelete } from "../../../../test/helpers/rebuild-delete-assertions";
-import {
-  createRebuildFlowHarness,
-  installRebuildFlowTestHooks,
-  snapshotEnv,
-} from "../../../../test/helpers/rebuild-flow-generic-harness";
+import { installRebuildFlowTestHooks } from "../../../../test/helpers/rebuild-flow-generic-harness";
 
 describe("rebuildSandbox DCode flow: prepared artifact drift", () => {
   installRebuildFlowTestHooks({ acceptThirdPartySoftware: true });
 
   it("preserves live DCode when retained replacement inputs drift after backup (#6195)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
       dcodeRouteResults: [{ ok: true }, { ok: true }, { ok: true }],
       dcodeImageVerificationResults: [true, false],
@@ -38,8 +34,7 @@ describe("rebuildSandbox DCode flow: prepared artifact drift", () => {
     );
   });
   it("preserves live DCode when its pinned base image drifts after backup (#6195)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
       dcodeRouteResults: [{ ok: true }, { ok: true }, { ok: true }],
       dcodeBaseImageIds: [`sha256:${"a".repeat(64)}`, `sha256:${"a".repeat(64)}`, "sha256:changed"],

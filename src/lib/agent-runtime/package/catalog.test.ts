@@ -7,6 +7,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../../test/helpers/adapter-fixtures";
+import {
   DamagedInstalledHarnessPackageError,
   HarnessPackageCatalogIntegrityError,
   HarnessPackageUnavailableError,
@@ -80,7 +85,7 @@ function writeFixtureFile(root: string, relativePath: string, contents: string):
 
 function writePackageFixture(parent: string, fixture: PackageFixture): string {
   const packageRoot = path.join(parent, fixture.directoryName ?? `nemoclaw-${fixture.id}`);
-  const manifestPath = fixture.manifestPath ?? `packages/nemoclaw-${fixture.id}/manifest.yaml`;
+  const manifestPath = fixture.manifestPath ?? "manifest.yaml";
   fs.mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
   fs.chmodSync(packageRoot, 0o700);
   writeFixtureFile(
@@ -112,6 +117,15 @@ function writePackageFixture(parent: string, fixture: PackageFixture): string {
       `  sandbox_name: ${fixture.sandboxName ?? fixture.id}`,
       "runtime:",
       "  kind: gateway",
+      `  interactive_command: ${fixture.id}`,
+      "  process_lifecycle:",
+      "    support: unsupported",
+      "    reason: This fixture does not manage a gateway process.",
+      `gateway_command: ${fixture.id} gateway run`,
+      "health_probe:",
+      "  url: http://127.0.0.1:19090/health",
+      "  port: 19090",
+      "  timeout_seconds: 30",
       "config:",
       `  dir: /sandbox/.${fixture.id}`,
       "  config_file: config.json",
@@ -122,12 +136,18 @@ function writePackageFixture(parent: string, fixture: PackageFixture): string {
       "    reason: This synthetic package has fixed inference configuration.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This package does not run scheduled work.",
@@ -135,6 +155,22 @@ function writePackageFixture(parent: string, fixture: PackageFixture): string {
       "      kind: not-required",
       "",
     ].join("\n"),
+  );
+  const manifestDirectory = path.posix.dirname(manifestPath);
+  writeFixtureFile(
+    packageRoot,
+    path.posix.join(manifestDirectory, "host/config-adapter.cts"),
+    TEST_CONFIG_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    packageRoot,
+    path.posix.join(manifestDirectory, "host/messaging-adapter.cts"),
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    packageRoot,
+    path.posix.join(manifestDirectory, "host/startup-adapter.cts"),
+    TEST_STARTUP_ADAPTER_SOURCE,
   );
   writeFixtureFile(packageRoot, "runtime/payload.txt", fixture.payload ?? `${fixture.id}\n`);
   return packageRoot;

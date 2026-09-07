@@ -423,6 +423,7 @@ export const googlechatManifest = {
       phase: "enroll",
       handler: "common.configPrompt",
       agents: ["openclaw"],
+      packageOperationRequired: true,
       outputs: [
         {
           id: "appPrincipal",
@@ -436,6 +437,7 @@ export const googlechatManifest = {
       phase: "enroll",
       handler: "common.configPrompt",
       agents: ["hermes"],
+      packageOperationRequired: true,
       outputs: [
         {
           id: "projectId",

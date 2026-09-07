@@ -38,6 +38,7 @@ it("materializes the Haystack publish set through the public harness contract", 
     expect(
       fs.existsSync(path.join(artifactRoot, "fabric/haystack-agent.fabric-adapter.json")),
     ).toBe(true);
+    expect(fs.existsSync(path.join(artifactRoot, "host/startup-adapter.cts"))).toBe(true);
     expect(fs.existsSync(path.join(artifactRoot, "tests"))).toBe(false);
     expect(fs.statSync(artifactRoot).mode & 0o777).toBe(0o555);
     expect(fs.statSync(path.join(artifactRoot, "start.sh")).mode & 0o111).not.toBe(0);

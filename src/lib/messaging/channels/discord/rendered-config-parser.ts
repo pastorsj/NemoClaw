@@ -3,43 +3,21 @@
 
 import type { MessagingSerializableValue } from "../../manifest";
 import {
-  envConfigKey,
   getEnvConfigValue,
   getStructuredConfigValue,
   getStructuredPath,
+  listPackageConfigVisibilityKeys,
   type RenderedChannelConfigParser,
   type RenderedConfigSource,
   type RenderedConfigVisibilityKey,
-  structuredConfigKey,
 } from "../rendered-config-parser-utils";
-
-const OPENCLAW_GUILDS_PATH = ["channels", "discord", "guilds"] as const;
+import { listLegacyRenderedConfigKeys } from "../legacy/rendered-config";
 
 export const discordRenderedConfigParser: RenderedChannelConfigParser = {
   listConfigVisibilityKeys(context) {
-    if (context.agentId === "openclaw") {
-      return [
-        structuredConfigKey("serverId", "openclaw.json", OPENCLAW_GUILDS_PATH, "guildIds"),
-        structuredConfigKey(
-          "requireMention",
-          "openclaw.json",
-          OPENCLAW_GUILDS_PATH,
-          "guildRequireMention",
-        ),
-        structuredConfigKey("userId", "openclaw.json", OPENCLAW_GUILDS_PATH, "guildUsers"),
-      ];
-    }
-    if (context.agentId === "hermes") {
-      return [
-        envConfigKey("serverId", "~/.hermes/.env", "NEMOCLAW_DISCORD_GUILD_IDS"),
-        envConfigKey("userId", "~/.hermes/.env", "DISCORD_ALLOWED_USERS"),
-        structuredConfigKey("requireMention", "~/.hermes/config.yaml", [
-          "discord",
-          "require_mention",
-        ]),
-      ];
-    }
-    return [];
+    return (
+      listPackageConfigVisibilityKeys(context) ?? listLegacyRenderedConfigKeys("discord", context)
+    );
   },
 
   getValue(key, source) {

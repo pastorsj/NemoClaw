@@ -44,6 +44,7 @@ const PUBLISHED_CONTRACT_RANGE = /^\^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\
 const NON_SECRET_BASE_IMAGE =
   "ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const HARNESS_CONTRACT_ROOT = path.resolve(import.meta.dirname, "..", "..", "harness-contract");
+const HARNESS_CONTRACT_VERIFIER = path.resolve(import.meta.dirname, "verify-contract.mts");
 const OMITTED_DIRECTORY_NAMES = new Set([
   ".git",
   ".cache",
@@ -625,6 +626,16 @@ function installPackageDevelopmentDependencies(
         : ["ci", "--ignore-scripts"],
     ),
   );
+  if (harnessContractArchive) {
+    runCommand({
+      executable: "node",
+      args: ["--experimental-strip-types", "--no-warnings", HARNESS_CONTRACT_VERIFIER, packageRoot],
+      cwd: packageRoot,
+      env,
+      output: "inherit",
+      purpose: "verify installed harness contract",
+    });
+  }
   for (const projectPath of buildProjectRoots) {
     const projectRoot = path.resolve(packageRoot, ...projectPath.split("/"));
     assertRegularDirectory(projectRoot, "Candidate build project");

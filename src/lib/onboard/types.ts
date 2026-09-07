@@ -67,6 +67,9 @@ export interface SandboxCreateIntent {
   readonly observabilityEnabled: boolean;
   /** Present only when the operator explicitly selected observability on or off. */
   readonly observabilityRequestedExplicitly?: true;
+  /** Package-neutral startup approval mode selected for a receipt-backed harness. */
+  readonly approvalMode?: import("@nvidia/nemoclaw-harness-contract").HarnessStartupApprovalMode;
+  /** Legacy no-receipt Deep Agents Code compatibility input. */
   readonly dcodeAutoApprovalMode?: import("./dcode-auto-approval").DcodeAutoApprovalMode;
   /** Non-secret upstream endpoint metadata for managed image config generation. */
   readonly endpointUrl?: string | null;

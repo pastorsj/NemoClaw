@@ -27,6 +27,7 @@ import {
   resolveAgentDefaultCloudModel,
   resolveAgentInferenceApi,
   resolveAgentProviderInferenceApi,
+  resolvePackageProviderInferenceApi,
   sanitizeRouteValueForDisplay,
   VLLM_LOCAL_CREDENTIAL_ENV,
 } from "./config";
@@ -84,6 +85,78 @@ describe("resolveAgentProviderInferenceApi", () => {
         "anthropic-messages",
       ),
     ).toBe("openai-completions");
+  });
+});
+
+describe("resolvePackageProviderInferenceApi", () => {
+  it("uses a future package's provider override without recognizing its harness ID", () => {
+    const futureAgent = {
+      name: "future-harness",
+      inference: {
+        providerApiOverrides: [
+          { provider: "compatible-anthropic-endpoint", api: "openai-completions" },
+        ],
+      },
+    };
+
+    expect(
+      resolvePackageProviderInferenceApi(
+        futureAgent,
+        "compatible-anthropic-endpoint",
+        "anthropic-messages",
+      ),
+    ).toBe("openai-completions");
+  });
+
+  it("still applies a package's protocol capability when no provider override exists", () => {
+    expect(
+      resolvePackageProviderInferenceApi(
+        {
+          name: "future-harness",
+          inference: { provider_type: "openai_compatible", providerApiOverrides: [] },
+        },
+        "compatible-anthropic-endpoint",
+        "anthropic-messages",
+      ),
+    ).toBe("openai-completions");
+  });
+
+  it("does not apply a receiptless Hermes compatibility rule to a package with that ID", () => {
+    expect(
+      resolvePackageProviderInferenceApi(
+        { name: "hermes", inference: { providerApiOverrides: [] } },
+        "compatible-anthropic-endpoint",
+        "anthropic-messages",
+      ),
+    ).toBe("anthropic-messages");
+  });
+
+  it.each([
+    {
+      name: "OpenClaw",
+      agent: { name: "openclaw", inference: { providerApiOverrides: [] } },
+      expected: "anthropic-messages",
+    },
+    {
+      name: "Hermes",
+      agent: {
+        name: "hermes",
+        inference: {
+          providerApiOverrides: [
+            { provider: "compatible-anthropic-endpoint", api: "openai-completions" },
+          ],
+        },
+      },
+      expected: "openai-completions",
+    },
+  ])("matches the $name package declaration", ({ agent, expected }) => {
+    expect(
+      resolvePackageProviderInferenceApi(
+        agent,
+        "compatible-anthropic-endpoint",
+        "anthropic-messages",
+      ),
+    ).toBe(expected);
   });
 });
 

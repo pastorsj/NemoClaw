@@ -599,10 +599,14 @@ COPY packages/nemoclaw-openclaw/runtime/managed-gateway-control.py /usr/local/li
 COPY packages/nemoclaw-openclaw/runtime/managed-gateway-profile.py /usr/local/lib/nemoclaw/managed-gateway-profile.py
 COPY packages/nemoclaw-openclaw/start.sh /usr/local/bin/nemoclaw-start
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/session-admin.sh /usr/local/bin/nemoclaw-openclaw-session-admin
+COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/semantic-turn.sh /usr/local/bin/nemoclaw-openclaw-semantic-turn
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/device-pairing-settle.sh /usr/local/bin/nemoclaw-device-pairing-settle
+COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/session-qualify.py /usr/local/bin/nemoclaw-session-qualify
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/state-restore.sh /usr/local/bin/nemoclaw-state-restore
 COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/state-restore.py /usr/local/lib/nemoclaw/openclaw-state-restore.py
+COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/state-extensions.py /usr/local/lib/nemoclaw/openclaw-state-extensions.py
 COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/session-admin.mts /usr/local/lib/nemoclaw/openclaw-session-admin.mts
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/semantic-turn.mts /usr/local/lib/nemoclaw/openclaw-semantic-turn.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/auto-pair.py /usr/local/lib/nemoclaw/openclaw-startup/auto-pair.py
 COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/inference-reconcile.py /usr/local/lib/nemoclaw/openclaw-startup/inference-reconcile.py
 COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/gateway-setup.sh /usr/local/lib/nemoclaw/openclaw-startup/gateway-setup.sh
@@ -624,11 +628,11 @@ COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/seal-config.cts /usr/local/
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/generate-config.mts /packages/nemoclaw-openclaw/config/generate-config.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/agent-config.mts /packages/nemoclaw-openclaw/config/agent-config.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/model-setup.mts /packages/nemoclaw-openclaw/config/model-setup.mts
+COPY --chmod=0444 packages/nemoclaw-openclaw/config/tool-disclosure.ts /packages/nemoclaw-openclaw/config/tool-disclosure.ts
 COPY --chmod=0444 packages/nemoclaw-openclaw/host/config-runtime.cts /packages/nemoclaw-openclaw/host/config-runtime.cts
 COPY --chmod=0444 packages/nemoclaw-openclaw/host/startup-adapter.cts /usr/local/lib/nemoclaw/startup-adapter.cjs
 COPY packages/nemoclaw-openclaw/checks/tool-search.mts /scripts/validate-openclaw-tool-search.mts
 COPY --from=managed-startup-runtime-builder /out/managed-startup-image-runtime.cjs /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs
-COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
 COPY packages/nemoclaw-openclaw/openclaw-plugins/ /usr/local/share/nemoclaw/openclaw-plugins/
 COPY --from=mcp-tool-discovery-runtime /opt/mcp-tool-discovery-runtime/dist/ /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/
 
@@ -1554,9 +1558,9 @@ RUN mkdir -p /sandbox/.nemoclaw/blueprints/0.1.0 \
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/generate-config.mts /packages/nemoclaw-openclaw/config/generate-config.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/agent-config.mts /packages/nemoclaw-openclaw/config/agent-config.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/model-setup.mts /packages/nemoclaw-openclaw/config/model-setup.mts
+COPY --chmod=0444 packages/nemoclaw-openclaw/config/tool-disclosure.ts /packages/nemoclaw-openclaw/config/tool-disclosure.ts
 COPY --chmod=0444 packages/nemoclaw-openclaw/host/config-runtime.cts /packages/nemoclaw-openclaw/host/config-runtime.cts
 COPY packages/nemoclaw-openclaw/checks/tool-search.mts /scripts/validate-openclaw-tool-search.mts
-COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
 COPY packages/nemoclaw-openclaw/openclaw-plugins/ /usr/local/share/nemoclaw/openclaw-plugins/
 
 RUN chmod 755 /packages \
@@ -1567,7 +1571,7 @@ RUN chmod 755 /packages \
         /src/lib \
         /packages/nemoclaw-openclaw/config/generate-config.mts \
         /scripts/validate-openclaw-tool-search.mts \
-    && chmod 444 /src/lib/tool-disclosure.ts \
+    && chmod 444 /packages/nemoclaw-openclaw/config/tool-disclosure.ts \
     && chmod 755 /usr/local/share/nemoclaw \
         /usr/local/share/nemoclaw/openclaw-plugins \
     && find /usr/local/share/nemoclaw/openclaw-plugins -type d -exec chmod 755 {} + \
@@ -1864,13 +1868,15 @@ RUN --network=none --mount=from=openclaw-optional-plugin-archives,target=/opt/ne
 # owner; messaging intentionally stays out of openclaw-runtime-payload.
 USER root
 COPY --chmod=0555 packages/nemoclaw-openclaw/messaging/messaging-build.mts /usr/local/lib/nemoclaw/messaging-build.mts
+COPY --chmod=0555 packages/nemoclaw-openclaw/messaging/probes/probe.mts /usr/local/lib/nemoclaw/messaging-probe.mts
+COPY --chmod=0444 packages/nemoclaw-openclaw/messaging/profile.json packages/nemoclaw-openclaw/messaging/runtime-profile.json /usr/local/share/nemoclaw/messaging/
 
 # Bake reduced messaging runtime metadata for the entrypoint. The full
 # NEMOCLAW_MESSAGING_PLAN_B64 is a build input; OpenShell sandbox create only
 # forwards explicit runtime env, so nemoclaw-start reads this generic artifact
 # when the env plan is absent.
 # hadolint ignore=DL3059
-RUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --agent openclaw --phase runtime-setup
+RUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --profile /usr/local/share/nemoclaw/messaging/runtime-profile.json --agent openclaw --phase runtime-setup
 USER sandbox
 
 # npm still needs a writable _cacache/tmp while OpenClaw packs the verified archive,
@@ -1907,7 +1913,7 @@ RUN --mount=from=openclaw-managed-messaging-npm-cache,source=/out/npm-cache,targ
         NEMOCLAW_NODE_PACKAGE_REMEDIATION_HELPER=/packages/nemoclaw-openclaw/compat/npm-remediation.mts \
         OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
         node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts \
-            --agent openclaw --phase "$messaging_phase"; \
+            --profile /usr/local/share/nemoclaw/messaging/runtime-profile.json --agent openclaw --phase "$messaging_phase"; \
     rm -rf "$install_cache"; \
     trap - EXIT; \
     test ! -e "$install_cache"
@@ -2050,7 +2056,7 @@ RUN chmod 755 /packages \
         /usr/local/lib/nemoclaw/openclaw-startup \
         /packages/nemoclaw-openclaw/config/generate-config.mts \
         /scripts/validate-openclaw-tool-search.mts \
-    && chmod 444 /src/lib/tool-disclosure.ts \
+    && chmod 444 /packages/nemoclaw-openclaw/config/tool-disclosure.ts \
         /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh \
     && chown root:root /usr/local/bin/nemoclaw-gateway-control \
         /usr/local/lib/nemoclaw/gateway-supervisor.sh \
@@ -2114,7 +2120,7 @@ RUN NPM_CONFIG_IGNORE_SCRIPTS=true npm_config_ignore_scripts=true \
 
 # Apply messaging render and post-agent-install build-file hooks after agent/plugin installation.
 # hadolint ignore=DL3059,DL4006
-RUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --agent openclaw --phase post-agent-install
+RUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --profile /usr/local/share/nemoclaw/messaging/runtime-profile.json --agent openclaw --phase post-agent-install
 
 # A managed image is a neutral capability carrier, not an all-channels-enabled
 # deployment. Regenerate after every optional plugin is installed so OpenClaw's
@@ -2486,10 +2492,14 @@ RUN check_metadata() { \
     && test ! -L /usr/local/lib/nemoclaw/seal-config \
     && check_metadata /usr/local/lib/nemoclaw/seal-config 'root:root:555' \
     && check_metadata /usr/local/bin/nemoclaw-openclaw-session-admin 'root:root:555' \
+    && check_metadata /usr/local/bin/nemoclaw-openclaw-semantic-turn 'root:root:555' \
     && check_metadata /usr/local/bin/nemoclaw-device-pairing-settle 'root:root:555' \
+    && check_metadata /usr/local/bin/nemoclaw-session-qualify 'root:root:555' \
     && check_metadata /usr/local/bin/nemoclaw-state-restore 'root:root:555' \
     && check_metadata /usr/local/lib/nemoclaw/openclaw-state-restore.py 'root:root:444' \
+    && check_metadata /usr/local/lib/nemoclaw/openclaw-state-extensions.py 'root:root:555' \
     && check_metadata /usr/local/lib/nemoclaw/openclaw-session-admin.mts 'root:root:444' \
+    && check_metadata /usr/local/lib/nemoclaw/openclaw-semantic-turn.mts 'root:root:444' \
     && check_metadata /usr/local/bin/nemoclaw-gateway-control 'root:root:700' \
     && check_metadata /usr/local/lib/nemoclaw/openclaw-startup 'root:root:755' \
     && for startup_module in \

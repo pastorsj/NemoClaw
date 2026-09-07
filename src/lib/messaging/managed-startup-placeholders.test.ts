@@ -67,6 +67,12 @@ describe("managed-startup messaging field authorization", () => {
     expect(authorizeMessagingManagedStartupFields(wechatEntry, "buildSteps")).toEqual([
       { path: ["value", "content", "token"], value: WECHAT_TOKEN_PLACEHOLDER },
     ]);
+    expect(
+      authorizeMessagingManagedStartupFields(
+        { ...wechatEntry, handler: "common.packageBuildFiles" },
+        "buildSteps",
+      ),
+    ).toEqual([{ path: ["value", "content", "token"], value: WECHAT_TOKEN_PLACEHOLDER }]);
   });
 
   it("rejects inherited Teams and WeChat fields", () => {

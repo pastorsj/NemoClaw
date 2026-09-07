@@ -8,6 +8,14 @@ import {
   isHermesApiPort,
 } from "../core/ports";
 import * as registry from "../state/registry";
+import type { SecondaryForwardAllocation } from "./gateway-binding/secondary-forward";
+import {
+  findAvailableSecondaryForwardPort,
+  reserveCreateSandboxSecondaryForwardPort,
+  resolveRecordedSecondaryForwardPort,
+} from "./gateway-binding/secondary-forward";
+
+export { findAvailableSecondaryForwardPort, resolveRecordedSecondaryForwardPort };
 import {
   createDashboardPortScopedSandboxEntryPoints,
   type DashboardPortReservation,
@@ -25,6 +33,7 @@ export const HERMES_API_PORT_ENV = "NEMOCLAW_HERMES_API_PORT";
 
 /** Registry fields the Hermes API-port allocator reads for identity vs allocation. */
 export type HermesApiPortSandboxLookup = {
+  secondaryForwardPort?: number | null;
   hermesApiPort?: number | null;
   pendingRouteReservation?: true;
   createdAt?: string;
@@ -44,8 +53,10 @@ function durableHermesApiPortSandbox(
   return registered;
 }
 
-export interface HermesApiPortReservationInput {
+export interface SecondaryForwardPortReservationInput {
   agentName?: string | null;
+  /** Receipt-derived allocation. Null means the receipt declares no secondary forward. */
+  secondaryForwardAllocation?: SecondaryForwardAllocation | null;
   sandboxName: string;
   env: NodeJS.ProcessEnv;
   getSandbox(name: string): HermesApiPortSandboxLookup | null | undefined;
@@ -54,21 +65,28 @@ export interface HermesApiPortReservationInput {
   warn(message: string): void;
 }
 
-export interface HermesApiPortReservationScope {
+export interface SecondaryForwardPortReservationScope {
   current: DashboardPortReservation | null;
   effectivePort: number | null;
-  selectAndReserve(input: HermesApiPortReservationInput): Promise<void>;
-  rebindAfterOwnedForwardDelete(input: HermesApiPortReservationInput): Promise<void>;
+  /** Identifies the neutral registry field for a receipt-backed allocation. */
+  registryField: "secondaryForwardPort" | "hermesApiPort" | null;
+  environmentVariable: string | null;
+  selectAndReserve(input: SecondaryForwardPortReservationInput): Promise<void>;
+  rebindAfterOwnedForwardDelete(input: SecondaryForwardPortReservationInput): Promise<void>;
   releaseBeforeForward(agentName: string, port: number): Promise<void>;
   release(): Promise<void>;
 }
+
+/** Compatibility names retained for callers that still own the no-receipt Hermes lane. */
+export type HermesApiPortReservationInput = SecondaryForwardPortReservationInput;
+export type HermesApiPortReservationScope = SecondaryForwardPortReservationScope;
 
 export interface ReservedCreateSandboxHermesApiPortResult {
   effectivePort: number;
   reservation: DashboardPortReservation | null;
 }
 
-interface HermesApiPortScopedSandboxEntryPointDeps<
+interface SecondaryForwardPortScopedSandboxEntryPointDeps<
   Args extends unknown[],
   Result,
   BaseImageResolutionContext,
@@ -84,7 +102,7 @@ interface HermesApiPortScopedSandboxEntryPointDeps<
     temporaryManagedRuntime: boolean,
     temporaryManagedRuntimeCatalog: null,
     dashboardPortReservationScope: DashboardPortReservationScope,
-    hermesApiPortReservationScope: HermesApiPortReservationScope,
+    secondaryForwardPortReservationScope: SecondaryForwardPortReservationScope,
     ...args: Args
   ): Promise<Result>;
   resolvePortableRuntimeContext(): PortableRuntimeContext;
@@ -92,14 +110,14 @@ interface HermesApiPortScopedSandboxEntryPointDeps<
 }
 
 /** Compose dashboard and Hermes API port ownership around sandbox creation. */
-export function createHermesApiPortScopedSandboxEntryPoints<
+export function createSecondaryForwardPortScopedSandboxEntryPoints<
   Args extends unknown[],
   Result,
   BaseImageResolutionContext,
   PortableRuntimeContext,
   ComputePlan,
 >(
-  deps: HermesApiPortScopedSandboxEntryPointDeps<
+  deps: SecondaryForwardPortScopedSandboxEntryPointDeps<
     Args,
     Result,
     BaseImageResolutionContext,
@@ -122,7 +140,7 @@ export function createHermesApiPortScopedSandboxEntryPoints<
       dashboardPortReservationScope,
       ...args
     ) =>
-      withHermesApiPortReservationScope((hermesApiPortReservationScope) =>
+      withSecondaryForwardPortReservationScope((secondaryForwardPortReservationScope) =>
         deps.createSandboxWithBaseImageResolution(
           baseImageResolutionContext,
           portableRuntimeContext,
@@ -131,7 +149,7 @@ export function createHermesApiPortScopedSandboxEntryPoints<
           temporaryManagedRuntime,
           temporaryManagedRuntimeCatalog,
           dashboardPortReservationScope,
-          hermesApiPortReservationScope,
+          secondaryForwardPortReservationScope,
           ...args,
         ),
       ),
@@ -139,6 +157,10 @@ export function createHermesApiPortScopedSandboxEntryPoints<
     resolvePortableRuntimeContext: deps.resolvePortableRuntimeContext,
   });
 }
+
+/** Compatibility export for the historical onboarding facade. */
+export const createHermesApiPortScopedSandboxEntryPoints =
+  createSecondaryForwardPortScopedSandboxEntryPoints;
 
 const HERMES_API_RANGE: HostPortRange = {
   start: HERMES_API_PORT_RANGE_START,
@@ -268,30 +290,46 @@ export async function reserveCreateSandboxHermesApiPort(options: {
   }
 }
 
-export function createHermesApiPortReservationScope(): HermesApiPortReservationScope {
+export function createSecondaryForwardPortReservationScope(): SecondaryForwardPortReservationScope {
   return {
     current: null,
     effectivePort: null,
+    registryField: null,
+    environmentVariable: null,
     async selectAndReserve(input) {
-      if (input.agentName !== "hermes") return;
-      const selection = await reserveCreateSandboxHermesApiPort({
-        sandboxName: input.sandboxName,
-        env: input.env,
-        getSandbox: input.getSandbox,
-        allowRegisteredOverride: true,
-        forwardListOutput: input.captureForwardList(),
-        reservePort: input.reservePort,
-        warn: input.warn,
-      });
+      if (!usesSecondaryForwardPort(input)) return;
+      const allocation = input.secondaryForwardAllocation;
+      const selection = allocation
+        ? await reserveCreateSandboxSecondaryForwardPort({
+            allocation,
+            sandboxName: input.sandboxName,
+            env: input.env,
+            getSandbox: input.getSandbox,
+            allowRegisteredOverride: true,
+            forwardListOutput: input.captureForwardList(),
+            reservePort: input.reservePort,
+            warn: input.warn,
+          })
+        : await reserveCreateSandboxHermesApiPort({
+            sandboxName: input.sandboxName,
+            env: input.env,
+            getSandbox: input.getSandbox,
+            allowRegisteredOverride: true,
+            forwardListOutput: input.captureForwardList(),
+            reservePort: input.reservePort,
+            warn: input.warn,
+          });
       this.effectivePort = selection.effectivePort;
       this.current = selection.reservation;
+      this.registryField = allocation ? "secondaryForwardPort" : "hermesApiPort";
+      this.environmentVariable = allocation?.environment_variable ?? HERMES_API_PORT_ENV;
     },
     async rebindAfterOwnedForwardDelete(input) {
-      if (input.agentName !== "hermes" || this.current !== null) return;
+      if (!usesSecondaryForwardPort(input) || this.current !== null) return;
       await this.selectAndReserve({ ...input, captureForwardList: () => "" });
     },
-    async releaseBeforeForward(agentName, port) {
-      if (agentName === "hermes" && this.current?.port === port) await this.release();
+    async releaseBeforeForward(_agentName, port) {
+      if (this.current?.port === port) await this.release();
     },
     async release() {
       const reservation = this.current;
@@ -301,17 +339,31 @@ export function createHermesApiPortReservationScope(): HermesApiPortReservationS
   };
 }
 
+/**
+ * Receipt-backed callers select allocation through a manifest declaration.
+ * The name fallback exists only for direct pre-receipt compatibility callers.
+ */
+function usesSecondaryForwardPort(input: SecondaryForwardPortReservationInput): boolean {
+  return input.secondaryForwardAllocation !== undefined
+    ? input.secondaryForwardAllocation !== null
+    : input.agentName === "hermes";
+}
+
 /** Release a Hermes API-port reservation after both successful and failed onboarding. */
-export async function withHermesApiPortReservationScope<T>(
-  operation: (scope: HermesApiPortReservationScope) => Promise<T>,
+export async function withSecondaryForwardPortReservationScope<T>(
+  operation: (scope: SecondaryForwardPortReservationScope) => Promise<T>,
 ): Promise<T> {
-  const scope = createHermesApiPortReservationScope();
+  const scope = createSecondaryForwardPortReservationScope();
   try {
     return await operation(scope);
   } finally {
     await scope.release();
   }
 }
+
+/** Compatibility exports for explicit no-receipt Hermes callers. */
+export const createHermesApiPortReservationScope = createSecondaryForwardPortReservationScope;
+export const withHermesApiPortReservationScope = withSecondaryForwardPortReservationScope;
 
 /**
  * Resolve the API port a sandbox actually uses. Sandboxes registered before the
@@ -430,22 +482,51 @@ export function resolveSandboxHealthPort(
         name?: string;
         forwardPort?: unknown;
         forward_ports?: unknown;
-        healthProbe?: { port?: number } | null;
+        healthProbe?: {
+          port?: number;
+          port_resolution?: "sandbox-secondary-forward";
+          secondary_forward?: SecondaryForwardAllocation;
+        } | null;
       }
     | null
     | undefined,
   options: {
-    getSandbox?: (
-      name: string,
-    ) => { dashboardPort?: number | null; hermesApiPort?: number | null } | null | undefined;
+    getSandbox?: (name: string) =>
+      | {
+          agent?: string | null;
+          dashboardPort?: number | null;
+          secondaryForwardPort?: number | null;
+          hermesApiPort?: number | null;
+          harnessPackage?: unknown;
+        }
+      | null
+      | undefined;
   } = {},
 ): number | undefined {
   const declaredPort = agent?.healthProbe?.port;
   if (!isValidHealthPort(declaredPort)) return undefined;
 
   const sandbox = (options.getSandbox ?? registry.getSandbox)(sandboxName);
-  if (agent?.name === "hermes" && declaredPort === HERMES_OPENAI_API_PORT) {
-    return resolveSandboxHermesApiPort(sandbox ?? {});
+  if (agent?.healthProbe?.port_resolution === "sandbox-secondary-forward") {
+    const allocation = agent.healthProbe.secondary_forward;
+    const isReceiptBacked = sandbox?.harnessPackage != null;
+    if (allocation && (isReceiptBacked || sandbox?.secondaryForwardPort !== undefined)) {
+      return resolveRecordedSecondaryForwardPort(sandbox ?? {}, allocation);
+    }
+    // Compatibility rows without package authority keep the historical Hermes field/default.
+    return isValidHealthPort(sandbox?.hermesApiPort) ? sandbox.hermesApiPort : declaredPort;
+  }
+
+  // Old no-receipt definitions did not carry port_resolution. The historical
+  // registry field and declared Hermes API port are the complete compatibility
+  // signal; receipt-backed packages never enter this lane.
+  if (
+    sandbox?.harnessPackage == null &&
+    (agent?.name === "hermes" || sandbox?.agent === "hermes") &&
+    declaredPort === HERMES_OPENAI_API_PORT &&
+    isValidHealthPort(sandbox?.hermesApiPort)
+  ) {
+    return sandbox.hermesApiPort;
   }
 
   const declaredForwardPorts = [

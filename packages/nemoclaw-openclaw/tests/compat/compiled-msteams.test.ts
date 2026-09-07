@@ -6,18 +6,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = path.join(import.meta.dirname, "..", "..", "..", "..");
-const compiledPreload = path.join(
-  repoRoot,
-  "dist",
-  "lib",
+const packageRoot = path.join(import.meta.dirname, "..", "..");
+const preloadSource = path.join(
+  packageRoot,
   "messaging",
-  "channels",
+  "runtime",
   "teams",
   "runtime",
-  "msteams-message-hints.js",
+  "msteams-message-hints.ts",
 );
 
 // Reviewed from the published @openclaw/msteams artifact, not inferred from
@@ -112,12 +112,17 @@ describe("compiled Microsoft Teams message hint preload contract", () => {
   });
 
   it("patches the reviewed package-load shape without claiming Bot Framework delivery", () => {
-    expect(
-      fs.existsSync(compiledPreload),
-      "Run `npm run build:cli` before the package-contract project.",
-    ).toBe(true);
-
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-msteams-package-contract-"));
+    const compiledPreload = path.join(tmp, "msteams-message-hints.cjs");
+    fs.writeFileSync(
+      compiledPreload,
+      ts.transpileModule(fs.readFileSync(preloadSource, "utf8"), {
+        compilerOptions: {
+          module: ts.ModuleKind.CommonJS,
+          target: ts.ScriptTarget.ES2022,
+        },
+      }).outputText,
+    );
     const packageDir = writeReviewedPackageShape(tmp, readPinnedOpenClawVersion());
     try {
       const script = `

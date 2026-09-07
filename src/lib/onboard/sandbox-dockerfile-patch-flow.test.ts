@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
+import type { AgentDefinition } from "../agent/defs";
 import type { SandboxBaseImageResolutionMetadata } from "../sandbox-base-image";
 import {
   captureBaseResolution,
@@ -36,6 +37,64 @@ const resolutionMetadata: SandboxBaseImageResolutionMetadata = {
 };
 
 describe("prepareSandboxDockerfilePatch", () => {
+  it("routes a receipt-backed fallback around the legacy Dockerfile patch", async () => {
+    const patchStagedDockerfile = vi.fn();
+    const patchPackageDockerfile = vi.fn(() => ({ dashboardRemoteBindPrepared: true }));
+    const packageDockerfilePlan = {
+      packageId: "future-harness",
+      configurationEnvironment: { FUTURE_RUNTIME_MODE: "enabled" },
+      materials: [
+        {
+          kind: "corporate-ca-handoff" as const,
+          legacyInput: "NEMOCLAW_CORPORATE_CA_B64" as const,
+          expectedSha256: null,
+        },
+      ],
+      dashboardRemoteBindPrepared: true,
+    };
+
+    await expect(
+      prepareSandboxDockerfilePatch({
+        agent: { name: "future-harness" } as AgentDefinition,
+        rootDir: "/tmp/future-harness",
+        fromDockerfile: null,
+        sandboxBaseImage: "registry.example/base",
+        sandboxBaseTag: "latest",
+        stagedDockerfile: "/tmp/Dockerfile",
+        model: "ambient-model",
+        chatUiUrl: "https://ambient-dashboard.example",
+        provider: "ambient-provider",
+        preferredInferenceApi: null,
+        webSearchConfig: { fetchEnabled: true, provider: "brave" },
+        hermesToolGateways: ["ambient-hermes-gateway"],
+        packageDockerfilePlan,
+        sandboxGpuConfig,
+        preResolvedBaseImageMetadata: resolutionMetadata,
+        deps: {
+          isLinuxDockerDriverGatewayEnabled: vi.fn(() => false),
+          enforceDockerGpuPatchPreserveNetwork: vi.fn(async () => false),
+          patchStagedDockerfile,
+          patchPackageDockerfile,
+          now: () => 42,
+        },
+      }),
+    ).resolves.toEqual({
+      buildId: "42",
+      dashboardRemoteBindPrepared: true,
+      resolvedBaseImage: null,
+    });
+
+    expect(patchStagedDockerfile).not.toHaveBeenCalled();
+    expect(patchPackageDockerfile).toHaveBeenCalledExactlyOnceWith({
+      dockerfilePath: "/tmp/Dockerfile",
+      buildId: "42",
+      baseImageRef: null,
+      baseImageResolutionMetadata: resolutionMetadata,
+      trustedManagedDockerfile: true,
+      plan: packageDockerfilePlan,
+    });
+  });
+
   it("keeps rebuild hints isolated per flow and lets fresh bypass reuse (#4680)", () => {
     const warmContext = createBaseImageResolutionContext({
       fresh: false,

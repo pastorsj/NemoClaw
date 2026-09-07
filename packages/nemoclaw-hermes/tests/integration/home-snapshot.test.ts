@@ -6,26 +6,22 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { afterAll, expect, it } from "vitest";
+import { expect, it } from "vitest";
 
 import {
   createSnapshotBackupAuthorityFixture,
   createSnapshotHarnessPackageFixture,
 } from "../../../../test/helpers/snapshot-authority.ts";
 
-const ORIGINAL_HOME = process.env.HOME;
-const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-home-snapshot-"));
-process.env.HOME = TMP_HOME;
+const TMP_HOME = process.env.HOME;
+if (!TMP_HOME || !path.isAbsolute(TMP_HOME)) {
+  throw new Error("Hermes home snapshot tests require an isolated absolute HOME");
+}
 const sandboxStateUrl = pathToFileURL(
   path.join(import.meta.dirname, "../../../..", "src", "lib", "state", "sandbox.ts"),
 );
 sandboxStateUrl.searchParams.set("hermes-home-channel", String(Date.now()));
 const sandboxState = await import(sandboxStateUrl.href);
-
-afterAll(() => {
-  ORIGINAL_HOME === undefined ? delete process.env.HOME : (process.env.HOME = ORIGINAL_HOME);
-  fs.rmSync(TMP_HOME, { recursive: true, force: true });
-});
 
 function writeExecutable(filePath: string, source: string): void {
   fs.writeFileSync(filePath, source, { mode: 0o755 });
@@ -111,6 +107,7 @@ process.exit(result.status === null ? 1 : result.status);
           "SLACK_HOME_CHANNEL_THREAD_ID=",
           "TEAMS_HOME_CHANNEL=19:meeting@example",
         ],
+        renderTarget: "~/.hermes/.env",
       },
     ]);
     expect(JSON.stringify(backup.manifest)).not.toContain("xoxb-must-not-enter-backup");

@@ -20,7 +20,10 @@ export function resetStepForAgentChange(session: Session, stepName: string): voi
 
 export function clearAgentScopedResumeState(session: Session, selectedAgentName: string): Session {
   const normalizedAgentName = normalizeAgentNameForResumeState(selectedAgentName);
-  session.agent = normalizedAgentName === "openclaw" ? null : normalizedAgentName;
+  const usesLegacyAgentEncoding =
+    session.harnessPackage === null && session.harnessPackageMigration === null;
+  session.agent =
+    usesLegacyAgentEncoding && normalizedAgentName === "openclaw" ? null : normalizedAgentName;
   session.provider = null;
   session.model = null;
   session.endpointUrl = null;

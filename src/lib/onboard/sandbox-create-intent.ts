@@ -150,6 +150,7 @@ export function resolveSandboxCreateIntent({
   reusableMessagingProviders,
   extraProviders,
   staleExtraProviders,
+  toolGatewaySelections = [],
   hermesToolGateways,
   sandboxGpuConfig,
   gpuCreateArgs,
@@ -160,6 +161,7 @@ export function resolveSandboxCreateIntent({
   sandboxGpuLogMessage,
   extraPlaceholderKeys = [],
   agentName,
+  observabilityEnabled,
   policyTier = null,
 }: ResolveSandboxCreateIntentInput): SandboxCreateIntent {
   const selectedChannelNames = enabledChannels == null ? null : new Set(enabledChannels);
@@ -193,6 +195,7 @@ export function resolveSandboxCreateIntent({
     reusableMessagingProviders: enabledReusableMessagingProviders,
     extraProviders: [...new Set(extraProviders ?? [])].filter(Boolean),
     staleExtraProviders: [...new Set(staleExtraProviders ?? [])].filter(Boolean),
+    toolGatewaySelections: [...toolGatewaySelections],
     hermesToolGateways: [...hermesToolGateways],
     policy: {
       basePolicyPath,
@@ -202,9 +205,10 @@ export function resolveSandboxCreateIntent({
         ...(sandboxGpuConfig.hostGpuDetected !== undefined
           ? { hostGpuAvailable: sandboxGpuConfig.hostGpuDetected }
           : {}),
-        additionalPresets: [...hermesToolGateways],
+        additionalPresets: [...toolGatewaySelections, ...hermesToolGateways],
         ...(hostLocalInferenceRouteOnly ? { hostLocalInferenceRouteOnly: true as const } : {}),
         ...(agentName !== undefined ? { agentName } : {}),
+        ...(observabilityEnabled !== undefined ? { observabilityEnabled } : {}),
         policyTier,
       },
     },

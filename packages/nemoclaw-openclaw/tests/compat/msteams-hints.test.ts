@@ -9,11 +9,9 @@ import { describe, expect, it } from "vitest";
 
 const MSTEAMS_HINT_PRELOAD = path.join(
   import.meta.dirname,
-  "../../../..",
-  "src",
-  "lib",
+  "../..",
   "messaging",
-  "channels",
+  "runtime",
   "teams",
   "runtime",
   "msteams-message-hints.ts",

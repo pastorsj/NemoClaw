@@ -365,6 +365,12 @@ export function prepareLegacyCloneProviderTransaction(input: {
   readonly transactionId?: string;
 }): PreparedLegacyCloneProviderTransaction {
   const destinationSandboxName = input.handoff.destinationSandboxName;
+  if (input.handoff.sourceRegistryAuthority.harnessPackage !== null) {
+    fail(
+      "receipt-backed package clone provider reconciliation is unsupported; " +
+        "use the package-owned web-search provider declaration",
+    );
+  }
   if (
     !isValidName(input.handoff.sourceSandboxName) ||
     !isValidName(destinationSandboxName) ||

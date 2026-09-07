@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { buildHarnessAdapterArtifacts } from "./build-adapters.mts";
 import { HarnessPackageConformanceError, validateHarnessPackage } from "./validate-package.mts";
@@ -35,12 +35,19 @@ const REAL_HARNESS_IDS = [
   "deepseek-harness",
   "haystack-agent",
 ] as const;
+const UNSAFE_PRIVILEGED_COMMAND_PATHS = [
+  "/sandbox/package-control",
+  "/usr/local/bin/../sandbox/package-control",
+  "/usr/local/bin/future\\package-control",
+  "/usr/local/bin/future\u001b-package-control",
+] as const;
 
 function validPackageManifest(
   options: {
     readonly additional?: readonly string[];
     readonly mcp?: readonly string[];
     readonly messaging?: readonly string[];
+    readonly policy?: readonly string[];
   } = {},
 ): string {
   return [
@@ -65,7 +72,9 @@ function validPackageManifest(
     "    kind: not-required",
     "  snapshot_restore: []",
     "  rebuild:",
-    "    image_plugin_provenance: not-required",
+    "    managed_extensions:",
+    "      support: disabled",
+    "      reason: Test package has no managed extensions.",
     "    scheduled_work:",
     "      support: disabled",
     "      reason: This package does not run scheduled work.",
@@ -73,8 +82,74 @@ function validPackageManifest(
     "      kind: not-required",
     ...(options.mcp ?? ["mcp:", "  support: disabled"]),
     ...(options.messaging ?? ["messaging:", "  support: disabled"]),
+    ...(options.policy ?? [
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
+    ]),
     "",
   ].join("\n");
+}
+
+function futureToolGatewayManifest(): Record<string, unknown> {
+  return parseYaml(
+    validPackageManifest({
+      additional: [
+        "provider_broker:",
+        "  support: managed",
+        "  adapter: provider-broker",
+        "  operations: [describe-provider, register-refresh-provider, ensure-broker, inspect-broker, teardown-broker]",
+        "provider_auth:",
+        "  support: managed",
+        "  adapter: provider-auth",
+        "  operation: resolve-auth-method",
+        "  request_environment: [NEMOCLAW_FUTURE_AUTH_METHOD]",
+        "  default_method: browser-login",
+        "  selection:",
+        "    key: futureProvider",
+        "    aliases: [future]",
+        "    label: Future Provider",
+        "    provider_name: future-provider",
+        "    provider_type: openai",
+        "    endpoint_url: https://inference.example.com/v1",
+        "    help_url: https://example.com/keys",
+        "    default_model: future/model",
+        "    models: [future/model]",
+        "    preferred_inference_api: openai-completions",
+        "  methods:",
+        "    - id: browser-login",
+        "      label: Browser login",
+        "      kind: oauth-device-code",
+        "      credential_env: FUTURE_API_KEY",
+        "      device_code:",
+        "        portal_base_url: https://login.example.com",
+        "        client_id: future-cli",
+        "        scope: future:tools",
+        "        minimum_credential_ttl_seconds: 1800",
+        "tool_gateways:",
+        "  support: managed",
+        "  selection_label: Future managed tools",
+        "  selection_prompt: Managed tools",
+        "  request_environment: [NEMOCLAW_FUTURE_TOOL_GATEWAYS]",
+        "  incompatible_auth_message: Managed tools require browser login.",
+        "  gateways:",
+        "    - id: future-search",
+        "      aliases: [search]",
+        "      label: Future search",
+        "      description: Search through the future provider",
+        "      default_selected: true",
+        "      authentication_methods: [browser-login]",
+        "      policy_presets: [future-search]",
+      ],
+      policy: [
+        "policy:",
+        "  owned_presets: [future-search]",
+        "  automatic_presets: []",
+        "  baseline_exclusion_impacts: {}",
+      ],
+    }),
+  ) as Record<string, unknown>;
 }
 
 interface FixtureOptions {
@@ -124,6 +199,11 @@ function createPackageFixture(options: FixtureOptions = {}): string {
   writeFile(
     packageRoot,
     "host/messaging-adapter.cts",
+    '"use strict";\nmodule.exports = Object.freeze({});\n',
+  );
+  writeFile(
+    packageRoot,
+    "host/startup-adapter.cts",
     '"use strict";\nmodule.exports = Object.freeze({});\n',
   );
   return packageRoot;
@@ -185,6 +265,94 @@ function validManifestValue(): Record<string, unknown> {
   return parseYaml(validPackageManifest()) as Record<string, unknown>;
 }
 
+function addGatewayRuntimeSurfaces(manifest: Record<string, unknown>): void {
+  manifest.gateway_command = "future-terminal gateway run";
+  manifest.forward_ports = [19_090];
+  manifest.health_probe = {
+    url: "http://127.0.0.1:19090/health",
+    port: 19_090,
+    timeout_seconds: 30,
+  };
+  const runtime = manifestRecordAt(manifest, "runtime");
+  runtime.kind = "gateway";
+  runtime.process_lifecycle ??= {
+    support: "unsupported",
+    reason: "This fixture does not provide managed gateway recovery.",
+  };
+}
+
+function tavilyWebSearchBinding(): Record<string, unknown> {
+  return {
+    provider: "tavily",
+    credential_env: "TAVILY_API_KEY",
+    profile_type: "tavily-future",
+    config_verification: {
+      path: "/sandbox/.future/config.yaml",
+      format: "yaml",
+      assertions: [{ path: ["web", "provider"], equals: "tavily" }],
+      credential_paths: [["web", "api_key"]],
+    },
+    egress_verification: {
+      method: "POST",
+      url: "https://search.example.test/query",
+      parameters: [{ name: "query", value: "NVIDIA" }],
+      credential: { kind: "header", name: "Authorization", prefix: "bearer" },
+      result_array_path: ["results"],
+    },
+  };
+}
+
+function futureWebSearchManifest(): string {
+  return validPackageManifest({
+    additional: [
+      "web_search:",
+      "  support: providers",
+      "  providers:",
+      "    - provider: tavily",
+      "      credential_env: TAVILY_API_KEY",
+      "      profile_type: tavily-future",
+      "      config_verification:",
+      "        path: /sandbox/.future/config.yaml",
+      "        format: yaml",
+      "        assertions:",
+      "          - path: [web, provider]",
+      "            equals: tavily",
+      "        credential_paths: [[web, api_key]]",
+      "      egress_verification:",
+      "        method: POST",
+      "        url: https://search.example.test/query",
+      "        parameters:",
+      "          - name: query",
+      "            value: NVIDIA",
+      "        credential:",
+      "          kind: header",
+      "          name: Authorization",
+      "          prefix: bearer",
+      "        result_array_path: [results]",
+    ],
+  });
+}
+
+function futureWebSearchProfile(host = "search.example.test", curlPath = "/usr/bin/curl"): string {
+  return [
+    "id: tavily-future",
+    "credentials:",
+    "  - name: api_key",
+    "    env_vars: [TAVILY_API_KEY]",
+    "    required: true",
+    "    auth_style: bearer",
+    "    header_name: authorization",
+    "endpoints:",
+    `  - host: ${host}`,
+    "    port: 443",
+    "    protocol: rest",
+    "    enforcement: enforce",
+    `binaries: [${curlPath}]`,
+    "inference_capable: false",
+    "",
+  ].join("\n");
+}
+
 function manifestRecordAt(
   manifest: Record<string, unknown>,
   field: string,
@@ -222,14 +390,234 @@ test("accepts a synthetic harness package and reports its published runtime file
     assert.deepEqual(report.adapterArtifacts, [
       "host/config-adapter.cts",
       "host/messaging-adapter.cts",
+      "host/startup-adapter.cts",
     ]);
     assert.ok(report.packedFiles.includes("manifest.yaml"));
     assert.ok(report.packedFiles.includes("host/config-adapter.cts"));
     assert.ok(report.packedFiles.includes("host/messaging-adapter.cts"));
+    assert.ok(report.packedFiles.includes("host/startup-adapter.cts"));
     assert.equal(fs.existsSync(path.join(packageRoot, "ran")), false);
   } finally {
     removeFixture(packageRoot);
   }
+});
+
+test("requires every declared package policy preset as a matching published asset", async (t) => {
+  const manifest = validPackageManifest({
+    policy: [
+      "policy:",
+      "  context_target: /sandbox/.future-terminal/context/POLICY.md",
+      "  owned_presets: [future-tools]",
+      "  automatic_presets:",
+      "    - name: future-tools",
+      "      activation: { kind: observability-enabled }",
+      "      apply_during_create: true",
+      "      suppress_in_tiers: [restricted]",
+      "  baseline_exclusion_impacts: {}",
+    ],
+  });
+
+  await t.test("accepts the convention-based package asset", () => {
+    const packageRoot = createPackageFixture({
+      manifest,
+      files: [...REQUIRED_RUNTIME_FILES, "host/*-adapter.cts", "policies/presets/*.yaml"],
+    });
+    try {
+      writeFile(
+        packageRoot,
+        "policies/presets/future-tools.yaml",
+        [
+          "preset:",
+          "  name: future-tools",
+          '  description: "Future service access"',
+          "network_policies:",
+          "  future_tools: {}",
+          "",
+        ].join("\n"),
+      );
+
+      const report = validateHarnessPackage(packageRoot);
+      assert.ok(report.packedFiles.includes("policies/presets/future-tools.yaml"));
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+
+  await t.test("rejects a missing declared asset", () => {
+    const packageRoot = createPackageFixture({ manifest });
+    try {
+      expectDiagnostic(packageRoot, "file-type", "policies/presets/future-tools.yaml");
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+
+  await t.test("rejects mismatched asset metadata", () => {
+    const packageRoot = createPackageFixture({ manifest });
+    try {
+      writeFile(
+        packageRoot,
+        "policies/presets/future-tools.yaml",
+        [
+          "preset:",
+          "  name: wrong-tools",
+          '  description: "Wrong service"',
+          "network_policies: {}",
+          "",
+        ].join("\n"),
+      );
+      expectDiagnostic(packageRoot, "manifest", "policies/presets/future-tools.yaml");
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+
+  await t.test("rejects an optional package route embedded in the baseline", () => {
+    const packageRoot = createPackageFixture({ manifest });
+    try {
+      writeFile(packageRoot, "policy-additions.yaml", "network_policies:\n  future_tools: {}\n");
+      writeFile(
+        packageRoot,
+        "policies/presets/future-tools.yaml",
+        [
+          "preset:",
+          "  name: future-tools",
+          '  description: "Future service"',
+          "network_policies:",
+          "  future_tools: {}",
+          "",
+        ].join("\n"),
+      );
+
+      expectDiagnostic(packageRoot, "manifest", "policies/presets/future-tools.yaml");
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+});
+
+test("validates finite managed tool-gateway declarations and their package references", () => {
+  const valid = futureToolGatewayManifest();
+  assert.doesNotThrow(() => validateHarnessManifest(valid, "future-terminal"));
+
+  const duplicateAlias = structuredClone(valid);
+  const capability = manifestRecordAt(duplicateAlias, "tool_gateways");
+  const gateways = capability.gateways as Record<string, unknown>[];
+  gateways.push({
+    ...(gateways[0] ?? {}),
+    id: "future-image",
+    aliases: ["search"],
+    label: "Future image",
+  });
+  expectManifestValidationError(duplicateAlias, "tool_gateways.gateways[1].aliases");
+
+  const unknownAuth = structuredClone(valid);
+  const unknownAuthGateway = (
+    manifestRecordAt(unknownAuth, "tool_gateways").gateways as Record<string, unknown>[]
+  )[0];
+  assert.ok(unknownAuthGateway);
+  unknownAuthGateway.authentication_methods = ["not-declared"];
+  expectManifestValidationError(unknownAuth, "tool_gateways.gateways[0].authentication_methods");
+
+  const foreignPolicy = structuredClone(valid);
+  const foreignPolicyGateway = (
+    manifestRecordAt(foreignPolicy, "tool_gateways").gateways as Record<string, unknown>[]
+  )[0];
+  assert.ok(foreignPolicyGateway);
+  foreignPolicyGateway.policy_presets = ["not-owned"];
+  expectManifestValidationError(foreignPolicy, "tool_gateways.gateways[0].policy_presets");
+
+  const tooManyGateways = structuredClone(valid);
+  const bounded = manifestRecordAt(tooManyGateways, "tool_gateways");
+  const first = (bounded.gateways as Record<string, unknown>[])[0];
+  assert.ok(first);
+  bounded.gateways = Array.from({ length: 33 }, (_, index) => ({
+    ...first,
+    id: `future-${String(index)}`,
+    aliases: [],
+  }));
+  expectManifestValidationError(tooManyGateways, "tool_gateways.gateways");
+});
+
+test("requires web-search recipes to match a published provider profile", async (t) => {
+  const files = [...REQUIRED_RUNTIME_FILES, "host/*-adapter.cts", "provider-profiles/*.yaml"];
+
+  await t.test("accepts and publishes the matching profile", () => {
+    const packageRoot = createPackageFixture({ manifest: futureWebSearchManifest(), files });
+    try {
+      writeFile(packageRoot, "provider-profiles/tavily-future.yaml", futureWebSearchProfile());
+      const report = validateHarnessPackage(packageRoot);
+      assert.ok(report.packedFiles.includes("provider-profiles/tavily-future.yaml"));
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+
+  await t.test("rejects a missing profile", () => {
+    const packageRoot = createPackageFixture({ manifest: futureWebSearchManifest(), files });
+    try {
+      expectDiagnostic(
+        packageRoot,
+        "provider-profile-artifact",
+        "provider-profiles/tavily-future.yaml",
+      );
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+
+  await t.test("rejects a linked profile", () => {
+    const packageRoot = createPackageFixture({ manifest: futureWebSearchManifest(), files });
+    try {
+      writeFile(packageRoot, "provider-profiles/real.yaml", futureWebSearchProfile());
+      fs.symlinkSync("real.yaml", path.join(packageRoot, "provider-profiles/tavily-future.yaml"));
+      expectDiagnostic(
+        packageRoot,
+        "provider-profile-artifact",
+        "provider-profiles/tavily-future.yaml",
+      );
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+
+  await t.test("rejects a profile that does not authorize the fixed probe command", () => {
+    const packageRoot = createPackageFixture({ manifest: futureWebSearchManifest(), files });
+    try {
+      writeFile(
+        packageRoot,
+        "provider-profiles/tavily-future.yaml",
+        futureWebSearchProfile("search.example.test", "/usr/local/bin/curl"),
+      );
+      const error = expectDiagnostic(
+        packageRoot,
+        "provider-profile-artifact",
+        "provider-profiles/tavily-future.yaml",
+      );
+      assert.match(error.message, /does not authorize the core verification command/u);
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+
+  await t.test("rejects a verification host outside the profile boundary", () => {
+    const packageRoot = createPackageFixture({ manifest: futureWebSearchManifest(), files });
+    try {
+      writeFile(
+        packageRoot,
+        "provider-profiles/tavily-future.yaml",
+        futureWebSearchProfile("different.example.test"),
+      );
+      const error = expectDiagnostic(
+        packageRoot,
+        "provider-profile-artifact",
+        "provider-profiles/tavily-future.yaml",
+      );
+      assert.match(error.message, /verification host is not declared/u);
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
 });
 
 test("publishes only Dockerfile-required production configs from a declared build project", () => {
@@ -274,6 +662,80 @@ test("publishes only Dockerfile-required production configs from a declared buil
   } finally {
     removeFixture(packageRoot);
   }
+});
+
+test("limits direct Dockerfile sources to the package, core build kit, and pinned downloads", async (t) => {
+  await t.test("accepts package-owned, shared Fabric, and pinned remote sources", () => {
+    const packageRoot = createPackageFixture();
+    try {
+      writeFile(
+        packageRoot,
+        "Dockerfile",
+        [
+          "FROM scratch",
+          "COPY packages/nemoclaw-future-terminal/start.sh /usr/local/bin/start",
+          "COPY packages/nemoclaw-fabric/src/ /opt/nemoclaw-fabric/src/",
+          "COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/",
+          `ADD --checksum=sha256:${"a".repeat(64)} https://packages.example/runtime.tgz /opt/runtime.tgz`,
+          "",
+        ].join("\n"),
+      );
+      assert.doesNotThrow(() => validateHarnessPackage(packageRoot));
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+
+  await t.test("rejects an arbitrary core file", () => {
+    const packageRoot = createPackageFixture();
+    try {
+      writeFile(packageRoot, "Dockerfile", "FROM scratch\nCOPY README.md /opt/nemoclaw/\n");
+      const error = expectDiagnostic(packageRoot, "build-context-source", "Dockerfile");
+      assert.match(error.message, /outside this package and the NemoClaw core build kit/u);
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+
+  await t.test("rejects a local ADD outside the package and core build kit", () => {
+    const packageRoot = createPackageFixture();
+    try {
+      writeFile(packageRoot, "Dockerfile", "FROM scratch\nADD README.md /opt/nemoclaw/\n");
+      const error = expectDiagnostic(packageRoot, "build-context-source", "Dockerfile");
+      assert.match(error.message, /outside this package and the NemoClaw core build kit/u);
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+
+  await t.test("rejects an unpinned remote ADD", () => {
+    const packageRoot = createPackageFixture();
+    try {
+      writeFile(
+        packageRoot,
+        "Dockerfile",
+        "FROM scratch\nADD https://packages.example/runtime.tgz /opt/runtime.tgz\n",
+      );
+      const error = expectDiagnostic(packageRoot, "build-context-source", "Dockerfile");
+      assert.match(error.message, /one exact SHA-256 checksum/u);
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
+
+  await t.test("rejects another harness package", () => {
+    const packageRoot = createPackageFixture();
+    try {
+      writeFile(
+        packageRoot,
+        "Dockerfile",
+        "FROM scratch\nCOPY packages/nemoclaw-openclaw/start.sh /usr/local/bin/start\n",
+      );
+      expectDiagnostic(packageRoot, "build-context-source", "Dockerfile");
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
 });
 
 test("rejects build-project metadata and TypeScript config publication outside the build closure", async (t) => {
@@ -478,12 +940,242 @@ test("accepts every real harness manifest through the public runtime validator",
   }
 });
 
+test("validates the optional package-owned gateway log path", async (t) => {
+  const baseManifest = validManifestValue();
+  addGatewayRuntimeSurfaces(baseManifest);
+  const runtime = manifestRecordAt(baseManifest, "runtime");
+  runtime.gateway_log_path = "/var/log/future-agent/gateway.log";
+
+  await t.test("accepts a canonical absolute path for a gateway runtime", () => {
+    assert.doesNotThrow(() => validateHarnessManifest(baseManifest, "future-terminal"));
+  });
+
+  await t.test("rejects a non-canonical path", () => {
+    const manifest = structuredClone(baseManifest);
+    manifestRecordAt(manifest, "runtime").gateway_log_path = "/var/log/../secret";
+    expectManifestValidationError(manifest, "runtime.gateway_log_path");
+  });
+
+  await t.test("rejects the field for a terminal runtime", () => {
+    const manifest = structuredClone(baseManifest);
+    manifestRecordAt(manifest, "runtime").kind = "terminal";
+    expectManifestValidationError(manifest, "runtime.gateway_log_path");
+  });
+});
+
+test("validates the finite semantic-turn command declaration", async (t) => {
+  const managedManifest = validManifestValue();
+  managedManifest.managed_image = {
+    repository: "registry.example.test/future/harness",
+    architectures: ["linux/amd64"],
+    runtime_identity: { uid: 1000, gid: 1000, workdir: "/sandbox" },
+  };
+  manifestRecordAt(managedManifest, "runtime").semantic_turn = {
+    support: "managed",
+    command: ["/usr/local/bin/future-semantic-turn"],
+    timeout_seconds: 120,
+    protocol: "semantic-turn-ndjson",
+  };
+
+  await t.test("accepts a managed immutable command", () => {
+    assert.doesNotThrow(() => validateHarnessManifest(managedManifest, "future-terminal"));
+  });
+
+  await t.test("accepts explicit unsupported behavior without an image", () => {
+    const manifest = validManifestValue();
+    manifestRecordAt(manifest, "runtime").semantic_turn = {
+      support: "unsupported",
+      reason: "This runtime does not accept semantic turns.",
+    };
+    assert.doesNotThrow(() => validateHarnessManifest(manifest, "future-terminal"));
+  });
+
+  await t.test("rejects a managed command without image authority", () => {
+    const manifest = structuredClone(managedManifest);
+    delete manifest.managed_image;
+    expectManifestValidationError(manifest, "runtime.semantic_turn");
+  });
+
+  for (const fixture of [
+    {
+      name: "a mutable command path",
+      field: "runtime.semantic_turn.command[0]",
+      value: { command: ["/sandbox/future-semantic-turn"] },
+    },
+    {
+      name: "an unknown stream protocol",
+      field: "runtime.semantic_turn.protocol",
+      value: { protocol: "native-events" },
+    },
+    {
+      name: "an unbounded timeout",
+      field: "runtime.semantic_turn.timeout_seconds",
+      value: { timeout_seconds: 301 },
+    },
+    {
+      name: "an arbitrary callback field",
+      field: "runtime.semantic_turn",
+      value: { callback: "load-native-code" },
+    },
+  ] as const) {
+    await t.test(`rejects ${fixture.name}`, () => {
+      const manifest = structuredClone(managedManifest);
+      Object.assign(
+        manifestRecordAt(manifestRecordAt(manifest, "runtime"), "semantic_turn"),
+        fixture.value,
+      );
+      expectManifestValidationError(manifest, fixture.field);
+    });
+  }
+});
+
+test("requires complete operational surfaces for every gateway runtime", async (t) => {
+  const baseManifest = validManifestValue();
+  addGatewayRuntimeSurfaces(baseManifest);
+
+  await t.test("gateway command", () => {
+    const manifest = structuredClone(baseManifest);
+    delete manifest.gateway_command;
+    expectManifestValidationError(manifest, "gateway_command");
+  });
+
+  await t.test("health probe", () => {
+    const manifest = structuredClone(baseManifest);
+    delete manifest.health_probe;
+    expectManifestValidationError(manifest, "health_probe");
+  });
+
+  await t.test("explicit lifecycle support", () => {
+    const manifest = structuredClone(baseManifest);
+    delete manifestRecordAt(manifest, "runtime").process_lifecycle;
+    expectManifestValidationError(manifest, "runtime.process_lifecycle");
+  });
+
+  await t.test("an interactive or headless entry point", () => {
+    const manifest = structuredClone(baseManifest);
+    const runtime = manifestRecordAt(manifest, "runtime");
+    delete runtime.interactive_command;
+    delete runtime.headless_command;
+    expectManifestValidationError(manifest, "runtime");
+  });
+});
+
+test("rejects privileged commands outside immutable image-owned roots", async (t) => {
+  const hermesManifestPath = path.join(
+    REPOSITORY_ROOT,
+    "packages",
+    "nemoclaw-hermes",
+    "manifest.yaml",
+  );
+  const baseManifest = parseYaml(fs.readFileSync(hermesManifestPath, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const surfaces = [
+    {
+      name: "backup quiescence",
+      field: "state_lifecycle.backup_quiescence.command[0]",
+      update: (manifest: Record<string, unknown>, commandPath: string) => {
+        manifestRecordAt(manifest, "state_lifecycle").backup_quiescence = {
+          kind: "command",
+          command: [commandPath],
+          timeout_seconds: 15,
+        };
+      },
+    },
+    {
+      name: "process lifecycle",
+      field: "runtime.process_lifecycle.command[0]",
+      update: (manifest: Record<string, unknown>, commandPath: string) => {
+        const runtime = manifestRecordAt(manifest, "runtime");
+        manifestRecordAt(runtime, "process_lifecycle").command = [commandPath];
+      },
+    },
+    {
+      name: "scheduled work",
+      field: "state_lifecycle.rebuild.scheduled_work.controller.command",
+      update: (manifest: Record<string, unknown>, commandPath: string) => {
+        const state = manifestRecordAt(manifest, "state_lifecycle");
+        const rebuild = manifestRecordAt(state, "rebuild");
+        const scheduledWork = manifestRecordAt(rebuild, "scheduled_work");
+        manifestRecordAt(scheduledWork, "controller").command = [commandPath];
+      },
+    },
+  ] as const;
+
+  for (const surface of surfaces) {
+    for (const commandPath of UNSAFE_PRIVILEGED_COMMAND_PATHS) {
+      await t.test(`${surface.name}: ${JSON.stringify(commandPath)}`, () => {
+        const manifest = structuredClone(baseManifest);
+        surface.update(manifest, commandPath);
+        assert.throws(
+          () => validateHarnessManifest(manifest, "hermes"),
+          (error: unknown) => {
+            assert.ok(error instanceof HarnessManifestValidationError);
+            assert.ok(error.message.includes(surface.field), error.message);
+            return true;
+          },
+        );
+      });
+    }
+  }
+});
+
+test("rejects mutable managed-extension controller commands", async (t) => {
+  const manifestPath = path.join(REPOSITORY_ROOT, "packages", "nemoclaw-openclaw", "manifest.yaml");
+  const baseManifest = parseYaml(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+
+  for (const commandPath of UNSAFE_PRIVILEGED_COMMAND_PATHS) {
+    await t.test(JSON.stringify(commandPath), () => {
+      const manifest = structuredClone(baseManifest);
+      const state = manifestRecordAt(manifest, "state_lifecycle");
+      const rebuild = manifestRecordAt(state, "rebuild");
+      const extensions = manifestRecordAt(rebuild, "managed_extensions");
+      manifestRecordAt(extensions, "controller").command = [commandPath];
+      assert.throws(
+        () => validateHarnessManifest(manifest, "openclaw"),
+        (error: unknown) => {
+          assert.ok(error instanceof HarnessManifestValidationError);
+          assert.ok(
+            error.message.includes("state_lifecycle.rebuild.managed_extensions.controller.command"),
+            error.message,
+          );
+          return true;
+        },
+      );
+    });
+  }
+});
+
+test("uses canonical sandbox-path rules for web-search config verification", async (t) => {
+  for (const configPath of [
+    "/sandbox/.future/../secret",
+    "/sandbox/.future\\config.yaml",
+    "/sandbox/.future/config\u001b.yaml",
+  ]) {
+    await t.test(JSON.stringify(configPath), () => {
+      const manifest = validManifestValue();
+      const binding = tavilyWebSearchBinding();
+      (binding.config_verification as Record<string, unknown>).path = configPath;
+      manifest.web_search = { support: "providers", providers: [binding] };
+      expectManifestValidationError(manifest, "web_search.providers[0].config_verification.path");
+    });
+  }
+});
+
 test("rejects unknown and missing fields in every public nested manifest shape", async (t) => {
   const cases: readonly {
     readonly name: string;
     readonly field: string;
     readonly update: (manifest: Record<string, unknown>) => void;
   }[] = [
+    {
+      name: "a missing policy declaration",
+      field: "<root>.policy",
+      update: (manifest) => {
+        delete manifest.policy;
+      },
+    },
     {
       name: "an unknown runtime field",
       field: "runtime",
@@ -496,6 +1188,46 @@ test("rejects unknown and missing fields in every public nested manifest shape",
       field: "runtime.kind",
       update: (manifest) => {
         delete manifestRecordAt(manifest, "runtime").kind;
+      },
+    },
+    {
+      name: "a session qualification command without device pairing",
+      field: "runtime",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "runtime").session_qualification = {
+          command: ["/usr/local/bin/future-session-qualify"],
+          timeout_seconds: 30,
+        };
+      },
+    },
+    {
+      name: "a relative session qualification command",
+      field: "runtime.session_qualification.command[0]",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "runtime").session_qualification = {
+          command: ["future-session-qualify"],
+          timeout_seconds: 30,
+        };
+      },
+    },
+    {
+      name: "a relative selection qualification command",
+      field: "runtime.selection_qualification.command[0]",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "runtime").selection_qualification = {
+          command: ["future-selection-qualify"],
+          timeout_seconds: 30,
+        };
+      },
+    },
+    {
+      name: "a selection qualification command without managed image authority",
+      field: "runtime.selection_qualification",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "runtime").selection_qualification = {
+          command: ["/usr/local/bin/future-selection-qualify"],
+          timeout_seconds: 30,
+        };
       },
     },
     {
@@ -538,6 +1270,115 @@ test("rejects unknown and missing fields in every public nested manifest shape",
       },
     },
     {
+      name: "a health probe with duplicate success statuses",
+      field: "health_probe.success_statuses",
+      update: (manifest) => {
+        manifest.health_probe = {
+          url: "http://127.0.0.1:8080/health",
+          port: 8080,
+          timeout_seconds: 30,
+          success_statuses: [200, 200],
+        };
+      },
+    },
+    {
+      name: "a secondary health probe without allocation data",
+      field: "health_probe.secondary_forward",
+      update: (manifest) => {
+        manifest.forward_ports = [9000, 8080];
+        manifest.health_probe = {
+          url: "http://127.0.0.1:8080/health",
+          port: 8080,
+          port_resolution: "sandbox-secondary-forward",
+          timeout_seconds: 30,
+        };
+      },
+    },
+    {
+      name: "a secondary health probe whose port is not a secondary forward",
+      field: "health_probe.port_resolution",
+      update: (manifest) => {
+        manifest.forward_ports = [8080];
+        manifest.health_probe = {
+          url: "http://127.0.0.1:8080/health",
+          port: 8080,
+          port_resolution: "sandbox-secondary-forward",
+          secondary_forward: {
+            environment_variable: "FUTURE_RUNTIME_API_PORT",
+            preferred_port: 8080,
+            range_start: 8080,
+            range_end: 8090,
+            label: "future runtime API",
+            remedy: "Stop an existing listener and retry onboarding.",
+          },
+          timeout_seconds: 30,
+        };
+      },
+    },
+    {
+      name: "a secondary forward that replaces a core-owned environment value",
+      field: "health_probe.secondary_forward.environment_variable",
+      update: (manifest) => {
+        manifest.forward_ports = [9000, 8080];
+        manifest.health_probe = {
+          url: "http://127.0.0.1:8080/health",
+          port: 8080,
+          port_resolution: "sandbox-secondary-forward",
+          secondary_forward: {
+            environment_variable: "NEMOCLAW_GATEWAY_PORT",
+            preferred_port: 8080,
+            range_start: 8080,
+            range_end: 8090,
+            label: "future runtime API",
+            remedy: "Stop an existing listener and retry onboarding.",
+          },
+          timeout_seconds: 30,
+        };
+      },
+    },
+    {
+      name: "an unbounded secondary-forward allocation range",
+      field: "health_probe.secondary_forward",
+      update: (manifest) => {
+        manifest.forward_ports = [9000, 8080];
+        manifest.health_probe = {
+          url: "http://127.0.0.1:8080/health",
+          port: 8080,
+          port_resolution: "sandbox-secondary-forward",
+          secondary_forward: {
+            environment_variable: "FUTURE_RUNTIME_API_PORT",
+            preferred_port: 8080,
+            range_start: 8080,
+            range_end: 8336,
+            label: "future runtime API",
+            remedy: "Stop an existing listener and retry onboarding.",
+          },
+          timeout_seconds: 30,
+        };
+      },
+    },
+    {
+      name: "a secondary-forward preference that differs from the health port",
+      field: "health_probe.secondary_forward.preferred_port",
+      update: (manifest) => {
+        manifest.forward_ports = [9000, 8080];
+        manifest.health_probe = {
+          url: "http://127.0.0.1:8080/health",
+          port: 8080,
+          port_resolution: "sandbox-secondary-forward",
+          secondary_forward: {
+            environment_variable: "FUTURE_RUNTIME_API_PORT",
+            preferred_port: 8081,
+            range_start: 8080,
+            range_end: 8090,
+            label: "future runtime API",
+            remedy: "Stop an existing listener and retry onboarding.",
+          },
+          timeout_seconds: 30,
+        };
+      },
+    },
+    {
       name: "an unknown dashboard field",
       field: "dashboard",
       update: (manifest) => {
@@ -552,6 +1393,8 @@ test("rejects unknown and missing fields in every public nested manifest shape",
           port: 8080,
           enable_env: "DASHBOARD_ENABLED",
           port_env: "DASHBOARD_PORT",
+          internal_port: 18080,
+          internal_port_env: "DASHBOARD_INTERNAL_PORT",
           native_hook: "open",
         };
       },
@@ -560,7 +1403,51 @@ test("rejects unknown and missing fields in every public nested manifest shape",
       name: "a dashboard UI without its port environment",
       field: "dashboard_ui.port_env",
       update: (manifest) => {
-        manifest.dashboard_ui = { port: 8080, enable_env: "DASHBOARD_ENABLED" };
+        manifest.dashboard_ui = {
+          port: 8080,
+          enable_env: "DASHBOARD_ENABLED",
+          internal_port: 18080,
+          internal_port_env: "DASHBOARD_INTERNAL_PORT",
+        };
+      },
+    },
+    {
+      name: "a dashboard UI that reuses its public port internally",
+      field: "dashboard_ui.internal_port",
+      update: (manifest) => {
+        manifest.dashboard_ui = {
+          port: 8080,
+          enable_env: "DASHBOARD_ENABLED",
+          port_env: "DASHBOARD_PORT",
+          internal_port: 8080,
+          internal_port_env: "DASHBOARD_INTERNAL_PORT",
+        };
+      },
+    },
+    {
+      name: "a dashboard UI that aliases two environment settings",
+      field: "dashboard_ui",
+      update: (manifest) => {
+        manifest.dashboard_ui = {
+          port: 8080,
+          enable_env: "DASHBOARD_ENABLED",
+          port_env: "DASHBOARD_PORT",
+          internal_port: 18080,
+          internal_port_env: "DASHBOARD_PORT",
+        };
+      },
+    },
+    {
+      name: "a dashboard UI with a credential-shaped environment setting",
+      field: "dashboard_ui.enable_env",
+      update: (manifest) => {
+        manifest.dashboard_ui = {
+          port: 8080,
+          enable_env: "DASHBOARD_SECRET",
+          port_env: "DASHBOARD_PORT",
+          internal_port: 18080,
+          internal_port_env: "DASHBOARD_INTERNAL_PORT",
+        };
       },
     },
     {
@@ -592,6 +1479,68 @@ test("rejects unknown and missing fields in every public nested manifest shape",
       },
     },
     {
+      name: "an executable inference route probe hook",
+      field: "inference.route_probe",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "inference").route_probe = { callback: "native" };
+      },
+    },
+    {
+      name: "an unsupported provider-key credential alias",
+      field: "inference.provider_key_credential_alias",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "inference").provider_key_credential_alias = "arbitrary-env";
+      },
+    },
+    {
+      name: "an inference smoke path with traversal",
+      field: "inference.sandbox_smoke.config_path",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "inference").sandbox_smoke = {
+          kind: "compatible-endpoint",
+          config_path: "/sandbox/.future/../secret",
+        };
+      },
+    },
+    {
+      name: "an inference smoke path with a backslash",
+      field: "inference.sandbox_smoke.config_path",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "inference").sandbox_smoke = {
+          kind: "compatible-endpoint",
+          config_path: "/sandbox/.future\\config.json",
+        };
+      },
+    },
+    {
+      name: "an inference smoke path with a control character",
+      field: "inference.sandbox_smoke.config_path",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "inference").sandbox_smoke = {
+          kind: "compatible-endpoint",
+          config_path: "/sandbox/.future/config\u001b.json",
+        };
+      },
+    },
+    {
+      name: "an unsupported local context-window provider",
+      field: "inference.context_window_requirements[0].provider",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "inference").context_window_requirements = [
+          { provider: "future-local", minimum_tokens: 64_000 },
+        ];
+      },
+    },
+    {
+      name: "an unbounded local context-window minimum",
+      field: "inference.context_window_requirements[0].minimum_tokens",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "inference").context_window_requirements = [
+          { provider: "ollama-local", minimum_tokens: 4_194_305 },
+        ];
+      },
+    },
+    {
       name: "an unknown onboarding field",
       field: "onboarding",
       update: (manifest) => {
@@ -606,14 +1555,71 @@ test("rejects unknown and missing fields in every public nested manifest shape",
       },
     },
     {
+      name: "an unknown sandbox startup control",
+      field: "sandbox_create.startup_controls",
+      update: (manifest) => {
+        manifest.sandbox_create = { startup_controls: ["native-hook"] };
+      },
+    },
+    {
+      name: "duplicate Docker ulimit names",
+      field: "sandbox_create.docker_ulimits",
+      update: (manifest) => {
+        manifest.sandbox_create = {
+          docker_ulimits: [
+            { name: "nofile", soft: 1024, hard: 2048 },
+            { name: "nofile", soft: 2048, hard: 4096 },
+          ],
+        };
+      },
+    },
+    {
+      name: "a Docker ulimit whose hard value is below its soft value",
+      field: "sandbox_create.docker_ulimits[0].hard",
+      update: (manifest) => {
+        manifest.sandbox_create = {
+          docker_ulimits: [{ name: "nofile", soft: 2048, hard: 1024 }],
+        };
+      },
+    },
+    {
       name: "an unknown web-search field",
       field: "web_search",
       update: (manifest) => {
         manifest.web_search = {
           support: "providers",
-          providers: ["tavily"],
+          providers: [tavilyWebSearchBinding()],
           native_hook: "callback",
         };
+      },
+    },
+    {
+      name: "a non-canonical web-search config path",
+      field: "web_search.providers[0].config_verification.path",
+      update: (manifest) => {
+        const binding = tavilyWebSearchBinding();
+        (binding.config_verification as Record<string, unknown>).path =
+          "/sandbox/.future/../secret";
+        manifest.web_search = { support: "providers", providers: [binding] };
+      },
+    },
+    {
+      name: "an unbounded web-search provider profile type",
+      field: "web_search.providers[0].profile_type",
+      update: (manifest) => {
+        const binding = tavilyWebSearchBinding();
+        binding.profile_type = `a${"b".repeat(64)}`;
+        manifest.web_search = { support: "providers", providers: [binding] };
+      },
+    },
+    {
+      name: "a web-search verification URL carrying credentials",
+      field: "web_search.providers[0].egress_verification.url",
+      update: (manifest) => {
+        const binding = tavilyWebSearchBinding();
+        (binding.egress_verification as Record<string, unknown>).url =
+          "https://credential@search.example.test/query";
+        manifest.web_search = { support: "providers", providers: [binding] };
       },
     },
     {
@@ -621,6 +1627,110 @@ test("rejects unknown and missing fields in every public nested manifest shape",
       field: "mcp",
       update: (manifest) => {
         manifest.mcp = { support: "disabled", native_hook: "callback" };
+      },
+    },
+    {
+      name: "an unknown agent roster field",
+      field: "agent_roster",
+      update: (manifest) => {
+        manifest.agent_roster = {
+          support: "managed",
+          adapter: "agent-roster",
+          onboarding_environment: "NEMOCLAW_EXTRA_AGENTS_JSON",
+          command: "run-anything",
+        };
+      },
+    },
+    {
+      name: "a package-selected agent roster adapter",
+      field: "agent_roster.adapter",
+      update: (manifest) => {
+        manifest.agent_roster = {
+          support: "managed",
+          adapter: "future-adapter",
+          onboarding_environment: "NEMOCLAW_EXTRA_AGENTS_JSON",
+        };
+      },
+    },
+    {
+      name: "an unknown policy field",
+      field: "policy",
+      update: (manifest) => {
+        manifest.policy = {
+          owned_presets: [],
+          automatic_presets: [],
+          baseline_exclusion_impacts: {},
+          native_hook: "callback",
+        };
+      },
+    },
+    {
+      name: "a policy context target that escapes the sandbox root",
+      field: "policy.context_target",
+      update: (manifest) => {
+        manifest.policy = {
+          context_target: "/sandbox/../host/POLICY.md",
+          owned_presets: [],
+          automatic_presets: [],
+          baseline_exclusion_impacts: {},
+        };
+      },
+    },
+    {
+      name: "a non-canonical owned policy preset",
+      field: "policy.owned_presets",
+      update: (manifest) => {
+        manifest.policy = {
+          owned_presets: ["Future Tools"],
+          automatic_presets: [],
+          baseline_exclusion_impacts: {},
+        };
+      },
+    },
+    {
+      name: "an automatic policy preset that is not package-owned",
+      field: "policy.automatic_presets[0].name",
+      update: (manifest) => {
+        manifest.policy = {
+          owned_presets: [],
+          automatic_presets: [
+            {
+              name: "future-tools",
+              activation: { kind: "always" },
+              apply_during_create: false,
+              suppress_in_tiers: [],
+            },
+          ],
+          baseline_exclusion_impacts: {},
+        };
+      },
+    },
+    {
+      name: "an automatic policy preset without a create-stage declaration",
+      field: "policy.automatic_presets[0]",
+      update: (manifest) => {
+        manifest.policy = {
+          owned_presets: ["future-tools"],
+          automatic_presets: [
+            {
+              name: "future-tools",
+              activation: { kind: "always" },
+              suppress_in_tiers: [],
+            },
+          ],
+          baseline_exclusion_impacts: {},
+        };
+      },
+    },
+    {
+      name: "an unbounded policy impact disclosure",
+      field: "policy.baseline_exclusion_impacts.future_api",
+      update: (manifest) => {
+        manifest.policy = {
+          owned_presets: [],
+          automatic_presets: [],
+          baseline_exclusion_impacts: { future_api: "x".repeat(513) },
+        };
       },
     },
     {
@@ -666,6 +1776,11 @@ test("accepts typed sandbox-create, web-search, and messaging-route declarations
   const manifest = validManifestValue();
   manifest.sandbox_create = {
     generated_image_build: "local-buildkit-required",
+    startup_controls: ["approval-mode", "observability"],
+    docker_ulimits: [
+      { name: "nproc", soft: 512, hard: 512 },
+      { name: "nofile", soft: 65_536, hard: 65_536 },
+    ],
     driver_mounts: [
       {
         type: "tmpfs",
@@ -679,7 +1794,7 @@ test("accepts typed sandbox-create, web-search, and messaging-route declarations
   };
   manifest.web_search = {
     support: "providers",
-    providers: ["tavily"],
+    providers: [tavilyWebSearchBinding()],
     tool_gateway_conflicts: [{ provider: "tavily", tool_gateway: "future-search" }],
   };
   manifestRecordAt(manifest, "inference").refresh_route_for_messaging_providers = [
@@ -882,18 +1997,14 @@ test("the package validator binary emits one JSON conformance report", () => {
 });
 
 test("accepts a finite managed process lifecycle command for a gateway package", () => {
+  const manifest = validManifestValue();
+  addGatewayRuntimeSurfaces(manifest);
+  manifestRecordAt(manifest, "runtime").process_lifecycle = {
+    support: "managed",
+    command: ["/opt/future/process-control", "--structured"],
+  };
   const packageRoot = createPackageFixture({
-    manifest: validPackageManifest()
-      .replace("  kind: terminal", "  kind: gateway")
-      .replace(
-        "  interactive_command: future-terminal",
-        [
-          "  interactive_command: future-terminal",
-          "  process_lifecycle:",
-          "    support: managed",
-          "    command: [/opt/future/process-control, --structured]",
-        ].join("\n"),
-      ),
+    manifest: `${stringifyYaml(manifest)}`,
   });
   try {
     assert.equal(validateHarnessPackage(packageRoot).harnessId, "future-terminal");
@@ -964,6 +2075,59 @@ test("rejects malformed data-only contract fields before package consumption", a
         "  config_file: /sandbox/config.json",
       ),
       field: "config.config_file",
+    },
+    {
+      name: "a configuration directory at the filesystem root",
+      manifest: validPackageManifest().replace("  dir: /sandbox/.future-terminal", "  dir: /"),
+      field: "config.dir",
+    },
+    {
+      name: "a configuration directory outside the sandbox root",
+      manifest: validPackageManifest().replace(
+        "  dir: /sandbox/.future-terminal",
+        "  dir: /etc/future",
+      ),
+      field: "config.dir",
+    },
+    {
+      name: "a noncanonical configuration directory",
+      manifest: validPackageManifest().replace(
+        "  dir: /sandbox/.future-terminal",
+        "  dir: /sandbox/../etc/future",
+      ),
+      field: "config.dir",
+    },
+    {
+      name: "a parent-relative configuration file",
+      manifest: validPackageManifest().replace(
+        "  config_file: config.json",
+        "  config_file: ../config.json",
+      ),
+      field: "config.config_file",
+    },
+    {
+      name: "a parent-relative environment file",
+      manifest: validPackageManifest().replace(
+        "  config_file: config.json",
+        "  config_file: config.json\n  env_file: ../secrets.env",
+      ),
+      field: "config.env_file",
+    },
+    {
+      name: "a noncanonical authentication file",
+      manifest: validPackageManifest().replace(
+        "  config_file: config.json",
+        "  config_file: config.json\n  auth_file: credentials/./auth.json",
+      ),
+      field: "config.auth_file",
+    },
+    {
+      name: "an escaping shields file",
+      manifest: validPackageManifest().replace(
+        "  config_file: config.json",
+        "  config_file: config.json\n  shields_files:\n    - ../fabric.json",
+      ),
+      field: "config.shields_files",
     },
     {
       name: "an incomplete mutable inference declaration",
@@ -1037,7 +2201,9 @@ test("rejects malformed data-only contract fields before package consumption", a
           "    kind: not-required",
           "  snapshot_restore: []",
           "  rebuild:",
-          "    image_plugin_provenance: not-required",
+          "    managed_extensions:",
+          "      support: disabled",
+          "      reason: Test package has no managed extensions.",
           "    scheduled_work:",
           "      support: disabled",
           "      reason: This package does not run scheduled work.",
@@ -1048,6 +2214,56 @@ test("rejects malformed data-only contract fields before package consumption", a
         "",
       ),
       field: "state_lifecycle",
+    },
+    {
+      name: "a terminal runtime requesting a snapshot restart",
+      manifest: validPackageManifest().replace(
+        "  snapshot_restore: []",
+        "  snapshot_restore: [restart-runtime]",
+      ),
+      field: "state_lifecycle.snapshot_restore",
+    },
+    {
+      name: "a noncanonical preserved environment render target",
+      manifest: validPackageManifest().replace(
+        [
+          "    managed_extensions:",
+          "      support: disabled",
+          "      reason: Test package has no managed extensions.",
+        ].join("\n"),
+        [
+          "    managed_extensions:",
+          "      support: disabled",
+          "      reason: Test package has no managed extensions.",
+          "    preserved_environment:",
+          "      files:",
+          "        - path: routing.env",
+          "          patterns: ['FUTURE_*']",
+          "          render_target: ~/.future/./routes.env",
+        ].join("\n"),
+      ),
+      field: "state_lifecycle.rebuild.preserved_environment.files[0].render_target",
+    },
+    {
+      name: "a credential-shaped preserved environment pattern",
+      manifest: validPackageManifest().replace(
+        [
+          "    managed_extensions:",
+          "      support: disabled",
+          "      reason: Test package has no managed extensions.",
+        ].join("\n"),
+        [
+          "    managed_extensions:",
+          "      support: disabled",
+          "      reason: Test package has no managed extensions.",
+          "    preserved_environment:",
+          "      files:",
+          "        - path: routing.env",
+          "          patterns: ['*TOKEN*']",
+          "          render_target: ~/.future/routes.env",
+        ].join("\n"),
+      ),
+      field: "state_lifecycle.rebuild.preserved_environment.files[0].patterns",
     },
     {
       name: "a relative state backup readiness command",
@@ -1065,8 +2281,17 @@ test("rejects malformed data-only contract fields before package consumption", a
     {
       name: "an arbitrary rebuild native callback",
       manifest: validPackageManifest().replace(
-        "    image_plugin_provenance: not-required",
-        "    image_plugin_provenance: not-required\n    native_callback: run-native-callback",
+        [
+          "    managed_extensions:",
+          "      support: disabled",
+          "      reason: Test package has no managed extensions.",
+        ].join("\n"),
+        [
+          "    managed_extensions:",
+          "      support: disabled",
+          "      reason: Test package has no managed extensions.",
+          "    native_callback: run-native-callback",
+        ].join("\n"),
       ),
       field: "state_lifecycle.rebuild",
     },
@@ -1088,17 +2313,15 @@ test("rejects malformed data-only contract fields before package consumption", a
     },
     {
       name: "a relative process lifecycle controller command",
-      manifest: validPackageManifest()
-        .replace("  kind: terminal", "  kind: gateway")
-        .replace(
-          "  interactive_command: future-terminal",
-          [
-            "  interactive_command: future-terminal",
-            "  process_lifecycle:",
-            "    support: managed",
-            "    command: [future-process-control]",
-          ].join("\n"),
-        ),
+      manifest: (() => {
+        const manifest = validManifestValue();
+        addGatewayRuntimeSurfaces(manifest);
+        manifestRecordAt(manifest, "runtime").process_lifecycle = {
+          support: "managed",
+          command: ["future-process-control"],
+        };
+        return stringifyYaml(manifest);
+      })(),
       field: "runtime.process_lifecycle.command[0]",
     },
     {
@@ -1370,19 +2593,20 @@ test("requires compiled adapters for the capabilities declared by the manifest",
       artifact: "host/mcp-adapter.cts",
     },
     {
-      name: "managed image startup",
+      name: "managed agent roster support",
       manifest: validPackageManifest({
         additional: [
-          "managed_image:",
-          "  repository: ghcr.io/example/future-terminal",
-          "  architectures:",
-          "    - linux/amd64",
-          "  runtime_identity:",
-          "    uid: 1000",
-          "    gid: 1000",
-          "    workdir: /sandbox",
+          "agent_roster:",
+          "  support: managed",
+          "  adapter: agent-roster",
+          "  onboarding_environment: NEMOCLAW_EXTRA_AGENTS_JSON",
         ],
       }),
+      artifact: "host/agent-roster-adapter.cts",
+    },
+    {
+      name: "the universal startup boundary",
+      manifest: validPackageManifest(),
       artifact: "host/startup-adapter.cts",
     },
     {
@@ -1404,10 +2628,42 @@ test("requires compiled adapters for the capabilities declared by the manifest",
           "provider_broker:",
           "  support: managed",
           "  adapter: provider-broker",
-          "  operations: [describe-provider, register-refresh-provider, ensure-broker]",
+          "  operations: [describe-provider, register-refresh-provider, ensure-broker, inspect-broker, teardown-broker]",
         ],
       }),
       artifact: "host/provider-broker-adapter.cts",
+    },
+    {
+      name: "managed provider authentication",
+      manifest: validPackageManifest({
+        additional: [
+          "provider_auth:",
+          "  support: managed",
+          "  adapter: provider-auth",
+          "  operation: resolve-auth-method",
+          "  request_environment: [NEMOCLAW_FUTURE_AUTH_METHOD]",
+          "  default_method: api-key",
+          "  selection:",
+          "    key: futureProvider",
+          "    aliases: [future]",
+          "    label: Future Provider",
+          "    provider_name: future-provider",
+          "    provider_type: openai",
+          "    endpoint_url: https://inference.example.com/v1",
+          "    help_url: https://example.com/keys",
+          "    default_model: future/model",
+          "    models: [future/model]",
+          "    preferred_inference_api: openai-completions",
+          "  methods:",
+          "    - id: api-key",
+          "      label: API key",
+          "      kind: api-key",
+          "      credential_env: FUTURE_API_KEY",
+          "      source_env: FUTURE_API_KEY",
+          "      prompt_label: Future API key",
+        ],
+      }),
+      artifact: "host/provider-auth-adapter.cts",
     },
   ] as const;
 
@@ -1431,14 +2687,14 @@ test("requires compiled adapters for the capabilities declared by the manifest",
   }
 });
 
-test("requires the conventional managed provider-broker controller", () => {
+test("requires the conventional managed provider-broker controller", async (t) => {
   const packageRoot = createPackageFixture({
     manifest: validPackageManifest({
       additional: [
         "provider_broker:",
         "  support: managed",
         "  adapter: provider-broker",
-        "  operations: [describe-provider, register-refresh-provider, ensure-broker]",
+        "  operations: [describe-provider, register-refresh-provider, ensure-broker, inspect-broker, teardown-broker]",
       ],
     }),
   });
@@ -1448,7 +2704,13 @@ test("requires the conventional managed provider-broker controller", () => {
       "host/provider-broker-adapter.cts",
       '"use strict";\nmodule.exports = Object.freeze({});\n',
     );
-    expectDiagnostic(packageRoot, "provider-broker-artifact", "host/provider-broker-control.cts");
+    await t.test("when it is missing", () => {
+      expectDiagnostic(packageRoot, "provider-broker-artifact", "host/provider-broker-control.cts");
+    });
+    await t.test("when it is empty", () => {
+      writeFile(packageRoot, "host/provider-broker-control.cts", "");
+      expectDiagnostic(packageRoot, "provider-broker-artifact", "host/provider-broker-control.cts");
+    });
   } finally {
     removeFixture(packageRoot);
   }

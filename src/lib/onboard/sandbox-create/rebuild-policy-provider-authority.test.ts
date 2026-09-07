@@ -346,6 +346,7 @@ describe("rebuild policy provider handoff", () => {
       expect(
         resolveRebuildObservabilityPolicyDelta({
           agent,
+          receiptBackedPackage: false,
           enabled,
           explicitlyRequested,
           tierName,
@@ -353,6 +354,19 @@ describe("rebuild policy provider handoff", () => {
       ).toEqual({ requiredNetworkPolicyKeys, removedNetworkPolicyKeys });
     },
   );
+
+  it("does not enter the legacy DCode policy lane for a receipt without a declaration", () => {
+    expect(
+      resolveRebuildObservabilityPolicyDelta({
+        agent: "langchain-deepagents-code",
+        receiptBackedPackage: true,
+        packagePolicy: null,
+        enabled: true,
+        explicitlyRequested: true,
+        tierName: "balanced",
+      }),
+    ).toEqual({ requiredNetworkPolicyKeys: [], removedNetworkPolicyKeys: [] });
+  });
 
   it("adds missing live-policy providers to the final create arguments", () => {
     expect(

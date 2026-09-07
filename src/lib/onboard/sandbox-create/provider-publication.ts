@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isDeepStrictEqual } from "node:util";
+
 import type { SandboxCreateOrchestrationRuntime } from "../../onboard";
+import type { AgentDefinition } from "../../agent/defs";
 import type {
   OpenShellProviderAdapter,
   OpenShellProviderError,
@@ -15,6 +18,12 @@ import {
   MESSAGING_CREDENTIAL_PROVIDER_TYPE,
 } from "../../messaging/provider-profile";
 import type { SandboxEntry } from "../../state/registry";
+import { createBuiltInChannelManifestRegistry } from "../../messaging/channels/built-ins";
+import {
+  listMessagingChannelsForProfile,
+  resolveSandboxMessagingProfileAuthority,
+} from "../../messaging/profile-authority";
+import type { HarnessPackageSessionAuthority } from "../package/package-authority";
 import { matchesGatewayCredentialFamilyProviderBinding } from "../gateway-provider-metadata";
 import { resolveRegisteredRuntimeProvider } from "../runtime-provider/selection";
 import type { SandboxCreateIntent } from "../sandbox-create-intent-types";
@@ -27,6 +36,23 @@ type ProviderPreparationInput = {
   readonly extraProviders: readonly string[];
   readonly gatewayName: string;
 };
+
+export function resolveSandboxCreateMessagingManifests(
+  session: HarnessPackageSessionAuthority,
+  effectiveAgent: AgentDefinition,
+) {
+  const profile = resolveSandboxMessagingProfileAuthority({
+    agent: session.agent,
+    ...(session.harnessPackage ? { harnessPackage: session.harnessPackage } : {}),
+    ...(session.harnessPackageMigration
+      ? { harnessPackageMigration: session.harnessPackageMigration }
+      : {}),
+  });
+  if (!isDeepStrictEqual(profile.agent, effectiveAgent)) {
+    throw new Error("Selected messaging profile does not match package agent authority");
+  }
+  return listMessagingChannelsForProfile(profile, createBuiltInChannelManifestRegistry());
+}
 
 type ProviderPreparationDeps = Pick<SandboxCreateOrchestrationRuntime, "runOpenshell"> & {
   readonly cleanupCreateSources: () => void;

@@ -287,7 +287,7 @@ describe("portable runtime cleanup in the uninstall run plan", testTimeoutOption
   it.each<[string, string, DeferredMutation]>([
     [
       "HOME gateway-limit",
-      "Managed llama.cpp cleanup could not safely inventory gateway-scoped ownership state.",
+      "Refusing scoped gateway cleanup because its sandbox namespace cannot be proven.",
       (_home, state) =>
         deferredEvidence(path.join(state, "gateways"), (evidence) => {
           fs.mkdirSync(evidence, { recursive: true });
@@ -297,7 +297,7 @@ describe("portable runtime cleanup in the uninstall run plan", testTimeoutOption
     ],
     [
       "HOME gateway-file",
-      "Managed llama.cpp cleanup could not safely inventory gateway-scoped ownership state.",
+      "Refusing scoped gateway cleanup because its sandbox namespace cannot be proven.",
       (_home, state) =>
         deferredEvidence(path.join(state, "gateways", "8090"), (evidence) => {
           fs.mkdirSync(path.dirname(evidence), { recursive: true });
@@ -329,16 +329,17 @@ describe("portable runtime cleanup in the uninstall run plan", testTimeoutOption
   ])("rejects %s before generic effects (#9189)", async (_case, category, prepare) => {
     const scope = admissionFailureScope("nemoclaw-secret-home-sentinel-");
     const { evidence, arm } = prepare(scope.homeDir, scope.stateDir);
-    const stderr = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const diagnostics: string[] = [];
     const result = await runUninstallPlanProduction(
       { assumeYes: true, deleteModels: true, destroyUserData: true, keepOpenShell: false },
       withManagedGatewayAuthority({
         ...admissionFailureDeps(scope),
         commandExists: (command) => command === "openshell",
+        error: (message) => diagnostics.push(message),
         hasPortableRuntimeCleanup: () => (arm(), false),
       }),
     );
-    const output = stderr.mock.calls.flat().join("\n");
+    const output = diagnostics.join("\n");
     expect(result.exitCode).toBe(1);
     expect(output).toContain(category);
     expect(output).not.toContain(scope.homeDir);
@@ -385,7 +386,7 @@ describe("portable runtime cleanup in the uninstall run plan", testTimeoutOption
 
     const result = await runUninstallPlanProduction(
       { assumeYes: true, deleteModels: false, destroyUserData: true, keepOpenShell: false },
-      {
+      withManagedGatewayAuthority({
         ...admissionFailureDeps(scope),
         commandExists: (command) => ["openshell", "pgrep", "lsof"].includes(command),
         env: {
@@ -401,7 +402,7 @@ describe("portable runtime cleanup in the uninstall run plan", testTimeoutOption
             hostFenceHeld = false;
           }
         },
-      },
+      }),
     );
 
     expect(result.exitCode).toBe(0);

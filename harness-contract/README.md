@@ -74,6 +74,13 @@ build project may publish only the production `tsconfig*.json` files copied by a
 Dockerfile, plus their local `extends` chain. Root, test, undeclared-project, Vitest, and Jest
 configuration remains authoring-only.
 
+Dockerfiles are composed from two authorities. A package may `COPY` anything beneath its own
+`packages/nemoclaw-<id>/` path. NemoClaw supplies the shared Fabric runner, blueprint, security
+helpers, managed-startup tooling, and other explicitly named core build-kit files. Validation
+rejects arbitrary repository paths and every sibling harness package. This keeps native harness
+code independently publishable without making each package redistribute NemoClaw core; adding a
+new core dependency is an intentional contract change rather than an implicit monorepo coupling.
+
 ## Strict data-only manifest
 
 `HarnessAgentManifest` intentionally has no string index signature. Authors get TypeScript editor
@@ -83,9 +90,41 @@ The validator requires `name`, `runtime`, `config`, `inference.config_update`, `
 `state_lifecycle`. It rejects unknown top-level and nested fields, ambiguous YAML, aliases,
 unbounded values, invalid paths and commands, and package identity mismatches.
 
+`config.dir` must be a canonical directory below `/sandbox`. Each declared config file must use a
+canonical relative path that stays below that directory.
+
 The manifest declares data. It cannot choose an executable module, export name, request schema, or
 result schema. Core fixes those values. Prefer manifest data or a fixed sandbox command whenever
 native behavior does not require a protected host transaction.
+
+Three legacy metadata fields are deliberately non-authoritative. `version_constraint` records the
+package's upstream compatibility floor, while `expected_version` is the exact runtime version that
+NemoClaw qualifies. `package_registry` records the package manager and registry hosts used by the
+package itself; it is not a discovery or installation source. `phone_home_hosts` is an upstream
+host inventory, not an egress grant. Package policy files remain the network authority. Core must
+not act on these inventory fields without a separate typed operation and protecting tests.
+
+Receipt-backed inference selection consumes `inference.config_update.provider_api_overrides` and
+the optional bounded `inference.context_window_requirements` before route compatibility checks or
+provider probes. The latter currently accepts one `ollama-local` minimum between 16,384 and
+4,194,304 tokens. These are package requirements applied by core-owned inference runtimes, not
+host callbacks.
+
+`sandbox_create` contains finite inputs that core must apply before a managed harness starts. A
+package can declare `startup_controls` for `approval-mode` and `observability`; core resolves and
+persists those settings without branching on the package ID, then passes them through the existing
+typed startup profile. A package can also declare `docker_ulimits` as exact `name`, `soft`, and
+`hard` values. Core applies those limits to Docker sandbox creation so the supervisor and its child
+processes inherit them. The validator bounds both lists and rejects unknown controls, duplicate
+limit names, invalid names, and limits whose hard value is below the soft value.
+
+No-receipt compatibility behavior is separate. A current package must declare every startup
+control and Docker limit it requires in its manifest.
+
+Every package also declares `policy`. Empty `owned_presets`, `automatic_presets`, and
+`baseline_exclusion_impacts` values are the explicit no-additions form. This keeps receipt-backed
+onboarding total: core never has to guess whether an omitted policy surface means “none” or an
+incomplete package.
 
 ### Package-published managed images
 
@@ -137,10 +176,16 @@ operation core needs to perform:
 
 | Source | Typed responsibility |
 | --- | --- |
-| `command.ts` | Interactive and headless commands, prompt transport, public environment, smoke checks, and process lifecycle actions |
+| `command.ts` | Interactive and headless commands, raw or Fabric CLI prompt protocol, prompt transport, public environment, smoke checks, process lifecycle actions, semantic turns, and bounded session or inference-selection qualification commands |
+| `agent-roster.ts` | Agent list, add, delete, inspection, and declarative reconciliation plans |
 | `config.ts` | Inference projection, configuration update, URL policy, mutable-state reconciliation, and package-specific restore merging |
 | `mcp.ts` | Model Context Protocol (MCP) registration, removal, inspection, capability probes, runtime plans, intent verification, and snapshot repair |
 | `messaging.ts` | Supported or disabled channel integration profiles and native configuration projection |
+| `policy.ts` | Package-owned policy presets, activation conditions, tier suppression, and operator-facing exclusion effects |
+| `provider-auth.ts` | Provider selection metadata and finite API-key or device-code authentication plans |
+| `provider-broker.ts` | Provider description, registration, readiness, bounded inspection, and teardown plans |
+| `provider-profile.ts` | Validation of package-owned provider profiles used by bounded web-search verification |
+| `tool-gateway.ts` | Managed-tool catalogue, aliases, labels, defaults, authentication compatibility, environment requests, and package-owned policy mappings |
 | `session.ts` | Session list, delete, reset, and export plans plus output interpretation |
 | `startup.ts` | Managed startup plans, startup profiles, material, actions, and reconciliation |
 | `state.ts` | Backup quiescence, snapshot repair actions, and typed rebuild declarations using fixed package commands and finite core operations |
@@ -154,8 +199,12 @@ and exports:
 | `host/config-adapter.cts` | Every package |
 | `host/messaging-adapter.cts` | Every package |
 | `host/mcp-adapter.cts` | `mcp.support` is `bridge` |
+| `host/agent-roster-adapter.cts` | `agent_roster.support` is `managed` |
 | `host/session-adapter.cts` | `sessions` is declared |
-| `host/startup-adapter.cts` | `managed_image` is declared |
+| `host/startup-adapter.cts` | Every package |
+| `host/provider-auth-adapter.cts` | `provider_auth.support` is `managed` |
+| `host/provider-broker-adapter.cts` | `provider_broker.support` is `managed` |
+| `host/provider-broker-control.cts` | `provider_broker.support` is `managed` |
 | `host/restore-adapter.cts` | A state file uses `restore.merge: package-config` |
 
 An adapter returns a finite data plan and does not execute commands. Core retains credential
@@ -163,6 +212,91 @@ custody, authorization, protected execution, transaction order, locks, verificat
 and redacted diagnostics. A new operation needs a current core consumer, at least one package
 implementation, runtime request and result schemas, negative trust-boundary tests, and removal of
 the native branch it replaces.
+
+### Agent roster
+
+Declare roster support only when the package implements all three fixed adapter exports:
+
+```yaml
+agent_roster:
+  support: managed
+  adapter: agent-roster
+  onboarding_environment: NEMOCLAW_EXTRA_AGENTS_JSON
+```
+
+`buildAgentRosterCommand` translates core's fixed `list`, `add`, and `delete` operations into
+native argv. `buildAgentRosterInspection` validates the package-native manifest and returns one
+bounded inspection command. `buildAgentRosterApplyPlan` interprets that output and returns finite
+add/delete commands, rebuild-only fields, and operator notices. The adapter owns native grammar,
+output parsing, path defaults, and rebuild distinctions. NemoClaw owns receipt authority,
+OpenShell execution, input and output bounds, confirmation, ordering, and the sandbox mutation
+lock. A receipt-backed package that omits `agent_roster` receives a typed unsupported result; it
+never inherits OpenClaw behavior. Only sandboxes without a package receipt use the explicit legacy
+compatibility path.
+
+### Command output
+
+Every runtime declares an interactive or headless entry point. A package that opts its bounded
+agent command into `output_interpretation: structured-turn-envelope` emits the exported
+`HarnessStructuredTurnEnvelope`: either a response with `payloads` and `meta`, or a gateway wrapper
+whose `result` is that response. Only the final response `meta` record carries completion authority.
+NemoClaw treats `replayInvalid`, an abandoned `livenessState`, a non-empty `timeoutPhase`, or
+`error.kind: incomplete-turn` as unfinished. Package payloads and earlier JSON log records remain
+untrusted output and cannot cause a retry.
+
+### Semantic turns
+
+A package can declare `runtime.semantic_turn` when a core-owned service needs one committed text
+turn from the package's native runtime:
+
+```yaml
+semantic_turn:
+  support: managed
+  command: [/usr/local/bin/future-semantic-turn]
+  timeout_seconds: 120
+  protocol: semantic-turn-ndjson
+```
+
+Core writes one `HarnessSemanticTurnRequest` to the command's standard input. The request contains
+only `type`, `message`, `conversationKey`, `runtimeTarget`, and `idempotencyKey`. The conversation
+key is opaque. The package maps the key and target to its native session grammar. The command
+either writes one `failed` event before native work starts, or writes one `started` event, zero or
+more `text` events, and one `completed` or `failed` event. Each event is newline-delimited JSON.
+The schema is closed. Native run IDs, frames, options, and diagnostic fields cannot cross the
+boundary. The package must omit native secrets from its text projection; core treats accepted text
+as opaque package output.
+
+Managed semantic turns require a managed image because core needs its runtime identity authority.
+The package owns native authentication, session mapping, protocol translation, and native frame
+bounds inside its sandbox. Core captures the sandbox name, exact package receipt, gateway name and
+port, lifecycle generation, and live identity fingerprint. It rechecks that binding under the
+sandbox mutation lock before each turn. Core also owns OpenShell execution, the timeout, request
+and response limits, cancellation, and event delivery. A package can omit this optional surface or
+declare `support: unsupported` with a reason. It does not add a host callback.
+
+### Provider authentication and broker
+
+`provider_auth` declares one package-owned provider choice and its finite authentication methods.
+The adapter resolves a requested method. NemoClaw owns prompts, secrets, provider registration,
+route validation, and persisted non-secret state.
+
+`provider_broker` declares five operations: describe the provider, register or refresh it, ensure
+the broker, inspect it, and tear it down. The adapter returns the provider identity. The fixed
+controller performs the bounded package operation. NemoClaw verifies the package receipt and
+provider ownership before each mutation. Inspection reports bounded non-secret state. Teardown
+revalidates that authority before it detaches or deletes the provider and before it removes
+package-owned broker state.
+
+### Managed tool gateways
+
+`tool_gateways` is an optional, finite declaration for tools exposed through a package's managed
+provider broker. Each entry declares its canonical ID, input aliases, operator-facing text,
+default selection, compatible `provider_auth` methods, and required package-owned policy presets.
+Core reads this data from the exact installed receipt, prompts and validates the selection, keeps
+credentials, stores only `toolGatewaySelections`, adds the declared policy presets, and projects
+the IDs into the typed startup profile. A receipt-backed package with no managed declaration gets
+an unsupported result; it never inherits another harness's catalogue. The old Hermes field and
+selector remain only on the explicit no-receipt compatibility path.
 
 ## Build commands
 
@@ -236,6 +370,25 @@ NeMo Fabric is the sandbox-local headless data plane. It consumes the package's 
 and Fabric configuration. It does not replace the host contract, package receipts, or NemoClaw's
 control plane.
 
+Messaging profiles may attach finite `hookOperations` to core-owned workflow slots. Use
+`config-prompt` to declare the configuration outputs a package needs, `sandbox-command` to invoke
+a fixed package probe that emits NemoClaw's bounded health protocol, and `build-files` to describe
+bounded configuration artifacts using typed input and generated-value markers. Core validates and
+executes these operations without loading arbitrary callbacks. Package code owns native paths,
+process names, CLI grammar, and output parsing. A receipt-backed profile cannot fall back to a
+legacy-native implementation when its required operation is absent.
+
+An optional browser surface is data, not a host callback. A package declares `dashboard_ui` with
+distinct public and private ports, distinct non-credential environment names for enablement and
+port projection, and an optional terminal-UI environment name. NemoClaw owns allocation,
+forwarding, drift decisions, and durable neutral state. It reconstructs those actions from the
+pinned package declaration; a malformed or missing declaration fails closed instead of entering a
+harness-specific fallback.
+
+An MCP bridge implements eight fixed operations. They cover registration, removal, inspection,
+mutation and teardown capability probes, runtime intent verification, runtime planning, and
+snapshot repair.
+
 ## Test workflow
 
 The contract test suite proves its tools from outside the NemoClaw checkout. It packs this module,
@@ -259,6 +412,11 @@ rehearsal against an exact NemoClaw commit. The composed lane builds that revisi
 candidate artifact, and verifies its receipt-backed identity. Add live coverage only for a changed
 OpenShell, image, process, filesystem, policy, network, hardware, or inference boundary that the
 deterministic lanes cannot prove.
+
+Package-only tests do not select a host operating system, runtime provider, hardware target, or
+managed-image source. The revision-pinned composed lane supplies those core-owned inputs through
+the selected NemoClaw commit. Image qualification and live tests then prove the combinations that
+need a real image, runtime, host, hardware, or OpenShell boundary.
 
 A package is ready for local review when it:
 

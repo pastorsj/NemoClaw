@@ -39,6 +39,19 @@ const {
   normalizeNonInteractiveProviderKey,
 } = require("./inference-providers/provider-selection-keys");
 const { HERMES_PROVIDER_NAME } = require("./inference-providers/hermes-provider-identity");
+const {
+  buildProviderArgs,
+  identityCheckedRunner,
+  providerExistsInGateway,
+  upsertProvider: upsertProviderWithoutDiagnostics,
+} = require("./inference-providers/provider-upsert");
+
+function upsertProvider(name, type, credentialEnv, baseUrl, env, runOpenshell, options = {}) {
+  return upsertProviderWithoutDiagnostics(name, type, credentialEnv, baseUrl, env, runOpenshell, {
+    ...options,
+    formatDiagnostic: (value) => compactText(redact(String(value ?? ""))),
+  });
+}
 
 const MESSAGING_PROVIDER_BINDING_CONFLICT = "NEMOCLAW_MESSAGING_PROVIDER_BINDING_CONFLICT";
 const MESSAGING_PROVIDER_MUTATION_FAILURE = "NEMOCLAW_MESSAGING_PROVIDER_MUTATION_FAILURE";
@@ -352,8 +365,8 @@ function getEffectiveProviderName(providerKey) {
 
 // ── Non-interactive helpers ──────────────────────────────────────
 
-function getNonInteractiveProvider(allowHostedInferenceStaging = true) {
-  if (allowHostedInferenceStaging) stageHostedInferenceSourceSecretEnv();
+function getNonInteractiveProvider(allowHostedInferenceStaging = true, options = {}) {
+  if (allowHostedInferenceStaging) stageHostedInferenceSourceSecretEnv(options);
   const providerKey = (process.env.NEMOCLAW_PROVIDER || "").trim().toLowerCase();
   if (!providerKey) return null;
   const normalized = normalizeNonInteractiveProviderKey(providerKey);
@@ -365,20 +378,16 @@ function getNonInteractiveProvider(allowHostedInferenceStaging = true) {
   return normalized;
 }
 
-function stageHostedInferenceSourceSecretEnv() {
-  const agentName = (process.env.NEMOCLAW_AGENT || "").trim().toLowerCase();
+function stageHostedInferenceSourceSecretEnv(options = {}) {
   let providerKeySource = "";
-  if (agentName === "langchain-deepagents-code") {
+  if (options.allowHostedInferenceProviderKeyAlias === true) {
     const rawProviderKeySource = normalizeCredentialValue(
-      // check-direct-credential-env-ignore -- Deep Agents provider-key alias is immediately route-filtered and restaged as COMPATIBLE_API_KEY.
+      // check-direct-credential-env-ignore -- a package-declared provider-key alias is immediately route-filtered and restaged as COMPATIBLE_API_KEY.
       process.env[HOSTED_INFERENCE_PROVIDER_KEY_ENV] ?? "",
     );
-    // Deep Agents contract: NEMOCLAW_PROVIDER_KEY is a permanent
-    // hosted-compatible credential alias for langchain-deepagents-code only.
-    // It repairs the external env contract where older automation supplied
-    // the hosted credential through the provider-key slot; selector-like
-    // values remain source-of-truth provider choices and are rejected by the
-    // invariant tied to NON_INTERACTIVE_PROVIDER_* below.
+    // The typed harness contract may opt into the historical provider-key
+    // credential alias. Selector-like values remain provider choices and are
+    // rejected by the invariant tied to NON_INTERACTIVE_PROVIDER_* below.
     providerKeySource = isHostedInferenceProviderKeyCredentialCandidate(rawProviderKeySource)
       ? rawProviderKeySource
       : "";
@@ -473,188 +482,6 @@ function getRequestedModelHint(nonInteractive, allowHostedInferenceStaging = tru
   return getNonInteractiveModel(providerKey);
 }
 
-// ── Gateway provider CRUD ────────────────────────────────────────
-// Functions that call runOpenshell accept it as the last parameter
-// to avoid a circular dependency with onboard.ts.
-
-/**
- * Build the argument array for an `openshell provider create` or `update` command.
- * @param {"create"|"update"} action - Whether to create or update.
- * @param {string} name - Provider name.
- * @param {string} type - Provider type (for example, "openai" or "nemoclaw-mcp-v1").
- * @param {string} credentialEnv - Credential environment variable name.
- * @param {string|null} baseUrl - Optional base URL for API-compatible endpoints.
- * @param {{ includeCredential?: boolean, credentialEnvs?: string[] }} [opts] - When `includeCredential` is
- *   false, the `--credential` flag is omitted from the args. Used on the
- *   `provider update` path when the host env does not carry the credential and
- *   the gateway already holds it (no rotation needed). OpenShell's CLI rejects
- *   `--credential KEY` when the local env var is empty, so passing the flag
- *   would fail before reaching the gateway.
- * @returns {string[]} Argument array for runOpenshell().
- */
-function buildProviderArgs(action, name, type, credentialEnv, baseUrl, opts = {}) {
-  const { includeCredential = true, credentialEnvs } = opts;
-  const args =
-    action === "create"
-      ? ["provider", "create", "--name", name, "--type", type]
-      : ["provider", "update", name];
-  if (includeCredential) {
-    for (const envKey of credentialEnvs ?? [credentialEnv]) {
-      args.push("--credential", envKey);
-    }
-  }
-  if (baseUrl && type === "openai") {
-    args.push("--config", `OPENAI_BASE_URL=${baseUrl}`);
-  } else if (baseUrl && type === "anthropic") {
-    args.push("--config", `ANTHROPIC_BASE_URL=${baseUrl}`);
-  }
-  return args;
-}
-
-/**
- * Check whether an OpenShell provider exists in the gateway.
- *
- * Queries the gateway-level provider registry via `openshell provider get`.
- * Does NOT verify that the provider is attached to a specific sandbox —
- * OpenShell CLI does not currently expose a sandbox-scoped provider query.
- * @param {string} name - Provider name to look up (e.g. "discord-bridge").
- * @param {Function} _runOpenshell - Injected runOpenshell from onboard.ts.
- * @returns {boolean} True if the provider exists in the gateway.
- */
-function providerExistsInGateway(name, _runOpenshell) {
-  const result = _runOpenshell(["provider", "get", name], {
-    ignoreError: true,
-    stdio: ["ignore", "ignore", "ignore"],
-  });
-  return result.status === 0;
-}
-
-/**
- * Recheck current OpenShell sandbox identity before each provider command.
- * Commands in one provider operation can be separated by
- * probes and recovery work, so one outer check is not sufficient.
- * @param {Function} runOpenshell
- * @param {((operation: string) => void)|undefined} revalidateSandboxIdentity
- * @param {string} operation
- * @returns {Function}
- */
-function identityCheckedRunner(runOpenshell, revalidateSandboxIdentity, operation) {
-  if (!revalidateSandboxIdentity) return runOpenshell;
-  return (...args) => {
-    revalidateSandboxIdentity(operation);
-    return runOpenshell(...args);
-  };
-}
-
-/**
- * Create or update an OpenShell provider in the gateway.
- *
- * Checks whether the provider already exists via `openshell provider get`;
- * uses `create` for new providers and `update` for existing ones. When
- * `options.replaceExisting` is true an existing provider is deleted and
- * recreated instead of updated. This is required for provider-type changes that
- * `provider update` cannot apply (e.g. the Brave Search migration from the
- * legacy `generic` type to the `brave` profile). The caller must guarantee
- * the provider is detached from any live sandbox before opting in: OpenShell
- * rejects `provider delete` on attached providers.
- * @param {string} name - Provider name (e.g. "discord-bridge", "inference").
- * @param {string} type - Provider type (for example, "openai", "brave", or "nemoclaw-mcp-v1").
- * @param {string} credentialEnv - Environment variable name for the credential.
- * @param {string|null} baseUrl - Optional base URL for the provider endpoint.
- * @param {Record<string, string>} env - Environment variables for the openshell command.
- * @param {Function} _runOpenshell - Injected runOpenshell from onboard.ts.
- * @param {{replaceExisting?: boolean, knownExists?: boolean, allowedSandboxes?: readonly string[], requireExactBinding?: boolean, allowExtendedCredentialKeys?: boolean, credentialEnvs?: string[], revalidateSandboxIdentity?: (operation: string) => void}} options - Optional replacement controls.
- * @returns {{ ok: boolean, status?: number, message?: string, reason?: string }}
- */
-function upsertProvider(name, type, credentialEnv, baseUrl, env, _runOpenshell, options = {}) {
-  const runOpenshell = identityCheckedRunner(
-    _runOpenshell,
-    options.revalidateSandboxIdentity,
-    `inspect or change provider ${JSON.stringify(name)}`,
-  );
-  const exists = options.knownExists ?? providerExistsInGateway(name, runOpenshell);
-  const credentialEnvs = options.credentialEnvs ?? [credentialEnv];
-  const bindingMatches = (metadata) =>
-    options.allowExtendedCredentialKeys
-      ? matchesGatewayCredentialFamilyProviderBinding(metadata, {
-          name,
-          type,
-          credentialKey: credentialEnv,
-        })
-      : matchesGatewayCredentialOnlyProviderBinding(metadata, {
-          name,
-          type,
-          credentialKey: credentialEnv,
-        });
-  if (
-    exists &&
-    options.requireExactBinding &&
-    !options.replaceExisting &&
-    !bindingMatches(readGatewayProviderMetadata(name, runOpenshell))
-  ) {
-    return {
-      ok: false,
-      status: 1,
-      reason: "binding-conflict",
-      message: `Existing provider '${name}' does not match the required '${type}' credential binding.`,
-    };
-  }
-  if (exists && options.replaceExisting) {
-    const { deleteProviderWithRecovery } = require("./sandbox-provider-cleanup");
-    const r = deleteProviderWithRecovery(name, {
-      runOpenshell,
-      allowedSandboxes: options.allowedSandboxes,
-    });
-    if (!r.ok) {
-      const base =
-        compactText(redact(r.stderr)) ||
-        compactText(redact(r.stdout)) ||
-        `Failed to replace provider '${name}'.`;
-      const detail =
-        r.recoveryFailures.length > 0
-          ? ` (detach failures: ${r.recoveryFailures.map((f) => `${f.sandbox}: ${compactText(redact(f.output))}`).join("; ")})`
-          : "";
-      return { ok: false, status: r.status || 1, message: `${base}${detail}` };
-    }
-  }
-  const action = exists && !options.replaceExisting ? "update" : "create";
-  // On the update path, the OpenShell CLI's `--credential KEY` form reads the
-  // value from the host env and aborts when empty. If the caller did not stage
-  // a credential value (rebuild after `channels add` with the original env
-  // unset), drop the flag so `provider update` becomes a no-op merge — the
-  // gateway already holds the secret.
-  const availableCredentialEnvs = credentialEnvs.filter(
-    (envKey) => typeof env[envKey] === "string" && env[envKey].length > 0,
-  );
-  if (
-    action === "create" &&
-    options.allowExtendedCredentialKeys &&
-    !availableCredentialEnvs.includes(credentialEnv)
-  ) {
-    return {
-      ok: false,
-      status: 1,
-      message: `Cannot create provider '${name}' without its canonical credential '${credentialEnv}'.`,
-    };
-  }
-  const submittedCredentialEnvs = action === "create" ? credentialEnvs : availableCredentialEnvs;
-  const includeCredential = submittedCredentialEnvs.length > 0;
-  const args = buildProviderArgs(action, name, type, credentialEnv, baseUrl, {
-    includeCredential,
-    credentialEnvs: submittedCredentialEnvs,
-  });
-  const runOpts = { ignoreError: true, env, stdio: ["ignore", "pipe", "pipe"] };
-  const result = runOpenshell(args, runOpts);
-  if (result.status !== 0) {
-    const output =
-      compactText(redact(`${result.stderr || ""}`)) ||
-      compactText(redact(`${result.stdout || ""}`)) ||
-      `Failed to ${action} provider '${name}'.`;
-    return { ok: false, status: result.status || 1, message: output };
-  }
-  return { ok: true };
-}
-
 function plannedMessagingCredentialKeys(tokenDef) {
   return [
     tokenDef.envKey,
@@ -743,7 +570,7 @@ function assertCredentialFamilyProviderBindings(tokenDefs, runOpenshell, options
  * providers. Pass `options.bestEffort` only from rollback paths that must
  * continue restoring registry state and report residual gateway work instead
  * of terminating the CLI.
- * @param {Array<{name: string, envKey: string, token: string|null, providerType?: string, additionalCredentials?: Array<{envKey: string, token: string|null}>}>} tokenDefs
+ * @param {Array<{name: string, envKey: string, token: string|null, providerType?: string, providerProfilePath?: string, messagingProviderProfile?: import("./messaging-bridge-provider").MessagingBridgeProfile, additionalCredentials?: Array<{envKey: string, token: string|null}>}>} tokenDefs
  * @param {Function} _runOpenshell - Injected runOpenshell from onboard.ts.
  * @param {{replaceExisting?: boolean, bestEffort?: boolean, allowedSandboxes?: readonly string[], requireExactBindings?: boolean, revalidateSandboxIdentity?: (operation: string) => void, gatewayName?: string}} options - Provider upsert and cleanup controls.
  * @returns {string[]} Provider names that were upserted.
@@ -781,6 +608,12 @@ function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
   // channels/<channel>/provider-profile/<agent>.yaml (not a flag inside it); both
   // bracket steps self-gate when no bridge token def is present.
   const messagingBridgeProvider = require("./messaging-bridge-provider");
+  const declaredMessagingProviderProfiles =
+    messagingBridgeProvider.messagingBridgeProfilesFromTokenDefs(tokenDefs);
+  const messagingProviderProfileOptions =
+    declaredMessagingProviderProfiles.length > 0
+      ? { profiles: declaredMessagingProviderProfiles }
+      : {};
   if (tokenDefs.some(({ providerType }) => providerType === MESSAGING_CREDENTIAL_PROVIDER_TYPE)) {
     try {
       ensureMessagingCredentialProviderProfile({
@@ -797,6 +630,7 @@ function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
   messagingBridgeProvider.ensureMessagingBridgeProfiles(tokenDefs, {
     root: ROOT,
     runOpenshell: runMessagingBridgeOpenshell,
+    ...messagingProviderProfileOptions,
   });
   const upserted = [];
   const mutatedProviderNames = [];
@@ -955,6 +789,7 @@ function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
       getCredential,
       env: process.env,
       normalizeCredentialValue,
+      ...messagingProviderProfileOptions,
     });
   } catch (error) {
     throw cleanupCreatedMessagingProvidersAfterRefreshFailure(

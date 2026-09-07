@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../state/registry/persistence", () => ({ load: vi.fn() }));
+vi.mock("../onboard/sandbox-agent/authority", () => ({ resolveSandboxAgent: vi.fn() }));
 vi.mock("../state/registry-entry-view", () => ({ getSandboxEntryInference: vi.fn() }));
 vi.mock("../inference/live", () => ({ getLiveGatewayInference: vi.fn() }));
 vi.mock("../adapters/openshell/provider-adapter-cli", () => ({
@@ -193,6 +194,7 @@ describe("live export observation dependencies", () => {
   });
 
   it("binds tokens to live sandbox and policy revisions without reading credential values", async () => {
+    const ambientNvidiaApiKey = process.env.NVIDIA_API_KEY;
     vi.mocked(loadRegistry).mockReturnValue({ sandboxes: { alpha: entry }, defaultSandbox: null });
     vi.mocked(getSandboxEntryInference).mockReturnValue({
       kind: "configured",
@@ -225,7 +227,7 @@ describe("live export observation dependencies", () => {
       value: { document: "version: 1\nnetwork_policies: {}\n", appliedRevision: 4 },
     });
     await expect(deps.readSourceToken("alpha")).resolves.not.toBe(first);
-    expect(process.env.NVIDIA_API_KEY).toBeUndefined();
+    expect(process.env.NVIDIA_API_KEY).toBe(ambientNvidiaApiKey);
   });
 
   it("rejects effective policy that is older than the live sandbox revision (#10938)", async () => {

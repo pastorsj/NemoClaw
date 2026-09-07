@@ -698,10 +698,10 @@ describe("finalizePreparedRebuildImageMessagingPlan", () => {
       // the preserved-home-channels entry is not a contract.
       expect(
         imagePlan.agentRender.find(
-          (render) => render.renderId === "hermes-preserved-home-channels",
+          (render) => render.renderId === "preserved-environment-1",
         ),
       ).toMatchObject({
-        renderId: "hermes-preserved-home-channels",
+        renderId: "preserved-environment-1",
         lines: ["SLACK_HOME_CHANNEL=C0123", "SLACK_HOME_CHANNEL_THREAD_ID=123.456"],
       });
       expect(result.prepared.contextFingerprint).not.toBe(originalFingerprint);

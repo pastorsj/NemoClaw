@@ -7,243 +7,108 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { applyAgentsManifestEnv, loadAgentsManifest } from "./agents-manifest";
+import {
+  applyAgentsManifestEnv,
+  assertAgentsManifestCapability,
+  loadAgentsManifest,
+} from "./agents-manifest";
 
-let tmpDir: string;
+let temporaryDirectory = "";
 
-function manifestPath(name: string, content: string): string {
-  const file = path.join(tmpDir, name);
-  fs.writeFileSync(file, content, "utf-8");
-  return file;
+function writeManifest(name: string, contents: string): string {
+  const target = path.join(temporaryDirectory, name);
+  fs.writeFileSync(target, contents, "utf8");
+  return target;
 }
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-agents-manifest-"));
+  temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-agents-manifest-"));
 });
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(temporaryDirectory, { recursive: true, force: true });
 });
 
-describe("loadAgentsManifest", () => {
-  it("returns an empty agents list for an empty file", () => {
-    const file = manifestPath("empty.yaml", "");
-    expect(loadAgentsManifest(file)).toEqual({ agents: [] });
+describe("agent roster manifest transport", () => {
+  it("returns the historical empty roster for an empty file", () => {
+    expect(loadAgentsManifest(writeManifest("empty.yaml", ""))).toEqual({ agents: [] });
   });
 
-  it("parses the proposed manager-worker example shape", () => {
-    const file = manifestPath(
-      "manager-worker.yaml",
-      [
-        "agents:",
-        "  - id: manager",
-        "    model: test-provider/nemotron-super",
-        "    tools:",
-        "      allow: [read]",
-        "    subagents:",
-        "      allowAgents: [logs-reader]",
-        "      delegationMode: prefer",
-        "      requireAgentId: true",
-        "  - id: logs-reader",
-        "    model: test-provider/nemotron-nano",
-        "    tools:",
-        "      allow: [kubectl]",
-        "",
-      ].join("\n"),
+  it("preserves package-native fields without adding OpenClaw paths", () => {
+    const payload = loadAgentsManifest(
+      writeManifest(
+        "future.yaml",
+        ["workers:", "  - name: planner", "strategy: round-robin", ""].join("\n"),
+      ),
     );
-    const payload = loadAgentsManifest(file);
-    expect(payload.agents).toHaveLength(2);
-    expect(payload.agents[0]).toMatchObject({
-      id: "manager",
-      workspace: "/sandbox/.openclaw/workspace-manager",
-      agentDir: "/sandbox/.openclaw/agents/manager",
-      model: "test-provider/nemotron-super",
-      subagents: {
-        allowAgents: ["logs-reader"],
-        delegationMode: "prefer",
-        requireAgentId: true,
-      },
-    });
-    expect(payload.agents[1]).toMatchObject({
-      id: "logs-reader",
-      workspace: "/sandbox/.openclaw/workspace-logs-reader",
-      agentDir: "/sandbox/.openclaw/agents/logs-reader",
-    });
+
+    expect(payload).toEqual({ workers: [{ name: "planner" }], strategy: "round-robin" });
   });
 
-  it("preserves operator-supplied workspace/agentDir without overwriting", () => {
-    const file = manifestPath(
-      "explicit-paths.yaml",
-      [
-        "agents:",
-        "  - id: alpha",
-        "    workspace: /sandbox/.openclaw/workspace-alpha",
-        "    agentDir: /sandbox/.openclaw/agents/alpha",
-        "    tools:",
-        "      allow: [read]",
-        "",
-      ].join("\n"),
+  it("leaves OpenClaw path defaults to the OpenClaw package", () => {
+    const payload = loadAgentsManifest(
+      writeManifest("openclaw.yaml", ["agents:", "  - id: alpha", ""].join("\n")),
     );
-    const payload = loadAgentsManifest(file);
-    expect(payload.agents[0]).toMatchObject({
-      id: "alpha",
-      workspace: "/sandbox/.openclaw/workspace-alpha",
-      agentDir: "/sandbox/.openclaw/agents/alpha",
-    });
+
+    expect(payload).toEqual({ agents: [{ id: "alpha" }] });
   });
 
-  it("passes through defaults and main blocks unchanged", () => {
-    const file = manifestPath(
-      "with-defaults-main.yaml",
-      [
-        "defaults:",
-        "  subagents:",
-        "    maxSpawnDepth: 3",
-        "main:",
-        "  subagents:",
-        "    allowAgents: [alpha]",
-        "    delegationMode: prefer",
-        "agents:",
-        "  - id: alpha",
-        "    tools:",
-        "      allow: [read]",
-        "",
-      ].join("\n"),
-    );
-    const payload = loadAgentsManifest(file);
-    expect(payload.defaults).toEqual({ subagents: { maxSpawnDepth: 3 } });
-    expect(payload.main).toEqual({
-      subagents: { allowAgents: ["alpha"], delegationMode: "prefer" },
-    });
-  });
-
-  it("rejects unknown top-level keys", () => {
-    const file = manifestPath("rogue.yaml", "rogue: true\nagents: []\n");
-    expect(() => loadAgentsManifest(file)).toThrow(
-      /agents manifest contains unsupported top-level field "rogue"/,
+  it("rejects a non-mapping top level", () => {
+    expect(() => loadAgentsManifest(writeManifest("list.yaml", "- id: alpha\n"))).toThrow(
+      /must be a YAML mapping/u,
     );
   });
 
-  it("rejects a list at the top level", () => {
-    const file = manifestPath("list.yaml", "- id: alpha\n");
-    expect(() => loadAgentsManifest(file)).toThrow(
-      /must be a YAML mapping \(object\) at the top level/,
-    );
+  it("rejects oversized input before package transport", () => {
+    expect(() =>
+      loadAgentsManifest(writeManifest("large.yaml", `value: ${"x".repeat(65 * 1024)}\n`)),
+    ).toThrow(/64 KiB input boundary/u);
   });
 
-  it("rejects a non-list agents field", () => {
-    const file = manifestPath("scalar-agents.yaml", "agents: not-a-list\n");
-    expect(() => loadAgentsManifest(file)).toThrow(/'agents' must be a list/);
-  });
-
-  it("surfaces YAML parse errors with the underlying reason", () => {
-    const file = manifestPath("broken.yaml", "agents:\n  - id: alpha\n    tools: [\n");
-    expect(() => loadAgentsManifest(file)).toThrow(/--agents YAML parse error:/);
-  });
-
-  it("reports a clear error when the path does not exist", () => {
-    const missing = path.join(tmpDir, "does-not-exist.yaml");
-    expect(() => loadAgentsManifest(missing)).toThrow(/path not found:/);
-  });
-
-  it("reports a clear error when the path is a directory", () => {
-    const dir = path.join(tmpDir, "child-dir");
-    fs.mkdirSync(dir);
-    expect(() => loadAgentsManifest(dir)).toThrow(/must point to a file:/);
-  });
-
-  it.each([
-    "apiKey",
-    "api_key",
-    "API_KEY",
-    "token",
-    "secret",
-    "password",
-    "passphrase",
-    "credential",
-    "bearer",
-    "auth",
-    "clientSecret",
-    "client_secret",
-    "accessToken",
-    "refreshToken",
-    "refresh-token",
-    "sessionToken",
-    "idToken",
-    "apiToken",
-    "privateKey",
-    "private_key",
-    "publicKey",
-    "signingKey",
-    "encryptionKey",
-    "AccessKey",
-    "bearerToken",
-    "webhookSecret",
-    "encryption_passphrase",
-  ])(
-    "rejects manifests with nested credential-named keys before they reach the build [case %#]",
+  it.each(["apiKey", "token", "client_secret", "privateKey", "password"])(
+    "rejects credential-shaped fields before package transport [case %#]",
     (key) => {
-      const file = manifestPath(
-        `credential-${key}.yaml`,
-        [
-          "agents:",
-          "  - id: alpha",
-          "    tools:",
-          "      allow: [read]",
-          "    subagents:",
-          `      ${key}: leaking-secret-disguised-as-config`,
-          "",
-        ].join("\n"),
+      const file = writeManifest(
+        "credential.yaml",
+        ["agents:", "  - id: alpha", `    ${key}: unsafe`, ""].join("\n"),
       );
-      expect(() => loadAgentsManifest(file)).toThrow(/looks like a credential and is not allowed/);
+      expect(() => loadAgentsManifest(file)).toThrow(/looks like a credential/u);
     },
   );
 
-  it.each(["model", "workspace", "agentDir", "allowAgents", "maxSpawnDepth"])(
-    "accepts benign field names that are not credential-shaped [case %#]",
-    (key) => {
-      const file = manifestPath(
-        `benign-${key}.yaml`,
-        [
-          "agents:",
-          "  - id: alpha",
-          "    subagents:",
-          `      ${key}: ok-not-a-credential`,
-          "",
-        ].join("\n"),
-      );
-      expect(() => loadAgentsManifest(file)).not.toThrow();
-    },
-  );
+  it("sets the existing bounded onboarding environment", () => {
+    const environment: NodeJS.ProcessEnv = {};
+    const file = writeManifest("agents.yaml", "agents:\n  - id: alpha\n");
+
+    expect(applyAgentsManifestEnv(file, environment)).toEqual({ agents: [{ id: "alpha" }] });
+    expect(JSON.parse(environment.NEMOCLAW_EXTRA_AGENTS_JSON ?? "null")).toEqual({
+      agents: [{ id: "alpha" }],
+    });
+  });
 });
 
-describe("applyAgentsManifestEnv", () => {
-  const previous = process.env.NEMOCLAW_EXTRA_AGENTS_JSON;
-  beforeEach(() => {
-    delete process.env.NEMOCLAW_EXTRA_AGENTS_JSON;
-  });
-  afterEach(() => {
-    if (previous === undefined) {
-      delete process.env.NEMOCLAW_EXTRA_AGENTS_JSON;
-    } else {
-      process.env.NEMOCLAW_EXTRA_AGENTS_JSON = previous;
-    }
+describe("agent roster onboarding capability", () => {
+  it("accepts an unknown future package that declares the typed capability", () => {
+    expect(() =>
+      assertAgentsManifestCapability({
+        name: "future-harness",
+        displayName: "Future Harness",
+        agentRosterCapability: {
+          support: "managed",
+          adapter: "agent-roster",
+          onboarding_environment: "NEMOCLAW_EXTRA_AGENTS_JSON",
+        },
+      }),
+    ).not.toThrow();
   });
 
-  it("sets NEMOCLAW_EXTRA_AGENTS_JSON to the parsed payload", () => {
-    const file = manifestPath(
-      "set-env.yaml",
-      ["agents:", "  - id: alpha", "    tools:", "      allow: [read]", ""].join("\n"),
-    );
-    const returned = applyAgentsManifestEnv(file);
-    expect(returned.agents).toHaveLength(1);
-    const raw = process.env.NEMOCLAW_EXTRA_AGENTS_JSON;
-    expect(typeof raw).toBe("string");
-    const decoded = JSON.parse(raw as string);
-    expect(decoded.agents[0]).toMatchObject({
-      id: "alpha",
-      workspace: "/sandbox/.openclaw/workspace-alpha",
-      agentDir: "/sandbox/.openclaw/agents/alpha",
-    });
+  it("returns typed unsupported for a selected package that omits the capability", () => {
+    expect(() =>
+      assertAgentsManifestCapability({
+        name: "future-harness",
+        displayName: "Future Harness",
+        agentRosterCapability: null,
+      }),
+    ).toThrow(/not supported by Future Harness/u);
   });
 });

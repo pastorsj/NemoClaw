@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
@@ -271,9 +272,11 @@ function packageHandoff(): PackageManagedWorkloadRebuildHandoff {
 function installFuturePackageResolver(): () => void {
   const previous = managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent;
   managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = vi.fn((row) => {
-    if (row.harnessPackage?.contentDigest !== FUTURE_PACKAGE.contentDigest) {
-      throw new Error("future package authority drifted");
-    }
+    assert.equal(
+      row.harnessPackage?.contentDigest,
+      FUTURE_PACKAGE.contentDigest,
+      "future package authority drifted",
+    );
     return {
       recordedAgent: FUTURE_PACKAGE.id,
       effectiveAgentId: FUTURE_PACKAGE.id,
@@ -902,9 +905,8 @@ describe("managed workload rebuild transaction", () => {
         defaultSandbox: oldEntry.name,
       };
       const swapped = swapSandboxRebuildAuthorityInRegistry(currentRegistry, expected, replacement);
-      if (swapped.result.status === "committed") {
-        currentEntry = structuredClone(swapped.result.entry);
-      }
+      assert.equal(swapped.result.status, "committed");
+      currentEntry = structuredClone(swapped.result.entry);
       return swapped.result;
     };
 

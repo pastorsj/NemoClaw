@@ -4,6 +4,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  buildHostedFabricCommandEnvironment,
+  providerSmokeSelected,
+  type HostedFabricCommandEnvironment,
+  type ProviderSmokeSelection,
+} from "../../../tools/e2e/fabric-target.mts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { resultText } from "../fixtures/clients/command.ts";
@@ -44,64 +50,8 @@ const CREDENTIAL_CLASSIFICATION_PATTERN =
 const TRANSPORT_CLASSIFICATION_PATTERN =
   /unreachable|timeout|connect|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ENOTFOUND|EAI_AGAIN|No route to host|transport|network|endpoint|dns/i;
 
-export type ProviderSmokeSelection = "anthropic" | "fabric" | "openai";
-
-const DCODE_BASE_IMAGE_OVERRIDE = "NEMOCLAW_LANGCHAIN_DEEPAGENTS_CODE_SANDBOX_BASE_IMAGE_REF";
-
-export interface HostedFabricCommandEnvironment {
-  readonly env: NodeJS.ProcessEnv;
-  readonly gatewayName: string;
-}
-
-export function providerSmokeSelected(
-  provider: ProviderSmokeSelection,
-  requestedValue: string | undefined = process.env.NEMOCLAW_INFERENCE_ROUTING_PROVIDER_SMOKE,
-): boolean {
-  // The former shell script auto-ran these smokes when provider secrets were
-  // present. This live migration requires an explicit opt-in so PR-safe jobs
-  // cannot spend third-party quota accidentally; any future secret-backed lane
-  // must set NEMOCLAW_INFERENCE_ROUTING_PROVIDER_SMOKE=all or a provider name.
-  const requested = requestedValue?.trim().toLowerCase();
-  return requested === "1" || requested === "true" || requested === "all" || requested === provider;
-}
-
-export function buildHostedFabricCommandEnvironment(
-  base: NodeJS.ProcessEnv = process.env,
-): HostedFabricCommandEnvironment {
-  if (base.NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD?.trim() !== "1") {
-    throw new Error(
-      "Hosted Fabric source qualification requires NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD=1",
-    );
-  }
-  if (base[DCODE_BASE_IMAGE_OVERRIDE]?.trim()) {
-    throw new Error(
-      `Hosted Fabric source qualification requires ${DCODE_BASE_IMAGE_OVERRIDE} to be unset`,
-    );
-  }
-  const gatewayPort = base.NEMOCLAW_GATEWAY_PORT?.trim() ?? "";
-  const parsedGatewayPort = Number(gatewayPort);
-  if (
-    !/^[0-9]+$/u.test(gatewayPort) ||
-    !Number.isSafeInteger(parsedGatewayPort) ||
-    parsedGatewayPort < 1 ||
-    parsedGatewayPort > 65_535 ||
-    parsedGatewayPort === 8080
-  ) {
-    throw new Error(
-      "Hosted Fabric source qualification requires an isolated non-default NEMOCLAW_GATEWAY_PORT",
-    );
-  }
-  const gatewayName = `nemoclaw-${gatewayPort}`;
-  return {
-    env: {
-      ...buildAvailabilityProbeEnv(base),
-      NEMOCLAW_GATEWAY_PORT: gatewayPort,
-      NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1",
-      OPENSHELL_GATEWAY: gatewayName,
-    },
-    gatewayName,
-  };
-}
+export { buildHostedFabricCommandEnvironment, providerSmokeSelected };
+export type { HostedFabricCommandEnvironment, ProviderSmokeSelection };
 
 type SkipFn = (note?: string) => void;
 
@@ -114,48 +64,6 @@ function redactedResultText(
   result: Pick<RawRunResult, "redactedStdout" | "redactedStderr">,
 ): string {
   return [result.redactedStdout, result.redactedStderr].filter(Boolean).join("\n");
-}
-
-export function parseJsonObject(source: string, label: string): Record<string, unknown> {
-  let value: unknown;
-  try {
-    value = JSON.parse(source);
-  } catch (error) {
-    throw new Error(
-      `${label} did not return JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} did not return one JSON object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-export function expectResultOmitsSecret(
-  result: { readonly stderr: string; readonly stdout: string },
-  secret: string,
-  label: string,
-): void {
-  expect(
-    result.stdout.includes(secret) || result.stderr.includes(secret),
-    `${label} retained the hosted inference credential`,
-  ).toBe(false);
-}
-
-export function requireSuccessfulCleanupCommand(
-  result: Pick<RawRunResult, "exitCode" | "redactedStderr" | "redactedStdout" | "timedOut">,
-  label: string,
-): void {
-  if (result.exitCode !== 0 || result.timedOut) {
-    throw new Error(`${label} failed: ${redactedResultText(result)}`);
-  }
-}
-
-export function requireCleanupTargetAbsent(
-  result: { readonly exitCode: number | null },
-  label: string,
-): void {
-  if (result.exitCode === 0) throw new Error(`${label} remained after cleanup`);
 }
 
 function hasRawNodeStackTrace(text: string): boolean {

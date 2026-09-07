@@ -26,8 +26,19 @@ type RebuildOnboardModule = {
   ) => Promise<CheckpointGatewayAuthority>;
 };
 
+type BuildInstalledStartupPlan =
+  typeof import("../../onboard/managed-startup/agent-environment").buildInstalledStartupPlan;
+
 function loadOnboardModule(): RebuildOnboardModule {
   return require("../../onboard") as RebuildOnboardModule;
+}
+
+function loadBuildInstalledStartupPlan(): BuildInstalledStartupPlan {
+  return (
+    require("../../onboard/managed-startup/agent-environment") as {
+      buildInstalledStartupPlan: BuildInstalledStartupPlan;
+    }
+  ).buildInstalledStartupPlan;
 }
 
 /**
@@ -37,6 +48,11 @@ function loadOnboardModule(): RebuildOnboardModule {
  * the onboarding APIs are side-effect-free named imports.
  */
 export const rebuildOnboardDependencies = {
+  buildInstalledStartupPlan(
+    ...args: Parameters<BuildInstalledStartupPlan>
+  ): ReturnType<BuildInstalledStartupPlan> {
+    return loadBuildInstalledStartupPlan()(...args);
+  },
   ensureValidatedWebSearchCredential(
     config: NonNullable<RebuildDurableConfig["webSearchConfig"]>,
     nonInteractive?: boolean,

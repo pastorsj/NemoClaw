@@ -470,10 +470,12 @@ describe("execSandbox policy-denial hint wiring (#5978)", () => {
 
 describe("execSandbox scope-upgrade hint wiring (#9744)", () => {
   const cleanupSkipped: SandboxExecCleanupDeps = {
-    getSandbox: () => null,
-    inspectMutableConfigPerms: vi.fn(() => {
-      throw new Error("cleanup should be skipped for an unregistered sandbox");
-    }) as unknown as SandboxExecCleanupDeps["inspectMutableConfigPerms"],
+    getSandbox: () => ({ agent: "openclaw" }),
+    inspectMutableConfigPerms: vi.fn(() => ({
+      applies: false as const,
+      skipReason: "agent" as const,
+      reason: "no package-defined mutable configuration",
+    })),
     repairMutableConfigPerms: vi.fn(() => {
       throw new Error("cleanup should be skipped for an unregistered sandbox");
     }) as unknown as SandboxExecCleanupDeps["repairMutableConfigPerms"],
@@ -489,7 +491,7 @@ describe("execSandbox scope-upgrade hint wiring (#9744)", () => {
     ],
   });
 
-  const runOpenClawExec = async (status: number, devicesJson: string) => {
+  const runOpenClawExec = async (status: number, devicesJson: string, receiptBacked = false) => {
     const stderr: string[] = [];
     const probePendingDevices = vi.fn(() => devicesJson);
     let exitCode = Number.NaN;
@@ -511,7 +513,20 @@ describe("execSandbox scope-upgrade hint wiring (#9744)", () => {
             release: () => {},
           }),
         },
-        cleanupDeps: cleanupSkipped,
+        cleanupDeps: receiptBacked
+          ? {
+              ...cleanupSkipped,
+              getSandbox: () => ({
+                agent: "openclaw",
+                harnessPackage: {
+                  kind: "agent-runtime",
+                  id: "openclaw",
+                  packageVersion: "1.0.0",
+                  contentDigest: "a".repeat(64),
+                },
+              }),
+            }
+          : cleanupSkipped,
         exit,
         policyHint: {
           now: () => 0,
@@ -562,6 +577,17 @@ describe("execSandbox scope-upgrade hint wiring (#9744)", () => {
   it("stays silent when the failure leaves no pending request", async () => {
     const { exitCode, stderr } = await runOpenClawExec(1, JSON.stringify({ pending: [] }));
     expect(exitCode).toBe(1);
+    expect(stderr).toBe("");
+  });
+
+  it("does not run the legacy device probe for a receipt-backed command", async () => {
+    const { exitCode, probePendingDevices, stderr } = await runOpenClawExec(
+      1,
+      UNRELATED_ADMIN_PENDING,
+      true,
+    );
+    expect(exitCode).toBe(1);
+    expect(probePendingDevices).not.toHaveBeenCalled();
     expect(stderr).toBe("");
   });
 });

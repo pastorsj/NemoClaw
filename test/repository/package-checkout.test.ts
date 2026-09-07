@@ -16,6 +16,7 @@ import {
   readInstalledHarnessDigest,
   runPackageCheckoutRehearsal,
 } from "../../scripts/packages/checkout.mts";
+import { verifyInstalledHarnessContract } from "../../scripts/packages/verify-contract.mts";
 import {
   ensureHarnessPackageStore,
   harnessPackageStorePaths,
@@ -61,6 +62,74 @@ function createCheckoutToolDirectory(parent: string, includeUv: boolean): string
   }
   return toolDirectory;
 }
+
+function createInstalledHarnessContract(packageRoot: string): string {
+  const contractRoot = path.join(
+    packageRoot,
+    "node_modules",
+    "@nvidia",
+    "nemoclaw-harness-contract",
+  );
+  fs.mkdirSync(path.join(contractRoot, "dist"), { recursive: true });
+  const bin = {
+    "nemoclaw-build-adapters": "./dist/build-adapters.mjs",
+    "nemoclaw-build-package": "./dist/build-package.mjs",
+    "nemoclaw-materialize-runtime": "./dist/materialize-runtime.mjs",
+    "nemoclaw-validate-package": "./dist/validate-package.mjs",
+  };
+  fs.writeFileSync(
+    path.join(contractRoot, "package.json"),
+    `${JSON.stringify({ name: "@nvidia/nemoclaw-harness-contract", bin })}\n`,
+  );
+  for (const target of Object.values(bin)) {
+    fs.writeFileSync(path.join(contractRoot, target), "export {};\n", { mode: 0o755 });
+  }
+  return contractRoot;
+}
+
+describe("installed harness contract verification", () => {
+  it("accepts a self-contained package with every authoring binary", () => {
+    const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-contract-install-"));
+    try {
+      createInstalledHarnessContract(packageRoot);
+      expect(() => verifyInstalledHarnessContract(packageRoot)).not.toThrow();
+    } finally {
+      fs.rmSync(packageRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "rejects a monorepo link that would break after extraction",
+    () => {
+      const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-contract-link-"));
+      const externalContract = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-contract-source-"));
+      try {
+        const contractRoot = createInstalledHarnessContract(packageRoot);
+        fs.rmSync(contractRoot, { recursive: true, force: true });
+        fs.symlinkSync(externalContract, contractRoot, "dir");
+        expect(() => verifyInstalledHarnessContract(packageRoot)).toThrow(
+          /regular installed directory/u,
+        );
+      } finally {
+        fs.rmSync(packageRoot, { recursive: true, force: true });
+        fs.rmSync(externalContract, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("rejects an installed contract missing a required binary", () => {
+    const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-contract-bin-"));
+    try {
+      const contractRoot = createInstalledHarnessContract(packageRoot);
+      fs.rmSync(path.join(contractRoot, "dist", "validate-package.mjs"));
+      expect(() => verifyInstalledHarnessContract(packageRoot)).toThrow(
+        /nemoclaw-validate-package.*missing/u,
+      );
+    } finally {
+      fs.rmSync(packageRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("package checkout code execution acknowledgement", () => {
   it("refuses before command execution unless the caller acknowledges trusted package code", () => {
@@ -242,6 +311,7 @@ describe("package checkout cleanup", () => {
     );
     fs.writeFileSync(path.join(candidateRoot, "package-lock.json"), "{}\n");
     fs.writeFileSync(path.join(candidateRoot, "manifest.yaml"), "name: example\n");
+    const commandPurposes: string[] = [];
     try {
       runPackageCheckoutRehearsal(
         {
@@ -254,21 +324,25 @@ describe("package checkout cleanup", () => {
         },
         {
           runCommand: (command) => {
-            if (command.purpose === "pack public harness contract") {
+            commandPurposes.push(command.purpose);
+            const packsContract = command.purpose === "pack public harness contract";
+            packsContract &&
               expect(command.cwd).toBe(path.resolve(import.meta.dirname, "../../harness-contract"));
+            packsContract &&
               expect(command.args).toEqual([
                 "pack",
                 "--json",
                 "--pack-destination",
                 expect.any(String),
               ]);
-              return { stdout: '[{"filename":"nvidia-nemoclaw-harness-contract-0.1.0.tgz"}]' };
-            }
             const workspaceRoot = path.resolve(command.cwd, "..", "..");
-            expect(command.cwd).toBe(path.join(workspaceRoot, "packages", "nemoclaw-example"));
-            expect(fs.existsSync(path.join(workspaceRoot, "harness-contract"))).toBe(false);
-            expect(fs.existsSync(path.join(workspaceRoot, "src", "lib"))).toBe(false);
-            if (command.purpose === "install candidate package dependencies") {
+            packsContract ||
+              expect(command.cwd).toBe(path.join(workspaceRoot, "packages", "nemoclaw-example"));
+            packsContract ||
+              expect(fs.existsSync(path.join(workspaceRoot, "harness-contract"))).toBe(false);
+            packsContract ||
+              expect(fs.existsSync(path.join(workspaceRoot, "src", "lib"))).toBe(false);
+            command.purpose === "install candidate package dependencies" &&
               expect(command.args).toEqual([
                 "install",
                 "--ignore-scripts",
@@ -277,11 +351,29 @@ describe("package checkout cleanup", () => {
                 "--no-save",
                 expect.stringMatching(/\.tgz$/u),
               ]);
-            }
-            return { stdout: "" };
+            command.purpose === "verify installed harness contract" &&
+              expect(command.executable).toBe("node");
+            command.purpose === "verify installed harness contract" &&
+              expect(command.args).toEqual([
+                "--experimental-strip-types",
+                "--no-warnings",
+                expect.stringMatching(/verify-contract\.mts$/u),
+                command.cwd,
+              ]);
+            return {
+              stdout: packsContract
+                ? '[{"filename":"nvidia-nemoclaw-harness-contract-0.1.0.tgz"}]'
+                : "",
+            };
           },
         },
       );
+      expect(commandPurposes).toEqual([
+        "pack public harness contract",
+        "install candidate package dependencies",
+        "verify installed harness contract",
+        "run candidate package-only tests",
+      ]);
     } finally {
       fs.rmSync(parent, { recursive: true, force: true });
     }
@@ -834,23 +926,25 @@ describe("package checkout installed digest", () => {
       expect(buildCommand).toMatchObject({
         args: ["run", "build:package"],
       });
-      if (!buildCommand) throw new Error("Expected the candidate package build command");
-      expect(path.basename(buildCommand.cwd)).toBe("candidate-package");
-      const expectedPackageArtifact = path.join(path.dirname(buildCommand.cwd), "dist", "example");
+      expect(buildCommand, "Expected the candidate package build command").toBeDefined();
+      expect(path.basename(buildCommand!.cwd)).toBe("candidate-package");
+      const expectedPackageArtifact = path.join(path.dirname(buildCommand!.cwd), "dist", "example");
       const integrationTestCommand = commands.find(
         ({ purpose }) => purpose === "run candidate NemoClaw integration tests",
       );
-      if (!integrationTestCommand)
-        throw new Error("Expected the candidate integration test command");
-      expect(path.basename(integrationTestCommand.cwd)).toBe("nemoclaw-example");
-      expect(path.basename(path.dirname(integrationTestCommand.cwd))).toBe("packages");
+      expect(
+        integrationTestCommand,
+        "Expected the candidate integration test command",
+      ).toBeDefined();
+      expect(path.basename(integrationTestCommand!.cwd)).toBe("nemoclaw-example");
+      expect(path.basename(path.dirname(integrationTestCommand!.cwd))).toBe("packages");
       const installCommand = commands.find(
         ({ purpose }) => purpose === "install candidate harness",
       );
-      if (!installCommand) throw new Error("Expected the candidate harness install command");
-      const cliPath = installCommand.args[0];
+      expect(installCommand, "Expected the candidate harness install command").toBeDefined();
+      const cliPath = installCommand!.args[0];
       expect(cliPath.endsWith(path.join("bin", "nemoclaw.js"))).toBe(true);
-      expect(installCommand?.args).toEqual([
+      expect(installCommand!.args).toEqual([
         cliPath,
         "harness",
         "install",
@@ -859,7 +953,7 @@ describe("package checkout installed digest", () => {
         expectedPackageArtifact,
         "--yes-i-trust-local-package",
       ]);
-      expect(installCommand.args.join(" ")).not.toContain(
+      expect(installCommand!.args.join(" ")).not.toContain(
         `${path.sep}packages${path.sep}nemoclaw-example`,
       );
       expect(fs.readdirSync(parent).filter((entry) => entry.startsWith("nc-"))).toEqual([]);

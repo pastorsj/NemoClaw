@@ -4,7 +4,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 
 import type { HarnessPackageIdentity } from "../../../agent-runtime/package/identity";
-import { createSession, type Session } from "../../../state/onboard-session";
+import { createSession } from "../../../state/onboard-session";
 import type { SandboxEntry } from "../../../state/registry";
 import {
   beginSandboxRecreateTransaction,
@@ -39,24 +39,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("rejects package authority drift at the handler journal-open mutation edge", async () => {
+it("rejects package authority drift before the journal-open mutation", async () => {
   const session = createSession({ sandboxName: "saved", agent: "openclaw" });
   const journal = bindJournaledRecreate(session);
-  let journalOpening = false;
-  const updateSession = vi.fn((mutator: (value: Session) => Session | void) => {
-    const current = journalOpening ? { ...session, harnessPackage: DRIFTED_PACKAGE } : session;
-    return mutator(current) ?? current;
-  });
   const createSandbox = vi.fn(journal.completeCreate);
   const { deps, calls } = createDeps(
     {
       getSandboxReuseState: () => "not_ready",
       getSandboxRecreateObservation: () => {
-        journalOpening = true;
+        // Change authority after the compare-and-swap predicate captured its
+        // opening identity but before that write builds the next checkpoint.
+        session.harnessPackage = DRIFTED_PACKAGE;
         return journal.observe();
       },
       getSandboxRegistryEntry: () => SOURCE_ENTRY,
-      updateSession,
       createSandbox,
     },
     session,
@@ -68,7 +64,7 @@ it("rejects package authority drift at the handler journal-open mutation edge", 
       resume: true,
       sandboxName: "saved",
     }),
-  ).rejects.toThrow("owning Session authority changed");
+  ).rejects.toThrow(/package authority/u);
 
   expect(createSandbox).not.toHaveBeenCalled();
   expect(calls.removeSandbox).not.toHaveBeenCalled();

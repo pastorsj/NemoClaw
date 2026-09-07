@@ -17,7 +17,7 @@ describe("Pi package discovery", () => {
     expect(source).toMatchObject({
       id: "pi",
       displayName: "Pi",
-      manifestPath: "packages/nemoclaw-pi/manifest.yaml",
+      manifestPath: "manifest.yaml",
       packageVersion: "0.1.0",
     });
   });

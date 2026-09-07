@@ -4,10 +4,10 @@
 import { describe, expect, it } from "vitest";
 import {
   configureDcodeSession,
+  createLegacyDcodeRebuildHarness,
   makeDcodeSandboxEntry,
 } from "../../../../test/helpers/rebuild-dcode-flow-helpers";
 import {
-  createRebuildFlowHarness,
   installRebuildFlowTestHooks,
   snapshotEnv,
 } from "../../../../test/helpers/rebuild-flow-generic-harness";
@@ -66,8 +66,7 @@ describe("rebuildSandbox DCode flow: base-image trust lease", () => {
   installRebuildFlowTestHooks({ acceptThirdPartySoftware: true });
 
   it("keeps the current base-image trust lease active through replacement preparation (#6195)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
     });
     configureDcodeSession(harness);
@@ -102,8 +101,7 @@ describe("rebuildSandbox DCode flow: base-image trust lease", () => {
   });
 
   it("uses the refreshed published base without recompiling native libraries (#8120)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
     });
     configureDcodeSession(harness);
@@ -155,8 +153,7 @@ describe("rebuildSandbox DCode flow: base-image trust lease", () => {
     delete process.env[overrideEnvName];
     delete process.env.NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH;
     const resolutionMetadata = publishedOverrideResolutionMetadata;
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: {
         ...makeDcodeSandboxEntry(),
         imageTag: "nemoclaw-langchain-deepagents-code:recorded",
@@ -206,8 +203,7 @@ describe("rebuildSandbox DCode flow: base-image trust lease", () => {
     const restoreEnv = snapshotEnv([overrideEnvName, "NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH"]);
     delete process.env[overrideEnvName];
     delete process.env.NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH;
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: {
         ...makeDcodeSandboxEntry(),
         imageTag: "nemoclaw-langchain-deepagents-code:recorded",
@@ -248,8 +244,7 @@ describe("rebuildSandbox DCode flow: base-image trust lease", () => {
     const restoreEnv = snapshotEnv([overrideEnvName, "NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH"]);
     delete process.env[overrideEnvName];
     delete process.env.NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH;
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: {
         ...makeDcodeSandboxEntry(),
         imageTag: "nemoclaw-langchain-deepagents-code:recorded",
@@ -280,8 +275,7 @@ describe("rebuildSandbox DCode flow: base-image trust lease", () => {
     delete process.env[overrideEnvName];
     process.env.NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH = "true";
     const refreshedMetadata = trustedRemoteResolutionMetadata;
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: {
         ...makeDcodeSandboxEntry(),
         imageTag: "nemoclaw-langchain-deepagents-code:recorded",
@@ -320,8 +314,7 @@ describe("rebuildSandbox DCode flow: base-image trust lease", () => {
   });
 
   it("forces a trusted local build when refresh returns a mutable reference (#8120)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
     });
     configureDcodeSession(harness);
@@ -377,8 +370,7 @@ describe("rebuildSandbox DCode flow: base-image trust lease", () => {
   it("restores the published base-image trust lease when replacement preparation throws (#8120)", async () => {
     const restoreEnv = snapshotEnv([overrideEnvName]);
     process.env[overrideEnvName] = "caller-selected-base:current";
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
     });
     configureDcodeSession(harness);
@@ -424,8 +416,7 @@ describe("rebuildSandbox DCode flow: base-image trust lease", () => {
   it("restores the base-image trust lease when replacement preparation throws (#6195)", async () => {
     const restoreEnv = snapshotEnv([overrideEnvName]);
     process.env[overrideEnvName] = "caller-selected-base:current";
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
     });
     configureDcodeSession(harness);
@@ -461,8 +452,7 @@ describe("rebuildSandbox DCode flow: base-image trust lease", () => {
   });
 
   it("rejects base-image resolution metadata for a different local image (#9386)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
     });
     configureDcodeSession(harness);

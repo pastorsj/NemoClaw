@@ -160,6 +160,7 @@ describe("rebuildSandbox flow: lifecycle", () => {
     ].join("\n");
     const harness = createRebuildFlowHarness({
       applyPreset: () => true,
+      receiptPostRestoreMutableConfig: "repair",
       sandboxEntry: {},
       mcpPreparation: {
         entries: [mcpEntry],
@@ -185,7 +186,11 @@ describe("rebuildSandbox flow: lifecycle", () => {
     expect(harness.backupSandboxStateSpy).toHaveBeenCalledOnce();
     expect(harness.backupSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
-      expect.objectContaining({ captureStateFile: expect.any(Function) }),
+      expect.objectContaining({
+        agentDefinition: expect.objectContaining({ name: "openclaw" }),
+        harnessPackage: expect.objectContaining({ id: "openclaw" }),
+        validateBeforePublish: expect.any(Function),
+      }),
     );
     expect(harness.prepareMcpBridgesForRebuildSpy).toHaveBeenCalledWith(
       "alpha",
@@ -264,16 +269,8 @@ describe("rebuildSandbox flow: lifecycle", () => {
     expect(harness.registryUpdateSpy).toHaveBeenCalledWith("alpha", {
       agentVersion: "0.2.0",
     });
-    expect(harness.executeSandboxExecCommandSpy).toHaveBeenCalledWith(
-      "alpha",
-      "openclaw doctor --fix",
-      300_000,
-      { allowLocalDockerFallback: false },
-    );
-    expect(harness.establishRestoredSandboxGatewayPairingSpy).toHaveBeenCalledWith("alpha");
-    expect(harness.restoreMcpBridgesAfterRebuildSpy.mock.invocationCallOrder[0]).toBeLessThan(
-      harness.establishRestoredSandboxGatewayPairingSpy.mock.invocationCallOrder[0],
-    );
+    expect(harness.executeSandboxExecCommandSpy).not.toHaveBeenCalled();
+    expect(harness.establishRestoredSandboxGatewayPairingSpy).not.toHaveBeenCalled();
     expect(harness.retireRemovedImmutabilityStateRecordSpy).toHaveBeenCalledWith(
       "alpha",
       "mutable-rebuild",
@@ -292,6 +289,7 @@ describe("rebuildSandbox flow: lifecycle", () => {
 
   it("retains removed immutability state when mutable config verification fails", async () => {
     const harness = createRebuildFlowHarness({
+      receiptPostRestoreMutableConfig: "repair",
       sandboxEntry: {},
       repairMutableConfigPerms: () => ({
         applied: true,
@@ -306,7 +304,7 @@ describe("rebuildSandbox flow: lifecycle", () => {
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow(/state was retained.*mutable config posture was not verified/u);
+    ).rejects.toThrow("OpenClaw mutable config repair failed during rebuild");
 
     expect(harness.retireRemovedImmutabilityStateRecordSpy).not.toHaveBeenCalled();
   });
@@ -352,7 +350,7 @@ describe("rebuildSandbox flow: lifecycle", () => {
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow(/State restore remained incomplete/u);
+    ).rejects.toThrow("Pi post-restore verification failed for 'alpha'");
 
     expect(harness.retireRemovedImmutabilityStateRecordSpy).not.toHaveBeenCalled();
   });

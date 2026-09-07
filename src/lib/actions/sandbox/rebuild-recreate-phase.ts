@@ -58,6 +58,7 @@ export interface RebuildRecreatePhaseInput {
   hasHermesToolGateways: boolean;
   policySourcePath?: string;
   credentialEnv: string | null;
+  providerAuthMethod?: string | null;
   baseImagePreflight: RebuildAgentBaseImagePreflight;
   recoveryRecreate: boolean;
   preparedBackupRecovery?: boolean;
@@ -101,6 +102,7 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
     hasHermesToolGateways: hasRebuildHermesToolGateways,
     policySourcePath: rebuildPolicySourcePath,
     credentialEnv: rebuildCredentialEnv,
+    providerAuthMethod: rebuildProviderAuthMethod,
     baseImagePreflight: rebuildBaseImagePreflight,
     recoveryRecreate,
     preparedBackupRecovery = false,
@@ -195,6 +197,9 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
         mode: "non-interactive",
         harnessPackage: recreateOptions.harnessPackage,
         harnessPackageMigration: recreateOptions.harnessPackageMigration,
+        providerAuthMethod: recreateOptions.harnessPackage
+          ? (rebuildProviderAuthMethod ?? null)
+          : null,
         hermesAuthMethod: rebuildDurableConfig.hermesAuthMethod,
         webSearchConfig: rebuildDurableConfig.webSearchConfig,
         toolDisclosure: rebuildDurableConfig.toolDisclosure,
@@ -312,9 +317,7 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
       ...(preparedBackupRecovery ? { allowRemovedImmutabilityStateRecord: true } : {}),
       rebuildGatewayAuthority,
       rebuildPolicySourcePath,
-      ...(rebuildsHermesSandbox && backupManifest?.preservedEnv
-        ? { rebuildPreservedEnv: backupManifest.preservedEnv }
-        : {}),
+      ...(backupManifest?.preservedEnv ? { rebuildPreservedEnv: backupManifest.preservedEnv } : {}),
       recreateJournalTargetIntentFingerprint: recreateJournal.targetIntentFingerprint,
     });
     const returnedExitCode = normalizeProcessExitCode(process.exitCode);

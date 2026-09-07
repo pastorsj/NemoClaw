@@ -99,6 +99,61 @@ describe("host gateway registry index", () => {
     }
   });
 
+  it("migrates an older receipt-backed secondary port by authority shape", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-index-secondary-"));
+    try {
+      const root = path.join(home, ".nemoclaw", "gateways", "9123");
+      fs.mkdirSync(root, { recursive: true });
+      fs.writeFileSync(
+        path.join(root, "sandboxes.json"),
+        JSON.stringify({
+          defaultSandbox: "future-box",
+          sandboxes: {
+            "future-box": {
+              name: "future-box",
+              gatewayName: "nemoclaw-9123",
+              gatewayPort: 9123,
+              harnessPackage: { kind: "agent-runtime", id: "future-runtime" },
+              hermesApiPort: 9310,
+            },
+          },
+        }),
+      );
+
+      const [entry] = listHostGatewayRegistryEntries(home);
+      expect(entry.entry.secondaryForwardPort).toBe(9310);
+      expect(entry.entry.hermesApiPort).toBe(9310);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects malformed neutral secondary ports instead of ignoring collisions", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-index-secondary-bad-"));
+    try {
+      const root = path.join(home, ".nemoclaw", "gateways", "9123");
+      fs.mkdirSync(root, { recursive: true });
+      fs.writeFileSync(
+        path.join(root, "sandboxes.json"),
+        JSON.stringify({
+          defaultSandbox: "future-box",
+          sandboxes: {
+            "future-box": {
+              name: "future-box",
+              gatewayName: "nemoclaw-9123",
+              gatewayPort: 9123,
+              secondaryForwardPort: "9310",
+            },
+          },
+        }),
+      );
+
+      expect(() => listHostGatewayRegistryEntries(home)).toThrow(/invalid secondaryForwardPort/u);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("rejects sandbox names that could escape a gateway-owned snapshot directory", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-index-name-"));
     try {

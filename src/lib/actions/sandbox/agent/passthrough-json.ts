@@ -3,16 +3,21 @@
 
 import { isStdinTty } from "../../../core/stdin";
 import {
-  openClawAgentIncompleteTurnSignal,
-  type OpenClawIncompleteTurnSignal,
-  openClawAgentJsonProvenanceLines,
-} from "../../../openclaw/agent-json-provenance";
+  structuredTurnIncompleteSignal,
+  type StructuredTurnIncompleteSignal,
+  structuredTurnProvenanceLines,
+} from "./structured-turn-envelope";
 import {
   buildOpenshellExecArgs,
   computeExitCode,
+  wrapExecCommandWithRuntimeEnv,
   wrapOpenClawAgentCommandWithRuntimeEnv,
 } from "../exec";
 import { getKnownSandboxTargetGatewayName } from "../gateway-target";
+import {
+  declarationAuthorizesStructuredTurnEnvelope,
+  type StructuredTurnEnvelopeDeclaration,
+} from "./command-plan";
 import {
   type AgentDispatchRunner,
   agentDispatchDeadlineSeconds,
@@ -21,6 +26,8 @@ import {
   SILENT_AGENT_DISPATCH_EXIT_CODE,
 } from "./passthrough-dispatch";
 import {
+  writeDeclaredAgentTurnIncompleteFailure,
+  writeDeclaredAgentTurnTimeoutFailure,
   writeIncompleteAgentTurnFailure,
   writeSilentAgentDispatchFailure,
   writeTimedOutAgentTurnFailure,
@@ -40,17 +47,19 @@ export type AgentJsonPassthroughDeps = {
   getGatewayName?: (sandboxName: string) => string | null;
   stdinIsTty?: () => boolean;
   provenanceLines?: (raw: string) => string[];
-  incompleteTurnSignal?: (raw: string) => OpenClawIncompleteTurnSignal | null;
+  incompleteTurnSignal?: (raw: string) => StructuredTurnIncompleteSignal | null;
   runDispatch?: AgentDispatchRunner;
   timeoutSeconds?: number;
+  wrapCommand?: (command: readonly string[]) => string[];
+  parserFailureLine?: string;
+  legacyOpenClawDiagnostics?: boolean;
 };
 
 export function defaultGetOpenshellBinary(): string {
   // Lazy require keeps this module unit-testable under Vitest's TS loader; the
   // OpenShell runtime imports runner/platform modules that only exist in built
   // CLI layouts.
-  const runtime =
-    require("../../../adapters/openshell/runtime") as typeof import("../../../adapters/openshell/runtime");
+  const runtime = require("../agents/openshell") as typeof import("../agents/openshell");
   return runtime.getOpenshellBinary();
 }
 
@@ -63,7 +72,7 @@ function writeProvenanceBlock(
   proc.stderr.write(`${stderr && !stderr.endsWith("\n") ? "\n" : ""}${lines.join("\n")}\n`);
 }
 
-export async function runAgentJsonPassthrough(
+async function runStructuredJsonPassthrough(
   sandboxName: string,
   command: readonly string[],
   proc: AgentJsonPassthroughProcess = process,
@@ -74,8 +83,8 @@ export async function runAgentJsonPassthrough(
     binary,
     buildOpenshellExecArgs(
       sandboxName,
-      wrapOpenClawAgentCommandWithRuntimeEnv(command),
-      { tty: false, timeoutSeconds: deps.timeoutSeconds ?? agentDispatchDeadlineSeconds(command) },
+      (deps.wrapCommand ?? wrapExecCommandWithRuntimeEnv)(command),
+      { tty: false, timeoutSeconds: deps.timeoutSeconds },
       (deps.getGatewayName ?? getKnownSandboxTargetGatewayName)(sandboxName) ?? undefined,
     ),
     {
@@ -98,11 +107,12 @@ export async function runAgentJsonPassthrough(
     writeProvenanceBlock(
       proc,
       stderr,
-      (deps.provenanceLines ?? openClawAgentJsonProvenanceLines)(stdout),
+      (deps.provenanceLines ?? structuredTurnProvenanceLines)(stdout),
     );
   } catch {
     writeProvenanceBlock(proc, stderr, [
-      "[openclaw provenance] skipped provenance extraction after parser failure.",
+      deps.parserFailureLine ??
+        "[agent provenance] skipped provenance extraction after parser failure.",
     ]);
   }
 
@@ -118,14 +128,62 @@ export async function runAgentJsonPassthrough(
   // that declares a timeout phase gets the deadline-specific guidance instead
   // of the generic incomplete-turn text; both are the same failure to the
   // caller and share one exit code.
-  const incompleteTurn = (deps.incompleteTurnSignal ?? openClawAgentIncompleteTurnSignal)(stdout);
+  const incompleteTurn = (deps.incompleteTurnSignal ?? structuredTurnIncompleteSignal)(stdout);
   if (incompleteTurn && code === 0) {
     if (incompleteTurn.timeoutPhase) {
-      writeTimedOutAgentTurnFailure(proc, sandboxName, incompleteTurn.timeoutPhase);
-    } else {
+      if (deps.legacyOpenClawDiagnostics) {
+        writeTimedOutAgentTurnFailure(proc, sandboxName, incompleteTurn.timeoutPhase);
+      } else {
+        writeDeclaredAgentTurnTimeoutFailure(proc, sandboxName, incompleteTurn.timeoutPhase);
+      }
+    } else if (deps.legacyOpenClawDiagnostics) {
       writeIncompleteAgentTurnFailure(proc, sandboxName, incompleteTurn.markers);
+    } else {
+      writeDeclaredAgentTurnIncompleteFailure(proc, sandboxName, incompleteTurn.markers);
     }
     return proc.exit(INCOMPLETE_AGENT_TURN_EXIT_CODE);
   }
   return proc.exit(code);
+}
+
+/** Interpret a receipt-declared structured turn envelope without harness-specific dispatch. */
+export async function runStructuredTurnJsonPassthrough(
+  declaration: StructuredTurnEnvelopeDeclaration,
+  sandboxName: string,
+  command: readonly string[],
+  proc: AgentJsonPassthroughProcess = process,
+  deps: AgentJsonPassthroughDeps = {},
+): Promise<never> {
+  if (!declarationAuthorizesStructuredTurnEnvelope(declaration, command)) {
+    proc.stderr.write(
+      "  The package command is not authorized for structured-turn envelope interpretation.\n",
+    );
+    return proc.exit(2);
+  }
+  return runStructuredJsonPassthrough(sandboxName, command, proc, deps);
+}
+
+/** Compatibility wrapper for no-receipt OpenClaw sandboxes. */
+export async function runAgentJsonPassthrough(
+  sandboxName: string,
+  command: readonly string[],
+  proc: AgentJsonPassthroughProcess = process,
+  deps: AgentJsonPassthroughDeps = {},
+): Promise<never> {
+  const provenanceLines =
+    deps.provenanceLines ??
+    ((raw: string) =>
+      structuredTurnProvenanceLines(raw).map((line) =>
+        line.replace(/^\[agent provenance\]/u, "[openclaw provenance]"),
+      ));
+  return runStructuredJsonPassthrough(sandboxName, command, proc, {
+    ...deps,
+    legacyOpenClawDiagnostics: true,
+    timeoutSeconds: deps.timeoutSeconds ?? agentDispatchDeadlineSeconds(command),
+    provenanceLines,
+    wrapCommand: deps.wrapCommand ?? wrapOpenClawAgentCommandWithRuntimeEnv,
+    parserFailureLine:
+      deps.parserFailureLine ??
+      "[openclaw provenance] skipped provenance extraction after parser failure.",
+  });
 }

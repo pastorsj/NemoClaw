@@ -7,7 +7,11 @@ import {
   createBuiltInRenderTemplateResolver,
 } from "../channels";
 import { createBuiltInMessagingHookRegistry, MessagingHookRegistry } from "../hooks";
-import { type ChannelManifest, createChannelManifestRegistry } from "../manifest";
+import {
+  type ChannelManifest,
+  createChannelManifestRegistry,
+  type SandboxMessagingPlan,
+} from "../manifest";
 import { compactSandboxMessagingPlanForPersistence } from "../persistence";
 import { MessagingWorkflowPlanner } from "./workflow-planner";
 
@@ -140,6 +144,87 @@ async function withEnv<T>(
 }
 
 describe("MessagingWorkflowPlanner", () => {
+  it("rehydrates same-ID persisted plans from the planner's exact manifest content", async () => {
+    const sourceTelegram = createBuiltInChannelManifestRegistry().get("telegram");
+    expect(sourceTelegram, "Telegram test manifest is unavailable").toBeDefined();
+    const receiptTelegram: ChannelManifest = {
+      ...sourceTelegram!,
+      packageBuild: {
+        configRoot: "~/.receipt-openclaw",
+        packageManagers: [],
+      },
+      policyPresets: [],
+      render: [
+        {
+          id: "receipt-telegram-render",
+          kind: "json-fragment",
+          agent: "openclaw",
+          target: "~/.receipt-openclaw/receipt.json",
+          fragment: { path: "channels.telegram", value: { enabled: true } },
+        },
+      ],
+      hooks: [
+        {
+          id: "telegram-status-health",
+          phase: "status",
+          handler: "common.packageCommand",
+          agents: ["openclaw"],
+          outputs: [{ id: "channelHealth", kind: "status" }],
+          packageOperation: {
+            hookId: "telegram-status-health",
+            kind: "sandbox-command",
+            command: { argv: ["receiptctl", "telegram-status"] },
+            output: "channel-health",
+            context: "channel-health",
+          },
+        },
+      ],
+    };
+    const receiptPlanner = new MessagingWorkflowPlanner(
+      createChannelManifestRegistry([receiptTelegram]),
+      new MessagingHookRegistry(),
+      createBuiltInRenderTemplateResolver(),
+    );
+    const initial = await receiptPlanner.buildPlan({
+      sandboxName: "demo",
+      agent: "openclaw",
+      workflow: "onboard",
+      isInteractive: false,
+      configuredChannels: ["telegram"],
+      credentialAvailability: { TELEGRAM_BOT_TOKEN: true },
+    });
+    const persisted = compactSandboxMessagingPlanForPersistence(initial);
+
+    const rebuilt = await receiptPlanner.buildRebuildPlanFromSandboxEntry({
+      sandboxName: "demo",
+      agent: "openclaw",
+      sandboxEntry: {
+        name: "demo",
+        messaging: { schemaVersion: 1, plan: persisted as SandboxMessagingPlan },
+      },
+      supportedChannelIds: ["telegram"],
+    });
+
+    expect(rebuilt?.packageBuild?.configRoot).toBe("~/.receipt-openclaw");
+    expect(rebuilt?.agentRender).toContainEqual(
+      expect.objectContaining({
+        renderId: "receipt-telegram-render",
+        target: "~/.receipt-openclaw/receipt.json",
+      }),
+    );
+    expect(rebuilt?.agentRender.some((render) => render.target.includes("~/.openclaw/"))).toBe(
+      false,
+    );
+    expect(rebuilt?.channels[0]?.hooks).toEqual([
+      expect.objectContaining({
+        handler: "common.packageCommand",
+        packageOperation: expect.objectContaining({
+          command: { argv: ["receiptctl", "telegram-status"] },
+        }),
+      }),
+    ]);
+  });
+
   it("builds onboard plans from configured channels", async () => {
     const plan = await planner().buildPlan({
       sandboxName: "demo",

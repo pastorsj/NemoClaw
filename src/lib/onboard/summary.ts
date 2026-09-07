@@ -31,6 +31,8 @@ export type OnboardConfigSummary = {
   webSearchConfig?: WebSearchConfig | null;
   enabledChannels?: string[] | null;
   hermesToolGateways?: string[] | null;
+  /** Package-rendered, secret-free label for receipt-backed managed tools. */
+  managedToolsLabel?: string | null;
   sandboxName: string;
   servingProfileProvenance?: ServingProfileProvenance | null;
   notes?: string[] | null;
@@ -84,6 +86,7 @@ export function formatOnboardConfigSummary({
   webSearchConfig = null,
   enabledChannels = null,
   hermesToolGateways = null,
+  managedToolsLabel = null,
   sandboxName,
   servingProfileProvenance = null,
   notes = [],
@@ -134,7 +137,7 @@ export function formatOnboardConfigSummary({
     ...profileLines,
     apiKeyLine,
     `  Web search:    ${webSearch}`,
-    `  Managed tools: ${hermesToolGatewayLabels(hermesToolGateways)}`,
+    `  Managed tools: ${managedToolsLabel ?? hermesToolGatewayLabels(hermesToolGateways)}`,
     `  Messaging:     ${messaging}`,
     `  Sandbox name:  ${sandboxName}`,
     ...noteLines,

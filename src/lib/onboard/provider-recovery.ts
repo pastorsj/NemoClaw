@@ -30,7 +30,10 @@ interface VllmInstallResumeSessionAccess {
 }
 
 export interface VllmInstallResumeDeps {
-  getNonInteractiveProvider(): string | null;
+  getNonInteractiveProvider(
+    allowHostedInferenceStaging?: boolean,
+    options?: { readonly allowHostedInferenceProviderKeyAlias?: boolean },
+  ): string | null;
   getVllmInstallResumeModel?(): string | null;
   checkpointVllmInstallModel?(modelId: string): void;
 }
@@ -47,8 +50,8 @@ export function applyVllmInstallResumeDefaults<T extends VllmInstallResumeDeps>(
 ): T {
   return {
     ...deps,
-    getNonInteractiveProvider: () =>
-      deps.getNonInteractiveProvider() ??
+    getNonInteractiveProvider: (allowHostedInferenceStaging, options) =>
+      deps.getNonInteractiveProvider(allowHostedInferenceStaging, options) ??
       (readVllmInstallResumeModel(access) ? "install-vllm" : null),
     getVllmInstallResumeModel: () =>
       deps.getVllmInstallResumeModel?.() ?? readVllmInstallResumeModel(access),

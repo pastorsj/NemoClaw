@@ -8,7 +8,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import re
+import stat
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +25,7 @@ from nemoclaw_fabric.output import value_looks_like_secret
 
 
 DEFAULT_CONFIG_PATH = Path("/etc/nemoclaw/fabric.json")
+FABRIC_CONFIG_MAX_BYTES = 1024 * 1024
 SUPERVISOR_CONFIG_SHA256_ENV = "NEMOCLAW_FABRIC_SUPERVISOR_CONFIG_SHA256"
 
 # Fabric 0.2 credential fields contain environment-variable names, never the
@@ -230,15 +233,89 @@ def _invocation_unavailable_reason(payload: Mapping[str, Any]) -> str | None:
     return reason.strip()
 
 
+def _read_bounded_config(config_path: Path) -> tuple[Path, bytes]:
+    """Read one stable regular file without following its final path component."""
+
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    if no_follow is None:
+        raise FabricConfigLoadError("this platform cannot safely open a Fabric config")
+    candidate = Path(os.path.abspath(config_path))
+    flags = os.O_RDONLY | os.O_NONBLOCK | no_follow | getattr(os, "O_CLOEXEC", 0)
+    try:
+        descriptor = os.open(candidate, flags)
+    except OSError as error:
+        raise FabricConfigLoadError(
+            f"could not open Fabric config {config_path} as a regular file"
+        ) from error
+
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise FabricConfigLoadError(
+                f"Fabric config {config_path} must be one regular file"
+            )
+        if before.st_size > FABRIC_CONFIG_MAX_BYTES:
+            raise FabricConfigLoadError(
+                f"Fabric config {config_path} exceeds the {FABRIC_CONFIG_MAX_BYTES}-byte limit"
+            )
+
+        chunks: list[bytes] = []
+        remaining = FABRIC_CONFIG_MAX_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw_bytes = b"".join(chunks)
+        if len(raw_bytes) > FABRIC_CONFIG_MAX_BYTES:
+            raise FabricConfigLoadError(
+                f"Fabric config {config_path} exceeds the {FABRIC_CONFIG_MAX_BYTES}-byte limit"
+            )
+
+        after = os.fstat(descriptor)
+        stable_fields = ("st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns")
+        if any(getattr(before, field) != getattr(after, field) for field in stable_fields):
+            raise FabricConfigLoadError(f"Fabric config {config_path} changed while it was read")
+        path_metadata = os.lstat(candidate)
+        if (
+            not stat.S_ISREG(path_metadata.st_mode)
+            or path_metadata.st_nlink != 1
+            or path_metadata.st_dev != after.st_dev
+            or path_metadata.st_ino != after.st_ino
+        ):
+            raise FabricConfigLoadError(
+                f"Fabric config {config_path} changed while it was read"
+            )
+        resolved_path = candidate.resolve(strict=True)
+        resolved_metadata = os.stat(resolved_path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(resolved_metadata.st_mode)
+            or resolved_metadata.st_dev != after.st_dev
+            or resolved_metadata.st_ino != after.st_ino
+        ):
+            raise FabricConfigLoadError(
+                f"Fabric config {config_path} changed while it was resolved"
+            )
+        return resolved_path, raw_bytes
+    except OSError as error:
+        raise FabricConfigLoadError(
+            f"could not read Fabric config {config_path} safely"
+        ) from error
+    finally:
+        os.close(descriptor)
+
+
 def load_fabric_config(path: str | Path) -> LoadedFabricConfig:
     """Read one JSON file and validate it with Fabric's native config model."""
 
     config_path = Path(path).expanduser()
     try:
-        resolved_path = config_path.resolve(strict=True)
-        raw_bytes = resolved_path.read_bytes()
+        resolved_path, raw_bytes = _read_bounded_config(config_path)
         raw = raw_bytes.decode("utf-8")
-    except (OSError, UnicodeError) as error:
+    except FabricConfigLoadError:
+        raise
+    except UnicodeError as error:
         raise FabricConfigLoadError(
             f"could not read Fabric config {config_path}: {error}"
         ) from error

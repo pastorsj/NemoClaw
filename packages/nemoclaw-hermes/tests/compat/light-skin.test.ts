@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { checkHermesLightSkinBoundary } from "../../checks/light-skin.mts";
+import {
+  checkHermesLightSkinBoundary,
+  HERMES_LIGHT_SKIN_REVIEWED_VERSIONS,
+} from "../../checks/light-skin.mts";
 
 function dockerfileWithVersion(version: string): string {
   return ["FROM debian:bookworm-slim", `ARG HERMES_VERSION=${version}`, ""].join("\n");
@@ -13,7 +16,7 @@ describe("hermes light-skin boundary check", () => {
     expect(
       checkHermesLightSkinBoundary({
         dockerfileText: dockerfileWithVersion("v2026.8.27"),
-        reviewedVersions: ["v2026.6.19", "v2026.7.1", "v2026.8.27"],
+        reviewedVersions: HERMES_LIGHT_SKIN_REVIEWED_VERSIONS,
       }),
     ).toBeNull();
   });

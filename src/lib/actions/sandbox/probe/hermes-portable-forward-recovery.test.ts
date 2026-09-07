@@ -1061,7 +1061,10 @@ describe("Hermes Portable connect composition", () => {
   it("keeps direct interactive connect outside the probe-only forward recovery seam", async () => {
     const harness = createConnectHarness({
       agentName: "hermes",
-      sessionAgent: { name: "hermes" },
+      sessionAgent: {
+        name: "hermes",
+        runtime: { kind: "gateway", interactive_command: "hermes" },
+      },
       portableReceiptDisposition: { kind: "hermes", phase: "active" },
       portableRecoveryResult: { kind: "already-running" },
     });

@@ -9,6 +9,10 @@ import type {
 } from "../hooks";
 import { MessagingHookRegistry, runMessagingHook } from "../hooks";
 import {
+  COMMON_PACKAGE_BUILD_FILES_HOOK_HANDLER_ID,
+  createPackageBuildFilesHook,
+} from "../hooks/common/build-files";
+import {
   COMMON_STATIC_OUTPUTS_HOOK_HANDLER_ID,
   createStaticOutputsHook,
 } from "../hooks/common/static-outputs";
@@ -175,6 +179,7 @@ export class ManifestCompiler {
       selected,
       configured: configured && !resolvedInputs.skipped,
       disabled: disabled || resolvedInputs.skipped || (requestedActive && !requiredInputsAvailable),
+      ...(manifest.credentialProvider ? { credentialProvider: manifest.credentialProvider } : {}),
       inputs: resolvedInputs.inputs,
       ...(hostForward ? { hostForward } : {}),
       hooks: requested
@@ -203,6 +208,9 @@ function resolvePackageBuildProfile(manifests: readonly ChannelManifest[]) {
 function ensureCommonCompilerHooks(hooks: MessagingHookRegistry): MessagingHookRegistry {
   if (!hooks.get(COMMON_STATIC_OUTPUTS_HOOK_HANDLER_ID)) {
     hooks.register(COMMON_STATIC_OUTPUTS_HOOK_HANDLER_ID, createStaticOutputsHook());
+  }
+  if (!hooks.get(COMMON_PACKAGE_BUILD_FILES_HOOK_HANDLER_ID)) {
+    hooks.register(COMMON_PACKAGE_BUILD_FILES_HOOK_HANDLER_ID, createPackageBuildFilesHook());
   }
   return hooks;
 }
@@ -235,6 +243,9 @@ function cloneHookReference(
     agents: hook.agents ? [...hook.agents] : undefined,
     inputs: hook.inputs ? [...hook.inputs] : undefined,
     outputs: hook.outputs?.map((output) => ({ ...output })),
+    packageOperation: hook.packageOperation
+      ? (JSON.parse(JSON.stringify(hook.packageOperation)) as typeof hook.packageOperation)
+      : undefined,
     onFailure: hook.onFailure,
   };
 }

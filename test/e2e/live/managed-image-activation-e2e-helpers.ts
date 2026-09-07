@@ -5,7 +5,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { shellQuote } from "../../../src/lib/core/shell-quote.ts";
-import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-target.mts";
 import {
   type ManagedImageContractCatalog,
   type ManagedImageContractV1,
@@ -34,7 +33,6 @@ import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compati
 import { captureIssue4462FailureDiagnostics } from "../fixtures/issue-4462-diagnostics.ts";
 import type { LifecyclePhaseFixture } from "../fixtures/phases/lifecycle.ts";
 import type { TestProgress } from "../fixtures/progress.ts";
-import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const API_KEY = "nemoclaw-managed-activation-e2e-key";
 const MODEL = "nemoclaw-managed-activation-model";
@@ -448,19 +446,6 @@ async function qualifyAgent(
   await host.expectStatus(sandboxName, { env, timeoutMs: 120_000 });
   await sandbox.expectListed(sandboxName, { env });
   await runAgentTurn(sandbox, agent, sandboxName, "before", env);
-  if (agent === "openclaw" || agent === "hermes") {
-    await runPublicFabricTurn({
-      artifacts,
-      contract: readBundledFabricHarnessE2eFixture(agent),
-      env,
-      host,
-      lifecyclePhase: "before-gateway-restart",
-      redactionValues: [API_KEY],
-      sandbox,
-      sandboxName,
-      scanPrivateState: false,
-    });
-  }
   const marker = `managed-activation-${agent}-${Date.now()}`;
   const writeMarker = await sandbox.execShell(
     sandboxName,
@@ -495,19 +480,6 @@ async function qualifyAgent(
   expect(readMarker.exitCode, resultText(readMarker)).toBe(0);
   expect(readMarker.stdout.trim()).toBe(marker);
   await runAgentTurn(sandbox, agent, sandboxName, "after", env);
-  if (agent === "openclaw" || agent === "hermes") {
-    await runPublicFabricTurn({
-      artifacts,
-      contract: readBundledFabricHarnessE2eFixture(agent),
-      env,
-      host,
-      lifecyclePhase: "after-gateway-restart",
-      redactionValues: [API_KEY],
-      sandbox,
-      sandboxName,
-      scanPrivateState: false,
-    });
-  }
 
   enterCleanupPhase(progress, agent);
   const destroy = await host.nemoclaw([sandboxName, "destroy", "--yes", "--no-cleanup-gateway"], {
@@ -565,18 +537,14 @@ export async function qualifyManagedImageActivation(fixtures: RuntimeFixtures): 
   const chatRequests = inference
     .requests()
     .filter((request) => request.method === "POST" && request.path === "/v1/chat/completions");
-  const nativeAgentTurns = SHIPPED_MANAGED_IMAGE_AGENTS.length * 2;
-  const publicFabricTurns = 4;
-  expect(chatRequests.length).toBeGreaterThanOrEqual(nativeAgentTurns + publicFabricTurns);
+  expect(chatRequests.length).toBeGreaterThanOrEqual(SHIPPED_MANAGED_IMAGE_AGENTS.length * 2);
   expect(chatRequests.every((request) => request.auth === "ok" && request.model === MODEL)).toBe(
     true,
   );
   await artifacts.writeText("docker-argv.log", trace);
   await artifacts.writeJson("managed-image-activation-summary.json", {
     agents: SHIPPED_MANAGED_IMAGE_AGENTS,
-    nativeAgentTurns,
-    publicFabricTurns,
-    observedInferenceRequests: chatRequests.length,
+    agentTurns: chatRequests.length,
     buildCommands: 0,
     catalog: [...contracts.values()].map((contract) => ({
       agent: contract.agent,
@@ -584,22 +552,12 @@ export async function qualifyManagedImageActivation(fixtures: RuntimeFixtures): 
       revision: contract.source.revision,
       cohort: contract.source.cohort,
     })),
-    lifecycle: [
-      "onboard",
-      "native-agent-turn",
-      "public-fabric-turn",
-      "gateway-restart",
-      "reconcile",
-      "native-agent-turn",
-      "public-fabric-turn",
-      "destroy",
-    ],
+    lifecycle: ["onboard", "agent-turn", "gateway-restart", "reconcile", "agent-turn", "destroy"],
   });
   await artifacts.target.complete({
     id: "managed-image-activation",
     agents: SHIPPED_MANAGED_IMAGE_AGENTS,
     buildCommands: 0,
     exactPublishedDigests: [...contracts.values()].map((contract) => contract.reference),
-    publicFabricTurns,
   });
 }

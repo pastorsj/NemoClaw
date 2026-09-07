@@ -24,7 +24,9 @@ import {
 } from "../../../../src/lib/messaging/channels";
 import { MessagingWorkflowPlanner } from "../../../../src/lib/messaging/compiler";
 import { createBuiltInMessagingHookRegistry } from "../../../../src/lib/messaging/hooks";
+import type { HarnessMessagingAdapterModule } from "@nvidia/nemoclaw-harness-contract";
 import { baseOpenClawGenerationEnv } from "../helpers/env-fixture";
+import { loadPackageHostModule } from "../helpers/host-module";
 
 const BASE_ENV = baseOpenClawGenerationEnv();
 const EXPECTED_MANAGED_IMAGE_OPENCLAW_MESSAGING_CAPABILITIES = [
@@ -43,6 +45,9 @@ const EXPECTED_MANAGED_IMAGE_OPENCLAW_NEUTRAL_CAPABILITIES = [
   ...EXPECTED_MANAGED_IMAGE_OPENCLAW_MESSAGING_CAPABILITIES,
   ...EXPECTED_MANAGED_IMAGE_OPENCLAW_BUNDLED_INERT_CAPABILITIES,
 ] as const;
+const OPENCLAW_MESSAGING_BUILD_PROFILE = loadPackageHostModule<HarnessMessagingAdapterModule>(
+  "messaging-adapter.cts",
+).describeMessagingIntegration({ packageId: "openclaw" }).build;
 
 function messagingPlanner(): MessagingWorkflowPlanner {
   return new MessagingWorkflowPlanner(
@@ -143,7 +148,11 @@ describe("generate-openclaw-config.mts: default plugin entries", () => {
       credentialAvailability: { TELEGRAM_BOT_TOKEN: true },
     });
     const added = structuredClone(baseline);
-    applyMessagingAgentRenderToObject(added, addedPlan, "openclaw.json");
+    applyMessagingAgentRenderToObject(
+      added,
+      { ...addedPlan, packageBuild: OPENCLAW_MESSAGING_BUILD_PROFILE },
+      "openclaw.json",
+    );
 
     expect(added.channels.telegram).toMatchObject({
       enabled: true,
@@ -178,7 +187,11 @@ describe("generate-openclaw-config.mts: default plugin entries", () => {
       ...BASE_ENV,
       NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION: "1",
     });
-    applyMessagingAgentRenderToObject(removed, removedPlan, "openclaw.json");
+    applyMessagingAgentRenderToObject(
+      removed,
+      { ...removedPlan, packageBuild: OPENCLAW_MESSAGING_BUILD_PROFILE },
+      "openclaw.json",
+    );
     expect(removed.channels.telegram).toEqual({ enabled: false });
     expect(removed.channels.telegram.accounts).toBeUndefined();
     expect(JSON.stringify(removed.channels.telegram)).not.toContain("TELEGRAM_BOT_TOKEN");

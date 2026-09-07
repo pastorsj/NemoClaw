@@ -52,6 +52,10 @@ class RuntimeRefreshCredentialStore {
     return entry.refreshToken;
   }
 
+  has(state: RefreshCredentialState | null | undefined): boolean {
+    return this.resolve(state) !== null;
+  }
+
   rotate(state: RefreshCredentialState | null | undefined, nextRefreshToken: unknown): boolean {
     return this.register(state, nextRefreshToken);
   }

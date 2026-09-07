@@ -3,6 +3,8 @@
 
 import { isDeepStrictEqual } from "node:util";
 
+import type { HarnessManagedExtension } from "@nvidia/nemoclaw-harness-contract";
+
 import type { AgentDefinition } from "../agent/defs";
 import type {
   HarnessPackageAuthority,
@@ -34,8 +36,10 @@ import {
   type QualifiedSandboxInferenceRouteReservation,
 } from "../state/registry/route-reservation";
 import { cloneSandboxWorkloadReceipt } from "../state/registry/workload";
+import { parseSandboxProviderBrokerOwnership } from "../state/registry/provider-broker";
 import { DEFAULT_TOOL_DISCLOSURE, type ToolDisclosure } from "../tool-disclosure";
 import type { DcodeAutoApprovalMode } from "./dcode-auto-approval";
+import type { SandboxApprovalMode } from "./managed-startup/startup-controls";
 import {
   classifyPortableLifecycleReceipt,
   portableLifecycleReceiptMatchesGeneration,
@@ -45,6 +49,7 @@ import {
   getHermesDashboardRegistryFields,
   type HermesDashboardOnboardState,
 } from "./hermes-dashboard";
+import { getPackageDashboardRegistryFields } from "./dashboard/package-dashboard";
 import { isManagedImageAgent, qualifiedManagedImageDeclaration } from "./managed-image/contract";
 import {
   CURRENT_RUNTIME_PROVIDER_BUNDLES,
@@ -79,12 +84,15 @@ export interface CreatedSandboxRegistryEntryInput {
   hostLocalInferenceReceipt?: SandboxEntry["hostLocalInferenceReceipt"];
   hostLocalInferenceProvenance?: SandboxEntry["hostLocalInferenceProvenance"];
   openclawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
+  managedImageExtensions?: readonly HarnessManagedExtension[];
   toolDisclosure?: ToolDisclosure;
   observabilityEnabled?: boolean;
+  approvalMode?: SandboxApprovalMode;
   dcodeAutoApprovalMode?: DcodeAutoApprovalMode;
   webSearchEnabled?: boolean;
   webSearchProvider?: SandboxEntry["webSearchProvider"];
   fromDockerfile?: string | null;
+  providerAuthMethod?: string | null;
   hermesAuthMethod?: "oauth" | "api_key" | null;
   plannedMessagingState: SandboxMessagingState | undefined;
   /**
@@ -92,10 +100,13 @@ export interface CreatedSandboxRegistryEntryInput {
    * The caller must only supply state captured from the same sandbox name.
    */
   preservedMcpState?: SandboxMcpState;
+  toolGatewaySelections?: string[];
   hermesToolGateways: string[];
   hermesDashboardState: HermesDashboardOnboardState;
   /** Host port this sandbox exposes its OpenAI-compatible API on. */
   hermesApiPort?: number | null;
+  /** Host port selected from the exact package's secondary-forward declaration. */
+  secondaryForwardPort?: number | null;
   /** True only when schema-5 receipt authority owns this Hermes registration. */
   hermesPortableLifecycle?: boolean;
   dashboardPort: number;
@@ -282,12 +293,14 @@ export function creationFidelity(
   webSearchConfig: WebSearchConfig | null,
   fromDockerfile: string | null,
   hermesAuthMethod: "oauth" | "api_key" | null,
+  providerAuthMethod?: string | null,
   dashboardRemoteBindPrepared?: boolean,
 ): Pick<
   SandboxEntry,
   | "webSearchEnabled"
   | "webSearchProvider"
   | "fromDockerfile"
+  | "providerAuthMethod"
   | "hermesAuthMethod"
   | "dashboardRemoteBindPrepared"
 > {
@@ -295,6 +308,7 @@ export function creationFidelity(
     webSearchEnabled: webSearchConfig?.fetchEnabled === true,
     webSearchProvider: webSearchConfig ? webSearchProviderForConfig(webSearchConfig) : null,
     fromDockerfile,
+    providerAuthMethod: providerAuthMethod ?? null,
     hermesAuthMethod,
     dashboardRemoteBindPrepared: dashboardRemoteBindPrepared === true,
   };
@@ -382,7 +396,25 @@ export function buildCreatedSandboxRegistryEntry(
       hostLocalInferenceReceipt,
     );
   }
-  const agentFields = getSandboxAgentRegistryFields(input.agent, input.agentVersionKnown);
+  const agentFields = getSandboxAgentRegistryFields(
+    input.agent,
+    input.agentVersionKnown,
+    session?.harnessPackage != null,
+  );
+  const secondaryForwardPort = input.secondaryForwardPort;
+  if (secondaryForwardPort != null) {
+    const allocation = input.agent?.healthProbe?.secondary_forward;
+    if (
+      !allocation ||
+      !Number.isInteger(secondaryForwardPort) ||
+      secondaryForwardPort < allocation.range_start ||
+      secondaryForwardPort > allocation.range_end
+    ) {
+      throw new RuntimeProviderSelectionError(
+        "Sandbox secondary-forward registration does not match its package declaration.",
+      );
+    }
+  }
   if (workload?.kind === "managed-image") {
     const requestedAgent = getRequestedSandboxAgentName(input.agent);
     const definitionName = input.agent?.name ?? requestedAgent;
@@ -420,8 +452,18 @@ export function buildCreatedSandboxRegistryEntry(
           })),
         }
       : {}),
+    ...(input.managedImageExtensions !== undefined
+      ? {
+          managedImageExtensions: input.managedImageExtensions.map((extension) => ({
+            id: extension.id,
+            directory: extension.directory,
+            configPaths: [...extension.configPaths],
+          })),
+        }
+      : {}),
     toolDisclosure: input.toolDisclosure ?? DEFAULT_TOOL_DISCLOSURE,
     observabilityEnabled: input.observabilityEnabled === true,
+    ...(input.approvalMode !== undefined ? { approvalMode: input.approvalMode } : {}),
     ...(input.dcodeAutoApprovalMode !== undefined
       ? { dcodeAutoApprovalMode: input.dcodeAutoApprovalMode }
       : {}),
@@ -429,16 +471,26 @@ export function buildCreatedSandboxRegistryEntry(
     webSearchProvider:
       input.webSearchEnabled === true ? (input.webSearchProvider ?? "brave") : null,
     fromDockerfile: input.fromDockerfile ?? null,
+    providerAuthMethod: input.providerAuthMethod ?? null,
     hermesAuthMethod: input.hermesAuthMethod ?? null,
     messaging: messagingState,
     mcp: input.preservedMcpState,
+    toolGatewaySelections:
+      session?.harnessPackage && (input.toolGatewaySelections?.length ?? 0) > 0
+        ? [...(input.toolGatewaySelections ?? [])]
+        : undefined,
     hermesToolGateways:
-      input.hermesToolGateways.length > 0 ? [...input.hermesToolGateways] : undefined,
-    ...getHermesDashboardRegistryFields(input.hermesDashboardState),
+      !session?.harnessPackage && input.hermesToolGateways.length > 0
+        ? [...input.hermesToolGateways]
+        : undefined,
+    ...(input.hermesDashboardState.packageOwned === true
+      ? getPackageDashboardRegistryFields(input.hermesDashboardState)
+      : getHermesDashboardRegistryFields(input.hermesDashboardState)),
     hermesApiPort:
       input.hermesPortableLifecycle === true || input.hermesApiPort == null
         ? undefined
         : input.hermesApiPort,
+    secondaryForwardPort: secondaryForwardPort ?? undefined,
     dashboardPort: input.dashboardPort,
     dashboardRemoteBindPrepared: input.dashboardRemoteBindPrepared === true,
     lifecycleGeneration: input.lifecycleGeneration,
@@ -499,6 +551,12 @@ export function prepareCreatedSandboxRegistration(
     entry.harnessPackage = reservedPackageAuthority.harnessPackage;
     if (reservedPackageAuthority.harnessPackageMigration) {
       entry.harnessPackageMigration = reservedPackageAuthority.harnessPackageMigration;
+    }
+    if (pending?.providerBroker) {
+      entry.providerBroker = parseSandboxProviderBrokerOwnership(
+        pending.providerBroker,
+        reservedPackageAuthority.harnessPackage,
+      );
     }
   }
   if (input.portableLifecycle === true) {

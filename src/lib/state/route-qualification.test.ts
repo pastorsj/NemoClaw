@@ -177,7 +177,7 @@ describe("sandbox inference route reservation qualification (#9203)", () => {
   });
 
   it.each([
-    ["agent", { agent: "hermes" }],
+    ["mismatched agent", { agent: "openclaw" }],
     [
       "workload",
       { workload: { schemaVersion: 1, kind: "legacy-dockerfile", reference: null, shared: false } },

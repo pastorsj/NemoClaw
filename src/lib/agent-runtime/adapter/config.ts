@@ -51,23 +51,25 @@ export type {
   HarnessConfigUrlPolicy,
   HarnessConfigUrlRequest,
   HarnessExitZeroCommand,
-  HarnessImagePluginInstall,
+  HarnessManagedExtension,
   HarnessMutableConfigPlan,
   HarnessMutableConfigRequest,
 } from "@nvidia/nemoclaw-harness-contract";
 
-const canonicalAbsolutePathSchema: AnySchemaObject = Object.freeze({
+const canonicalSandboxPathSchema: AnySchemaObject = Object.freeze({
   type: "string",
   minLength: 1,
   maxLength: 4096,
-  pattern: "^/[^\\u0000\\r\\n]*$",
+  pattern:
+    "^/sandbox/(?!\\.{1,2}(?:/|$))(?!.*\\/\\.{1,2}(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:/[^/\\\\\\u0000-\\u001f\\u007f]+)*$",
 });
 
 const relativeFileSchema: AnySchemaObject = Object.freeze({
   type: "string",
   minLength: 1,
   maxLength: 4096,
-  pattern: "^[^/\\\\\\u0000\\r\\n][^\\\\\\u0000\\r\\n]*$",
+  pattern:
+    "^(?!\\.{1,2}(?:/|$))(?!.*\\/\\.{1,2}(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:/[^/\\\\\\u0000-\\u001f\\u007f]+)*$",
 });
 
 const configTargetSchema: AnySchemaObject = Object.freeze({
@@ -75,14 +77,14 @@ const configTargetSchema: AnySchemaObject = Object.freeze({
   additionalProperties: false,
   required: ["directory", "file", "format", "sensitiveFiles"],
   properties: {
-    directory: canonicalAbsolutePathSchema,
+    directory: canonicalSandboxPathSchema,
     file: relativeFileSchema,
     format: { type: "string", minLength: 1, maxLength: 64, pattern: "^[a-z0-9-]+$" },
     sensitiveFiles: {
       type: "array",
       maxItems: 32,
       uniqueItems: true,
-      items: canonicalAbsolutePathSchema,
+      items: canonicalSandboxPathSchema,
     },
   },
 });
@@ -101,7 +103,7 @@ const configTransactionSuccessSchema: AnySchemaObject = Object.freeze({
   properties: {
     kind: { const: "config-transaction" },
     action: { type: "string", minLength: 1, maxLength: 128 },
-    configDirectory: canonicalAbsolutePathSchema,
+    configDirectory: canonicalSandboxPathSchema,
     protectedFiles: {
       type: "array",
       minItems: 1,
@@ -189,7 +191,7 @@ const configManifestSchema: AnySchemaObject = Object.freeze({
       type: "object",
       required: ["dir", "config_file", "format"],
       properties: {
-        dir: canonicalAbsolutePathSchema,
+        dir: canonicalSandboxPathSchema,
         config_file: relativeFileSchema,
         format: { type: "string", minLength: 1, maxLength: 64 },
       },
@@ -574,17 +576,23 @@ const mutableResultSchema: AnySchemaObject = Object.freeze({
   ],
 });
 
-const imagePluginInstallSchema: AnySchemaObject = Object.freeze({
+const managedExtensionSchema: AnySchemaObject = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["id", "loadPaths"],
+  required: ["id", "directory", "configPaths"],
   properties: {
     id: { type: "string", minLength: 1, maxLength: 256 },
-    loadPaths: {
+    directory: {
+      anyOf: [
+        { type: "null" },
+        { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._+~-]*$" },
+      ],
+    },
+    configPaths: {
       type: "array",
-      maxItems: 512,
+      maxItems: 8,
       uniqueItems: true,
-      items: canonicalAbsolutePathSchema,
+      items: canonicalSandboxPathSchema,
     },
   },
 });
@@ -596,8 +604,8 @@ const restoreRequestSchema: AnySchemaObject = Object.freeze({
     "backupContent",
     "currentContent",
     "managedChannelNames",
-    "previousImagePluginInstalls",
-    "freshImagePluginInstalls",
+    "previousManagedExtensions",
+    "freshManagedExtensions",
   ],
   properties: {
     backupContent: { type: "string", maxLength: CONFIG_DOCUMENT_MAX_BYTES },
@@ -610,11 +618,11 @@ const restoreRequestSchema: AnySchemaObject = Object.freeze({
       uniqueItems: true,
       items: { type: "string", minLength: 1, maxLength: 256 },
     },
-    previousImagePluginInstalls: {
-      anyOf: [{ type: "null" }, { type: "array", maxItems: 512, items: imagePluginInstallSchema }],
+    previousManagedExtensions: {
+      anyOf: [{ type: "null" }, { type: "array", maxItems: 128, items: managedExtensionSchema }],
     },
-    freshImagePluginInstalls: {
-      anyOf: [{ type: "null" }, { type: "array", maxItems: 512, items: imagePluginInstallSchema }],
+    freshManagedExtensions: {
+      anyOf: [{ type: "null" }, { type: "array", maxItems: 128, items: managedExtensionSchema }],
     },
   },
 });

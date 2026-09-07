@@ -25,7 +25,7 @@ function makeSpawnChild(): EventEmitter & {
 }
 
 describe("sandbox logs for terminal agents", () => {
-  it("skips the OpenClaw gateway log source but keeps OpenShell audit logs", () => {
+  it("skips the managed gateway log source but keeps OpenShell audit logs", () => {
     const calls: string[] = [];
     let exitCode: number | null = null;
 

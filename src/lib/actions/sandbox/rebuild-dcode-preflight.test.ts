@@ -7,9 +7,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   configureDcodeSession,
+  createLegacyDcodeRebuildHarness,
   expectNoDcodeMutation,
   makeDcodeSandboxEntry,
 } from "../../../../test/helpers/rebuild-dcode-flow-helpers";
+import { expectNoSandboxDelete } from "../../../../test/helpers/rebuild-delete-assertions";
 import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
@@ -65,7 +67,7 @@ describe("rebuildSandbox DCode flow: preflight", () => {
       harness.rebuildSandbox("alpha", ["--yes", "--dcode-auto-approval", "thread-opt-in"], {
         throwOnError: true,
       }),
-    ).rejects.toThrow("Unsupported rebuild DCode auto-approval override");
+    ).rejects.toThrow("Unsupported rebuild approval-mode override");
 
     expect(harness.registryUpdateSpy).not.toHaveBeenCalled();
     expect(harness.prepareManagedDcodeRebuildImageSpy).not.toHaveBeenCalled();
@@ -85,7 +87,7 @@ describe("rebuildSandbox DCode flow: preflight", () => {
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("incompatible with the sandbox agent");
+    ).rejects.toThrow("incompatible with the harness package");
 
     expect(harness.registryUpdateSpy).not.toHaveBeenCalled();
     expect(harness.prepareManagedDcodeRebuildImageSpy).not.toHaveBeenCalled();
@@ -118,8 +120,7 @@ describe("rebuildSandbox DCode flow: preflight", () => {
   });
 
   it("rejects an invalid durable DCode auto-approval mode before mutation (#6478)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: {
         ...makeDcodeSandboxEntry(),
         dcodeAutoApprovalMode: "always",
@@ -137,8 +138,7 @@ describe("rebuildSandbox DCode flow: preflight", () => {
   });
 
   it("rejects a stored DCode route failure before any rebuild mutation (#6195)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
       dcodeRouteResults: [
         { ok: false, detail: "existing sandbox inference probe returned HTTP 401" },
@@ -160,8 +160,7 @@ describe("rebuildSandbox DCode flow: preflight", () => {
     process.env.OPENSHELL_GATEWAY = "previous-gateway";
 
     try {
-      const harness = createRebuildFlowHarness({
-        agentName: "langchain-deepagents-code",
+      const harness = createLegacyDcodeRebuildHarness({
         sandboxEntry: makeDcodeSandboxEntry(),
         gatewayRecoveryResult: {
           recovered: false,
@@ -189,8 +188,7 @@ describe("rebuildSandbox DCode flow: preflight", () => {
     process.env.OPENSHELL_GATEWAY = "previous-gateway";
 
     try {
-      const harness = createRebuildFlowHarness({
-        agentName: "langchain-deepagents-code",
+      const harness = createLegacyDcodeRebuildHarness({
         sandboxEntry: makeDcodeSandboxEntry(),
         preflightMessagingConflicts: () => {
           throw new Error("messaging conflict preflight failed");
@@ -212,7 +210,7 @@ describe("rebuildSandbox DCode flow: preflight", () => {
       restoreEnv();
     }
   });
-  it("rejects DCode package object drift before image preparation", async () => {
+  it("rejects receipt-backed package object drift before image preparation", async () => {
     const harnessPackage = installRebuildHarnessPackage("langchain-deepagents-code");
     expect(harnessPackage).not.toBeNull();
     const packagePayload = path.join(
@@ -237,13 +235,13 @@ describe("rebuildSandbox DCode flow: preflight", () => {
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("The pinned DCode package object could not be revalidated");
+    ).rejects.toThrow("Installed harness package failed messaging adapter integrity validation");
 
     expect(harness.ensureAgentBaseImageSpy).not.toHaveBeenCalled();
     expect(harness.prepareManagedDcodeRebuildImageSpy).not.toHaveBeenCalled();
     expectNoDcodeMutation(harness);
   });
-  it("disposes the prepared DCode image when its package object drifts during preparation", async () => {
+  it("rejects receipt-backed package object drift at the backup publication boundary", async () => {
     const harnessPackage = installRebuildHarnessPackage("langchain-deepagents-code");
     expect(harnessPackage).not.toBeNull();
     const packagePayload = path.join(
@@ -260,27 +258,24 @@ describe("rebuildSandbox DCode flow: preflight", () => {
       agentName: "langchain-deepagents-code",
       sandboxEntry: makeDcodeSandboxEntry(),
       harnessPackage,
+      beforeBackup: () => {
+        fs.appendFileSync(packagePayload, "changed before backup publication\n");
+      },
     });
     configureDcodeSession(harness);
-    harness.prepareManagedDcodeRebuildImageSpy.mockImplementation(async () => {
-      fs.appendFileSync(packagePayload, "changed during image preparation\n");
-      return { ok: true, prepared: harness.preparedDcodeBuildContext };
-    });
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("The pinned DCode package object could not be revalidated");
+    ).rejects.toThrow("Harness package object identity does not match its receipt");
 
-    expect(harness.prepareManagedDcodeRebuildImageSpy).toHaveBeenCalledOnce();
-    expect(harness.disposePreparedDcodeRebuildImageSpy).toHaveBeenCalledExactlyOnceWith(
-      harness.preparedDcodeBuildContext,
-    );
-    expect(harness.preparedDcodeBuildContext.cleanupBuildCtx).toHaveBeenCalledOnce();
-    expectNoDcodeMutation(harness);
+    expect(harness.backupSandboxStateSpy).toHaveBeenCalledOnce();
+    expect(harness.prepareManagedDcodeRebuildImageSpy).not.toHaveBeenCalled();
+    expectNoSandboxDelete(harness.runOpenshellSpy);
+    expect(harness.removeSandboxRegistryEntrySpy).not.toHaveBeenCalled();
+    expect(harness.onboardSpy).not.toHaveBeenCalled();
   });
   it("rejects a DCode replacement-image failure before any rebuild mutation (#6195)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
       dcodeImageResult: { ok: false, detail: "replacement image build failed" },
     });
@@ -296,8 +291,7 @@ describe("rebuildSandbox DCode flow: preflight", () => {
     expectNoDcodeMutation(harness);
   });
   it("rejects a managed DCode session with a recorded custom Dockerfile before image preparation (#6195)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
     });
     configureDcodeSession(harness);
@@ -305,7 +299,7 @@ describe("rebuildSandbox DCode flow: preflight", () => {
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("Managed DCode rebuild cannot use a recorded custom Dockerfile");
+    ).rejects.toThrow("Managed package rebuild cannot use a recorded custom Dockerfile");
 
     expect(harness.preflightDcodeRouteSpy).not.toHaveBeenCalled();
     expect(harness.prepareManagedDcodeRebuildImageSpy).not.toHaveBeenCalled();
@@ -313,8 +307,7 @@ describe("rebuildSandbox DCode flow: preflight", () => {
     expectNoDcodeMutation(harness);
   });
   it("rejects a registry-owned DCode custom Dockerfile before image preparation (#6195)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: {
         ...makeDcodeSandboxEntry(),
         fromDockerfile: "/tmp/registry-owned-custom.Dockerfile",
@@ -324,14 +317,13 @@ describe("rebuildSandbox DCode flow: preflight", () => {
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("Managed DCode rebuild cannot use a recorded custom Dockerfile");
+    ).rejects.toThrow("Managed package rebuild cannot use a recorded custom Dockerfile");
 
     expect(harness.prepareManagedDcodeRebuildImageSpy).not.toHaveBeenCalled();
     expectNoDcodeMutation(harness);
   });
   it("lets explicit registry-managed DCode state override stale session Dockerfile metadata (#6195)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: { ...makeDcodeSandboxEntry(), fromDockerfile: null },
     });
     configureDcodeSession(harness);
@@ -351,9 +343,7 @@ describe("rebuildSandbox DCode flow: preflight", () => {
     const baseImageAgent = harness.ensureAgentBaseImageSpy.mock.calls[0]?.[0];
     expect(baseImageAgent).toMatchObject({
       name: "langchain-deepagents-code",
-      packageRoot: expect.stringContaining(
-        path.join(".nemoclaw", "harnesses", "objects", "sha256"),
-      ),
+      packageRoot: "/tmp/nemoclaw-legacy-langchain-deepagents-code",
     });
     expect(preparedImageOptions?.agent).toBe(baseImageAgent);
     expect(backupOptions?.agentDefinition).toStrictEqual(baseImageAgent);

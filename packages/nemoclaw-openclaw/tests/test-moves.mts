@@ -16,6 +16,17 @@ function createTestMoveRecords(
 }
 
 export const openclawPackageTestMoves = createTestMoveRecords({
+  "src/lib/voice-gateway/openclaw-client.test.ts": "tests/runtime/semantic-turn.test.ts",
+  "src/lib/messaging/channels/googlechat/runtime/googlechat-outbound-auth.test.ts":
+    "tests/runtime/googlechat-auth.test.ts",
+  "src/lib/messaging/channels/googlechat/runtime/googlechat-trusted-proxy-fetch.test.ts":
+    "tests/runtime/googlechat-proxy.test.ts",
+  "src/lib/messaging/channels/wechat/runtime/wechat-account-placeholder.test.ts":
+    "tests/runtime/wechat-account.test.ts",
+  "src/lib/messaging/channels/whatsapp/runtime/whatsapp-qr-compact.test.ts":
+    "tests/runtime/whatsapp-compact.test.ts",
+  "test/runtime/messaging/telegram-diagnostics.test.ts": "tests/runtime/telegram-runtime.test.ts",
+  "test/runtime/messaging/wechat-diagnostics.test.ts": "tests/runtime/wechat-runtime.test.ts",
   "test/runtime/sandbox/clean-runtime-shell-env-shim.test.ts":
     "tests/runtime/shell-cleanup.test.ts",
   "test/runtime/gateway/gateway-watchdog-kill-marker.test.ts": "tests/runtime/kill-marker.test.ts",

@@ -54,6 +54,10 @@ function hasLegacySelector(args: readonly string[]): boolean {
 
 /** Preserve the historical no-receipt selector scan while using the finite grammar. */
 export function buildLegacyOpenClawCommandPlan(args: readonly string[]): PackageAgentCommandPlan {
+  for (const argument of args) {
+    if (argument === "--") break;
+    if (argument === "-h" || argument === "--help") return { kind: "help" };
+  }
   const plan = buildPackageAgentCommandPlan(LEGACY_OPENCLAW_AGENT_COMMAND, args);
   if (plan.kind !== "missing-selector" || !hasLegacySelector(args)) return plan;
   return buildPackageAgentCommandPlan(

@@ -16,6 +16,7 @@ import {
   writeDockerGatewayDebEnvOverride,
 } from "./docker-driver-gateway-env";
 import { PORTABLE_HOST_GATEWAY_IP } from "./experimental/portable-profile";
+import { prepareNativePodmanGatewayHostRuntime } from "./runtime-provider/podman-runtime-surfaces";
 
 function homeEnv(home: string, xdgConfigHome = ""): NodeJS.ProcessEnv {
   return { HOME: home, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv;
@@ -183,6 +184,12 @@ describe("buildDockerDriverGatewayEnv", () => {
       const env = buildDockerDriverGatewayEnv({
         platform: "linux",
         stateDir,
+        gatewayHostRuntime: prepareNativePodmanGatewayHostRuntime({
+          environment: {},
+          platform: "linux",
+          socketPath: "/run/user/1001/podman/podman.sock",
+        }),
+        podmanSocketPath: "/run/user/1001/podman/podman.sock",
         getDockerSupervisorImage: () => "supervisor:test",
         resolveSandboxBin: () => "/usr/bin/openshell-sandbox",
       });

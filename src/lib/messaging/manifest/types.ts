@@ -45,11 +45,15 @@ export interface ChannelManifest {
   readonly auth: ChannelAuthSpec;
   readonly inputs: readonly ChannelInputSpec[];
   readonly credentials: readonly ChannelCredentialSpec[];
+  /** Receipt-backed custom provider boundary. Legacy manifests leave this absent. */
+  readonly credentialProvider?: ChannelCredentialProviderSpec;
   /** Agent config-relative durable state directories cleared during channel removal. */
   readonly state?: Partial<Record<MessagingAgentId, readonly string[]>>;
   /** Policy presets needed when this channel is active. */
   readonly policyPresets?: readonly ChannelPolicyPresetReference[];
   readonly render: readonly ChannelRenderSpec[];
+  /** Receipt-backed, package-owned locations of rendered non-secret config. */
+  readonly configVisibility?: readonly ChannelConfigVisibilitySpec[];
   readonly hostForward?: ChannelHostForwardSpec;
   readonly runtime?: ChannelRuntimeByAgentSpec;
   readonly agentPackages?: readonly ChannelAgentPackageSpec[];
@@ -65,9 +69,51 @@ export interface ChannelManifest {
   readonly packageBuild?: HarnessMessagingBuildProfile;
 }
 
+/** Validated, non-secret provider projection copied from an installed package profile. */
+export interface ChannelCredentialProviderSpec {
+  readonly profilePath: string;
+  readonly profileId: string;
+  readonly credentialEnv: string;
+  readonly sourceInputId: string;
+  readonly sourceSecretEnv: string;
+  readonly refresh?: {
+    readonly strategy: "google-service-account-jwt";
+    readonly scopes: readonly string[];
+    readonly secretMaterialKeys: readonly string[];
+  };
+}
+
+export interface ChannelConfigVisibilitySpec {
+  readonly key?: string;
+  readonly inputId: string;
+  readonly target: string;
+  readonly kind: "structured" | "env";
+  readonly path?: readonly string[];
+  readonly envKey?: string;
+  readonly targetInputId?: string;
+  readonly whenInput?: {
+    readonly inputId: string;
+    readonly equals: string;
+    readonly defaultValue?: string;
+  };
+}
+
 export interface HarnessMessagingBuildProfile {
   readonly configRoot: string;
   readonly packageManagers: readonly ChannelAgentPackageManager[];
+  readonly packageInstallers?: {
+    readonly "node-package"?: {
+      readonly kind: "verified-archive-command";
+      readonly command: readonly string[];
+      readonly archiveArgumentPrefix?: "npm-pack:";
+      readonly packageVersionEnvironment?: string;
+    };
+    readonly "python-package"?: {
+      readonly kind: "batched-command";
+      readonly command: readonly string[];
+      readonly environment?: Readonly<Record<string, string>>;
+    };
+  };
   readonly renderFinalizers?: readonly ("allow-rendered-plugins" | "inherit-api-server-toolsets")[];
   readonly postRenderRepair?: { readonly command: readonly string[] };
   readonly nodeArchiveRemediation?: "package-helper";
@@ -286,6 +332,12 @@ export interface ChannelHookSpec {
   readonly phase: ChannelHookPhase;
   readonly handler: string;
   readonly providesReadiness?: true;
+  /** Receipt-backed finite status operation selected by package data. */
+  readonly statusProbe?: import("@nvidia/nemoclaw-harness-contract").HarnessWhatsappStatusProbe;
+  /** Receipt-backed finite operation selected by package data. */
+  readonly packageOperation?: import("@nvidia/nemoclaw-harness-contract").HarnessMessagingHookOperation;
+  /** Receipt-backed profiles must supply a typed operation for this legacy-native hook slot. */
+  readonly packageOperationRequired?: true;
   readonly agents?: readonly MessagingAgentId[];
   readonly inputs?: readonly string[];
   readonly outputs?: readonly ChannelHookOutputSpec[];
@@ -348,6 +400,8 @@ export interface SandboxMessagingChannelPlan {
   readonly disabled: boolean;
   /** Exact command-owned removal transaction retained until post-restore config cleanup succeeds. */
   readonly pendingRemoval?: boolean;
+  /** Non-secret receipt projection used by provider planning and replay. */
+  readonly credentialProvider?: ChannelCredentialProviderSpec;
   readonly inputs: readonly SandboxMessagingInputReference[];
   readonly hostForward?: SandboxMessagingHostForwardPlan;
   readonly hooks: readonly SandboxMessagingHookReferencePlan[];

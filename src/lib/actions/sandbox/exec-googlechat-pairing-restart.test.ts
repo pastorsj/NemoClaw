@@ -18,10 +18,12 @@ import { resolveLegacyGoogleChatApprovalAgent } from "./exec-legacy";
 import { restartSandboxGatewayWithDeps } from "./gateway-restart";
 
 const CLEANUP_SKIPPED: SandboxExecCleanupDeps = {
-  getSandbox: () => null,
-  inspectMutableConfigPerms: () => {
-    throw new Error("cleanup should be skipped for an unregistered sandbox");
-  },
+  getSandbox: () => ({ agent: "openclaw" }),
+  inspectMutableConfigPerms: () => ({
+    applies: false,
+    skipReason: "agent",
+    reason: "no package-defined mutable configuration",
+  }),
   repairMutableConfigPerms: () => {
     throw new Error("cleanup should be skipped for an unregistered sandbox");
   },
@@ -110,6 +112,36 @@ describe("Google Chat pairing approval gateway activation (#8553)", () => {
     expect(
       isGoogleChatPairingApproval(["openclaw", "pairing", "approve", "googlechat", "--help"]),
     ).toBe(false);
+  });
+
+  it("does not interpret stock approval argv for a receipt-backed package", async () => {
+    const restartGateway = vi.fn(() => ({ ok: true }));
+    const resolveSandboxAgent = vi.fn(() => {
+      throw new Error("receipt-backed approval must not resolve legacy authority");
+    });
+    const deps = depsFor(0, restartGateway);
+    deps.cleanupDeps = {
+      ...CLEANUP_SKIPPED,
+      getSandbox: () => ({
+        agent: "openclaw",
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: "openclaw",
+          packageVersion: "1.0.0",
+          contentDigest: "a".repeat(64),
+        },
+      }),
+    };
+    deps.resolveSandboxAgent = resolveSandboxAgent;
+
+    const exitCode = await runAndCaptureExit(
+      ["openclaw", "pairing", "approve", "googlechat", "ABCD1234"],
+      deps,
+    );
+
+    expect(exitCode).toBe(0);
+    expect(resolveSandboxAgent).not.toHaveBeenCalled();
+    expect(restartGateway).not.toHaveBeenCalled();
   });
 
   it("restarts the managed gateway after the exact approval succeeds", async () => {
@@ -322,10 +354,10 @@ describe("Google Chat pairing approval gateway activation (#8553)", () => {
     expect(restartGateway).not.toHaveBeenCalled();
     expect(exitCode).toBe(1);
     expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("pairing approval committed for 'alpha'"),
+      expect.stringContaining("Sandbox configuration permission cleanup failed"),
     );
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("nemoclaw alpha gateway restart"),
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("pairing approval committed for 'alpha'"),
     );
   });
 
@@ -439,7 +471,12 @@ describe("Google Chat pairing approval gateway activation (#8553)", () => {
 
     expect(restartGateway).not.toHaveBeenCalled();
     expect(exitCode).toBe(1);
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("approval was not rolled back"));
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Sandbox configuration permission cleanup failed"),
+    );
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("approval was not rolled back"),
+    );
     expect(errorSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("managed gateway activation failed"),
     );

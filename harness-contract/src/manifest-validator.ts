@@ -10,8 +10,13 @@ import { validateHarnessRuntime, validateRuntimeSurfaces } from "./validation/ru
 import { validateHarnessSandboxCreate } from "./validation/sandbox-create.js";
 import { fail, isRecord, requireKnownFields, requireRecord } from "./validation/shared.js";
 import { validateHarnessState } from "./validation/state.js";
+import { validateProviderAuth } from "./validation/provider-auth.js";
 
-export { HarnessManifestValidationError } from "./validation/shared.js";
+export {
+  HarnessManifestValidationError,
+  isCanonicalSandboxPath,
+  isImmutableSandboxCommandPath,
+} from "./validation/shared.js";
 
 /**
  * Validate every package-owned, data-only manifest field consumed by NemoClaw.
@@ -28,6 +33,7 @@ export function validateHarnessManifest(
     new Set([
       "alias_summary",
       "aliases",
+      "agent_roster",
       "binary_path",
       "config",
       "dashboard",
@@ -51,7 +57,10 @@ export function validateHarnessManifest(
       "onboarding",
       "package_registry",
       "phone_home_hosts",
+      "policy",
       "provider_broker",
+      "provider_auth",
+      "tool_gateways",
       "runtime",
       "sandbox_create",
       "sessions",
@@ -67,7 +76,7 @@ export function validateHarnessManifest(
       "web_auth_env",
       "web_auth_method",
     ]),
-    new Set(["config", "inference", "messaging", "name", "runtime", "state_lifecycle"]),
+    new Set(["config", "inference", "messaging", "name", "policy", "runtime", "state_lifecycle"]),
     "<root>",
   );
   validateHarnessIdentity(manifest, expectedHarnessId);
@@ -77,6 +86,7 @@ export function validateHarnessManifest(
     fail("inference.config_update", "is required for a harness package");
   }
   if (manifest.messaging === undefined) fail("messaging", "is required for a harness package");
+  if (manifest.policy === undefined) fail("policy", "is required for a harness package");
 
   validateHarnessRuntime(manifest);
   validateRuntimeSurfaces(manifest);
@@ -84,6 +94,7 @@ export function validateHarnessManifest(
   validateManagedImage(manifest);
   validateHarnessConfig(manifest);
   validateHarnessCapabilities(manifest);
+  validateProviderAuth(manifest);
   validateHarnessState(manifest);
   return manifest as unknown as HarnessAgentManifest;
 }

@@ -90,6 +90,16 @@ function semanticProblems(config: NemoClawConfig): string[] {
       ),
     );
     for (const [agentIndex, agent] of sandbox.agents.entries()) {
+      if (agent.package) {
+        if (agent.package.id !== agent.type)
+          problems.push(
+            `/spec/sandboxes/${sandboxIndex}/agents/${agentIndex}/package/id does not match the agent type`,
+          );
+      } else if (agent.type !== "openclaw") {
+        problems.push(
+          `/spec/sandboxes/${sandboxIndex}/agents/${agentIndex}/package is required for a package-backed agent type`,
+        );
+      }
       problems.push(
         ...duplicateProblems(
           agent.inference.routes.map(({ name }) => name),

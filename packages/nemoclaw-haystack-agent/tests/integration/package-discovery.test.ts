@@ -15,7 +15,7 @@ describe("Haystack Agent package discovery", () => {
     expect(source).toMatchObject({
       id: "haystack-agent",
       displayName: "Haystack Agent (experimental)",
-      manifestPath: "packages/nemoclaw-haystack-agent/manifest.yaml",
+      manifestPath: "manifest.yaml",
       packageVersion: "0.1.0",
     });
   });

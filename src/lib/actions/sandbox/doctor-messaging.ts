@@ -1,13 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isDeepStrictEqual } from "node:util";
+
 import { loadAgent } from "../../agent/defs";
+import type { AgentDefinition } from "../../agent/defs";
+import { hasHarnessPackageAuthority } from "../../agent-runtime/status-agent";
 import { compareChannelSets, probeChannelRuntimeStatus } from "../../channel-runtime-status";
 import { CLI_NAME } from "../../cli/branding";
+import { createBuiltInChannelManifestRegistry } from "../../messaging/channels/built-ins";
+import { collectMessagingChannelDiagnostics } from "../../messaging/diagnostics";
+import type { MessagingChannelDiagnosticSpec } from "../../messaging/diagnostics";
+import type { ChannelManifest } from "../../messaging/manifest";
 import {
-  collectBuiltInMessagingChannelDiagnostics,
-  type MessagingChannelDiagnosticSpec,
-} from "../../messaging/diagnostics";
+  listMessagingChannelsForProfile,
+  resolveSandboxMessagingProfileAuthority,
+} from "../../messaging/profile-authority";
 import { executeSandboxCommandForVerification } from "../../onboard/sandbox-verification-exec";
 import { ROOT } from "../../runner";
 import type { SandboxEntry } from "../../state/registry";
@@ -15,7 +23,7 @@ import * as registry from "../../state/registry";
 import { buildStatusCommandDeps } from "../../status-command-deps";
 import type { DoctorCheck } from "./doctor-report";
 
-const CHANNEL_STATUS_DIAGNOSTICS = collectBuiltInMessagingChannelDiagnostics();
+const doctorChannelManifestRegistry = createBuiltInChannelManifestRegistry();
 
 function runtimeProbeUnavailableCheck(sandboxName: string, detail: string): DoctorCheck {
   return {
@@ -153,9 +161,14 @@ function channelRuntimeDoctorCheck(
   );
 }
 
-function getChannelStatusDiagnostic(channelName: string): MessagingChannelDiagnosticSpec | null {
+function getChannelStatusDiagnostic(
+  channelName: string,
+  manifests: readonly ChannelManifest[],
+): MessagingChannelDiagnosticSpec | null {
   return (
-    CHANNEL_STATUS_DIAGNOSTICS.find((diagnostic) => diagnostic.channelId === channelName) ?? null
+    collectMessagingChannelDiagnostics(manifests).find(
+      (diagnostic) => diagnostic.channelId === channelName,
+    ) ?? null
   );
 }
 
@@ -185,7 +198,11 @@ function formatMessagingOverlapDoctorDetail(overlap: {
   return `${overlap.channel}: ${detail}`;
 }
 
-function configuredChannelsCheck(sandboxName: string, sb: SandboxEntry): DoctorCheck {
+function configuredChannelsCheck(
+  sandboxName: string,
+  sb: SandboxEntry,
+  manifests: readonly ChannelManifest[],
+): DoctorCheck {
   const registeredChannels = registry.getConfiguredMessagingChannelsFromEntry(sb);
   const disabledChannels = new Set(registry.getDisabledMessagingChannelsFromEntry(sb));
   const channels = registeredChannels.filter((channel: string) => !disabledChannels.has(channel));
@@ -235,7 +252,7 @@ function configuredChannelsCheck(sandboxName: string, sb: SandboxEntry): DoctorC
   }
 
   const diagnostic = channels
-    .map(getChannelStatusDiagnostic)
+    .map((channelName) => getChannelStatusDiagnostic(channelName, manifests))
     .find((candidate) => candidate?.doctorWhenNoHealthSignals);
   if (!diagnostic?.doctorWhenNoHealthSignals) {
     return {
@@ -265,16 +282,43 @@ export function collectMessagingDoctorChecks(
   sandboxName: string,
   sb: SandboxEntry,
   sandboxReachable: boolean,
+  packageAgent: AgentDefinition | null = null,
 ): DoctorCheck[] {
-  const checks = [configuredChannelsCheck(sandboxName, sb)];
+  const receiptBacked = hasHarnessPackageAuthority(sb);
+  const manifests = receiptBacked
+    ? resolveReceiptBackedDoctorManifests(sb, packageAgent)
+    : doctorChannelManifestRegistry.list();
+  const checks = [configuredChannelsCheck(sandboxName, sb, manifests)];
   const registered = registry.getConfiguredMessagingChannelsFromEntry(sb);
   const disabled = new Set(registry.getDisabledMessagingChannelsFromEntry(sb));
   const enabled = registered.filter((channel: string) => !disabled.has(channel));
-  const runtimeCheck = sandboxReachable
-    ? channelRuntimeDoctorCheck(sandboxName, enabled, sb)
-    : enabled.length > 0
-      ? unreachableRuntimeCheck(sandboxName)
-      : null;
+  // The runtime-registry probe parses OpenClaw-specific config and gateway-log
+  // shapes. Receipt-backed packages use their exact status hooks instead; a
+  // future package diagnostic belongs in the package contract, not an ID-based
+  // fallback to this legacy probe.
+  const runtimeCheck = receiptBacked
+    ? null
+    : sandboxReachable
+      ? channelRuntimeDoctorCheck(sandboxName, enabled, sb)
+      : enabled.length > 0
+        ? unreachableRuntimeCheck(sandboxName)
+        : null;
   if (runtimeCheck) checks.push(runtimeCheck);
   return checks;
+}
+
+function resolveReceiptBackedDoctorManifests(
+  sb: SandboxEntry,
+  packageAgent: AgentDefinition | null,
+): readonly ChannelManifest[] {
+  // `doctor` already records a bounded harness-authority failure when the exact
+  // package definition cannot be resolved. Do not substitute built-in channel
+  // behavior while rendering the remaining checks.
+  if (!packageAgent) return [];
+
+  const authority = resolveSandboxMessagingProfileAuthority(sb);
+  if (!isDeepStrictEqual(authority.agent, packageAgent)) {
+    throw new Error("Doctor messaging authority does not match the exact harness package receipt");
+  }
+  return listMessagingChannelsForProfile(authority, doctorChannelManifestRegistry);
 }

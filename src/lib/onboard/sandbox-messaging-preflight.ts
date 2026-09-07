@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WebSearchConfig } from "../inference/web-search";
+import type { HarnessWebSearchProviderBinding } from "@nvidia/nemoclaw-harness-contract";
 import type { SandboxMessagingPlan } from "../messaging/manifest/types";
-import { bridgeSecretEnvsForChannel } from "./messaging-bridge-provider";
+import {
+  bridgeSecretEnvsForChannel,
+  type MessagingBridgeProfile,
+} from "./messaging-bridge-provider";
 import {
   enforceMessagingChannelConflicts as defaultEnforceMessagingChannelConflicts,
   type MessagingConflictGuardDeps,
@@ -19,6 +23,10 @@ export interface SandboxMessagingPreflightInput {
   sandboxName: string;
   agentName?: string | null;
   requireExactProviderBinding?: boolean;
+  receiptBackedPackage?: boolean;
+  webSearchProviderBinding?: HarnessWebSearchProviderBinding | null;
+  webSearchProviderProfilePath?: string | null;
+  messagingProviderProfiles?: readonly MessagingBridgeProfile[];
   channels: readonly NamedMessagingChannel[];
   enabledChannels: readonly string[] | null;
   webSearchConfig: WebSearchConfig | null;
@@ -31,7 +39,12 @@ export interface SandboxMessagingPreflightDeps {
   gatewayName(): string;
   registry: MessagingConflictGuardDeps["registry"];
   providerExistsInGateway(name: string): boolean;
-  providerMatchesGatewayCredential(name: string, type: string, credentialEnv: string): boolean;
+  providerMatchesGatewayCredential(
+    name: string,
+    type: string,
+    credentialEnv: string,
+    messagingProviderProfile?: MessagingBridgeProfile,
+  ): boolean;
   isNonInteractive(): boolean;
   promptYesNoOrDefault(
     message: string,
@@ -73,6 +86,10 @@ export async function prepareSandboxMessagingPreflight(
     sandboxName: input.sandboxName,
     agentName: input.agentName,
     requireExactProviderBinding: input.requireExactProviderBinding,
+    receiptBackedPackage: input.receiptBackedPackage,
+    webSearchProviderBinding: input.webSearchProviderBinding,
+    webSearchProviderProfilePath: input.webSearchProviderProfilePath,
+    messagingProviderProfiles: input.messagingProviderProfiles,
     channels: input.channels,
     enabledChannels: input.enabledChannels,
     disabledChannels,
@@ -92,7 +109,10 @@ export async function prepareSandboxMessagingPreflight(
   // be dropped from the replacement without a word.
   result.missingBridgeChannels.forEach((channel) => {
     deps.error(
-      `  ${channel} mints its outbound token gateway-side and needs ${bridgeSecretEnvsForChannel(channel).join(", ")} to configure it.`,
+      `  ${channel} mints its outbound token gateway-side and needs ${bridgeSecretEnvsForChannel(
+        channel,
+        input.receiptBackedPackage === true ? (input.messagingProviderProfiles ?? []) : undefined,
+      ).join(", ")} to configure it.`,
     );
     deps.error("  Paste the secret at the enrollment prompt or export the env var, then re-run.");
   });

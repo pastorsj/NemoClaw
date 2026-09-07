@@ -250,7 +250,7 @@ describe("uninstall gateway-port segregation (#3053)", () => {
       },
     );
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).toBe(1);
     const openshellCalls = calls
       .filter(({ command }) => command === "openshell")
       .map(({ args }) => args);
@@ -341,7 +341,7 @@ describe("uninstall gateway-port segregation (#3053)", () => {
       },
     );
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).toBe(1);
     const openshellCalls = calls
       .filter(({ command }) => command === "openshell")
       .map(({ args }) => args);

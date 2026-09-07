@@ -160,6 +160,7 @@ describe("managed snapshot restore authority", () => {
           targetAgentType: "openclaw",
           agentDefinition: loadAgent("openclaw"),
           freshOpenClawImagePluginInstalls: [],
+          freshManagedImageExtensions: [],
           authority: contentAuthority!,
           validateBeforeMutation,
         }),

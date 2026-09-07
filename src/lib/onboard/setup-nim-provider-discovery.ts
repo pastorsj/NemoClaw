@@ -9,7 +9,10 @@ import type { RebuildRouteHandoff, RegistryInferenceRoute } from "./rebuild-rout
 interface ProviderDiscoveryDeps {
   remoteProviderConfig: Record<string, { providerName: string }>;
   isNonInteractive(): boolean;
-  getNonInteractiveProvider(): string | null;
+  getNonInteractiveProvider(
+    allowHostedInferenceStaging?: boolean,
+    options?: { readonly allowHostedInferenceProviderKeyAlias?: boolean },
+  ): string | null;
   getNonInteractiveModel(
     providerKey: string,
     options?: { allowProviderModelFallback?: boolean },
@@ -90,6 +93,7 @@ export function prepareProviderDiscovery(options: {
   assertRouteCompatible?: (route: ProviderInferenceProbeRoute) => GatewayRouteDiscoveryConstraints;
   canProbeRoute?: (provider: string) => boolean;
   recoverySessionId: string | null | undefined;
+  allowHostedInferenceProviderKeyAlias?: boolean;
 }): {
   requestedProvider: string | null;
   requestedModel: string | null;
@@ -106,6 +110,7 @@ export function prepareProviderDiscovery(options: {
     assertRouteCompatible,
     canProbeRoute,
     recoverySessionId,
+    allowHostedInferenceProviderKeyAlias = false,
   } = options;
   const recoveredRegistryRoute =
     rebuildRegistryInferenceRoute?.sandboxName === sandboxName &&
@@ -119,7 +124,9 @@ export function prepareProviderDiscovery(options: {
     recoverySessionId,
   );
   const nonInteractive = deps.isNonInteractive();
-  const requestedProvider = deps.getNonInteractiveProvider();
+  const requestedProvider = deps.getNonInteractiveProvider(true, {
+    allowHostedInferenceProviderKeyAlias,
+  });
   let providerChanged = false;
   if (nonInteractive && requestedProvider && recoverProvider) {
     const recordedProviderName = recordedProviderReaders.readRecordedProvider(sandboxName);

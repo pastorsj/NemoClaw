@@ -14,13 +14,28 @@ import {
 const PACKAGE_METADATA_FILE = "nemoclaw-package.json";
 const PACKAGE_METADATA_MAX_BYTES = 16 * 1024;
 const PACKAGE_VERSION_MAX_BYTES = 128;
+const PACKAGE_DOCKERFILE = "Dockerfile";
+const PACKAGE_DOCKERFILE_MAX_BYTES = 4 * 1024 * 1024;
+const PACKAGE_REVISION_MARKER_FILE = "e2e-lifecycle-revision.txt";
+const HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const PACKAGE_VERSION_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
 
-export interface PreparedHarnessPackageUpgrade {
+export const HARNESS_LIFECYCLE_REVISION_MARKER_PATH =
+  "/usr/local/share/nemoclaw/e2e-lifecycle-revision";
+
+export interface PreparedHarnessPackageRevision {
   readonly packageRoot: string;
   readonly packageVersion: string;
+  readonly revisionMarker: string;
   readonly sourcePackageVersion: string;
+}
+
+export type PreparedHarnessPackageUpgrade = PreparedHarnessPackageRevision;
+
+export interface PreparedHarnessPackageLifecycle {
+  readonly source: PreparedHarnessPackageRevision;
+  readonly upgrade: PreparedHarnessPackageUpgrade;
 }
 
 /** Require an install to publish a new revision for the same package id. */
@@ -74,6 +89,7 @@ function readPackageMetadata(packageRoot: string, expectedId: string): Record<st
     record.schemaVersion !== 1 ||
     record.kind !== "agent-runtime" ||
     record.id !== expectedId ||
+    !HARNESS_ID_PATTERN.test(expectedId) ||
     typeof record.packageVersion !== "string" ||
     !PACKAGE_VERSION_PATTERN.test(record.packageVersion)
   ) {
@@ -104,15 +120,115 @@ export function deriveHarnessLifecycleVersion(sourceVersion: string): string {
   throw new Error("Harness lifecycle source version cannot produce a bounded test version");
 }
 
-/**
- * Copy one validated artifact into run-owned state and change only its package
- * version. The public installer still validates every byte before publication.
- */
-export function prepareHarnessPackageUpgrade(
+function packageSourceDirectory(
+  packageRoot: string,
+  metadata: Record<string, unknown>,
+  expectedId: string,
+): string {
+  const manifest = metadata.manifest;
+  const nestedManifest = `packages/nemoclaw-${expectedId}/manifest.yaml`;
+  if (manifest !== "manifest.yaml" && manifest !== nestedManifest) {
+    throw new Error("Harness lifecycle package manifest path is invalid");
+  }
+  const directory = path.dirname(path.resolve(packageRoot, manifest));
+  if (directory !== packageRoot && !directory.startsWith(`${packageRoot}${path.sep}`)) {
+    throw new Error("Harness lifecycle package manifest escapes its artifact");
+  }
+  return directory;
+}
+
+function requirePackageDockerfile(packageRoot: string, expectedId: string): string {
+  const packageMetadata = readPackageMetadata(packageRoot, expectedId);
+  const dockerfilePath = path.join(
+    packageSourceDirectory(packageRoot, packageMetadata, expectedId),
+    PACKAGE_DOCKERFILE,
+  );
+  const metadata = fs.lstatSync(dockerfilePath);
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isFile() ||
+    metadata.size === 0 ||
+    metadata.size > PACKAGE_DOCKERFILE_MAX_BYTES
+  ) {
+    throw new Error("Harness lifecycle Dockerfile must be a bounded regular file");
+  }
+  const source = fs.readFileSync(dockerfilePath, "utf8");
+  if (
+    source.includes(PACKAGE_REVISION_MARKER_FILE) ||
+    source.includes(HARNESS_LIFECYCLE_REVISION_MARKER_PATH)
+  ) {
+    throw new Error("Harness lifecycle Dockerfile already owns the test revision marker");
+  }
+  return source;
+}
+
+function writePreservingMode(file: string, source: string): void {
+  const mode = fs.statSync(file).mode & 0o7777;
+  try {
+    fs.chmodSync(file, mode | 0o200);
+    fs.writeFileSync(file, source, "utf8");
+  } finally {
+    fs.chmodSync(file, mode);
+  }
+}
+
+function writeLifecycleRevisionMarker(
+  packageRoot: string,
+  expectedId: string,
+  revisionMarker: string,
+): void {
+  const metadata = readPackageMetadata(packageRoot, expectedId);
+  const packageDirectory = packageSourceDirectory(packageRoot, metadata, expectedId);
+  const rootMode = fs.statSync(packageDirectory).mode & 0o7777;
+  const markerPath = path.join(packageDirectory, PACKAGE_REVISION_MARKER_FILE);
+  try {
+    fs.chmodSync(packageDirectory, rootMode | 0o200);
+    fs.writeFileSync(markerPath, `${revisionMarker}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o444,
+    });
+    fs.chmodSync(markerPath, 0o444);
+  } finally {
+    fs.chmodSync(packageDirectory, rootMode);
+  }
+
+  const dockerfilePath = path.join(packageDirectory, PACKAGE_DOCKERFILE);
+  const dockerfile = requirePackageDockerfile(packageRoot, expectedId);
+  const separator = dockerfile.endsWith("\n") ? "" : "\n";
+  writePreservingMode(
+    dockerfilePath,
+    `${dockerfile}${separator}\n# Test-only marker proving which immutable harness package built this image.\nCOPY packages/nemoclaw-${expectedId}/${PACKAGE_REVISION_MARKER_FILE} ${HARNESS_LIFECYCLE_REVISION_MARKER_PATH}\n`,
+  );
+}
+
+function makeDirectoriesOwnerWritable(root: string): void {
+  let metadata: fs.Stats;
+  try {
+    metadata = fs.lstatSync(root);
+  } catch {
+    return;
+  }
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) return;
+  fs.chmodSync(root, (metadata.mode & 0o7777) | 0o700);
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (entry.isDirectory() && !entry.isSymbolicLink()) {
+      makeDirectoriesOwnerWritable(path.join(root, entry.name));
+    }
+  }
+}
+
+function removePreparedPackage(root: string): void {
+  makeDirectoriesOwnerWritable(root);
+  fs.rmSync(root, { force: true, recursive: true });
+}
+
+function prepareHarnessPackageRevision(
   sourceRootValue: string,
   destinationRootValue: string,
   expectedId: string,
-): PreparedHarnessPackageUpgrade {
+  revision: "source" | "upgrade",
+): PreparedHarnessPackageRevision {
   const sourceRoot = path.resolve(sourceRootValue);
   const destinationRoot = path.resolve(destinationRootValue);
   if (sourceRoot !== sourceRootValue || destinationRoot !== destinationRootValue) {
@@ -133,8 +249,13 @@ export function prepareHarnessPackageUpgrade(
     throw new Error("Harness lifecycle destination must be outside the source artifact");
   }
   const sourceMetadata = readPackageMetadata(sourceRoot, expectedId);
+  requirePackageDockerfile(sourceRoot, expectedId);
   const sourcePackageVersion = sourceMetadata.packageVersion as string;
-  const packageVersion = deriveHarnessLifecycleVersion(sourcePackageVersion);
+  const packageVersion =
+    revision === "upgrade"
+      ? deriveHarnessLifecycleVersion(sourcePackageVersion)
+      : sourcePackageVersion;
+  const revisionMarker = `${revision}:${packageVersion}`;
 
   try {
     fs.cpSync(sourceRoot, destinationRoot, {
@@ -144,22 +265,85 @@ export function prepareHarnessPackageUpgrade(
       recursive: true,
       verbatimSymlinks: true,
     });
-    const copiedMetadata = readPackageMetadata(destinationRoot, expectedId);
-    const copiedMetadataPath = path.join(destinationRoot, PACKAGE_METADATA_FILE);
-    const copiedMetadataMode = fs.statSync(copiedMetadataPath).mode & 0o7777;
-    try {
-      fs.chmodSync(copiedMetadataPath, copiedMetadataMode | 0o200);
-      fs.writeFileSync(
+    if (revision === "upgrade") {
+      const copiedMetadata = readPackageMetadata(destinationRoot, expectedId);
+      const copiedMetadataPath = path.join(destinationRoot, PACKAGE_METADATA_FILE);
+      writePreservingMode(
         copiedMetadataPath,
         `${JSON.stringify({ ...copiedMetadata, packageVersion }, null, 2)}\n`,
       );
-    } finally {
-      fs.chmodSync(copiedMetadataPath, copiedMetadataMode);
     }
+    writeLifecycleRevisionMarker(destinationRoot, expectedId, revisionMarker);
     readPackageMetadata(destinationRoot, expectedId);
-    return Object.freeze({ packageRoot: destinationRoot, packageVersion, sourcePackageVersion });
+    return Object.freeze({
+      packageRoot: destinationRoot,
+      packageVersion,
+      revisionMarker,
+      sourcePackageVersion,
+    });
   } catch (error) {
-    fs.rmSync(destinationRoot, { force: true, recursive: true });
+    removePreparedPackage(destinationRoot);
+    throw error;
+  }
+}
+
+/**
+ * Copy one validated artifact into run-owned state and change only its package
+ * version and fixture-only image marker. The public installer still validates
+ * every byte before publication.
+ */
+export function prepareHarnessPackageUpgrade(
+  sourceRootValue: string,
+  destinationRootValue: string,
+  expectedId: string,
+): PreparedHarnessPackageUpgrade {
+  return prepareHarnessPackageRevision(
+    sourceRootValue,
+    destinationRootValue,
+    expectedId,
+    "upgrade",
+  );
+}
+
+/** Prepare explicit old/new package-visible revisions for the generic lifecycle journey. */
+export function prepareHarnessPackageLifecycle(
+  sourceRootValue: string,
+  destinationRootValue: string,
+  expectedId: string,
+): PreparedHarnessPackageLifecycle {
+  const sourceRoot = path.resolve(sourceRootValue);
+  const destinationRoot = path.resolve(destinationRootValue);
+  if (sourceRoot !== sourceRootValue || destinationRoot !== destinationRootValue) {
+    throw new Error("Harness lifecycle package paths must be canonical absolute paths");
+  }
+  if (fs.existsSync(destinationRoot)) {
+    throw new Error("Harness lifecycle destination must be absent");
+  }
+  const relativeDestination = path.relative(sourceRoot, destinationRoot);
+  if (
+    !relativeDestination ||
+    (!relativeDestination.startsWith("..") && !path.isAbsolute(relativeDestination))
+  ) {
+    throw new Error("Harness lifecycle destination must be outside the source artifact");
+  }
+
+  try {
+    fs.mkdirSync(destinationRoot, { mode: 0o700 });
+    const source = prepareHarnessPackageRevision(
+      sourceRoot,
+      path.join(destinationRoot, "source"),
+      expectedId,
+      "source",
+    );
+    const upgrade = prepareHarnessPackageRevision(
+      sourceRoot,
+      path.join(destinationRoot, "upgrade"),
+      expectedId,
+      "upgrade",
+    );
+    return Object.freeze({ source, upgrade });
+  } catch (error) {
+    removePreparedPackage(destinationRoot);
     throw error;
   }
 }

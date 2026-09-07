@@ -3,7 +3,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-
 import { CLI_NAME } from "../../cli/branding";
 import { G, R, YW } from "../../cli/terminal-style";
 import { prompt as askPrompt } from "../../credentials/store";
@@ -12,6 +11,7 @@ import {
   normalizeDestroySandboxOptions,
 } from "../../domain/lifecycle/options";
 import {
+  getSandboxDeleteOutcome,
   isDestroyNonInteractiveEnv,
   resolveDestroyGatewayCleanupDecision,
   shouldStopHostServicesAfterDestroy,
@@ -36,11 +36,21 @@ import {
   requireRuntimeProviderDestructiveCleanupAuthority,
 } from "../../onboard/runtime-provider/access";
 import {
+  deleteProviderWithRecovery,
+  detachPreparedReceiptProviders,
   emitProviderDetachResidualHint,
+  prepareManagedAgentStateVolumeCleanup,
+  prepareProviderBrokerCleanup,
+  prepareReceiptProviderCleanup,
   removeManagedAgentStateVolumes,
+  removePreparedManagedAgentStateVolumes,
+  removePreparedProviderBroker,
+  removePreparedReceiptProviders,
   SANDBOX_PROVIDER_SUFFIXES,
-} from "../../onboard/sandbox-provider-cleanup";
+  type PreparedReceiptProviderCleanup,
+} from "./runtime/provider-cleanup";
 import { validateName } from "../../runner";
+import type { GatewayRegistryEntry } from "../../state/gateway-registry";
 import { withMcpLifecycleLock } from "../../state/mcp-lifecycle-lock";
 import {
   enforceRemovedImmutabilityMigrationBoundary,
@@ -57,6 +67,7 @@ import {
   preparePortableDemoSandboxDestroyAuthority,
   redactDestroyError,
   retirePortableLifecycleAuthority,
+  sandboxRegistryEntriesMatch,
 } from "./destroy-execution";
 import { cleanupGatewayAfterLastSandbox } from "./destroy-gateway";
 import { shouldCleanupGatewayAfterConfirmedFinalDestroy } from "./destroy-gateway-cleanup";
@@ -200,10 +211,13 @@ export type CleanupSandboxServicesDeps = {
   withOllamaModelOwnershipLock?: <T>(operation: () => T) => T;
   ollamaModelRefsMatch?: (left: string, right: string) => boolean;
   runOpenshell?: RunOpenshell;
+  deleteProvider?: typeof deleteProviderWithRecovery;
   rmSync?: typeof fs.rmSync;
   stopGooglechatWebhookTunnel?: (sandboxName: string) => string;
   googlechatWebhookTunnelPidDir?: (servicePidDir: string) => string;
 };
+
+export type SandboxServiceProviderCleanupMode = "legacy-suffixes" | "skip-gateway";
 
 async function resolveCleanupGatewayDecision(options: DestroySandboxOptions): Promise<boolean> {
   const decision = resolveDestroyGatewayCleanupDecision(options, {
@@ -227,7 +241,13 @@ async function resolveCleanupGatewayDecision(options: DestroySandboxOptions): Pr
 
 export function cleanupSandboxServices(
   sandboxName: string,
-  { stopHostServices = false }: { stopHostServices?: boolean } = {},
+  {
+    providerCleanupMode = "legacy-suffixes",
+    stopHostServices = false,
+  }: {
+    providerCleanupMode?: SandboxServiceProviderCleanupMode;
+    stopHostServices?: boolean;
+  } = {},
   deps: CleanupSandboxServicesDeps = {},
 ): void {
   // Source boundary: this exported helper can be called independently of CLI
@@ -308,6 +328,7 @@ export function cleanupSandboxServices(
       };
       return runtime.runOpenshell(args, opts);
     });
+  const deleteProvider = deps.deleteProvider ?? deleteProviderWithRecovery;
   const rmSync = deps.rmSync ?? fs.rmSync;
   const stopGooglechatWebhookTunnel =
     deps.stopGooglechatWebhookTunnel ??
@@ -439,17 +460,23 @@ export function cleanupSandboxServices(
     // Dedicated Google Chat service directory may not exist — ignore.
   }
 
-  // Delete every per-sandbox messaging and search provider created during
-  // onboard. Suppress stderr so "! Provider not found" noise doesn't appear
-  // when messaging was never configured. The suffix set is shared with the
-  // onboard rebuild path's pre-delete detach via
-  // `src/lib/onboard/sandbox-provider-cleanup.ts` so the two paths can't
-  // drift on which providers count as per-sandbox state.
-  for (const suffix of SANDBOX_PROVIDER_SUFFIXES) {
-    runOpenshell(["provider", "delete", `${validatedSandboxName}-${suffix}`], {
-      ignoreError: true,
-      stdio: ["ignore", "ignore", "ignore"],
-    });
+  if (providerCleanupMode !== "skip-gateway") {
+    // No-receipt compatibility rows have no persisted provider inventory. Keep
+    // their established bounded suffix cleanup until those rows are migrated.
+    for (const suffix of SANDBOX_PROVIDER_SUFFIXES) {
+      const providerName = `${validatedSandboxName}-${suffix}`;
+      const deleted = deleteProvider(providerName, {
+        allowedSandboxes: [validatedSandboxName],
+        runOpenshell,
+      });
+      if (!deleted.ok) {
+        const detail = redactDestroyError(deleted.stderr || deleted.stdout || "unknown error");
+        throw new Error(
+          `OpenShell provider '${providerName}' cleanup did not converge: ${detail}. ` +
+            "The sandbox registry row was retained so exact cleanup can be retried.",
+        );
+      }
+    }
   }
 }
 
@@ -633,25 +660,70 @@ function requestSandboxDestroyExit(exitCode: number): never {
   throw new SandboxDestroyExitRequest(exitCode);
 }
 
+export type UninstallSandboxDestroyResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly exitCode: number };
+
+async function runSandboxDestroyTransaction(
+  sandboxName: string,
+  options: string[] | DestroySandboxOptions,
+  expectedSandbox?: GatewayRegistryEntry,
+): Promise<void> {
+  return withMcpLifecycleLock(sandboxName, () => {
+    const removedImmutabilityMigration = enforceRemovedImmutabilityMigrationBoundary(sandboxName, {
+      allowStateRecord: true,
+    });
+    assertSandboxDestroyCommandAvailable(sandboxName);
+    if (
+      expectedSandbox &&
+      !sandboxRegistryEntriesMatch(registry.getSandbox(sandboxName), expectedSandbox)
+    ) {
+      console.error(
+        `  Refusing to destroy sandbox '${sandboxName}' during uninstall because its registry receipt changed before the lifecycle lock was acquired. No sandbox resources were removed.`,
+      );
+      requestSandboxDestroyExit(1);
+    }
+    return destroySandboxUnlocked(
+      sandboxName,
+      options,
+      removedImmutabilityMigration.stateRecord !== null,
+    );
+  });
+}
+
 export async function destroySandbox(
   sandboxName: string,
   options: string[] | DestroySandboxOptions = {},
 ): Promise<void> {
   try {
-    return await withMcpLifecycleLock(sandboxName, () => {
-      const removedImmutabilityMigration = enforceRemovedImmutabilityMigrationBoundary(
-        sandboxName,
-        { allowStateRecord: true },
-      );
-      assertSandboxDestroyCommandAvailable(sandboxName);
-      return destroySandboxUnlocked(
-        sandboxName,
-        options,
-        removedImmutabilityMigration.stateRecord !== null,
-      );
-    });
+    return await runSandboxDestroyTransaction(sandboxName, options);
   } catch (error) {
     if (error instanceof SandboxDestroyExitRequest) process.exit(error.exitCode);
+    throw error;
+  }
+}
+
+/**
+ * Run the ordinary confirmed destroy transaction for one receipt selected by
+ * uninstall without translating its controlled failure into `process.exit`.
+ * The expected row is compared while holding the same lifecycle lock as the
+ * destructive transaction, so a same-name replacement cannot be selected.
+ */
+export async function destroySandboxForUninstall(
+  sandboxName: string,
+  expectedSandbox: GatewayRegistryEntry,
+): Promise<UninstallSandboxDestroyResult> {
+  try {
+    await runSandboxDestroyTransaction(
+      sandboxName,
+      { cleanupGateway: false, yes: true },
+      expectedSandbox,
+    );
+    return registry.getSandbox(sandboxName) === null ? { ok: true } : { ok: false, exitCode: 1 };
+  } catch (error) {
+    if (error instanceof SandboxDestroyExitRequest) {
+      return { ok: false, exitCode: error.exitCode };
+    }
     throw error;
   }
 }
@@ -710,9 +782,7 @@ async function destroySandboxUnlocked(
         : normalizeRuntimeProviderIdentity(null),
       redact: redactDestroyError,
       sandbox: registeredSandbox,
-      ...(retainedSandboxIdentityFingerprint
-        ? { retainedSandboxIdentityFingerprint }
-        : {}),
+      ...(retainedSandboxIdentityFingerprint ? { retainedSandboxIdentityFingerprint } : {}),
     });
   };
   const initialIdentity = portableContainerAuthority ? null : inspectContainerIdentity();
@@ -783,17 +853,78 @@ async function destroySandboxUnlocked(
     cleanupGatewayName,
     runOpenshell,
     runtimeSelection: mcpRuntimeSelection,
+    sandboxListResult,
     selectedCaptureOpenshell: cleanupCaptureOpenshell,
     selectedRunOpenshell: cleanupRunOpenshell,
     sandbox,
     sandboxConfirmedAbsent,
   } = destroyPreflight;
+  const sandboxListOutcome = getSandboxDeleteOutcome(sandboxListResult);
+  const gatewayUnavailableAtPreflight =
+    sandboxListResult.status !== 0 && sandboxListOutcome.gatewayUnreachable;
   if (retainedRecoveryAuthority && !sandboxConfirmedAbsent) {
     console.error(
       `  Refusing to automatically delete retained sandbox '${sandboxName}': OpenShell still reports it present, but its delete command accepts only the mutable sandbox name. NemoClaw cannot bind that deletion to the retained immutable identity. No sandbox resources were removed. Ask an OpenShell administrator to resolve create-attempt label '${retainedRecoveryAuthority.createAttemptNonce}' to the exact sandbox and use an identity-bound removal procedure. After OpenShell confirms the retained sandbox is absent, rerun '${CLI_NAME} ${sandboxName} destroy --yes' to reconcile its verified Docker containers and recovery record.`,
     );
     preparedManagedLlamaCppCleanup?.abort();
     requestSandboxDestroyExit(1);
+  }
+  const stateVolumeContext = sandbox
+    ? {
+        agentName: sandbox.agent,
+        ...(sandbox.harnessPackage ? { harnessPackage: sandbox.harnessPackage } : {}),
+        runtimeProviderId: normalizeRuntimeProviderIdentity(sandbox.openshellDriver),
+        sandboxName,
+        workloadKind: sandbox.workload?.kind ?? "",
+      }
+    : null;
+  let receiptStateVolumeCleanup: ReturnType<typeof prepareManagedAgentStateVolumeCleanup> | null =
+    null;
+  if (stateVolumeContext?.harnessPackage && !gatewayUnavailableAtPreflight) {
+    try {
+      receiptStateVolumeCleanup = abortPreparedCleanupOnError(() =>
+        prepareManagedAgentStateVolumeCleanup(stateVolumeContext, {
+          runtimeProviders: CURRENT_RUNTIME_PROVIDER_BUNDLES,
+        }),
+      );
+    } catch (error) {
+      console.error(
+        `  Refusing to destroy sandbox '${sandboxName}': receipt-backed managed state cleanup could not be prepared: ${redactDestroyError(error)}. No sandbox resources were removed.`,
+      );
+      requestSandboxDestroyExit(1);
+    }
+  }
+  let receiptProviderCleanup: PreparedReceiptProviderCleanup | null = null;
+  if (sandbox?.harnessPackage && !gatewayUnavailableAtPreflight) {
+    try {
+      receiptProviderCleanup = abortPreparedCleanupOnError(() =>
+        prepareReceiptProviderCleanup(sandboxName, sandbox, {
+          getSandbox: registry.getSandbox,
+          runOpenshell: cleanupRunOpenshell,
+        }),
+      );
+    } catch (error) {
+      console.error(
+        `  Refusing to destroy sandbox '${sandboxName}': receipt-backed provider cleanup could not be prepared: ${redactDestroyError(error)}. No sandbox resources were removed.`,
+      );
+      requestSandboxDestroyExit(1);
+    }
+  }
+  let providerBrokerCleanup: ReturnType<typeof prepareProviderBrokerCleanup> = null;
+  if (sandbox?.harnessPackage && sandbox.providerBroker && !gatewayUnavailableAtPreflight) {
+    try {
+      providerBrokerCleanup = abortPreparedCleanupOnError(() =>
+        prepareProviderBrokerCleanup(sandboxName, sandbox, {
+          getSandbox: registry.getSandbox,
+          runOpenshell: cleanupRunOpenshell,
+        }),
+      );
+    } catch (error) {
+      console.error(
+        `  Refusing to destroy sandbox '${sandboxName}': provider-broker cleanup could not be prepared: ${redactDestroyError(error)}. No sandbox resources were removed.`,
+      );
+      requestSandboxDestroyExit(1);
+    }
   }
   // Recheck identity after pre-delete qualification and recoverable journal
   // publication reconciliation, before any sandbox runtime mutation.
@@ -827,7 +958,17 @@ async function destroySandboxUnlocked(
   let destructiveResult: Awaited<ReturnType<typeof executeSandboxDestroy>>;
   try {
     destructiveResult = await executeSandboxDestroy({
+      ...(receiptProviderCleanup
+        ? {
+            detachReceiptProviders: (selectedRunOpenshell) =>
+              detachPreparedReceiptProviders(receiptProviderCleanup!, {
+                getSandbox: registry.getSandbox,
+                runOpenshell: selectedRunOpenshell,
+              }),
+          }
+        : {}),
       force: normalized.force === true,
+      gatewayProbeResult: sandboxListResult,
       getSandbox: registry.getSandbox,
       listSandboxes: registry.listSandboxes,
       runOpenshell,
@@ -922,14 +1063,13 @@ async function destroySandboxUnlocked(
     runtimeSelection: destroyRuntimeSelection,
   } = destructiveResult;
 
-  if (
-    destroyRuntimeSelection &&
-    cleanupGatewayName !== destroyRuntimeSelection.gatewayName
-  ) {
+  if (destroyRuntimeSelection && cleanupGatewayName !== destroyRuntimeSelection.gatewayName) {
     console.error(
       `  Sandbox '${sandboxName}' was deleted, but its cleanup target changed from '${destroyRuntimeSelection.gatewayName}' to '${cleanupGatewayName}'.`,
     );
-    console.error("  Local ownership state was preserved. Restore the recorded gateway binding and retry destroy.");
+    console.error(
+      "  Local ownership state was preserved. Restore the recorded gateway binding and retry destroy.",
+    );
     preparedManagedLlamaCppCleanup?.abort();
     requestSandboxDestroyExit(1);
   }
@@ -956,7 +1096,7 @@ async function destroySandboxUnlocked(
       `  ${YW}⚠${R} OpenShell gateway unreachable; removing the local record for '${sandboxName}' (--force).`,
     );
     console.warn(
-      `  ${YW}⚠${R} If the gateway comes back, the sandbox may still exist — re-run destroy or remove it via openshell.`,
+      `  ${YW}⚠${R} If the gateway comes back, the sandbox and its providers may still exist. Remove those remote resources through OpenShell.`,
     );
   }
 
@@ -971,18 +1111,48 @@ async function destroySandboxUnlocked(
     preparedManagedLlamaCppCleanup?.abort();
   }
   if (deleteSucceededOrAlreadyGone && sandbox) {
+    if (receiptProviderCleanup) {
+      try {
+        removePreparedReceiptProviders(receiptProviderCleanup, {
+          getSandbox: registry.getSandbox,
+          runOpenshell: cleanupRunOpenshell,
+        });
+      } catch (error) {
+        console.error(
+          `  Sandbox '${sandboxName}' is gone, but its receipt-backed provider cleanup failed: ${redactDestroyError(error)}`,
+        );
+        console.error(
+          "  The sandbox registry entry was preserved so exact cleanup can be retried.",
+        );
+        preparedManagedLlamaCppCleanup?.abort();
+        requestSandboxDestroyExit(1);
+      }
+    }
+    if (providerBrokerCleanup) {
+      try {
+        removePreparedProviderBroker(providerBrokerCleanup, {
+          getSandbox: registry.getSandbox,
+          runOpenshell: cleanupRunOpenshell,
+        });
+      } catch (error) {
+        console.error(
+          `  Sandbox '${sandboxName}' is gone, but its provider-broker cleanup failed: ${redactDestroyError(error)}`,
+        );
+        console.error(
+          "  The sandbox registry entry was preserved so exact cleanup can be retried.",
+        );
+        preparedManagedLlamaCppCleanup?.abort();
+        requestSandboxDestroyExit(1);
+      }
+    }
     const stateVolumeCleanupResults = abortPreparedCleanupOnError(() =>
-      removeManagedAgentStateVolumes(
-        {
-          agentName: sandbox.agent,
-          runtimeProviderId: normalizeRuntimeProviderIdentity(sandbox.openshellDriver),
-          sandboxName,
-          workloadKind: sandbox.workload?.kind ?? "",
-        },
-        {
-          runtimeProviders: CURRENT_RUNTIME_PROVIDER_BUNDLES,
-        },
-      ),
+      receiptStateVolumeCleanup
+        ? removePreparedManagedAgentStateVolumes(receiptStateVolumeCleanup, {
+            runtimeProviders: CURRENT_RUNTIME_PROVIDER_BUNDLES,
+          })
+        : removeManagedAgentStateVolumes(stateVolumeContext!, {
+            runtimeProviders: CURRENT_RUNTIME_PROVIDER_BUNDLES,
+          }),
     );
     const failedStateVolumeCleanup = stateVolumeCleanupResults.find(
       (result) => result.status === "failed",
@@ -1011,11 +1181,17 @@ async function destroySandboxUnlocked(
       registeredSandboxCount: registry.listSandboxes().sandboxes.length,
       sandboxStillRegistered: !!registry.getSandbox(sandboxName),
     });
-    cleanupSandboxServices(sandboxName, {
-      stopHostServices: shouldStopHostServices,
-    }, {
-      runOpenshell: cleanupRunOpenshell,
-    });
+    cleanupSandboxServices(
+      sandboxName,
+      {
+        providerCleanupMode:
+          forcedLocalCleanup || sandbox?.harnessPackage ? "skip-gateway" : "legacy-suffixes",
+        stopHostServices: shouldStopHostServices,
+      },
+      {
+        runOpenshell: cleanupRunOpenshell,
+      },
+    );
   });
   if (deleteSucceededOrAlreadyGone && commonLlamaCppAuthorityRetired === true) {
     preparedManagedLlamaCppCleanup?.abort();
@@ -1057,7 +1233,11 @@ async function destroySandboxUnlocked(
   if (deleteSucceededOrAlreadyGone && retireRemovedImmutabilityState) {
     retireRemovedImmutabilityStateRecord(sandboxName, "sandbox-destroyed");
   }
-  const removalOutcome = removeSandboxRegistryEntryOutcome(sandboxName);
+  const removalOutcome: RemoveSandboxRegistryEntryOutcome = forcedLocalCleanup
+    ? registry.removeSandbox(sandboxName)
+      ? { status: "complete", removed: true }
+      : { status: "not-found", removed: false }
+    : removeSandboxRegistryEntryOutcome(sandboxName);
   const removed = removalOutcome.removed;
   if (removalOutcome.status === "blocked") {
     const providerId = normalizeRuntimeProviderIdentity(
@@ -1188,10 +1368,13 @@ async function destroySandboxUnlocked(
     }
   }
   if (
-    shouldCleanupGatewayAfterConfirmedFinalDestroy({
-      deleteSucceededOrAlreadyGone,
-      removedRegistryEntry: removed,
-    }, cleanupCaptureOpenshell ? { captureOpenshell: cleanupCaptureOpenshell } : {})
+    shouldCleanupGatewayAfterConfirmedFinalDestroy(
+      {
+        deleteSucceededOrAlreadyGone,
+        removedRegistryEntry: removed,
+      },
+      cleanupCaptureOpenshell ? { captureOpenshell: cleanupCaptureOpenshell } : {},
+    )
   ) {
     const shouldCleanupGateway = await resolveCleanupGatewayDecision(normalized);
     if (shouldCleanupGateway) {

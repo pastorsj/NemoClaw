@@ -3,7 +3,10 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { MIN_HERMES_OLLAMA_CONTEXT_WINDOW } from "../../../inference/ollama-runtime-context";
+import {
+  MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW,
+  MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
+} from "../../../inference/ollama-runtime-context";
 import { createSession } from "../../../state/onboard-session";
 import { handleProviderInferenceState } from "./provider-inference";
 import { baseOptions, createDeps } from "./provider-inference.test-support";
@@ -75,5 +78,39 @@ describe("handleProviderInferenceState Ollama context resume (#6760)", () => {
     expect(calls.setupNim).not.toHaveBeenCalled();
     expect(calls.setupInference).not.toHaveBeenCalled();
     expect(calls.skipped).not.toHaveBeenCalledWith("inference", expect.anything());
+  });
+
+  it("does not apply the legacy Hermes floor to a same-ID receipt without a declaration", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "1.0.0-test",
+      contentDigest: "b".repeat(64),
+    };
+    const session = createSession({
+      agent: "hermes",
+      harnessPackage,
+      provider: "ollama-local",
+      model: "future/model",
+    });
+    session.steps.provider_selection.status = "complete";
+    const { deps, calls } = createDeps({
+      isInferenceRouteReady: vi.fn(() => true),
+      revalidateHarnessPackageAuthority: () => ({
+        harnessPackage,
+        harnessPackageMigration: null,
+      }),
+    });
+
+    await handleProviderInferenceState({
+      ...baseOptions(deps, session),
+      resume: true,
+      sandboxName: "hermes-local",
+      agent: { name: "hermes" },
+    });
+
+    expect(calls.repair).toHaveBeenCalledWith(
+      expect.objectContaining({ contextWindowFloor: MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW }),
+    );
   });
 });

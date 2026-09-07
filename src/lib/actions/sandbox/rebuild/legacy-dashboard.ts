@@ -10,5 +10,6 @@ export function reconcileLegacyDashboardProfile(
   agentDefinition: AgentDefinition,
 ): ReturnType<typeof sandboxConfig.restoreHermesDashboardConfig> {
   const target = sandboxConfig.resolveAgentConfig(sandboxName, agentDefinition);
+  if (target.agentName !== agentDefinition.name) return "failed";
   return sandboxConfig.restoreHermesDashboardConfig(sandboxName, target);
 }

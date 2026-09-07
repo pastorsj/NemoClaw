@@ -41,8 +41,9 @@ export interface BuiltInMessagingHookOptions {
 export function createBuiltInMessagingHookRegistrations(
   options: BuiltInMessagingHookOptions = {},
 ): readonly MessagingHookRegistration[] {
+  const commonOptions = withPackageCommandOptions(options.common, options.statusHealth);
   return [
-    ...createCommonHookRegistrations(options.common),
+    ...createCommonHookRegistrations(commonOptions),
     ...createDiscordHookRegistrations(
       withOpenClawBridgeHealthOptions(options.discord, options.openclawBridgeHealth),
     ),
@@ -65,6 +66,20 @@ export function createBuiltInMessagingHookRegistrations(
       withStatusHealthOptions(options.whatsapp, options.statusHealth),
     ),
   ];
+}
+
+function withPackageCommandOptions(
+  common: CommonHookOptions | undefined,
+  statusHealth: ChannelStatusHealthHookOptions | undefined,
+): CommonHookOptions {
+  return {
+    ...common,
+    packageCommand: {
+      executeSandboxCommand: statusHealth?.executeSandboxCommand,
+      timeoutMs: statusHealth?.timeoutMs,
+      ...common?.packageCommand,
+    },
+  };
 }
 
 export function createBuiltInMessagingHookRegistry(

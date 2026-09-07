@@ -18,6 +18,7 @@ import {
   startScriptHeredoc,
 } from "../helpers/startup-suite";
 
+// This automated package suite supersedes the retired test/local-slack-auth-test.sh harness.
 describe("Slack channel guard — unhandled-rejection safety net (#2340)", () => {
   const src = readOpenClawStartupSource();
   const extractGuardScript = () => startScriptHeredoc(src, "SLACK_GUARD_EOF");
@@ -118,6 +119,20 @@ setImmediate(function () { console.log('still-running'); });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("still-running");
     expect(result.stderr).toContain("provider failed to start");
+    expect(result.stderr).toContain("invalid_auth");
+  });
+
+  it("passes non-Slack uncaught exceptions through to later process handlers", () => {
+    const result = runSlackGuardHarness(`
+process.on('uncaughtException', function () {
+  console.log('downstream');
+  process.exit(42);
+});
+process.emit('uncaughtException', new Error('out of memory'));
+`);
+    expect(result.status).toBe(42);
+    expect(result.stdout).toContain("downstream");
+    expect(result.stderr).not.toContain("provider failed to start");
   });
 
   it("passes non-Slack failures through to later process handlers", () => {
@@ -181,6 +196,13 @@ setImmediate(function () {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("downstream=true");
     expect(result.stderr).not.toContain("provider failed to start");
+  });
+
+  it("stays silent during normal operation", () => {
+    const result = runSlackGuardHarness("console.log('normal-operation');");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("normal-operation");
+    expect(result.stderr).toBe("");
   });
 });
 

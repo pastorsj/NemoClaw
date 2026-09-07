@@ -6,6 +6,10 @@ import { captureOpenshell, runOpenshell } from "../../adapters/openshell/runtime
 import type { OpenShellRuntimeSelection } from "../../adapters/openshell/runtime-selection";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
 import type { AgentDefinition } from "../../agent/defs";
+import {
+  prepareProviderBrokerCleanup,
+  removePreparedProviderBroker,
+} from "../../agent-runtime/provider-broker-cleanup";
 import { G, R } from "../../cli/terminal-style";
 import { waitUntil } from "../../core/wait";
 import { getSandboxDeleteOutcome } from "../../domain/sandbox/destroy";
@@ -279,6 +283,26 @@ export async function runRebuildDestroyPhase(
   log(
     `Registry entry: agent=${sbMeta?.agent}, agentVersion=${sbMeta?.agentVersion}, nimContainer=${sbMeta?.nimContainer}`,
   );
+  const brokerRunOpenshell = (args: string[], options: Record<string, unknown> = {}) =>
+    runOpenshell(args, {
+      ...options,
+      ...(input.runtimeSelection
+        ? {
+            env: buildSelectedOpenShellSubprocessEnv(input.runtimeSelection),
+            replaceEnv: true,
+          }
+        : {}),
+    });
+  let providerBrokerCleanup: ReturnType<typeof prepareProviderBrokerCleanup> = null;
+  try {
+    providerBrokerCleanup = prepareProviderBrokerCleanup(sandboxName, sbMeta, {
+      getSandbox: registry.getSandbox,
+      runOpenshell: brokerRunOpenshell,
+    });
+  } catch (error) {
+    bail(`Provider-broker cleanup preflight failed: ${redactFull(String(error))}`);
+    return null;
+  }
   const stopNimBestEffort = (): void => {
     try {
       if (sbMeta && sbMeta.nimContainer) {
@@ -579,6 +603,18 @@ export async function runRebuildDestroyPhase(
     const detail = error instanceof Error ? error.message : String(error);
     bail(`Sandbox deletion could not be journaled: ${redactFull(detail)}`);
     return null;
+  }
+  if (providerBrokerCleanup) {
+    try {
+      removePreparedProviderBroker(providerBrokerCleanup, {
+        getSandbox: registry.getSandbox,
+        runOpenshell: brokerRunOpenshell,
+      });
+    } catch (error) {
+      input.onDeleteStateAmbiguous?.();
+      bail(`Provider-broker cleanup failed after sandbox deletion: ${redactFull(String(error))}`);
+      return null;
+    }
   }
   if (!teardownSandboxDashboardForward(sandboxName)) {
     console.error(

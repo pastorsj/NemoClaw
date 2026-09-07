@@ -22,7 +22,7 @@ describe("DeepSeek Harness package discovery", () => {
     expect(source).toMatchObject({
       id: "deepseek-harness",
       displayName: "DeepSeek Harness (local POC)",
-      manifestPath: "packages/nemoclaw-deepseek-harness/manifest.yaml",
+      manifestPath: "manifest.yaml",
       packageVersion: "0.1.0",
     });
   });

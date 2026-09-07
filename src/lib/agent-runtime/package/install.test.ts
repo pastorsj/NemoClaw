@@ -6,16 +6,22 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../../test/helpers/adapter-fixtures";
+import { activateHarnessPackage } from "./activation";
 import { installHarnessPackage } from "./install";
 import {
   HarnessPackageStoreIntegrityError,
-  activateHarnessPackage,
   readInstalledHarnessPackage,
   resolvePinnedHarnessPackage,
   type InstalledHarnessPackage,
 } from "./store";
 import type { BundledHarnessPackageSourceIdentity } from "./receipt";
 import type { HarnessPackageIdentity } from "./types";
+import { validateHarnessPackage } from "./validation";
 
 const FIRST_SOURCE_IDENTITY: BundledHarnessPackageSourceIdentity = {
   kind: "bundled",
@@ -78,6 +84,15 @@ function writePackage(packageVersion = "1.0.0", payload = "first payload\n"): vo
       "description: Reviewed runtime adapter",
       "runtime:",
       "  kind: gateway",
+      "  interactive_command: openclaw",
+      "  process_lifecycle:",
+      "    support: unsupported",
+      "    reason: This fixture does not manage a gateway process.",
+      "gateway_command: openclaw gateway run",
+      "health_probe:",
+      "  url: http://127.0.0.1:18789/health",
+      "  port: 18789",
+      "  timeout_seconds: 30",
       "config:",
       "  dir: /sandbox/.openclaw",
       "  config_file: openclaw.json",
@@ -88,12 +103,18 @@ function writePackage(packageVersion = "1.0.0", payload = "first payload\n"): vo
       "    reason: This synthetic package has fixed inference configuration.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This package does not run scheduled work.",
@@ -101,6 +122,18 @@ function writePackage(packageVersion = "1.0.0", payload = "first payload\n"): vo
       "      kind: not-required",
       "",
     ].join("\n"),
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-openclaw/host/config-adapter.cts",
+    TEST_CONFIG_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-openclaw/host/messaging-adapter.cts",
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-openclaw/host/startup-adapter.cts",
+    TEST_STARTUP_ADAPTER_SOURCE,
   );
   writeFixtureFile("runtime/payload.txt", payload);
 }
@@ -134,6 +167,19 @@ function failMissingPackage(): never {
 
 function readActivePackage(): InstalledHarnessPackage {
   return readInstalledHarnessPackage("openclaw", { storeRoot }) ?? failMissingPackage();
+}
+
+function configAdapterWithDescribeMutableConfig(exportValue: string): string {
+  return `
+"use strict";
+module.exports = {
+  describeInferenceConfig() {},
+  prepareInferenceConfig() {},
+  prepareConfigUpdate() {},
+  classifyConfigUrl() {},
+  ${exportValue}
+};
+`;
 }
 
 beforeEach(() => {
@@ -203,11 +249,10 @@ describe("installHarnessPackage", () => {
       {
         storeRoot,
         dependencies: {
-          onPublicationCheckpoint: (checkpoint) => {
-            if (checkpoint === "before-object-publication") {
-              writeFixtureFile("runtime/payload.txt", "later payload\n");
-            }
-          },
+          onPublicationCheckpoint: (checkpoint) =>
+            checkpoint === "before-object-publication"
+              ? writeFixtureFile("runtime/payload.txt", "later payload\n")
+              : undefined,
         },
       },
     );
@@ -278,6 +323,118 @@ describe("installHarnessPackage", () => {
     expect(recovered.identity.packageVersion).toBe("1.1.0");
   });
 
+  it.each([
+    ["missing", ""],
+    ["wrongly typed", 'describeMutableConfig: "not-a-function",'],
+  ])(
+    "retains a package with a %s fixed export but refuses to install or activate it",
+    (_condition, exportValue) => {
+      const first = install();
+      writePackage("1.1.0", "unqualified payload\n");
+      writeFixtureFile(
+        "packages/nemoclaw-openclaw/host/config-adapter.cts",
+        configAdapterWithDescribeMutableConfig(exportValue),
+      );
+      const report = validateHarnessPackage(sourceRoot);
+
+      expect(report.valid).toBe(true);
+      expect(() => install(SECOND_SOURCE_IDENTITY)).toThrow(
+        /configuration adapter.*must export describeMutableConfig/u,
+      );
+      expect(readActivePackage().identity).toEqual(first.identity);
+      expect(fs.existsSync(objectPath(report.identity))).toBe(true);
+      expect(fs.existsSync(receiptPath(report.identity))).toBe(true);
+      expect(resolvePinnedHarnessPackage(report.identity, { storeRoot }).identity).toEqual(
+        report.identity,
+      );
+
+      expect(() =>
+        activateHarnessPackage("openclaw", report.identity.contentDigest, { storeRoot }),
+      ).toThrow(/configuration adapter.*must export describeMutableConfig/u);
+      expect(readActivePackage().identity).toEqual(first.identity);
+    },
+  );
+
+  it("evaluates adapter modules only during trusted install and activation", () => {
+    const first = install();
+    writePackage("1.1.0", "initialization marker payload\n");
+    writeFixtureFile(
+      "packages/nemoclaw-openclaw/host/config-adapter.cts",
+      'throw new Error("synthetic initialization marker"); module.exports = {};\n',
+    );
+    const report = validateHarnessPackage(sourceRoot);
+
+    expect(report.valid).toBe(true);
+    expect(() => install(SECOND_SOURCE_IDENTITY)).toThrow(
+      /configuration adapter.*could not be evaluated/u,
+    );
+    expect(resolvePinnedHarnessPackage(report.identity, { storeRoot }).identity).toEqual(
+      report.identity,
+    );
+    expect(() =>
+      activateHarnessPackage("openclaw", report.identity.contentDigest, { storeRoot }),
+    ).toThrow(/configuration adapter.*could not be evaluated/u);
+    expect(readActivePackage().identity).toEqual(first.identity);
+  });
+
+  it("initializes exports without running adapter operations or the provider controller", () => {
+    const controllerMarker = path.join(fixtureRoot, "provider-controller-ran");
+    const operationFailure = 'throw new Error("synthetic adapter operation ran");';
+    const throwingExports = (names: readonly string[]) =>
+      `"use strict"; module.exports = { ${names
+        .map((name) => `${name}() { ${operationFailure} }`)
+        .join(", ")} };\n`;
+    writeFixtureFile(
+      "packages/nemoclaw-openclaw/host/config-adapter.cts",
+      throwingExports([
+        "describeInferenceConfig",
+        "prepareInferenceConfig",
+        "prepareConfigUpdate",
+        "classifyConfigUrl",
+        "describeMutableConfig",
+      ]),
+    );
+    writeFixtureFile(
+      "packages/nemoclaw-openclaw/host/messaging-adapter.cts",
+      throwingExports(["describeMessagingIntegration"]),
+    );
+    writeFixtureFile(
+      "packages/nemoclaw-openclaw/host/startup-adapter.cts",
+      throwingExports([
+        "buildStartupPlan",
+        "prepareStartupProfile",
+        "buildInitialStartupProfile",
+        "reconcileStartupProfile",
+      ]),
+    );
+    fs.appendFileSync(
+      path.join(sourceRoot, "packages/nemoclaw-openclaw/manifest.yaml"),
+      [
+        "provider_broker:",
+        "  support: managed",
+        "  adapter: provider-broker",
+        "  operations:",
+        "    - describe-provider",
+        "    - register-refresh-provider",
+        "    - ensure-broker",
+        "    - inspect-broker",
+        "    - teardown-broker",
+        "",
+      ].join("\n"),
+    );
+    writeFixtureFile(
+      "packages/nemoclaw-openclaw/host/provider-broker-adapter.cts",
+      throwingExports(["buildProviderBrokerPlan"]),
+    );
+    writeFixtureFile(
+      "packages/nemoclaw-openclaw/host/provider-broker-control.cts",
+      `require("node:fs").writeFileSync(${JSON.stringify(controllerMarker)}, "ran");\n`,
+    );
+
+    expect(install().state).toBe("installed");
+    expect(fs.existsSync(controllerMarker)).toBe(false);
+  });
+
   it("rejects malformed source identity before creating package-store state", () => {
     const sourceIdentity = {
       ...FIRST_SOURCE_IDENTITY,
@@ -295,6 +452,17 @@ describe("installHarnessPackage", () => {
     expect(fs.readdirSync(storeRoot)).toEqual([]);
   });
 
+  it("rejects a package missing a required adapter before creating package-store state", () => {
+    fs.rmSync(
+      path.join(sourceRoot, "packages", "nemoclaw-openclaw", "host", "messaging-adapter.cts"),
+    );
+
+    expect(() => install()).toThrow(
+      "requires a non-empty regular artifact 'host/messaging-adapter.cts'",
+    );
+    expect(fs.readdirSync(storeRoot)).toEqual([]);
+  });
+
   it.each([
     ["missing", undefined, "metadata fields do not match"],
     ["malformed", "0.0", "minimumNemoClawVersion"],
@@ -302,11 +470,9 @@ describe("installHarnessPackage", () => {
     "rejects a %s minimum NemoClaw version before creating package-store state",
     (_label, minimumNemoClawVersion, expectedMessage) => {
       const envelope = packageEnvelope("1.0.0");
-      if (minimumNemoClawVersion === undefined) {
-        delete envelope.minimumNemoClawVersion;
-      } else {
-        envelope.minimumNemoClawVersion = minimumNemoClawVersion;
-      }
+      minimumNemoClawVersion === undefined
+        ? Reflect.deleteProperty(envelope, "minimumNemoClawVersion")
+        : Object.assign(envelope, { minimumNemoClawVersion });
       writeFixtureFile("nemoclaw-package.json", `${JSON.stringify(envelope)}\n`);
 
       expect(() => install()).toThrow(expectedMessage);
@@ -333,12 +499,13 @@ describe("installHarnessPackage", () => {
           getBuildIdentity: () => ({ nemoclawVersion, sourceRevision: "a".repeat(40) }),
         },
       );
-    if (compatible) {
-      expect(operation().identity.id).toBe("openclaw");
-    } else {
-      expect(operation).toThrow(expectedMessage);
-      expect(fs.readdirSync(storeRoot)).toEqual([]);
-    }
+    const assertCompatibility = compatible
+      ? () => expect(operation().identity.id).toBe("openclaw")
+      : () => {
+          expect(operation).toThrow(expectedMessage);
+          expect(fs.readdirSync(storeRoot)).toEqual([]);
+        };
+    assertCompatibility();
   });
 
   it("refuses an existing pinned receipt after the running core leaves its window", () => {
@@ -369,7 +536,7 @@ describe("installHarnessPackage", () => {
     expect(fs.readdirSync(storeRoot)).toEqual([]);
   });
 
-  it("copies executable and authoring sentinels without running package-owned code", () => {
+  it("copies executable and authoring sentinels without running package lifecycle scripts", () => {
     const marker = path.join(fixtureRoot, "package-code-ran");
     const markerCommand = `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`;
     writeFixtureFile(

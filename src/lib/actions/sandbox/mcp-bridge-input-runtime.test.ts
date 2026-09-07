@@ -30,11 +30,13 @@ describe("MCP input runtime boundaries", () => {
       () => restartMcpBridge(sandboxName, "github"),
     ];
 
-    for (const action of actions) {
-      await expect(action()).rejects.toMatchObject({
-        reasonCode: "package-authority-required",
-      });
-    }
+    await Promise.all(
+      actions.map((action) =>
+        expect(action()).rejects.toMatchObject({
+          reasonCode: "package-authority-required",
+        }),
+      ),
+    );
   });
 
   it("rejects unauthenticated direct add callers before sandbox or network side effects", async () => {

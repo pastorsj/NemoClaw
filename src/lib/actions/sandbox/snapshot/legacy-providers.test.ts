@@ -270,6 +270,76 @@ function prepareWithBinding(input: {
 }
 
 describe("managed clone provider transaction", () => {
+  it("rejects a same-ID receipt before applying legacy Hermes provider rules", () => {
+    const baseProfile = managedStartupE2eProfile("hermes");
+    const profile = {
+      ...baseProfile,
+      agentConfig: {
+        ...baseProfile.agentConfig,
+        webSearch: { enabled: true as const, provider: "tavily" as const },
+      },
+    };
+    const source = entry("source", profile);
+    const legacyHandoff = handoff(profile, source);
+    const packageHandoff = {
+      ...legacyHandoff,
+      sourceRegistryAuthority: {
+        ...legacyHandoff.sourceRegistryAuthority,
+        harnessPackage: {
+          kind: "agent-runtime" as const,
+          id: "hermes",
+          packageVersion: "1.0.0",
+          contentDigest: "d".repeat(64),
+        },
+      },
+    };
+    const runner = providerRunner();
+
+    expect(() =>
+      prepareLegacyCloneProviderTransaction({
+        handoff: packageHandoff,
+        destination: null,
+        environment: { TAVILY_API_KEY: "test-only-tavily-token" },
+        runOpenshell: runner.run,
+        transactionId: "a".repeat(32),
+      }),
+    ).toThrow(/receipt-backed package clone provider reconciliation is unsupported/u);
+    expect(runner.run).not.toHaveBeenCalled();
+  });
+
+  it("retains the qualified no-receipt Hermes Tavily provider mapping", () => {
+    const baseProfile = managedStartupE2eProfile("hermes");
+    const profile = {
+      ...baseProfile,
+      agentConfig: {
+        ...baseProfile.agentConfig,
+        webSearch: { enabled: true as const, provider: "tavily" as const },
+      },
+    };
+    const source = entry("source", profile);
+    const runner = providerRunner();
+
+    const prepared = prepareLegacyCloneProviderTransaction({
+      handoff: handoff(profile, source),
+      destination: null,
+      environment: { TAVILY_API_KEY: "test-only-tavily-token" },
+      runOpenshell: runner.run,
+      transactionId: "b".repeat(32),
+    });
+
+    expect(prepared.providers).toEqual([
+      {
+        binding: {
+          providerName: "destination-tavily-search",
+          providerType: "nemoclaw-hermes-tavily",
+          providerEnvKey: "TAVILY_API_KEY",
+          source: "web-search",
+        },
+        action: "create",
+      },
+    ]);
+  });
+
   it.each(["openclaw", "hermes", "langchain-deepagents-code"] as const)(
     "keeps the %s transaction provider-neutral, secret-free, and deeply frozen (#8931)",
     (agent) => {

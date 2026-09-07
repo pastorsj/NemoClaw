@@ -159,4 +159,61 @@ describe("fresh Hermes Portable provider selection", () => {
     expect(abortNonInteractive).toHaveBeenCalledOnce();
     expect(detectHostState).not.toHaveBeenCalled();
   });
+
+  it("keeps the exact Hermes Portable shortcut out of receipt-backed package onboarding", async () => {
+    vi.stubEnv("NEMOCLAW_EXPERIMENTAL_PROFILE", "portable");
+    const detectHostState = vi.fn(() =>
+      makeHostState({ hasOllama: true, ollamaHost: "127.0.0.1", ollamaRunning: true }),
+    );
+    const handleRunningOllamaSelection = vi.fn<SetupNimFlowDeps["handleRunningOllamaSelection"]>(
+      async (_gpu, _requestedModel, _recoveredModel, _ollamaRunning, state) => {
+        expect(state.ollamaContextWindowFloor).toBe(64_000);
+        state.model = "qwen3-vl:4b";
+        state.provider = "ollama-local";
+        state.endpointUrl = "http://127.0.0.1:11434/v1";
+        state.credentialEnv = null;
+        state.preferredInferenceApi = "openai-completions";
+        return "selected";
+      },
+    );
+    const setupNim = createSetupNim(
+      makeDeps({
+        isNonInteractive: () => true,
+        getNonInteractiveProvider: () => "ollama",
+        getNonInteractiveModel: () => "qwen3-vl:4b",
+        detectInferenceProviderHostState: detectHostState,
+        handleRunningOllamaSelection,
+      }),
+    );
+    const agent = {
+      name: "hermes",
+      inference: {
+        contextWindowRequirements: [{ provider: "ollama-local", minimumTokens: 64_000 }],
+      },
+    } as unknown as AgentDefinition;
+
+    await expect(
+      setupNim(
+        { type: "nvidia" } as SetupNimGpu,
+        "portable-hermes",
+        agent,
+        false,
+        null,
+        null,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          kind: "agent-runtime",
+          id: "hermes",
+          packageVersion: "1.0.0-test",
+          contentDigest: "a".repeat(64),
+        },
+      ),
+    ).resolves.toMatchObject({ provider: "ollama-local", model: "qwen3-vl:4b" });
+
+    expect(detectHostState).toHaveBeenCalledOnce();
+    expect(handleRunningOllamaSelection).toHaveBeenCalledOnce();
+  });
 });

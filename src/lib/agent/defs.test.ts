@@ -34,12 +34,35 @@ import { resolveAgent } from "./onboard";
 
 const tempAgentDirs: string[] = [];
 const PI_MANIFEST_PATH = path.join(AGENT_RUNTIME_PACKAGES_DIR, "nemoclaw-pi", "manifest.yaml");
+const VALID_STATE_LIFECYCLE_YAML = [
+  "state_lifecycle:",
+  "  backup_quiescence:",
+  "    kind: not-required",
+  "  snapshot_restore: []",
+  "  rebuild:",
+  "    managed_extensions:",
+  "      support: disabled",
+  "      reason: Test agent has no managed extensions.",
+  "    scheduled_work:",
+  "      support: disabled",
+  "      reason: Test agent has no scheduled work.",
+  "    post_restore:",
+  "      kind: not-required",
+].join("\n");
 
-function writeTempAgentManifest(name: string, contents: string): void {
+function writeTempAgentManifest(
+  name: string,
+  contents: string,
+  options: { readonly contractComplete?: boolean } = {},
+): void {
   const agentDir = path.join(AGENTS_DIR, name);
   tempAgentDirs.push(agentDir);
   fs.mkdirSync(agentDir, { recursive: true });
-  fs.writeFileSync(path.join(agentDir, "manifest.yaml"), contents);
+  const source =
+    options.contractComplete === false
+      ? contents
+      : `${contents.trimEnd()}\n${VALID_STATE_LIFECYCLE_YAML}\n`;
+  fs.writeFileSync(path.join(agentDir, "manifest.yaml"), source);
 }
 
 const qualificationFixtures: CandidateQualificationFixture[] = [];
@@ -165,13 +188,14 @@ describe("agent definitions", () => {
     vi.spyOn(fs, "readFileSync").mockImplementation(((
       target: fs.PathOrFileDescriptor,
       options?: unknown,
-    ) => {
-      return target === manifestPath && options === "utf8"
-        ? serveUpdatedManifest
-          ? updatedManifest
-          : originalManifest
-        : Reflect.apply(readFileSync, fs, [target, options]);
-    }) as typeof fs.readFileSync);
+    ) =>
+      target === manifestPath
+        ? options === undefined
+          ? Buffer.from(serveUpdatedManifest ? updatedManifest : originalManifest)
+          : serveUpdatedManifest
+            ? updatedManifest
+            : originalManifest
+        : Reflect.apply(readFileSync, fs, [target, options])) as typeof fs.readFileSync);
 
     const first = loadAgentFresh("pi", fixture.env);
     serveUpdatedManifest = true;
@@ -218,7 +242,7 @@ describe("agent definitions", () => {
     expect(manifest.config.dir).toBe("/sandbox/.pi/agent");
     expect(
       manifest.state_dirs.filter(({ backup }) => backup !== false).map(({ path }) => path),
-    ).toEqual(["sessions", "prompts", "themes"]);
+    ).toEqual(["sessions", "prompts", "themes", "skills"]);
     expect(
       manifest.state_dirs.filter(({ backup }) => backup === false).map(({ path }) => path),
     ).toEqual(["tools", "bin"]);
@@ -317,7 +341,9 @@ describe("agent definitions", () => {
 
   it("rejects non-object manifest payloads", () => {
     const agentName = `invalid-top-level-manifest-${String(Date.now())}`;
-    writeTempAgentManifest(agentName, ["- not", "- an", "- object"].join("\n"));
+    writeTempAgentManifest(agentName, ["- not", "- an", "- object"].join("\n"), {
+      contractComplete: false,
+    });
 
     expect(() => loadAgent(agentName)).toThrow(/YAML object/);
   });
@@ -596,6 +622,25 @@ describe("agent definitions", () => {
       },
       smoke_commands: ["terminal-agent --version"],
     });
+    expect(agent.healthProbe).toBeNull();
+    expect(agent.forwardPort).toBe(0);
+  });
+
+  it("loads gateway runtime manifests without undeclared OpenClaw ports or health probes", () => {
+    const agentName = `gateway-agent-${String(Date.now())}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "display_name: Gateway Agent",
+        "runtime:",
+        "  kind: gateway",
+        "  interactive_command: gateway-agent",
+      ].join("\n"),
+    );
+
+    const agent = loadAgent(agentName);
+
     expect(agent.healthProbe).toBeNull();
     expect(agent.forwardPort).toBe(0);
   });

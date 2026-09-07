@@ -6,6 +6,7 @@ import { spawnSync } from "child_process";
 import { loadAgent } from "../agent/defs.js";
 import { buildSelectedOpenShellSubprocessEnv } from "../adapters/openshell/command-argv.js";
 import type { OpenShellRuntimeSelection } from "../adapters/openshell/runtime-selection.js";
+import { resolveRecordedSandboxAgentAuthority } from "../onboard/package/package-authority.js";
 import { shellQuote } from "../runner.js";
 import { createTempSshConfig } from "../sandbox/temp-ssh-config.js";
 
@@ -31,7 +32,10 @@ export function probeUserManagedFiles(
 ): UserManagedFilesProbe {
   const sb = registry.getSandbox(sandboxName);
   const agentName = sb?.agent || "openclaw";
-  const agent = loadAgent(agentName);
+  const agent =
+    sb && (sb.harnessPackage != null || sb.harnessPackageMigration != null)
+      ? resolveRecordedSandboxAgentAuthority(sb).definition
+      : loadAgent(agentName);
   const declared = Array.isArray(agent.userManagedFiles) ? [...agent.userManagedFiles] : [];
   if (declared.length === 0) return { declared, existing: [] };
 

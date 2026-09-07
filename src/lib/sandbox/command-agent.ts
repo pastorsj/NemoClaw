@@ -6,7 +6,9 @@ import { isDeepStrictEqual } from "node:util";
 import { loadAgent, type AgentDefinition } from "../agent/defs";
 import { resolvePackageBackedSandboxAgent } from "../onboard/package/package-authority";
 import { normalizeSandboxAgentName } from "../onboard/sandbox-agent/naming";
-import type { SandboxEntry } from "../state/registry";
+import * as registry from "../state/registry";
+
+type SandboxEntry = registry.SandboxEntry;
 
 export interface SandboxCommandAgentDependencies {
   readonly loadAgent: (agentName: string) => AgentDefinition;
@@ -23,6 +25,11 @@ export interface SandboxCommandAgentAuthority {
   readonly harnessPackage: NonNullable<SandboxEntry["harnessPackage"]> | null;
   readonly harnessPackageMigration: NonNullable<SandboxEntry["harnessPackageMigration"]> | null;
   readonly definition: AgentDefinition;
+}
+
+/** Read one registry row at a sandbox-command package authority boundary. */
+export function readSandboxCommandAgentEntry(sandboxName: string): SandboxEntry | null {
+  return registry.getSandbox(sandboxName);
 }
 
 /** Resolve command metadata from exact package authority, retaining only no-receipt compatibility. */

@@ -26,6 +26,7 @@ describe("verifyDeployment agent dashboard probes", () => {
     const agentChain = buildChain({
       chatUiUrl: "http://127.0.0.1:18789",
       dashboardHealthEndpoint: "/api/status",
+      sandboxHealthPort: 8642,
       gatewayPort: 8642,
       gatewayHealthEndpoint: "/health",
     });

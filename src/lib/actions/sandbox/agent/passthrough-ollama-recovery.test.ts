@@ -49,7 +49,7 @@ describe("runOllamaRestartRecovery", () => {
     expect(writes.join("")).toContain("Ollama model 'qwen3.6:35b' is loaded and ready");
   });
 
-  it("reports a timeout before continuing to OpenClaw", () => {
+  it("reports a timeout before continuing to agent dispatch", () => {
     const { writes, proc } = makeProcMock();
 
     runOllamaRestartRecovery({ provider: "ollama-local", model: "qwen3.6:35b" }, proc, () => ({
@@ -66,7 +66,8 @@ describe("runOllamaRestartRecovery", () => {
     expect(stderr).toContain("Ollama warm-up for 'qwen3.6:35b'");
     expect(stderr).toContain("timed out");
     expect(stderr).toContain("at http://host.docker.internal:11434");
-    expect(stderr).toContain("OpenClaw dispatch will continue");
+    expect(stderr).toContain("Agent dispatch will continue");
+    expect(stderr).not.toContain("OpenClaw");
     expect(stderr).toContain("confirm that it serves 'qwen3.6:35b'");
   });
 
@@ -90,7 +91,7 @@ describe("runOllamaRestartRecovery", () => {
     const stderr = writes.join("");
     expect(stderr).toContain(message);
     expect(stderr).toContain("http://host.docker.internal:11434");
-    expect(stderr).toContain("OpenClaw dispatch will continue");
+    expect(stderr).toContain("Agent dispatch will continue");
     expect(stderr).toContain("confirm that it serves 'qwen3.6:35b'");
   });
 
@@ -133,12 +134,12 @@ describe("runOllamaRestartRecovery", () => {
       "Ollama at http://host.docker.internal:11434 reports 'gemma4:26b' as unavailable",
     );
     expect(stderr).toContain("reported models: llama3.2:1b");
-    expect(stderr).toContain("continuing to OpenClaw dispatch");
+    expect(stderr).toContain("continuing to agent dispatch");
     expect(stderr).toContain("Restart the daemon that holds 'gemma4:26b'");
     expect(stderr).not.toContain("Ollama was unreachable during the restart check");
   });
 
-  it("continues OpenClaw dispatch when Ollama recovery throws", () => {
+  it("continues agent dispatch when Ollama recovery throws", () => {
     const { writes, proc } = makeProcMock();
 
     expect(() =>
@@ -147,7 +148,7 @@ describe("runOllamaRestartRecovery", () => {
       }),
     ).not.toThrow();
     expect(writes.join("")).toContain(
-      "Ollama restart recovery failed unexpectedly; continuing to OpenClaw dispatch",
+      "Ollama restart recovery failed unexpectedly; continuing to agent dispatch",
     );
   });
 });

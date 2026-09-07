@@ -55,12 +55,22 @@ describe("OpenClaw host adapter build", () => {
     );
     expect(restoreArtifact).toContain("mergeConfigState");
     expect(restoreArtifact).toContain("module.exports = exportedAdapter;");
+
+    const rosterArtifact = fs.readFileSync(
+      path.join(PACKAGE_ROOT, "host/agent-roster-adapter.cts"),
+      "utf8",
+    );
+    expect(rosterArtifact).toContain("buildAgentRosterCommand");
+    expect(rosterArtifact).toContain("buildAgentRosterInspection");
+    expect(rosterArtifact).toContain("buildAgentRosterApplyPlan");
+    expect(rosterArtifact).not.toMatch(/\brequire\s*\(/u);
   });
 
-  it("publishes generated MCP and restore artifacts without their authoring source", () => {
+  it("publishes generated MCP, restore, and roster artifacts without authoring source", () => {
     const paths = packedPaths();
     expect(paths).toContain("host/mcp-adapter.cts");
     expect(paths).toContain("host/restore-adapter.cts");
+    expect(paths).toContain("host/agent-roster-adapter.cts");
     expect(paths.some((candidate) => candidate.startsWith("host/source/"))).toBe(false);
   });
 

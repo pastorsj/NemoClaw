@@ -8,6 +8,8 @@ import { pathToFileURL } from "node:url";
 
 import { afterAll, describe, expect, it } from "vitest";
 
+import type { HarnessManagedExtension } from "@nvidia/nemoclaw-harness-contract";
+
 import { restoreEnvBulk } from "../../../../test/helpers/env-test-helpers.js";
 import type { OpenClawImagePluginInstall } from "../../../../src/lib/state/openclaw-plugin-restore.js";
 
@@ -35,10 +37,22 @@ function installOpenClawRestorePackage() {
     path.join(PACKAGE_ROOT, "manifest.yaml"),
     path.join(packageRoot, "manifest.yaml"),
   );
-  fs.copyFileSync(
-    path.join(PACKAGE_ROOT, "host", "restore-adapter.cts"),
-    path.join(packageRoot, "host", "restore-adapter.cts"),
-  );
+  for (const entry of fs.readdirSync(path.join(PACKAGE_ROOT, "host"), {
+    withFileTypes: true,
+  })) {
+    if (!entry.isFile() || !entry.name.endsWith(".cts")) continue;
+    fs.copyFileSync(
+      path.join(PACKAGE_ROOT, "host", entry.name),
+      path.join(packageRoot, "host", entry.name),
+    );
+  }
+  for (const relativePath of ["messaging/profile.json", "provider-profiles/googlechat.yaml"]) {
+    fs.mkdirSync(path.dirname(path.join(packageRoot, relativePath)), {
+      recursive: true,
+      mode: 0o700,
+    });
+    fs.copyFileSync(path.join(PACKAGE_ROOT, relativePath), path.join(packageRoot, relativePath));
+  }
   fs.writeFileSync(
     path.join(sourceRoot, "nemoclaw-package.json"),
     `${JSON.stringify({
@@ -69,6 +83,12 @@ function installOpenClawRestorePackage() {
 }
 
 const OPENCLAW_PACKAGE_IDENTITY = installOpenClawRestorePackage();
+const { resolvePackageIdentityAgent } = await import(
+  pathToFileURL(
+    path.join(REPOSITORY_ROOT, "src", "lib", "onboard", "package", "package-authority.ts"),
+  ).href
+);
+const OPENCLAW_AGENT_DEFINITION = resolvePackageIdentityAgent(OPENCLAW_PACKAGE_IDENTITY).definition;
 
 afterAll(() => {
   if (ORIGINAL_HOME === undefined) delete process.env.HOME;
@@ -101,6 +121,12 @@ function writeOpenClawRegistry(sandboxName: string): void {
           gpuEnabled: false,
           agent: null,
           harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+          harnessPackageMigration: {
+            schemaVersion: 1,
+            source: "legacy-current-bundle",
+            legacyAgent: null,
+            migratedAt: "2026-09-06T12:00:00.000Z",
+          },
         },
       },
     }),
@@ -110,6 +136,14 @@ function writeOpenClawRegistry(sandboxName: string): void {
 function extensionDir(install: OpenClawImagePluginInstall): string | null {
   const prefix = `${OPENCLAW_DIR}/extensions/`;
   return install.installPath.startsWith(prefix) ? install.installPath.slice(prefix.length) : null;
+}
+
+function managedExtension(install: OpenClawImagePluginInstall): HarnessManagedExtension {
+  return {
+    id: install.id,
+    directory: extensionDir(install),
+    configPaths: [...(install.loadPaths ?? [])],
+  };
 }
 
 function runRestoreScenario(options: {
@@ -151,6 +185,7 @@ function runRestoreScenario(options: {
         .map(extensionDir)
         .filter((entry): entry is string => entry !== null),
     ];
+    const freshManagedExtensions = options.freshPluginInstalls.map(managedExtension);
     fs.mkdirSync(binDir, { recursive: true });
 
     for (const extensionName of freshExtensionDirs) {
@@ -238,6 +273,10 @@ if (cmd.includes("installed_plugin_index")) {
   process.stdout.write(JSON.stringify({ version: 1, installRecords: {}, loadPaths: [] }));
   process.exit(0);
 }
+if (cmd.includes("inspect-managed-extensions")) {
+  process.stdout.write(JSON.stringify({ schemaVersion: 1, extensions: ${JSON.stringify(freshManagedExtensions)} }));
+  process.exit(0);
+}
 if (cmd.includes("tar --no-same-owner -xf -")) {
   const result = spawnSync("tar", ["--no-same-owner", "-xf", "-", "-C", openclawDir], {
     input: readStdin(),
@@ -245,7 +284,12 @@ if (cmd.includes("tar --no-same-owner -xf -")) {
   });
   process.exit(result.status || 0);
 }
-if (cmd.includes("chown") || cmd.includes("[ -d ")) process.exit(0);
+if (
+  cmd.includes("chown") ||
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) process.exit(0);
 if (cmd.includes("openclaw.json") && cmd.includes("cat --")) {
   process.stdout.write(fs.readFileSync(path.join(openclawDir, "openclaw.json")));
   process.exit(0);
@@ -269,9 +313,10 @@ process.exit(1);
     writeOpenClawRegistry("alpha");
     const restore = restoreRecreatedSandboxState("alpha", backupPath, {
       targetAgentType: "openclaw",
+      agentDefinition: OPENCLAW_AGENT_DEFINITION,
       ...(options.discoverFreshPluginInstalls
         ? {}
-        : { freshOpenClawImagePluginInstalls: options.freshPluginInstalls }),
+        : { freshManagedImageExtensions: freshManagedExtensions }),
       ...(options.runtimeSelection ? { runtimeSelection: options.runtimeSelection } : {}),
     });
     const sshInvocations = fs

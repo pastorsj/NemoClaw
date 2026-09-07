@@ -360,7 +360,7 @@ exit 0
     expect(output.trim()).toBe("nemoclaw-installer");
     expect(output).not.toMatch(/0\.1\.0/);
   });
-  it("preserves the sandbox payload lockfile with npm ci (#3798)", { timeout: 20000 }, () => {
+  it("does not mutate harness packages during CLI setup", { timeout: 20000 }, () => {
     const {
       root: tmp,
       binDir: fakeBin,
@@ -435,7 +435,8 @@ exit 89
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     const log = fs.readFileSync(npmLog, "utf-8");
     expect(log.match(/^install --ignore-scripts$/gm)).toHaveLength(1);
-    expect(log.match(/^ci --ignore-scripts$/gm)).toHaveLength(1);
+    expect(log.match(/^run --if-present build:cli$/gm)).toHaveLength(1);
+    expect(log).not.toMatch(/^(pack|ci|run build)\b/m);
     expect(fs.readFileSync(payloadLockPath)).toEqual(Buffer.from("payload lock sentinel\n"));
     expect(log).toMatch(/^link/m);
     expect(log).not.toMatch(new RegExp(GITHUB_INSTALL_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -1736,16 +1737,6 @@ exit 1
     const r = callInstallerFn("resolve_installer_version");
     // May return clean semver ("0.0.2") or git describe format ("0.0.2-3-gabcdef1")
     expect(r.stdout.trim()).toMatch(/^\d+\.\d+\.\d+(-.+)?$/);
-  });
-
-  it("resolve_openclaw_version: falls back to Dockerfile.base when package.json omits it", () => {
-    const { root: tmp } = installerCheckout("nemoclaw-openclaw-version-");
-    fs.writeFileSync(path.join(tmp, "package.json"), JSON.stringify({ name: "fixture" }));
-    const packageRoot = path.join(tmp, "packages", "nemoclaw-openclaw");
-    fs.mkdirSync(packageRoot, { recursive: true });
-    fs.writeFileSync(path.join(packageRoot, "Dockerfile.base"), "ARG OPENCLAW_VERSION=1.2.3\n");
-    const r = callInstallerFn(`resolve_openclaw_version ${JSON.stringify(tmp)}`);
-    expect(r.stdout.trim()).toBe("1.2.3");
   });
 
   it("is_source_checkout: rejects a payload-like checkout without git metadata", () => {

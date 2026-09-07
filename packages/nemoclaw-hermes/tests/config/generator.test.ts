@@ -28,6 +28,8 @@ import {
   withLegacyMessagingPlanEnv,
   withLegacyMessagingPlanEnvDirect,
 } from "../../../../test/messaging-plan-test-helper";
+import type { HarnessMessagingAdapterModule } from "@nvidia/nemoclaw-harness-contract";
+import { loadPackageHostModule } from "../helpers/host-module";
 
 const SCRIPT_PATH = path.join(import.meta.dirname, "../..", "config", "generate-config.ts");
 const SCRIPT_DIR = path.dirname(SCRIPT_PATH);
@@ -71,12 +73,38 @@ const REMOTE_PLATFORM_TOOLSETS = [
 
 let tmpDir: string;
 
+const HERMES_MESSAGING_INTEGRATION = loadPackageHostModule<HarnessMessagingAdapterModule>(
+  "messaging-adapter.cts",
+).describeMessagingIntegration({ packageId: "hermes" });
+if (HERMES_MESSAGING_INTEGRATION.kind !== "channels") {
+  throw new Error("Hermes messaging test fixture must be enabled");
+}
+const HERMES_MESSAGING_BUILD_PROFILE = HERMES_MESSAGING_INTEGRATION.build;
+
 function encodeJson(value: unknown): string {
   return Buffer.from(JSON.stringify(value)).toString("base64");
 }
 
+function withHermesMessagingBuildProfile(env: Record<string, string>): Record<string, string> {
+  const encodedPlan = env.NEMOCLAW_MESSAGING_PLAN_B64;
+  if (!encodedPlan) return env;
+  const plan = JSON.parse(Buffer.from(encodedPlan, "base64").toString("utf8")) as Record<
+    string,
+    unknown
+  >;
+  return {
+    ...env,
+    NEMOCLAW_MESSAGING_PLAN_B64: encodeJson({
+      ...plan,
+      packageBuild: HERMES_MESSAGING_BUILD_PROFILE,
+    }),
+  };
+}
+
 function buildHermesTestEnv(envOverrides: Record<string, string> = {}): Record<string, string> {
-  return withLegacyMessagingPlanEnv(buildHermesTestEnvBase(envOverrides), "hermes");
+  return withHermesMessagingBuildProfile(
+    withLegacyMessagingPlanEnv(buildHermesTestEnvBase(envOverrides), "hermes"),
+  );
 }
 
 function buildHermesTestEnvBase(envOverrides: Record<string, string> = {}): Record<string, string> {
@@ -91,7 +119,9 @@ function buildHermesTestEnvBase(envOverrides: Record<string, string> = {}): Reco
 function buildHermesTestEnvDirect(
   envOverrides: Record<string, string> = {},
 ): Promise<Record<string, string>> {
-  return withLegacyMessagingPlanEnvDirect(buildHermesTestEnvBase(envOverrides), "hermes");
+  return withLegacyMessagingPlanEnvDirect(buildHermesTestEnvBase(envOverrides), "hermes").then(
+    withHermesMessagingBuildProfile,
+  );
 }
 
 function withEnv<T>(env: Record<string, string>, fn: () => T): T {
@@ -245,10 +275,6 @@ function copyConfigGeneratorFixture(fixtureRoot: string): string {
     path.join(import.meta.dirname, "../../../..", "src", "lib", "messaging"),
     path.join(fixtureRoot, "src", "lib", "messaging"),
     { recursive: true },
-  );
-  fs.copyFileSync(
-    path.join(import.meta.dirname, "../../../..", "src", "lib", "tool-disclosure.ts"),
-    path.join(fixtureRoot, "src", "lib", "tool-disclosure.ts"),
   );
   return fixtureScriptPath;
 }

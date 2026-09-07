@@ -72,6 +72,7 @@ import {
   validateLegacyGatewayRestartAgent,
   withLegacyPortableGatewayRestartFence,
   executeSandboxProcessLifecycle,
+  enforceRunningGatewayRevalidation,
 } from "./gateway-restart";
 import { printGatewayWedgeDiagnostics } from "./gateway-wedge-diagnostics";
 import { enforceHermesSecretBoundaryOnRunningGateway } from "./hermes-secret-boundary-recovery";
@@ -357,16 +358,22 @@ function parseSandboxGatewayProbe(result: SandboxCommandResult | null): boolean 
   return null;
 }
 
+function buildSandboxGatewayHealthCommand(
+  probeUrl: string,
+  successfulStatuses: readonly number[],
+): string {
+  const statusPattern = successfulStatuses.join("|");
+  return `HTTP_CODE=$(curl -so /dev/null -w '%{http_code}' --max-time 3 ${shellQuote(probeUrl)} 2>/dev/null || echo 000); case "$HTTP_CODE" in ${statusPattern}) echo RUNNING ;; *) echo STOPPED ;; esac`;
+}
+
 /**
- * Check whether the OpenClaw gateway process is running inside the sandbox.
- * Uses the gateway's HTTP /health endpoint as the source of truth,
+ * Check whether the selected gateway process is running inside the sandbox.
+ * Uses the package-declared HTTP health endpoint as the source of truth,
  * since the gateway runs as a separate user and pgrep may not see it.
  * Returns true (running), false (stopped), or null (cannot determine).
  *
- * Uses HTTP status code extraction instead of `curl -sf` so that
- * 401 (device auth enabled) is correctly treated as "alive".
- * Fixes #2342 — previously `curl -sf` failed on 401, causing false
- * "Health Offline" readings.
+ * Packages declare their successful status codes. Receiptless compatibility
+ * retains 200 and 401 because legacy OpenClaw device auth can protect health.
  */
 function isSandboxGatewayRunning(
   sandboxName: string,
@@ -375,8 +382,12 @@ function isSandboxGatewayRunning(
 ): boolean | null {
   const agent = agentDefinition ?? agentRuntime.getSessionAgent(sandboxName);
   if (agent && !agentRuntime.hasGatewayRuntime(agent)) return null;
+  if (agent?.healthProbe === null) return null;
   const probeUrl = getSandboxHealthProbeUrl(sandboxName, agentDefinition);
-  const command = `HTTP_CODE=$(curl -so /dev/null -w '%{http_code}' --max-time 3 ${shellQuote(probeUrl)} 2>/dev/null || echo 000); case "$HTTP_CODE" in 200|401) echo RUNNING ;; *) echo STOPPED ;; esac`;
+  const command = buildSandboxGatewayHealthCommand(
+    probeUrl,
+    agent?.healthProbe?.success_statuses ?? [200, 401],
+  );
   const execProbe = parseSandboxGatewayProbe(
     executeSandboxExecCommand(
       sandboxName,
@@ -540,7 +551,10 @@ function waitForFinalRelaunchManagedSupervisor(
       ready: false,
     };
   }
-  return { failure: classifyGatewayRestartFailure(probeResult), ready: false };
+  return {
+    failure: classifyGatewayRestartFailure(probeResult, { allowLegacyHarnessMarkers: true }),
+    ready: false,
+  };
 }
 
 function finalRelaunchContainerFailureDetail(
@@ -737,8 +751,12 @@ export async function isSandboxGatewayRunningForStatus(
 ): Promise<boolean | null> {
   const agent = (options.getSessionAgent ?? agentRuntime.getSessionAgent)(sandboxName);
   if (agent && !agentRuntime.hasGatewayRuntime(agent)) return null;
+  if (agent?.healthProbe === null) return null;
   const probeUrl = (options.getHealthProbeUrl ?? getSandboxHealthProbeUrl)(sandboxName);
-  const command = `HTTP_CODE=$(curl -so /dev/null -w '%{http_code}' --max-time 3 ${shellQuote(probeUrl)} 2>/dev/null || echo 000); case "$HTTP_CODE" in 200|401) echo RUNNING ;; *) echo STOPPED ;; esac`;
+  const command = buildSandboxGatewayHealthCommand(
+    probeUrl,
+    agent?.healthProbe?.success_statuses ?? [200, 401],
+  );
   return parseSandboxGatewayProbe(
     await executeSandboxExecCommandForStatus(sandboxName, command, gatewayName, options.capture),
   );
@@ -847,7 +865,9 @@ function recoverSandboxProcesses(
       if (attempt === maxAttempts) break;
       sleepSeconds(retryIntervalSeconds);
     }
-    const failure = classifyGatewayRestartFailure(execResult);
+    const failure = classifyGatewayRestartFailure(execResult, {
+      allowLegacyHarnessMarkers: !receiptBacked,
+    });
     onFailureLayer?.(failure.layer, failure.detail);
     if (
       !receiptBacked &&
@@ -1631,12 +1651,19 @@ function checkAndRecoverSandboxProcessesWithoutHostLock(
       ? pinnedRecoveryAgent?.runtime?.process_lifecycle?.support === "managed" &&
         pinnedRecoveryAgent.runtime.process_lifecycle.revalidate_running_gateway === true
       : requiresLegacyRunningGatewayRevalidation(persistedAgent);
-    const enforcement = enforceHermesSecretBoundaryOnRunningGateway(
-      sandboxName,
-      pinnedRecoveryAgent,
-      effectiveGatewaySupervisorAction,
-      requiresRunningGatewayRevalidation,
-    );
+    const enforcement = receiptBacked
+      ? enforceRunningGatewayRevalidation(
+          sandboxName,
+          pinnedRecoveryAgent,
+          effectiveGatewaySupervisorAction,
+          requiresRunningGatewayRevalidation,
+        )
+      : enforceHermesSecretBoundaryOnRunningGateway(
+          sandboxName,
+          pinnedRecoveryAgent,
+          effectiveGatewaySupervisorAction,
+          requiresRunningGatewayRevalidation,
+        );
     if (enforcement?.refused) {
       return {
         checked: true,
@@ -1840,7 +1867,9 @@ function checkAndRecoverSandboxProcessesWithoutHostLock(
               },
             });
             if (confirmed === false) {
-              relaunchedManagedHealth.failure = classifyGatewayRestartFailure(probeResult);
+              relaunchedManagedHealth.failure = classifyGatewayRestartFailure(probeResult, {
+                allowLegacyHarnessMarkers: true,
+              });
             }
             return confirmed;
           } catch {
@@ -1916,7 +1945,13 @@ function checkAndRecoverSandboxProcessesWithoutHostLock(
             ),
           );
         }
-        console.error("  Check /tmp/gateway.log inside the sandbox for details.");
+        const gatewayLogPath =
+          recoveryAgent?.runtime?.gateway_log_path ?? (receiptBacked ? null : "/tmp/gateway.log");
+        console.error(
+          gatewayLogPath
+            ? `  Check ${gatewayLogPath} inside the sandbox for details.`
+            : `  Run \`nemoclaw ${sandboxName} logs\` for package and OpenShell diagnostics.`,
+        );
         if (rollbackUnconfirmed) {
           console.error(
             "  Automatic rollback of the previous sandbox container failed; inspect Docker state before retrying.",

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Interfaces } from "@oclif/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { testTimeoutOptions } from "../../test/helpers/timeouts";
 
@@ -16,6 +17,23 @@ vi.mock("../lib/actions/sandbox/doctor", async (importOriginal) => ({
 import DoctorCommand from "./doctor";
 
 const rootDir = process.cwd();
+const sourceHelpOptions = {
+  root: rootDir,
+  pjson: {
+    name: "nemoclaw",
+    version: "0.0.0-test",
+    oclif: {
+      bin: "nemoclaw",
+      commands: {
+        strategy: "pattern",
+        target: "./src/commands",
+        globPatterns: ["doctor.ts"],
+      },
+      helpClass: "./src/lib/cli/public-help",
+      topicSeparator: " ",
+    },
+  },
+} satisfies Interfaces.Options;
 
 describe("global doctor command", () => {
   beforeEach(() => {
@@ -83,7 +101,7 @@ describe("global doctor command", () => {
   });
 
   it("shows global help without running health checks (#10212)", async () => {
-    await expect(DoctorCommand.run(["--help"], rootDir)).rejects.toThrow(/EEXIT: 0/);
+    await expect(DoctorCommand.run(["--help"], sourceHelpOptions)).rejects.toThrow(/EEXIT: 0/);
 
     expect(mocks.runGlobalDoctor).not.toHaveBeenCalled();
   });

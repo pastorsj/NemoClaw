@@ -30,6 +30,7 @@ const RUNTIME_CONTRACTS = [
   "host/config-adapter.cts",
   "host/messaging-adapter.cts",
   "host/mcp-adapter.cts",
+  "host/agent-roster-adapter.cts",
   "host/cli-grammar.cts",
   "host/restore-adapter.cts",
   "host/config-runtime.cts",
@@ -44,6 +45,14 @@ const PUBLISHED_LOCKFILES = [
   "runtime/wechat/npm-shrinkwrap.json",
 ] as const;
 const PUBLISHED_BUILD_CONFIGS = ["plugin/tsconfig.json", "plugin/tsconfig.shared.json"] as const;
+const PROVIDER_PROFILES = [
+  "provider-profiles/brave.yaml",
+  "provider-profiles/tavily.yaml",
+] as const;
+const SEMANTIC_TURN_RUNTIME_FILES = [
+  "runtime/semantic-turn.sh",
+  "runtime/semantic-turn.mts",
+] as const;
 const ARCHIVE_SETUP_TIMEOUT_MS = 3 * 60_000;
 const PACK_REPORT_MAX_BUFFER = 64 * 1024 * 1024;
 
@@ -155,6 +164,10 @@ describe("published OpenClaw package", () => {
     expect(packedFiles.has(artifact), artifact).toBe(true);
   });
 
+  it.each(PROVIDER_PROFILES)("ships package-owned provider profile %s", (artifact) => {
+    expect(packedFiles.has(artifact), artifact).toBe(true);
+  });
+
   it("ships the MCP adapter in the openclaw package", () => {
     expect(packedFiles.has("host/mcp-adapter.cts")).toBe(true);
   });
@@ -172,18 +185,30 @@ describe("published OpenClaw package", () => {
     expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
   });
 
-  it.each(["messaging/messaging-build.mts", "runtime/managed-gateway-control.py"])(
-    "ships package-owned image runtime %s as executable",
-    (artifact) => {
-      expect(packedFiles.has(artifact), artifact).toBe(true);
-      expect((packedFiles.get(artifact)?.mode ?? 0) & 0o111).not.toBe(0);
-      expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
-    },
-  );
+  it("ships the package-owned messaging build source as read-only data", () => {
+    const artifact = "messaging/messaging-build.mts";
+    expect(packedFiles.get(artifact)?.mode).toBe(0o644);
+    expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o777).toBe(0o644);
+  });
+
+  it("ships the package-owned managed gateway runtime as executable", () => {
+    const artifact = "runtime/managed-gateway-control.py";
+    expect(packedFiles.has(artifact), artifact).toBe(true);
+    expect((packedFiles.get(artifact)?.mode ?? 0) & 0o111).not.toBe(0);
+    expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
+  });
 
   it("ships the package-owned managed gateway profile", () => {
     expect(packedFiles.has("runtime/managed-gateway-profile.py")).toBe(true);
   });
+
+  it.each(SEMANTIC_TURN_RUNTIME_FILES)(
+    "ships package-owned semantic-turn runtime %s",
+    (artifact) => {
+      expect(packedFiles.has(artifact), artifact).toBe(true);
+      expect(statSync(path.join(installedPackageRoot, artifact)).isFile()).toBe(true);
+    },
+  );
 
   it.each(["runtime/backup-workspace.sh", "compat/npm-remediation.mts"])(
     "ships executable OpenClaw package helper %s",
@@ -260,9 +285,12 @@ describe("published OpenClaw package", () => {
       };
       mergeOpenClawRestoredConfig(backup: unknown, current: unknown): unknown;
     }>("host/restore-adapter.cts");
-    const cli = loadInstalledModule<{
-      buildOpenclawAgentDeleteArgs(id: string): string[];
-    }>("host/cli-grammar.cts");
+    const roster = loadInstalledModule<{
+      buildAgentRosterApplyPlan(request: {
+        manifest: { agents: unknown[] };
+        current_output: string;
+      }): { kind: string; deletions?: Array<{ command: string[] }> };
+    }>("host/agent-roster-adapter.cts");
     const openClawModel: Record<string, unknown> = {};
     const mcpEntry = {
       server: "example",
@@ -372,8 +400,8 @@ describe("published OpenClaw package", () => {
         backupContent: "{}",
         currentContent: "{}",
         managedChannelNames: [],
-        previousImagePluginInstalls: null,
-        freshImagePluginInstalls: null,
+        previousManagedExtensions: null,
+        freshManagedExtensions: null,
       }),
     ).toEqual({
       kind: "merged",
@@ -383,13 +411,15 @@ describe("published OpenClaw package", () => {
         hashFiles: ["openclaw.json", "fabric.json"],
       },
     });
-    expect(cli.buildOpenclawAgentDeleteArgs("example")).toEqual([
-      "openclaw",
-      "agents",
-      "delete",
-      "example",
-      "--force",
-    ]);
+    expect(
+      roster.buildAgentRosterApplyPlan({
+        manifest: { agents: [] },
+        current_output: '[{"id":"main"},{"id":"example"}]',
+      }),
+    ).toMatchObject({
+      kind: "ready",
+      deletions: [{ command: ["openclaw", "agents", "delete", "example", "--force"] }],
+    });
   });
 
   it("omits OpenClaw plugin dependencies from the published package", () => {

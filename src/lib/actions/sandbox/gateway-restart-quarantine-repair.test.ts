@@ -32,7 +32,10 @@ const REPORTED_RESTART_OUTPUT = [
 ].join("\n");
 
 function classify(stdout: string) {
-  return classifyGatewayRestartFailure({ status: 1, stdout, stderr: "" });
+  return classifyGatewayRestartFailure(
+    { status: 1, stdout, stderr: "" },
+    { allowLegacyHarnessMarkers: true },
+  );
 }
 
 function captureStderr(run: () => void): string[] {
@@ -94,15 +97,15 @@ describe("integrity repair guidance (#7801)", () => {
     expect(isGatewayIntegrityRepairLayer(undefined)).toBe(false);
   });
 
-  it.each([
-    "relaunch quarantined",
-    "config hash mismatch",
-  ] as const)("names the supported repair command for %s", (layer) => {
-    const lines = gatewayIntegrityRepairLines("repro-7801", layer).join("\n");
-    expect(lines).toContain("nemoclaw repro-7801 rebuild --yes");
-    expect(lines).toContain("Retrying the restart cannot clear it.");
-    expect(lines).toContain("nemoclaw repro-7801 config set");
-  });
+  it.each(["relaunch quarantined", "config hash mismatch"] as const)(
+    "names the supported repair command for %s",
+    (layer) => {
+      const lines = gatewayIntegrityRepairLines("repro-7801", layer).join("\n");
+      expect(lines).toContain("nemoclaw repro-7801 rebuild --yes");
+      expect(lines).toContain("Retrying the restart cannot clear it.");
+      expect(lines).toContain("nemoclaw repro-7801 config set");
+    },
+  );
 
   it("describes the two refusals differently", () => {
     const quarantined = gatewayIntegrityRepairLines("alpha", "relaunch quarantined")[0];

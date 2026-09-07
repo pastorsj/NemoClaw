@@ -4,7 +4,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { HarnessProcessLifecycleDeclaration } from "@nvidia/nemoclaw-harness-contract";
+import type {
+  HarnessDashboardUiDeclaration,
+  HarnessProcessLifecycleDeclaration,
+} from "@nvidia/nemoclaw-harness-contract";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 
@@ -32,6 +35,7 @@ describe("Hermes process lifecycle declaration", () => {
       runtime?: { process_lifecycle?: unknown };
       health_probe?: unknown;
       forward_ports?: unknown;
+      dashboard_ui?: HarnessDashboardUiDeclaration;
     };
     const expected = {
       support: "managed",
@@ -43,9 +47,42 @@ describe("Hermes process lifecycle declaration", () => {
     expect(manifest.health_probe).toEqual({
       url: "http://localhost:8642/health",
       port: 8642,
+      port_resolution: "sandbox-secondary-forward",
+      secondary_forward: {
+        environment_variable: "NEMOCLAW_HERMES_API_PORT",
+        preferred_port: 8642,
+        range_start: 8642,
+        range_end: 8652,
+        label: "Hermes API",
+        remedy:
+          "Destroy a listed Hermes sandbox or stop a listed non-OpenShell listener, then rerun onboarding.",
+      },
       timeout_seconds: 90,
+      success_statuses: [200],
     });
     expect(manifest.forward_ports).toEqual([18789, 8642]);
+    expect(manifest.dashboard_ui).toEqual({
+      label: "Hermes dashboard",
+      path: "/",
+      port: 9119,
+      enable_env: "NEMOCLAW_HERMES_DASHBOARD",
+      port_env: "NEMOCLAW_HERMES_DASHBOARD_PORT",
+      internal_port: 19119,
+      internal_port_env: "NEMOCLAW_HERMES_DASHBOARD_INTERNAL_PORT",
+      tui_env: "NEMOCLAW_HERMES_DASHBOARD_TUI",
+    });
+    const startup = fs.readFileSync(
+      path.join(PACKAGE_ROOT, "host", "source", "startup-adapter.cts"),
+      "utf8",
+    );
+    for (const environmentName of [
+      manifest.dashboard_ui?.enable_env,
+      manifest.dashboard_ui?.port_env,
+      manifest.dashboard_ui?.internal_port_env,
+      manifest.dashboard_ui?.tui_env,
+    ]) {
+      expect(startup).toContain(environmentName);
+    }
     const dockerfile = fs.readFileSync(path.join(PACKAGE_ROOT, "Dockerfile"), "utf8");
     expect(dockerfile).toContain(
       "COPY scripts/gateway-control.sh /usr/local/bin/nemoclaw-gateway-control",

@@ -50,12 +50,7 @@ export const MAX_AUTODETECTED_OLLAMA_CONTEXT_WINDOW = 4_194_304;
 // with a higher floor must prove that the loaded daemon actually provides it.
 export const MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW = 16_384;
 
-/**
- * Hermes-specific Ollama floor.
- *
- * Keep this consumer-specific so OpenClaw's Local Ollama defaults stay
- * unchanged while Hermes rejects model context windows below 64,000 tokens.
- */
+/** Legacy no-receipt Hermes floor retained while old sessions remain readable. */
 export const MIN_HERMES_OLLAMA_CONTEXT_WINDOW = 64_000;
 
 function normalizeOllamaModelName(value: unknown): string {
@@ -76,13 +71,29 @@ export function hasExplicitContextWindow(value: unknown): boolean {
   return String(value ?? "").trim() !== "";
 }
 
-/** Resolve the minimum Ollama context window required by an agent name. */
+/** Resolve the legacy no-receipt Ollama floor from a built-in agent name. */
 export function getOllamaContextWindowFloorForAgent(agentName: string | null | undefined): number {
   return String(agentName ?? "")
     .trim()
     .toLowerCase() === "hermes"
     ? MIN_HERMES_OLLAMA_CONTEXT_WINDOW
     : MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW;
+}
+
+/** Resolve a receipt-backed package's Ollama floor from its bounded manifest declaration. */
+export function getPackageOllamaContextWindowFloor(agent: unknown): number {
+  const requirements = (
+    agent as {
+      readonly inference?: {
+        readonly contextWindowRequirements?: readonly {
+          readonly provider: string;
+          readonly minimumTokens: number;
+        }[];
+      };
+    } | null
+  )?.inference?.contextWindowRequirements;
+  const declared = requirements?.find((entry) => entry.provider === "ollama-local");
+  return resolveOllamaContextWindowFloor(declared?.minimumTokens);
 }
 
 /** Normalize an optional agent floor, never returning less than the OpenClaw floor. */

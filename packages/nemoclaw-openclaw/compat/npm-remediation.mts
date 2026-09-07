@@ -10,6 +10,7 @@ import {
   cpSync,
   existsSync,
   fstatSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -18,9 +19,8 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { packReviewedNpmArchive } from "../../../scripts/lib/reviewed-npm-archive.mts";
 
 type JsonObject = Record<string, any>;
 
@@ -59,6 +59,8 @@ export type RemediatedArchive = Readonly<
     }
 >;
 
+const EXACT_NPM_PACKAGE_SPEC =
+  /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)@[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/;
 const AXIOS_VERSION = "1.18.0";
 const AXIOS_INTEGRITY =
   "sha512-E32NzpYKp++W7XRe52rHiXV2ehxmh3wbdgO7MHeFM+vqxLBYHzt0ElkiImtOBxtOmyp0yoC8C6uESVV84Y2/hw==";
@@ -989,6 +991,104 @@ function copyReplacementPackage(source: string, destination: string): void {
   cpSync(source, destination, { recursive: true, force: true });
 }
 
+function packReviewedReplacementArchive(request: {
+  env: NodeJS.ProcessEnv;
+  expectedIntegrity: string;
+  label: string;
+  npmExecutable?: string;
+  packageSpec: string;
+  tarballUrl: string;
+  workingDirectory: string;
+}): { archivePath: string; rootDirectory: string } {
+  if (!EXACT_NPM_PACKAGE_SPEC.test(request.packageSpec)) {
+    throw new Error(`${request.label} must use an exact npm package spec: ${request.packageSpec}`);
+  }
+  if (!request.expectedIntegrity.startsWith("sha512-")) {
+    throw new Error(`${request.label} must use a committed sha512 npm integrity value`);
+  }
+  const npmExecutable = request.npmExecutable ?? "npm";
+  const integrity = run(
+    npmExecutable,
+    ["view", request.packageSpec, "dist.integrity"],
+    request.workingDirectory,
+    request.env,
+  ).trim();
+  if (integrity !== request.expectedIntegrity) {
+    throw new Error(
+      `${request.label} npm integrity mismatch\nExpected: ${request.expectedIntegrity}\nActual:   ${integrity}`,
+    );
+  }
+  const tarballUrl = run(
+    npmExecutable,
+    ["view", request.packageSpec, "dist.tarball"],
+    request.workingDirectory,
+    request.env,
+  ).trim();
+  if (tarballUrl !== request.tarballUrl) {
+    throw new Error(
+      `${request.label} npm tarball URL mismatch\nExpected: ${request.tarballUrl}\nActual:   ${tarballUrl}`,
+    );
+  }
+
+  const rootDirectory = mkdtempSync(join(request.workingDirectory, "nemoclaw-reviewed-npm-pack-"));
+  try {
+    const packJson = run(
+      npmExecutable,
+      ["pack", request.tarballUrl, "--pack-destination", rootDirectory, "--json"],
+      request.workingDirectory,
+      request.env,
+    );
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(packJson);
+    } catch (error) {
+      throw new Error(`npm pack ${request.packageSpec} did not return JSON: ${String(error)}`);
+    }
+    const entry = Array.isArray(parsed) && parsed.length === 1 ? parsed[0] : undefined;
+    const filename =
+      typeof entry === "object" && entry !== null && "filename" in entry
+        ? String(entry.filename ?? "")
+        : "";
+    const packedIntegrity =
+      typeof entry === "object" && entry !== null && "integrity" in entry
+        ? String(entry.integrity ?? "")
+        : "";
+    if (!filename || !packedIntegrity) {
+      throw new Error(`npm pack ${request.packageSpec} did not report filename and integrity`);
+    }
+    if (packedIntegrity !== request.expectedIntegrity) {
+      throw new Error(
+        `${request.label} downloaded tarball integrity mismatch\nExpected: ${request.expectedIntegrity}\nActual:   ${packedIntegrity}`,
+      );
+    }
+    if (
+      isAbsolute(filename) ||
+      filename === "." ||
+      filename === ".." ||
+      filename.includes("/") ||
+      filename.includes("\\")
+    ) {
+      throw new Error(
+        `npm pack ${request.packageSpec} reported unsafe archive filename: ${filename}`,
+      );
+    }
+    const archivePath = resolve(rootDirectory, filename);
+    if (!archivePath.startsWith(`${resolve(rootDirectory)}${sep}`) || !existsSync(archivePath)) {
+      throw new Error(
+        `npm pack ${request.packageSpec} did not create reported archive: ${filename}`,
+      );
+    }
+    const archive = lstatSync(archivePath);
+    if (!archive.isFile() || archive.isSymbolicLink()) {
+      throw new Error(`npm pack ${request.packageSpec} reported a non-file archive: ${filename}`);
+    }
+    return { archivePath, rootDirectory };
+  } catch (error) {
+    rmSync(rootDirectory, { force: true, recursive: true });
+    throw error;
+  }
+}
+
 function packReplacement(
   packageSpec: string,
   expectedIntegrity: string,
@@ -1021,14 +1121,14 @@ function packReplacement(
     }
     return { archivePath, rootDirectory: archiveRoot };
   }
-  return packReviewedNpmArchive({
+  return packReviewedReplacementArchive({
     env,
     expectedIntegrity,
     label: `OpenClaw npm remediation dependency ${packageSpec}`,
     npmExecutable: env.NEMOCLAW_REVIEWED_NPM_EXECUTABLE,
     packageSpec,
     tarballUrl,
-    tempDirectory: workingDirectory,
+    workingDirectory,
   });
 }
 

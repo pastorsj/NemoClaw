@@ -47,7 +47,7 @@ function reportRecovery(
     }
     proc.stderr.write(
       `  Ollama warm-up for '${model}' at ${result.endpoint} ${describeWarmFailure(result.reason)} ` +
-        `(${result.detail}). OpenClaw dispatch will continue. To retry the warm-up, restore ` +
+        `(${result.detail}). Agent dispatch will continue. To retry the warm-up, restore ` +
         `Ollama access to ${result.endpoint} and confirm that it serves '${model}', then rerun ` +
         `this command.\n`,
     );
@@ -57,7 +57,7 @@ function reportRecovery(
   if (result.reason === "model-absent") {
     proc.stderr.write(
       `  Ollama at ${result.endpoint} reports '${model}' as unavailable ` +
-        `(reported models: ${result.inventoryLabel}); continuing to OpenClaw dispatch.\n`,
+        `(reported models: ${result.inventoryLabel}); continuing to agent dispatch.\n`,
     );
     proc.stderr.write(
       `  Either the daemon answering that endpoint changed, or the model was removed from ` +
@@ -74,12 +74,12 @@ function reportRecovery(
       break;
     case "unreachable":
       proc.stderr.write(
-        "  Ollama was unreachable during the model check; continuing to OpenClaw dispatch.\n",
+        "  Ollama was unreachable during the model check; continuing to agent dispatch.\n",
       );
       break;
     case "missing-model":
       proc.stderr.write(
-        "  No Ollama model is recorded for this sandbox; continuing to OpenClaw dispatch.\n",
+        "  No Ollama model is recorded for this sandbox; continuing to agent dispatch.\n",
       );
       break;
     case "not-ollama":
@@ -102,7 +102,7 @@ export function runOllamaRestartRecovery(
     reportRecovery(route, recoverOllama(route), proc);
   } catch {
     proc.stderr.write(
-      "  Ollama restart recovery failed unexpectedly; continuing to OpenClaw dispatch.\n",
+      "  Ollama restart recovery failed unexpectedly; continuing to agent dispatch.\n",
     );
   }
 }

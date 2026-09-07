@@ -530,8 +530,6 @@ function profileResultSchema(reconcile: boolean): AnySchemaObject {
 
 const startupManifestSchema: AnySchemaObject = Object.freeze({
   type: "object",
-  required: ["managed_image"],
-  properties: { managed_image: { type: "object" } },
 });
 
 const applicationEnvironmentSchema: AnySchemaObject = Object.freeze({

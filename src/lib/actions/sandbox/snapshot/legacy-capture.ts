@@ -3,6 +3,7 @@
 
 import type { AgentDefinition } from "../../../agent/defs";
 import type * as sandboxState from "../../../state/sandbox";
+import { allowsLegacyPrivilegedStateFileCapture } from "../../../state/snapshot/legacy-manifest";
 
 const LEGACY_OPENCLAW_CONFIG_DIRECTORY = "/sandbox/.openclaw";
 const LEGACY_OPENCLAW_CONFIG_NAME = "openclaw.json";
@@ -22,7 +23,7 @@ export function createLegacyOpenClawStateFileCapture(
   agentDefinition: AgentDefinition,
   capture: LegacyStateFileCapture,
 ): sandboxState.StateFileCapture | null {
-  if (agentDefinition.name !== "openclaw") return null;
+  if (!allowsLegacyPrivilegedStateFileCapture(agentDefinition.name)) return null;
   const authority = {
     directory: LEGACY_OPENCLAW_CONFIG_DIRECTORY,
     spec: { path: LEGACY_OPENCLAW_CONFIG_NAME, strategy: "copy" as const },

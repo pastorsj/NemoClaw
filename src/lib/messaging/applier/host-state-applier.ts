@@ -3,13 +3,19 @@
 
 import * as registry from "../../state/registry";
 import { hydrateDerivedSandboxMessagingPlanFields } from "../hydration";
-import type { SandboxMessagingPlan, SandboxMessagingRuntimeSetupPlan } from "../manifest";
+import type {
+  ChannelManifest,
+  SandboxMessagingPlan,
+  SandboxMessagingRuntimeSetupPlan,
+} from "../manifest";
 import { parseSandboxMessagingPlan } from "../plan-validation";
 import { MessagingSetupApplier } from "./setup-applier";
 import type { MessagingSetupEnvOptions } from "./types";
 
 export interface MessagingHostStateApplyOptions {
   readonly mode?: "replace" | "merge";
+  /** Exact composed manifests required when the registry row has package authority. */
+  readonly manifests?: readonly ChannelManifest[];
 }
 
 export class MessagingHostStateApplier {
@@ -44,14 +50,28 @@ export class MessagingHostStateApplier {
     if (plan.sandboxName !== sandboxName) return false;
     const entry = registry.getSandbox(sandboxName);
     if (!entry) return false;
-    const existingPlan = parseSandboxMessagingPlan(entry.messaging?.plan);
+    const receiptBacked = entry.harnessPackage != null || entry.harnessPackageMigration != null;
+    if (receiptBacked && options.manifests === undefined) {
+      throw new Error("Receipt-backed messaging persistence requires exact composed manifests");
+    }
+    const parseOptions = options.manifests ? { manifests: options.manifests } : {};
+    const preparedIncoming = options.manifests
+      ? hydrateDerivedSandboxMessagingPlanFields(
+          parseSandboxMessagingPlan(plan, parseOptions) ?? plan,
+          parseOptions,
+        )
+      : clonePlan(plan);
+    const existingPlan =
+      options.mode === "merge"
+        ? parseSandboxMessagingPlan(entry.messaging?.plan, parseOptions)
+        : null;
     const hydratedExistingPlan = existingPlan
-      ? hydrateDerivedSandboxMessagingPlanFields(existingPlan)
+      ? hydrateDerivedSandboxMessagingPlanFields(existingPlan, parseOptions)
       : null;
     const nextPlan =
       options.mode === "merge" && hydratedExistingPlan
-        ? mergeSandboxMessagingPlans(hydratedExistingPlan, plan)
-        : clonePlan(plan);
+        ? mergeSandboxMessagingPlans(hydratedExistingPlan, preparedIncoming)
+        : preparedIncoming;
     return registry.updateSandbox(sandboxName, {
       messaging: {
         schemaVersion: 1,

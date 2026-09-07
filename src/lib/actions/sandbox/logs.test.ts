@@ -133,7 +133,65 @@ describe("showSandboxLogsWithDeps", () => {
     ]);
   });
 
-  it("skips the OpenClaw gateway tail when --since targets OpenShell logs", () => {
+  it.each(["openclaw", "hermes"])(
+    "uses the receipt-selected gateway log path for a same-ID %s package",
+    (name) => {
+      const result = captureLogsRun(
+        { follow: false, lines: "25", since: null },
+        {
+          settings: { status: 0 },
+          sandbox: { status: 0, stdout: "" },
+          logs: { status: 0, stdout: "" },
+        },
+        {
+          getSessionAgent: () =>
+            ({
+              name,
+              runtime: {
+                kind: "gateway",
+                gateway_log_path: "/var/log/package-owned/gateway.log",
+              },
+            }) as never,
+        },
+      );
+
+      expect(result.calls.map((call) => call.args)).toContainEqual([
+        "sandbox",
+        "exec",
+        "-n",
+        "alpha",
+        "--",
+        "tail",
+        "-n",
+        "25",
+        "/var/log/package-owned/gateway.log",
+      ]);
+    },
+  );
+
+  it("does not infer a gateway log path for a receipt-selected package", () => {
+    const result = captureLogsRun(
+      { follow: false, lines: "25", since: null },
+      {
+        settings: { status: 0 },
+        logs: { status: 0, stdout: "" },
+      },
+      {
+        getSessionAgent: () =>
+          ({
+            name: "openclaw",
+            runtime: { kind: "gateway" },
+          }) as never,
+      },
+    );
+
+    expect(result.calls.map((call) => call.args)).toEqual([
+      ["settings", "set", "alpha", "--key", "ocsf_json_enabled", "--value", "true"],
+      ["logs", "alpha", "-n", "25", "--source", "all"],
+    ]);
+  });
+
+  it("skips the managed gateway tail when --since targets OpenShell logs", () => {
     const result = captureLogsRun(
       { follow: false, lines: "200", since: "5m" },
       {
@@ -205,7 +263,7 @@ describe("showSandboxLogsWithDeps", () => {
     expect(result.errors.join("\n")).toContain("settings unavailable");
     expect(result.errors.join("\n")).toContain("Policy denial events may be missing");
     expect(result.errors.join("\n")).toContain(
-      "OpenClaw log source unavailable (spawn openshell ETIMEDOUT)",
+      "Managed gateway log source unavailable (spawn openshell ETIMEDOUT)",
     );
   });
 
@@ -576,7 +634,7 @@ describe("follow-mode log source attribution (#10340)", () => {
 
       await expect(run.exited).resolves.toBe(1);
       expect(run.gateway.child.kill).toHaveBeenCalledWith("SIGTERM");
-      expect(errorSpy).toHaveBeenCalledWith("  OpenClaw log source read failed (EIO).");
+      expect(errorSpy).toHaveBeenCalledWith("  Managed gateway log source read failed (EIO).");
     } finally {
       errorSpy.mockRestore();
     }
@@ -600,7 +658,7 @@ describe("follow-mode log source attribution (#10340)", () => {
       await vi.runAllTimersAsync();
 
       await expect(run.exited).resolves.toBe(1);
-      expect(errorSpy).toHaveBeenCalledWith("  OpenClaw log source read failed (EIO).");
+      expect(errorSpy).toHaveBeenCalledWith("  Managed gateway log source read failed (EIO).");
     } finally {
       errorSpy.mockRestore();
       vi.useRealTimers();

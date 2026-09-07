@@ -3,13 +3,23 @@
 
 import { getCredential, prompt, saveCredential } from "../../../credentials/store";
 import type { MessagingHookRegistration } from "../types";
+import {
+  createPackageBuildFilesHookRegistration,
+  type PackageBuildFilesHookOptions,
+} from "./build-files";
 import { type ConfigPromptHookOptions, createConfigPromptHookRegistration } from "./config-prompt";
+import {
+  createPackageCommandHookRegistration,
+  type PackageCommandHookOptions,
+} from "./package-command";
 import { createStaticOutputsHookRegistration } from "./static-outputs";
 import { createTokenPasteHookRegistration, type TokenPasteHookOptions } from "./token-paste";
 
 export interface CommonHookOptions extends TokenPasteHookOptions {
   readonly tokenPaste?: TokenPasteHookOptions;
   readonly configPrompt?: ConfigPromptHookOptions;
+  readonly packageBuildFiles?: PackageBuildFilesHookOptions;
+  readonly packageCommand?: PackageCommandHookOptions;
 }
 
 export function createCommonHookRegistrations(
@@ -31,6 +41,8 @@ export function createCommonHookRegistrations(
     createStaticOutputsHookRegistration(),
     createTokenPasteHookRegistration(tokenPasteOptions),
     createConfigPromptHookRegistration(configPromptOptions),
+    createPackageBuildFilesHookRegistration(options.packageBuildFiles),
+    createPackageCommandHookRegistration(options.packageCommand),
   ] as const;
 }
 
@@ -80,5 +92,7 @@ function logMessage(message: string): void {
 }
 
 export * from "./config-prompt";
+export * from "./build-files";
+export * from "./package-command";
 export * from "./static-outputs";
 export * from "./token-paste";

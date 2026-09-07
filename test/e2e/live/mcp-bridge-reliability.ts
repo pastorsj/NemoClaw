@@ -345,17 +345,13 @@ export async function readConcurrentMcpStatusAndConfirmHermesRegistration(option
       ) {
         return { source: "direct-credential", result: revision } as const;
       }
-      const inspectionCommand = buildInstalledMcpInspectionCommand(
-        options.scenario.sandboxName,
-        options.scenario.expectedAdapter,
-        entry,
-        { credentialRevision: observedRevision as McpAttachedCredentialRevision },
-      );
-      if (inspectionCommand === null) {
-        throw new Error(
-          `Installed harness package for sandbox '${options.scenario.sandboxName}' does not provide MCP inspection.`,
-        );
-      }
+      const inspectionCommand =
+        buildInstalledMcpInspectionCommand(
+          options.scenario.sandboxName,
+          options.scenario.expectedAdapter,
+          entry,
+          { credentialRevision: observedRevision as McpAttachedCredentialRevision },
+        ) ?? "exit 97";
       return {
         source: "direct-adapter",
         result: await options.clients.sandbox.execShell(

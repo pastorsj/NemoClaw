@@ -34,6 +34,7 @@
     "host/config-adapter.cts",
     "host/messaging-adapter.cts",
     "host/session-adapter.cts",
+    "host/startup-adapter.cts",
     "manifest.yaml",
     "policy-additions.yaml",
     "runtime/",
@@ -51,6 +52,7 @@
     "@nvidia/nemoclaw-harness-contract": "^0.1.0",
     "@types/node": "^25.5.2",
     "typescript": "6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "yaml": "2.8.3"
   }
 }

@@ -31,6 +31,13 @@ describe("Haystack Agent host adapter build", () => {
     expect(artifact.startsWith("// SPDX-FileCopyrightText:")).toBe(true);
     expect(artifact).toContain("module.exports = configAdapter;");
     expect(artifact).not.toMatch(/\brequire\s*\(/u);
+
+    const startupArtifact = fs.readFileSync(
+      path.join(PACKAGE_ROOT, "host/startup-adapter.cts"),
+      "utf8",
+    );
+    expect(startupArtifact).toContain("module.exports = startupAdapter;");
+    expect(startupArtifact).not.toMatch(/\brequire\s*\(/u);
   });
 
   it("publishes the runtime artifact without its authoring source", () => {
@@ -38,6 +45,7 @@ describe("Haystack Agent host adapter build", () => {
     expect(paths).toContain("host/config-adapter.cts");
     expect(paths).toContain("host/messaging-adapter.cts");
     expect(paths).toContain("host/session-adapter.cts");
+    expect(paths).toContain("host/startup-adapter.cts");
     expect(paths.some((candidate) => candidate.startsWith("host/source/"))).toBe(false);
   });
 });

@@ -6,63 +6,25 @@ import {
   getEnvConfigValue,
   getStructuredConfigValue,
   getStructuredPath,
-  type RenderedChannelConfigParserContext,
+  listPackageConfigVisibilityKeys,
   type RenderedConfigSource,
   type RenderedConfigVisibilityKey,
   type RenderedChannelConfigParser,
-  structuredConfigKey,
 } from "../rendered-config-parser-utils";
+import { listLegacyRenderedConfigKeys } from "../legacy/rendered-config";
 
-const OPENCLAW_ACCOUNT_PATH = ["channels", "telegram", "accounts", "default"] as const;
-const OPENCLAW_GROUPS_PATH = ["channels", "telegram", "groups"] as const;
-const DEFAULT_OPENCLAW_GROUP_POLICY = "open";
+const ACCOUNT_PATH = ["channels", "telegram", "accounts", "default"] as const;
 
 export const telegramRenderedConfigParser: RenderedChannelConfigParser = {
   listConfigVisibilityKeys(context) {
-    if (context.agentId === "openclaw") {
-      const keys = [
-        structuredConfigKey("allowedIds", "openclaw.json", [
-          "channels",
-          "telegram",
-          "accounts",
-          "default",
-          "allowFrom",
-        ]),
-        structuredConfigKey("groupPolicy", "openclaw.json", [
-          "channels",
-          "telegram",
-          "accounts",
-          "default",
-          "groupPolicy",
-        ]),
-      ];
-      if (openClawGroupPolicyFromInputs(context) === "open") {
-        keys.push(
-          structuredConfigKey(
-            "requireMention",
-            "openclaw.json",
-            OPENCLAW_GROUPS_PATH,
-            "openclawGroupRequireMention",
-          ),
-        );
-      }
-      return keys;
-    }
-    if (context.agentId === "hermes") {
-      return [
-        envConfigKey("allowedIds", "~/.hermes/.env", "TELEGRAM_ALLOWED_USERS"),
-        structuredConfigKey("requireMention", "~/.hermes/config.yaml", [
-          "telegram",
-          "require_mention",
-        ]),
-      ];
-    }
-    return [];
+    return (
+      listPackageConfigVisibilityKeys(context) ?? listLegacyRenderedConfigKeys("telegram", context)
+    );
   },
 
   getValue(key, source) {
-    if (key.key === "openclawGroupRequireMention") {
-      return getOpenClawGroupRequireMention(key, source);
+    if (key.key === "groupRequireMention") {
+      return getGroupRequireMention(key, source);
     }
     return key.kind === "env"
       ? getEnvConfigValue(source, key.envKey)
@@ -70,22 +32,13 @@ export const telegramRenderedConfigParser: RenderedChannelConfigParser = {
   },
 };
 
-function openClawGroupPolicyFromInputs(context: RenderedChannelConfigParserContext): string {
-  const inputValue = context.inputs.find((input) => input.inputId === "groupPolicy")?.value;
-  if (typeof inputValue === "string" && inputValue.trim()) return inputValue.trim();
-  const defaultValue = context.manifest.inputs.find((input) => input.id === "groupPolicy");
-  return defaultValue?.kind === "config" && defaultValue.defaultValue
-    ? defaultValue.defaultValue
-    : DEFAULT_OPENCLAW_GROUP_POLICY;
-}
-
-function getOpenClawGroupRequireMention(
+function getGroupRequireMention(
   key: RenderedConfigVisibilityKey,
   source: RenderedConfigSource,
 ): boolean | boolean[] | undefined {
   const accountGroupPolicy =
     source.kind === "structured"
-      ? getStructuredPath(source.value, [...OPENCLAW_ACCOUNT_PATH, "groupPolicy"])
+      ? getStructuredPath(source.value, [...ACCOUNT_PATH, "groupPolicy"])
       : undefined;
   if (accountGroupPolicy !== "open") {
     return undefined;

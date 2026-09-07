@@ -16,7 +16,7 @@ describe("telegram rendered config parser", () => {
   it("extracts OpenClaw wildcard group mention mode (#5691)", () => {
     const requireMentionKey = telegramRenderedConfigParser
       .listConfigVisibilityKeys(openClawContext)
-      .find((key) => key.key === "openclawGroupRequireMention");
+      .find((key) => key.key === "groupRequireMention");
 
     expect(requireMentionKey).toBeDefined();
     expect(
@@ -45,7 +45,7 @@ describe("telegram rendered config parser", () => {
   it("treats missing OpenClaw groups as all-message mode when group policy is open (#5691)", () => {
     const requireMentionKey = telegramRenderedConfigParser
       .listConfigVisibilityKeys(openClawContext)
-      .find((key) => key.key === "openclawGroupRequireMention");
+      .find((key) => key.key === "groupRequireMention");
 
     expect(requireMentionKey).toBeDefined();
     expect(
@@ -69,7 +69,7 @@ describe("telegram rendered config parser", () => {
   it("treats missing OpenClaw group policy as unknown mention mode (#5691)", () => {
     const requireMentionKey = telegramRenderedConfigParser
       .listConfigVisibilityKeys(openClawContext)
-      .find((key) => key.key === "openclawGroupRequireMention");
+      .find((key) => key.key === "groupRequireMention");
 
     expect(requireMentionKey).toBeDefined();
     expect(
@@ -103,6 +103,6 @@ describe("telegram rendered config parser", () => {
       ],
     });
 
-    expect(keys.find((key) => key.key === "openclawGroupRequireMention")).toBeUndefined();
+    expect(keys.find((key) => key.key === "groupRequireMention")).toBeUndefined();
   });
 });

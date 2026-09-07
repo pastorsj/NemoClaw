@@ -37,8 +37,12 @@ function failPreparedRecoveryPreDelete(
 
 function registryEntryWithoutOpenClawPluginProvenance(
   entry: RebuildSandboxEntry,
-): Omit<RebuildSandboxEntry, "openclawImagePluginInstalls"> {
-  const { openclawImagePluginInstalls: _provenance, ...rest } = entry;
+): Omit<RebuildSandboxEntry, "managedImageExtensions" | "openclawImagePluginInstalls"> {
+  const {
+    managedImageExtensions: _managedProvenance,
+    openclawImagePluginInstalls: _legacyProvenance,
+    ...rest
+  } = entry;
   return rest;
 }
 
@@ -48,6 +52,7 @@ function isPreparedRecoveryImageAllowed(
   allowLegacyManagedImageRecovery: boolean,
 ): boolean {
   return (
+    sandboxState.hasAuthoritativeManagedImageExtensionProvenance(manifest) ||
     sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(manifest) ||
     sandboxState.isManagedImageRecoveryAllowed(entry, allowLegacyManagedImageRecovery)
   );
@@ -206,6 +211,7 @@ function rereadPreparedRecoveryAuthority(
     };
   }
   const authoritativePluginProvenance =
+    sandboxState.hasAuthoritativeManagedImageExtensionProvenance(candidate) ||
     sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(candidate);
   const registryConfigurationMatches = authoritativePluginProvenance
     ? isDeepStrictEqual(

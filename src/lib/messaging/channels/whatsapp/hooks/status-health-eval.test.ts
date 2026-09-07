@@ -11,6 +11,19 @@ import {
 } from "./status-health-eval";
 
 const PROBED_AT = "2026-05-28T04:00:00.000Z";
+const COMMAND_GUIDANCE = {
+  pairingCommand: "openclaw channels login --channel whatsapp",
+} as const;
+const SESSION_GUIDANCE = {
+  pairingCommand: "hermes whatsapp",
+  session: {
+    primaryLabel: "Hermes gateway",
+    alternateLabel: "dashboard-home",
+    primarySessionDir: "/sandbox/.hermes/platforms/whatsapp/session",
+    configuredValuePath: "platforms.whatsapp.extra.session_path",
+    configRoot: "/sandbox/.hermes",
+  },
+} as const;
 
 function baseInput(overrides: Partial<WhatsappProbeInput> = {}): WhatsappProbeInput {
   return {
@@ -25,6 +38,7 @@ function baseInput(overrides: Partial<WhatsappProbeInput> = {}): WhatsappProbeIn
     presetApplied: true,
     presetOnGateway: true,
     channelEnabledInRegistry: true,
+    guidance: overrides.agent === "hermes" ? SESSION_GUIDANCE : COMMAND_GUIDANCE,
     ...overrides,
   };
 }
@@ -96,7 +110,7 @@ describe("evaluateWhatsappDiagnostics", () => {
     expect(session?.detail).toMatch(/dashboard-home has WhatsApp credentials/);
     expect(pairing?.hint).toContain("`nemoclaw <sandbox> channels remove whatsapp`");
     expect(session?.hint).toContain("`nemoclaw <sandbox> channels add whatsapp`");
-    expect(session?.hint).toMatch(/Pair again from the dashboard/);
+    expect(session?.hint).toContain("Pair again with `hermes whatsapp`");
     expect(hints).toContain("/sandbox/.hermes/platforms/whatsapp/session");
     expect(hints).toContain("`nemoclaw <sandbox> channels status --channel whatsapp`");
     expect(hints).not.toContain("platforms.whatsapp.extra.session_path");
@@ -134,7 +148,7 @@ describe("evaluateWhatsappDiagnostics", () => {
     const session = report.signals.find((s) => s.label === "Session location");
     expect(report.verdict).toBe("unknown");
     expect(session?.severity).toBe("info");
-    expect(session?.detail).toBe("both Hermes session paths contain WhatsApp credentials");
+    expect(session?.detail).toBe("both declared session paths contain WhatsApp credentials");
     expect(session?.hint).toBe("use one active WhatsApp bridge for the paired account");
   });
 
@@ -154,9 +168,7 @@ describe("evaluateWhatsappDiagnostics", () => {
     const override = report.signals.find((s) => s.label === "Session path override");
     expect(report.verdict).toBe("unknown");
     expect(session?.severity).toBe("ok");
-    expect(session?.detail).toBe(
-      "the configured Hermes WhatsApp session path contains credentials",
-    );
+    expect(session?.detail).toBe("the configured WhatsApp session path contains credentials");
     expect(override?.severity).toBe("info");
     expect(override?.detail).toContain("platforms.whatsapp.extra.session_path");
   });
@@ -177,7 +189,7 @@ describe("evaluateWhatsappDiagnostics", () => {
     expect(report.verdict).toBe("unpaired");
     expect(session?.severity).toBe("warn");
     expect(session?.detail).toBe(
-      "the configured Hermes WhatsApp session path has no WhatsApp credentials",
+      "the configured WhatsApp session path has no WhatsApp credentials",
     );
     expect(report.hints.join(" ")).not.toContain("--config-accept-new-path");
     expect(report.hints.join(" ")).toContain("hermes whatsapp");

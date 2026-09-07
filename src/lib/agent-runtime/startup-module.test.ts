@@ -7,6 +7,10 @@ import path from "node:path";
 import type { HarnessStartupSettings } from "@nvidia/nemoclaw-harness-contract";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+} from "../../../test/helpers/adapter-fixtures";
 import { installHarnessPackage } from "./package/install";
 import type { InstalledHarnessPackage } from "./package/store";
 import {
@@ -148,12 +152,18 @@ function installFuturePackage(startupModule = STARTUP_MODULE): InstalledHarnessP
       "    reason: This synthetic package receives inference through its startup adapter.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This synthetic package does not run scheduled work.",
@@ -176,6 +186,14 @@ function installFuturePackage(startupModule = STARTUP_MODULE): InstalledHarnessP
       "      max_bytes: 10",
       "",
     ].join("\n"),
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/host/config-adapter.cts",
+    TEST_CONFIG_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/host/messaging-adapter.cts",
+    TEST_MESSAGING_ADAPTER_SOURCE,
   );
   writeFixtureFile("packages/nemoclaw-future-harness/host/startup-adapter.cts", startupModule);
   return installHarnessPackage(
@@ -340,10 +358,10 @@ describe("installed harness startup profile adapter", () => {
     const installed = installFuturePackage();
     const adapter = loadHarnessStartupProfileAdapterHostModule(installed.identity, { storeRoot });
 
-    for (const harnessPackage of [
+    [
       { ...installed.identity, packageVersion: "0.9.0" },
       { ...installed.identity, contentDigest: "e".repeat(64) },
-    ]) {
+    ].forEach((harnessPackage) => {
       expect(() =>
         adapter.buildInitialStartupProfile({
           packageId: installed.identity.id,
@@ -351,7 +369,7 @@ describe("installed harness startup profile adapter", () => {
           desiredState: DESIRED_STATE,
         }),
       ).toThrow(/does not match its installed harness package identity/u);
-    }
+    });
   });
 
   it("rejects invalid reconciliation metadata from the package", () => {

@@ -216,12 +216,16 @@ function checkStartedSandboxInference(
   if (!model || !provider) return null;
   const gatewayName = getPersistedSandboxTargetGatewayName(sandbox);
   const agentName = selectedAgent?.definition.name ?? resolveLegacyInferenceProbeAgent(sandbox);
+  const receiptProbeBoundary = selectedAgent
+    ? (selectedAgent.definition.runtime?.smoke_boundary ?? { kind: "login-shell" as const })
+    : null;
   log("  Checking that the sandbox serves an agent request…");
   return (deps.probeInferenceInvocation ?? probeSandboxInferenceInvocation)(
     {
       sandboxName,
       gatewayName,
       ...(agentName ? { agentName } : {}),
+      ...(receiptProbeBoundary ? { probeBoundary: receiptProbeBoundary } : {}),
       provider,
       model,
       preferredInferenceApi: sandbox.preferredInferenceApi ?? null,

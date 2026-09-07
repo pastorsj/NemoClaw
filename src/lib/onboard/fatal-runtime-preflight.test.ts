@@ -719,6 +719,7 @@ describe("readiness-gated runtime preflight", () => {
         },
         assessHost,
         detectGpu: () => null,
+        assertRuntimeProviderHealthy: vi.fn(),
         validateSandboxGpuPreflight: vi.fn(),
       },
     );

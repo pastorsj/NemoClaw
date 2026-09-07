@@ -24,6 +24,7 @@ export type {
 export { backupSandboxStateWithManagedAuthority } from "./backup-authority";
 export { createSnapshotCloneLifecycle, fingerprintSandboxLiveIdentity } from "./clone-lifecycle";
 export { getMcpProviderInspectionRuntimeSelection } from "../mcp-bridge-provider-inspection";
+export { restartSandboxGateway } from "../runtime/sandbox-lifecycle";
 export {
   applyInstalledMcpSnapshotRestore,
   prepareInstalledMcpSnapshotRestore,

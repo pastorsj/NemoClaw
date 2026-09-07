@@ -59,7 +59,7 @@ describe("CLI dispatch", () => {
     expect(setup.readCalls()).toEqual([]);
   });
 
-  it("continues to OpenShell logs when the OpenClaw gateway log probe times out", ({
+  it("continues to OpenShell logs when the managed gateway log probe times out", ({
     resources,
   }) => {
     const setup = createLogsTestSetup(resources, "nemoclaw-cli-logs-openclaw-timeout-", [
@@ -71,7 +71,7 @@ describe("CLI dispatch", () => {
     const r = setup.runLogs("alpha logs 2>&1", { NEMOCLAW_LOGS_PROBE_TIMEOUT_MS: "50" });
 
     expect(r.code).toBe(0);
-    expect(r.out).toContain("OpenClaw log source unavailable");
+    expect(r.out).toContain("Managed gateway log source unavailable");
     expect(r.out).toContain("ETIMEDOUT");
     expect(r.out).toContain(FAKE_OPENSHELL_LOG_LINE);
   });

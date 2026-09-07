@@ -25,7 +25,9 @@ state_lifecycle:
     kind: not-required
   snapshot_restore: []
   rebuild:
-    image_plugin_provenance: not-required
+    managed_extensions:
+      support: disabled
+      reason: NemoCUA does not preserve image-owned extensions during rebuild.
     scheduled_work:
       support: disabled
       reason: NemoCUA does not run scheduled work.

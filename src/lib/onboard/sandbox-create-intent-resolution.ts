@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WebSearchConfig } from "../inference/web-search";
+import { webSearchProviderForConfig } from "../inference/web-search";
 import type { HarnessSandboxCreateDeclaration } from "../agent-runtime/manifest-types";
+import type { HarnessWebSearchCapability } from "../agent-runtime/manifest-types";
+import {
+  assertWebSearchVerificationMatchesProviderProfile,
+  resolvePackageCredentialProviderProfile,
+} from "../agent-runtime/provider-profile";
+import { packageWebSearchProviderBinding } from "../agent-runtime/web-search";
 import { sandboxCreateDriverMounts } from "../agent-runtime/sandbox-create";
 import type { DockerGpuRoutePlan } from "./docker-gpu-route";
 import type { NamedMessagingChannel } from "./messaging-prep";
@@ -24,6 +31,7 @@ import {
   prepareSandboxMessagingPreflight,
   type SandboxMessagingPreflightDeps,
 } from "./sandbox-messaging-preflight";
+import { messagingBridgeProfilesFromPlan } from "./messaging-bridge-provider";
 
 export type CompleteSandboxCreateIntentInput<Agent, ResourceProfile> = {
   sandboxName: string;
@@ -39,8 +47,11 @@ export type CompleteSandboxCreateIntentInput<Agent, ResourceProfile> = {
   extraProviders: readonly string[];
   staleExtraProviders: readonly string[];
   policyTier?: string | null;
+  observabilityEnabled?: boolean;
   /** Internal OpenClaw resume authority for exact registered provider reuse. */
   reuseRegisteredCredentials?: boolean;
+  /** Select only package-declared web-search bindings and assets for receipt-backed onboarding. */
+  receiptBackedPackage?: boolean;
 };
 
 export interface SandboxCreateIntentResolverDeps<Agent, ResourceProfile> {
@@ -60,7 +71,13 @@ export interface SandboxCreateIntentResolverDeps<Agent, ResourceProfile> {
 }
 
 export function createSandboxCreateIntentResolver<
-  Agent extends { name?: string | null; sandbox_create?: HarnessSandboxCreateDeclaration } | null,
+  Agent extends {
+    name?: string | null;
+    agentDir?: string;
+    packageRoot?: string;
+    sandbox_create?: HarnessSandboxCreateDeclaration;
+    web_search?: HarnessWebSearchCapability;
+  } | null,
   ResourceProfile,
 >(deps: SandboxCreateIntentResolverDeps<Agent, ResourceProfile>) {
   function filterEnabledChannels(enabledChannels: readonly string[] | null, agent: Agent) {
@@ -89,11 +106,17 @@ export function createSandboxCreateIntentResolver<
   async function prepareMessagingCapabilities(
     input: Pick<
       CompleteSandboxCreateIntentInput<Agent, ResourceProfile>,
-      "sandboxName" | "enabledChannels" | "webSearchConfig" | "agent" | "reuseRegisteredCredentials"
+      | "sandboxName"
+      | "enabledChannels"
+      | "webSearchConfig"
+      | "agent"
+      | "reuseRegisteredCredentials"
+      | "receiptBackedPackage"
     >,
     expectedIntent?: SandboxCreateIntent,
     credentialRegistration = false,
   ) {
+    const stagedMessagingPlan = deps.messagingPreflightDeps.readMessagingPlanFromEnv();
     const preflightDeps = expectedIntent
       ? {
           ...deps.messagingPreflightDeps,
@@ -106,6 +129,24 @@ export function createSandboxCreateIntentResolver<
             readMessagingPlanFromEnv: () => null,
           }
         : deps.messagingPreflightDeps;
+    const webSearchProvider =
+      input.webSearchConfig?.fetchEnabled === true
+        ? webSearchProviderForConfig(input.webSearchConfig)
+        : null;
+    const webSearchBinding =
+      input.receiptBackedPackage === true && webSearchProvider
+        ? packageWebSearchProviderBinding(input.agent, webSearchProvider)
+        : null;
+    const providerProfile =
+      webSearchBinding && input.agent?.packageRoot
+        ? resolvePackageCredentialProviderProfile(
+            webSearchBinding.profile_type,
+            input.agent.packageRoot,
+          )
+        : null;
+    if (webSearchBinding && providerProfile) {
+      assertWebSearchVerificationMatchesProviderProfile(webSearchBinding, providerProfile);
+    }
     const result = await prepareSandboxMessagingPreflight(
       {
         channels: deps.channels,
@@ -114,6 +155,17 @@ export function createSandboxCreateIntentResolver<
         agentName: input.agent?.name ?? "openclaw",
         requireExactProviderBinding:
           credentialRegistration || input.reuseRegisteredCredentials === true,
+        receiptBackedPackage: input.receiptBackedPackage === true,
+        webSearchProviderBinding: webSearchBinding,
+        webSearchProviderProfilePath: providerProfile?.profilePath ?? null,
+        messagingProviderProfiles:
+          input.receiptBackedPackage === true
+            ? input.agent?.agentDir
+              ? messagingBridgeProfilesFromPlan(stagedMessagingPlan, input.agent.agentDir)
+              : (() => {
+                  throw new Error("Receipt-backed messaging provider package directory is missing");
+                })()
+            : undefined,
         webSearchConfig: input.webSearchConfig,
         env: process.env,
       },
@@ -162,7 +214,8 @@ export function createSandboxCreateIntentResolver<
       reusableMessagingProviders: messaging.reusableMessagingProviders,
       extraProviders: input.extraProviders,
       staleExtraProviders: input.staleExtraProviders,
-      hermesToolGateways: input.hermesToolGateways,
+      toolGatewaySelections: input.receiptBackedPackage === true ? input.hermesToolGateways : [],
+      hermesToolGateways: input.receiptBackedPackage === true ? [] : input.hermesToolGateways,
       sandboxGpuConfig: input.sandboxGpuConfig,
       gpuCreateArgs: buildSandboxGpuCreateArgs(input.sandboxGpuConfig),
       resourceCreateArgs,
@@ -172,6 +225,7 @@ export function createSandboxCreateIntentResolver<
       sandboxGpuLogMessage,
       extraPlaceholderKeys: messaging.extraPlaceholderKeys,
       agentName: input.agent?.name,
+      observabilityEnabled: input.observabilityEnabled,
       policyTier: resolveSandboxCreatePolicyTier(input.policyTier),
     });
   }
@@ -217,7 +271,7 @@ export function createSandboxCreateIntentResolver<
     prepareCredentialProviders: (
       input: Pick<
         CompleteSandboxCreateIntentInput<Agent, ResourceProfile>,
-        "sandboxName" | "enabledChannels" | "webSearchConfig" | "agent"
+        "sandboxName" | "enabledChannels" | "webSearchConfig" | "agent" | "receiptBackedPackage"
       >,
     ) => prepareMessagingCapabilities(input, undefined, true),
   };

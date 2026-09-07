@@ -524,6 +524,77 @@ describe("provider inference host-local startup selection", () => {
     },
   );
 
+  it.each(["openclaw", "hermes", "future-harness"])(
+    "uses the %s package receipt as host-local application authority",
+    async (application) => {
+      const harnessPackage = {
+        kind: "agent-runtime" as const,
+        id: application,
+        packageVersion: "1.0.0-test",
+        contentDigest: "9".repeat(64),
+      };
+      const model = "qwen3.5-9b";
+      const session = createSession({ harnessPackage, harnessPackageMigration: null });
+      const setupNim = vi.fn<TestProviderInferenceOptions["deps"]["setupNim"]>(
+        async (
+          _gpu,
+          _sandboxName,
+          _agent,
+          _allowRecordedProviderRecovery,
+          _gatewayName,
+          _assertRouteCompatible,
+          _canProbeRoute,
+          _recoverySessionId,
+          _revalidateSandboxIdentity,
+          selectedHarnessPackage,
+        ) => {
+          expect(selectedHarnessPackage).toEqual(harnessPackage);
+          return {
+            ...baseSelection,
+            provider: "ollama-local",
+            model,
+            endpointUrl: null,
+            credentialEnv: null,
+            preferredInferenceApi: "openai-completions",
+          };
+        },
+      );
+      const resolver = vi.fn((input: HostLocalInferenceStartupSelectionInput) =>
+        hostLocalStartupSelection(input),
+      );
+      const { deps, calls } = createDeps({
+        setupNim,
+        revalidateHarnessPackageAuthority: vi.fn(() => ({
+          harnessPackage,
+          harnessPackageMigration: null,
+        })),
+        resolveHostLocalInferenceStartupSelection: resolver,
+      });
+      calls.complete.mockResolvedValue(session);
+
+      await handleProviderInferenceState({
+        ...baseOptions(deps, session),
+        agent: { name: application },
+        sandboxName: `${application}-sandbox`,
+      });
+
+      expect(resolver).toHaveBeenCalledWith(
+        expect.objectContaining({
+          application: harnessPackage,
+          provider: "ollama-local",
+          model,
+        }),
+      );
+      expect(calls.setupInference.mock.calls[0]?.[7]).toEqual(
+        expect.objectContaining({
+          hostLocalInference: expect.objectContaining({
+            request: expect.objectContaining({ application: harnessPackage }),
+          }),
+        }),
+      );
+    },
+  );
+
   it("rejects non-boolean interrupted-recovery authority at the injected provider seam", async () => {
     const model = "persisted-served-alias";
     const session = createSession({
@@ -1423,63 +1494,4 @@ describe("provider inference host-local startup selection", () => {
       expect(calls.setupInference).not.toHaveBeenCalled();
     },
   );
-
-  it("rejects a resolver result for a different accepted application", async () => {
-    const model = "qwen3.5-9b";
-    const setupNim = vi.fn(async () => ({
-      ...baseSelection,
-      provider: "ollama-local",
-      model,
-      endpointUrl: null,
-      credentialEnv: null,
-      preferredInferenceApi: "openai-completions",
-    }));
-    const resolver = vi.fn((input: HostLocalInferenceStartupSelectionInput) => {
-      const selected = hostLocalStartupSelection(input);
-      return {
-        ...selected,
-        request: { ...selected.request, application: "hermes" as const },
-      };
-    });
-    const { deps, calls } = createDeps({
-      setupNim,
-      resolveHostLocalInferenceStartupSelection: resolver,
-    });
-
-    await expect(
-      handleProviderInferenceState({
-        ...baseOptions(deps, createSession()),
-        agent: { name: "openclaw" },
-        sandboxName: "openclaw-sandbox",
-      }),
-    ).rejects.toThrow("accepted application");
-
-    expect(calls.setupInference).not.toHaveBeenCalled();
-  });
-
-  it("rejects a resolver result cross-wired to a different accepted provider", async () => {
-    const model = "qwen3.5-9b";
-    const setupNim = vi.fn(async () => ({
-      ...baseSelection,
-      provider: "ollama-local",
-      model,
-      endpointUrl: null,
-      credentialEnv: null,
-      preferredInferenceApi: "openai-completions",
-    }));
-    const { deps, calls } = createDeps({
-      setupNim,
-      resolveHostLocalInferenceStartupSelection: (input) =>
-        hostLocalStartupSelection(input, "vllm"),
-    });
-
-    await expect(
-      handleProviderInferenceState({
-        ...baseOptions(deps, createSession()),
-        sandboxName: "openclaw-sandbox",
-      }),
-    ).rejects.toThrow("accepted provider");
-
-    expect(calls.setupInference).not.toHaveBeenCalled();
-  });
 });

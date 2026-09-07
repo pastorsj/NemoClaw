@@ -22,10 +22,10 @@ import {
   readGatewayProviderMetadata,
 } from "../../onboard/gateway-provider-metadata";
 import { resolveSandboxGpuConfig } from "../../onboard/sandbox-gpu-mode";
-import { agentSupportsWebSearchProvider } from "../../onboard/web-search/support";
-import { redact } from "../../security/redact";
+import { selectedAgentSupportsWebSearchProvider } from "../../onboard/web-search/support";
 import {
   legacyRebuildCanReuseGatewayWebSearchCredential,
+  listRebuildCredentialMessagingManifests,
   preflightRebuildCredentials,
   type RebuildBail,
   type RebuildLog,
@@ -35,10 +35,16 @@ import * as rebuildImagePreflight from "./rebuild-custom-image-preflight";
 import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
 import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 import { rebuildOnboardDependencies } from "./rebuild-onboard-dependencies";
-import { printRebuildPreflightFailure } from "./rebuild-preflight-error";
+import {
+  printRebuildPreflightFailure,
+  redactRebuildPreflightDetail,
+} from "./rebuild-preflight-error";
 import { disposePreparedBuildContext } from "./rebuild-prepared-image-context";
 import type { RebuildResumeConfig } from "./rebuild-resume-config";
-import type { RebuildTargetConfig } from "./rebuild-target-config";
+import {
+  resolveReceiptRebuildStartupProfile,
+  type RebuildTargetConfig,
+} from "./rebuild-target-config";
 
 /**
  * Whether recreate can reuse the web-search credential already registered with
@@ -128,6 +134,7 @@ export async function preflightRebuildTargetRuntime(
   bail: RebuildBail,
   options: {
     allowMissingGatewayProviderWithHostCredential?: boolean;
+    buildInstalledStartupPlan?: typeof rebuildOnboardDependencies.buildInstalledStartupPlan;
     skipImagePreflight?: boolean;
   } = {},
 ): Promise<RebuildTargetRuntimePreflightResult> {
@@ -135,8 +142,9 @@ export async function preflightRebuildTargetRuntime(
   const webSearchProvider = webSearchConfig ? webSearchProviderForConfig(webSearchConfig) : null;
   if (
     webSearchProvider &&
-    !agentSupportsWebSearchProvider(
+    !selectedAgentSupportsWebSearchProvider(
       target.agentDefinition,
+      target.agentAuthority.harnessPackage !== null,
       webSearchProvider,
       target.fromDockerfile,
     )
@@ -216,6 +224,26 @@ export async function preflightRebuildTargetRuntime(
   let preparedImage: PreparedRebuildImage | null = null;
   let requiresGatewayProviderReconfigure = false;
   if (!options.skipImagePreflight) {
+    const receiptMessagingManifests = target.agentAuthority.harnessPackage
+      ? listRebuildCredentialMessagingManifests(target.agentAuthority)
+      : undefined;
+    const packageProfile = target.agentAuthority.harnessPackage
+      ? resolveReceiptRebuildStartupProfile(sb, target.agentAuthority)
+      : null;
+    const installedStartupPlan = packageProfile
+      ? (options.buildInstalledStartupPlan ?? rebuildOnboardDependencies.buildInstalledStartupPlan)(
+          packageProfile,
+          process.env,
+        )
+      : null;
+    const packageDockerfilePlan = installedStartupPlan
+      ? {
+          packageId: installedStartupPlan.agent,
+          configurationEnvironment: installedStartupPlan.configurationEnvironment,
+          materials: installedStartupPlan.materials,
+          dashboardRemoteBindPrepared: sb.dashboardRemoteBindPrepared === true,
+        }
+      : undefined;
     const customImage = await rebuildImagePreflight.preflightRebuildImage({
       agent: target.agentDefinition,
       fromDockerfile: target.fromDockerfile,
@@ -225,6 +253,10 @@ export async function preflightRebuildTargetRuntime(
       compatibleEndpointReasoning: target.resumeConfig.compatibleEndpointReasoning,
       compatibleEndpointReasoningEffort: target.resumeConfig.compatibleEndpointReasoningEffort,
       webSearchConfig: target.durableConfig.webSearchConfig,
+      ...(receiptMessagingManifests === undefined
+        ? {}
+        : { messagingManifests: receiptMessagingManifests }),
+      ...(packageDockerfilePlan === undefined ? {} : { packageDockerfilePlan }),
       toolDisclosure: target.durableConfig.toolDisclosure,
       hermesToolGateways: target.hermesToolGateways,
       sandboxGpuConfig,
@@ -237,7 +269,7 @@ export async function preflightRebuildTargetRuntime(
     if (!customImage.ok) {
       printRebuildPreflightFailure(
         "the replacement sandbox image did not build.",
-        redact(customImage.detail),
+        redactRebuildPreflightDetail(customImage.detail),
         "Replacement sandbox image preflight failed",
         bail,
       );
@@ -267,6 +299,12 @@ export async function preflightRebuildTargetRuntime(
         {
           allowMissingGatewayProviderWithHostCredential:
             options.allowMissingGatewayProviderWithHostCredential,
+          receiptProviderAuth: target.agentAuthority.harnessPackage
+            ? {
+                agentAuthority: target.agentAuthority,
+                methodId: target.providerAuthMethod,
+              }
+            : undefined,
           onGatewayProviderReconfigureRequired: () => {
             requiresGatewayProviderReconfigure = true;
           },

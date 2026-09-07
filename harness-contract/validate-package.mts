@@ -10,8 +10,10 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
+import type { HarnessWebSearchProviderBinding } from "./src/manifest.ts";
 
 type ManifestValidatorModule = typeof import("./src/manifest-validator.ts");
+type ProviderProfileValidatorModule = typeof import("./src/provider-profile.ts");
 
 const require = createRequire(import.meta.url);
 const sourceModule = fileURLToPath(import.meta.url).endsWith(".mts");
@@ -24,6 +26,14 @@ const manifestValidator = require(
   ),
 ) as ManifestValidatorModule;
 const { HarnessManifestValidationError, validateHarnessManifest } = manifestValidator;
+const { assertHarnessWebSearchProviderProfile } = require(
+  fileURLToPath(
+    new URL(
+      sourceModule ? "./dist/src/provider-profile.js" : "./src/provider-profile.js",
+      import.meta.url,
+    ),
+  ),
+) as ProviderProfileValidatorModule;
 
 const PACKAGE_JSON = "package.json";
 const REQUIRED_ROOT_FILES = Object.freeze([
@@ -39,6 +49,7 @@ const HARNESS_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const PACKAGE_SCOPE = /^[a-z0-9][a-z0-9._-]*$/u;
 const MAX_PACKAGE_JSON_BYTES = 128 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
+const MAX_POLICY_PRESET_BYTES = 1024 * 1024;
 const MAX_MANIFEST_DEPTH = 16;
 const MAX_MANIFEST_NODES = 8192;
 const MAX_MAPPING_ENTRIES = 512;
@@ -59,6 +70,46 @@ const BUILD_PROJECT_PATH = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/u;
 const TYPESCRIPT_CONFIG_FILE = /^tsconfig(?:\.[a-z0-9_-]+)*\.json$/iu;
 const TEST_CONFIG_TERM =
   /(?:^|[^a-z0-9])(?:__tests__|e2e|jest|spec|specs|test|tests|vitest)(?:[^a-z0-9]|$)/iu;
+
+// Package Dockerfiles are composed with this small, core-owned build kit. A
+// package may evolve freely beneath its own packages/nemoclaw-<id>/ prefix,
+// while every dependency on NemoClaw core remains explicit here.
+const CORE_BUILD_CONTEXT_DIRECTORIES = Object.freeze([
+  "nemoclaw-blueprint/",
+  "packages/nemoclaw-fabric/",
+  "tools/mcp-tool-discovery-runtime/",
+]);
+const CORE_BUILD_CONTEXT_FILES = new Set([
+  "ci/npm-audit-exceptions.json",
+  "ci/reviewed-npm-audit.json",
+  "scripts/checks/materialize-locked-npm-cache-seed.mts",
+  "scripts/checks/verify-openshell-policy-boundary-dependencies.mts",
+  "scripts/gateway-control.sh",
+  "scripts/lib/bundled-npm-package.mts",
+  "scripts/lib/corporate-ca-runtime.sh",
+  "scripts/lib/entrypoint-env-wrapper.sh",
+  "scripts/lib/gateway-supervisor.sh",
+  "scripts/lib/npm-audit-receipt.mts",
+  "scripts/lib/patch-bundled-npm-ip-address.mts",
+  "scripts/lib/reviewed-npm-archive.mts",
+  "scripts/lib/reviewed-npm-audit.mts",
+  "scripts/lib/sandbox-init.sh",
+  "scripts/lib/sandbox-rlimits.sh",
+  "scripts/lib/seed-reviewed-npm-cache.mts",
+  "scripts/managed-bootstrap-entrypoint.c",
+  "scripts/managed-bootstrap-trampoline.sh",
+  "scripts/managed-startup-hold.sh",
+  "scripts/patch-bundled-npm-brace-expansion.mts",
+  "scripts/patch-bundled-npm-tar.mts",
+  "scripts/security/build-native-security-packages.sh",
+  "scripts/security/build-perl-security-packages.sh",
+  "scripts/security/patches/libssh2-1.11.1-cve-2026.patch",
+  "scripts/security/patches/perl-5.44.0-net-ping-capability-tests.patch",
+  "scripts/security/patches/python3.13-htmlparser-cve-2026-15308.patch",
+  "scripts/upgrade-bundled-npm.mts",
+  "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json",
+  "tsconfig.runtime-preloads.json",
+]);
 
 const AUTHORING_DIRECTORY_NAMES = new Set([
   ".cache",
@@ -96,12 +147,14 @@ export type HarnessPackageDiagnosticCode =
   | "archive-authoring-path"
   | "archive-credential-path"
   | "archive-membership"
+  | "build-context-source"
   | "file-type"
   | "manifest"
   | "manifest-identity"
   | "metadata"
   | "package-root"
   | "provider-broker-artifact"
+  | "provider-profile-artifact"
   | "start-mode";
 
 export interface HarnessPackageDiagnostic {
@@ -556,18 +609,25 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 }
 
 function requiredAdapterArtifacts(manifest: Readonly<Record<string, unknown>>): readonly string[] {
-  const required = ["host/config-adapter.cts", "host/messaging-adapter.cts"];
+  const required = [
+    "host/config-adapter.cts",
+    "host/messaging-adapter.cts",
+    "host/startup-adapter.cts",
+  ];
   if (isRecord(manifest.mcp) && manifest.mcp.support === "bridge") {
     required.push("host/mcp-adapter.cts");
-  }
-  if (manifest.managed_image !== undefined) {
-    required.push("host/startup-adapter.cts");
   }
   if (isRecord(manifest.sessions)) {
     required.push("host/session-adapter.cts");
   }
+  if (isRecord(manifest.agent_roster) && manifest.agent_roster.support === "managed") {
+    required.push("host/agent-roster-adapter.cts");
+  }
   if (isRecord(manifest.provider_broker) && manifest.provider_broker.support === "managed") {
     required.push("host/provider-broker-adapter.cts");
+  }
+  if (isRecord(manifest.provider_auth) && manifest.provider_auth.support === "managed") {
+    required.push("host/provider-auth-adapter.cts");
   }
   if (
     Array.isArray(manifest.state_files) &&
@@ -579,6 +639,152 @@ function requiredAdapterArtifacts(manifest: Readonly<Record<string, unknown>>): 
     required.push("host/restore-adapter.cts");
   }
   return Object.freeze(required);
+}
+
+function assertOwnedPolicyPresetAssets(
+  packageRoot: string,
+  manifest: Readonly<Record<string, unknown>>,
+): void {
+  if (!isRecord(manifest.policy) || !Array.isArray(manifest.policy.owned_presets)) return;
+
+  const baselineSource = readBoundedUtf8File(
+    packageRoot,
+    "policy-additions.yaml",
+    MAX_POLICY_PRESET_BYTES,
+  );
+  const baselineDocument = parseDocument(baselineSource, {
+    prettyErrors: false,
+    schema: "core",
+    strict: true,
+    uniqueKeys: true,
+  });
+  let baselineValue: unknown = null;
+  if (baselineDocument.errors.length === 0 && baselineDocument.warnings.length === 0) {
+    try {
+      baselineValue = baselineDocument.toJS({ maxAliasCount: 0 }) as unknown;
+    } catch {
+      baselineValue = null;
+    }
+  }
+  const baselinePolicyKeys = new Set(
+    isRecord(baselineValue) && isRecord(baselineValue.network_policies)
+      ? Object.keys(baselineValue.network_policies)
+      : [],
+  );
+
+  for (const presetName of manifest.policy.owned_presets) {
+    if (typeof presetName !== "string") continue;
+    const relativePath = `policies/presets/${presetName}.yaml`;
+    let source: string;
+    try {
+      source = readBoundedUtf8File(packageRoot, relativePath, MAX_POLICY_PRESET_BYTES);
+    } catch (error) {
+      if (error instanceof HarnessPackageConformanceError) throw error;
+      throw diagnostic(
+        "file-type",
+        relativePath,
+        "declared package policy preset is missing or unreadable",
+      );
+    }
+
+    const document = parseDocument(source, {
+      prettyErrors: false,
+      schema: "core",
+      strict: true,
+      uniqueKeys: true,
+    });
+    if (document.errors.length > 0 || document.warnings.length > 0) {
+      throw diagnostic("manifest", relativePath, "must contain unambiguous YAML");
+    }
+    let value: unknown;
+    try {
+      value = document.toJS({ maxAliasCount: 0 }) as unknown;
+    } catch {
+      throw diagnostic("manifest", relativePath, "must not contain YAML aliases");
+    }
+    if (
+      !isRecord(value) ||
+      !isRecord(value.preset) ||
+      value.preset.name !== presetName ||
+      typeof value.preset.description !== "string" ||
+      !isRecord(value.network_policies)
+    ) {
+      throw diagnostic(
+        "manifest",
+        relativePath,
+        "must declare matching preset metadata and a network_policies mapping",
+      );
+    }
+    const overlappingPolicyKey = Object.keys(value.network_policies).find((key) =>
+      baselinePolicyKeys.has(key),
+    );
+    if (overlappingPolicyKey) {
+      throw diagnostic(
+        "manifest",
+        relativePath,
+        `optional policy key '${overlappingPolicyKey}' must not also be present in policy-additions.yaml`,
+      );
+    }
+  }
+}
+
+function parsePackageYamlAsset(
+  packageRoot: string,
+  relativePath: string,
+  maximumBytes: number,
+): unknown {
+  let source: string;
+  try {
+    source = readBoundedUtf8File(packageRoot, relativePath, maximumBytes);
+  } catch {
+    throw diagnostic(
+      "provider-profile-artifact",
+      relativePath,
+      "declared provider profile is missing or unreadable",
+    );
+  }
+  const document = parseDocument(source, {
+    prettyErrors: false,
+    schema: "core",
+    strict: true,
+    uniqueKeys: true,
+  });
+  if (document.errors.length > 0 || document.warnings.length > 0) {
+    throw diagnostic(
+      "provider-profile-artifact",
+      relativePath,
+      "must contain unambiguous YAML using the core schema",
+    );
+  }
+  try {
+    return document.toJS({ maxAliasCount: 0 }) as unknown;
+  } catch {
+    throw diagnostic("provider-profile-artifact", relativePath, "must not contain YAML aliases");
+  }
+}
+
+function assertWebSearchProviderProfileAssets(
+  packageRoot: string,
+  manifest: Readonly<Record<string, unknown>>,
+): void {
+  if (!isRecord(manifest.web_search) || manifest.web_search.support !== "providers") return;
+  if (!Array.isArray(manifest.web_search.providers)) return;
+
+  for (const rawBinding of manifest.web_search.providers) {
+    if (!isRecord(rawBinding) || typeof rawBinding.profile_type !== "string") continue;
+    const binding = rawBinding as unknown as HarnessWebSearchProviderBinding;
+    const relativePath = `provider-profiles/${binding.profile_type}.yaml`;
+    const profileDocument = parsePackageYamlAsset(packageRoot, relativePath, MAX_MANIFEST_BYTES);
+    try {
+      assertHarnessWebSearchProviderProfile(binding, binding.profile_type, profileDocument);
+    } catch (error) {
+      throw diagnostic(
+        "provider-profile-artifact",
+        relativePath,
+        error instanceof Error ? error.message : "provider profile does not match its declaration",
+      );
+    }
+  }
 }
 
 function assertRequiredAdapterArtifacts(
@@ -867,12 +1073,18 @@ function logicalDockerfileLines(source: string): readonly string[] {
   return lines;
 }
 
-interface DockerCopyInstruction {
-  readonly copiesFromStage: boolean;
+interface DockerContextInstruction {
+  readonly instruction: "ADD" | "COPY";
+  readonly externalStage: boolean;
+  readonly checksum: string | null;
   readonly sources: readonly string[];
 }
 
-function parseShellCopyOperands(dockerfileName: string, source: string): readonly string[] {
+function parseShellContextOperands(
+  dockerfileName: string,
+  instruction: "ADD" | "COPY",
+  source: string,
+): readonly string[] {
   const operands: string[] = [];
   let current = "";
   let quote: '"' | "'" | undefined;
@@ -885,7 +1097,10 @@ function parseShellCopyOperands(dockerfileName: string, source: string): readonl
       } else if (character === "\\" && quote === '"') {
         index += 1;
         if (index >= source.length) {
-          throw buildConfigFailure(dockerfileName, "COPY instruction ends with an escape");
+          throw buildConfigFailure(
+            dockerfileName,
+            `${instruction} instruction ends with an escape`,
+          );
         }
         current += source[index];
       } else {
@@ -910,7 +1125,7 @@ function parseShellCopyOperands(dockerfileName: string, source: string): readonl
     if (character === "\\") {
       index += 1;
       if (index >= source.length) {
-        throw buildConfigFailure(dockerfileName, "COPY instruction ends with an escape");
+        throw buildConfigFailure(dockerfileName, `${instruction} instruction ends with an escape`);
       }
       current += source[index];
       hasCurrent = true;
@@ -920,31 +1135,56 @@ function parseShellCopyOperands(dockerfileName: string, source: string): readonl
     hasCurrent = true;
   }
   if (quote !== undefined) {
-    throw buildConfigFailure(dockerfileName, "COPY instruction contains an unterminated quote");
+    throw buildConfigFailure(
+      dockerfileName,
+      `${instruction} instruction contains an unterminated quote`,
+    );
   }
   if (hasCurrent) operands.push(current);
   return operands;
 }
 
-function parseDockerCopyInstruction(
+function parseDockerContextInstruction(
   dockerfileName: string,
   line: string,
-): DockerCopyInstruction | undefined {
-  const match = /^COPY\s+(.+)$/iu.exec(line);
+): DockerContextInstruction | undefined {
+  const match = /^(ADD|COPY)\s+(.+)$/iu.exec(line);
   if (!match) return undefined;
-  let remaining = match[1].trim();
-  let copiesFromStage = false;
+  const instruction = match[1].toUpperCase() as "ADD" | "COPY";
+  let remaining = match[2].trim();
+  let externalStage = false;
+  let checksum: string | null = null;
   while (remaining.startsWith("--")) {
     const option = /^(--[a-z][a-z0-9-]*(?:=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s]+))?)(?:\s+|$)/iu.exec(
       remaining,
     );
     if (!option) {
-      throw buildConfigFailure(dockerfileName, "COPY instruction contains an unsupported option");
+      throw buildConfigFailure(
+        dockerfileName,
+        `${instruction} instruction contains an unsupported option`,
+      );
     }
-    if (/^--from(?:=|$)/iu.test(option[1])) copiesFromStage = true;
+    if (/^--from(?:=|$)/iu.test(option[1])) {
+      if (instruction !== "COPY") {
+        throw buildConfigFailure(dockerfileName, "ADD instruction cannot copy from a build stage");
+      }
+      externalStage = true;
+    }
+    const checksumMatch = /^--checksum=(.+)$/iu.exec(option[1]);
+    if (checksumMatch) {
+      if (instruction !== "ADD" || checksum !== null) {
+        throw buildConfigFailure(
+          dockerfileName,
+          `${instruction} instruction contains an invalid checksum option`,
+        );
+      }
+      checksum = checksumMatch[1];
+    }
     remaining = remaining.slice(option[0].length).trimStart();
   }
-  if (copiesFromStage) return Object.freeze({ copiesFromStage: true, sources: [] });
+  if (externalStage) {
+    return Object.freeze({ instruction, externalStage: true, checksum, sources: [] });
+  }
 
   let operands: readonly string[];
   if (remaining.startsWith("[")) {
@@ -954,23 +1194,110 @@ function parseDockerCopyInstruction(
     } catch {
       throw buildConfigFailure(
         dockerfileName,
-        "JSON-array COPY instruction must contain valid JSON",
+        `JSON-array ${instruction} instruction must contain valid JSON`,
       );
     }
     if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== "string")) {
-      throw buildConfigFailure(dockerfileName, "JSON-array COPY operands must all be strings");
+      throw buildConfigFailure(
+        dockerfileName,
+        `JSON-array ${instruction} operands must all be strings`,
+      );
     }
     operands = parsed;
   } else {
-    operands = parseShellCopyOperands(dockerfileName, remaining);
+    operands = parseShellContextOperands(dockerfileName, instruction, remaining);
   }
   if (operands.length < 2) {
     throw buildConfigFailure(
       dockerfileName,
-      "COPY instruction must contain at least one source and one destination",
+      `${instruction} instruction must contain at least one source and one destination`,
     );
   }
-  return Object.freeze({ copiesFromStage: false, sources: Object.freeze(operands.slice(0, -1)) });
+  return Object.freeze({
+    instruction,
+    externalStage: false,
+    checksum,
+    sources: Object.freeze(operands.slice(0, -1)),
+  });
+}
+
+function normalizedDockerContextSource(
+  dockerfileName: string,
+  instruction: "ADD" | "COPY",
+  sourcePath: string,
+): string {
+  const normalized = sourcePath.replace(/^(?:\.\/)+/u, "");
+  const pathSegments = normalized.replace(/\/+$/u, "").split("/");
+  if (
+    !normalized ||
+    normalized.includes("\\") ||
+    path.posix.isAbsolute(normalized) ||
+    pathSegments.some((segment) => !segment || segment === "." || segment === "..")
+  ) {
+    throw diagnostic(
+      "build-context-source",
+      dockerfileName,
+      `direct ${instruction} source '${sourcePath}' is not a canonical repository-relative path`,
+    );
+  }
+  return normalized;
+}
+
+function isCoreBuildContextSource(sourcePath: string): boolean {
+  return (
+    CORE_BUILD_CONTEXT_FILES.has(sourcePath) ||
+    CORE_BUILD_CONTEXT_DIRECTORIES.some((prefix) => sourcePath.startsWith(prefix))
+  );
+}
+
+function isRemoteAddSource(sourcePath: string): boolean {
+  return /^https:\/\//iu.test(sourcePath);
+}
+
+function assertDockerContextSourceAuthority(packageRoot: string, harnessId: string): void {
+  const packagePrefix = `packages/nemoclaw-${harnessId}/`;
+  for (const dockerfileName of ["Dockerfile", "Dockerfile.base"] as const) {
+    const source = readBoundedUtf8File(packageRoot, dockerfileName, MAX_BUILD_CONFIG_BYTES * 32);
+    for (const line of logicalDockerfileLines(source)) {
+      const contextInstruction = parseDockerContextInstruction(dockerfileName, line);
+      if (!contextInstruction || contextInstruction.externalStage) continue;
+      const remoteSources = contextInstruction.sources.filter(isRemoteAddSource);
+      if (remoteSources.length > 0) {
+        if (
+          contextInstruction.instruction !== "ADD" ||
+          contextInstruction.sources.length !== 1 ||
+          !/^sha256:[a-f0-9]{64}$/u.test(contextInstruction.checksum ?? "")
+        ) {
+          throw diagnostic(
+            "build-context-source",
+            dockerfileName,
+            "remote ADD requires one HTTPS source and one exact SHA-256 checksum",
+          );
+        }
+        continue;
+      }
+      if (contextInstruction.checksum !== null) {
+        throw diagnostic(
+          "build-context-source",
+          dockerfileName,
+          "a checksum is valid only for one remote HTTPS ADD source",
+        );
+      }
+      for (const rawSourcePath of contextInstruction.sources) {
+        const sourcePath = normalizedDockerContextSource(
+          dockerfileName,
+          contextInstruction.instruction,
+          rawSourcePath,
+        );
+        if (sourcePath.startsWith(packagePrefix) || isCoreBuildContextSource(sourcePath)) continue;
+        throw diagnostic(
+          "build-context-source",
+          dockerfileName,
+          `direct ${contextInstruction.instruction} source '${rawSourcePath}' is outside this package and the NemoClaw core build kit`,
+        );
+      }
+    }
+  }
 }
 
 function directPackageBuildConfigs(packageRoot: string, harnessId: string): readonly string[] {
@@ -979,9 +1306,10 @@ function directPackageBuildConfigs(packageRoot: string, harnessId: string): read
   for (const dockerfileName of ["Dockerfile", "Dockerfile.base"] as const) {
     const source = readBoundedUtf8File(packageRoot, dockerfileName, MAX_BUILD_CONFIG_BYTES * 32);
     for (const line of logicalDockerfileLines(source)) {
-      const copy = parseDockerCopyInstruction(dockerfileName, line);
-      if (!copy || copy.copiesFromStage) continue;
-      for (const sourcePath of copy.sources) {
+      const contextInstruction = parseDockerContextInstruction(dockerfileName, line);
+      if (!contextInstruction || contextInstruction.externalStage) continue;
+      for (const sourcePath of contextInstruction.sources) {
+        if (isRemoteAddSource(sourcePath)) continue;
         const normalizedSourcePath = sourcePath.replace(/^(?:\.\/)+/u, "");
         if (!normalizedSourcePath.startsWith(packagePrefix)) continue;
         const relativePath = normalizedSourcePath.slice(packagePrefix.length);
@@ -1291,6 +1619,7 @@ export function validateHarnessPackage(packageRootInput: string): HarnessPackage
   const packageRoot = resolvePackageRoot(packageRootInput);
   assertRequiredRootFiles(packageRoot);
   const metadata = readPackageMetadata(packageRoot);
+  assertDockerContextSourceAuthority(packageRoot, metadata.harnessId);
   const manifest = readManifest(packageRoot, metadata.harnessId);
   try {
     validateHarnessManifest(manifest.value, metadata.harnessId);
@@ -1301,6 +1630,8 @@ export function validateHarnessPackage(packageRootInput: string): HarnessPackage
         : "manifest semantic validation failed";
     throw diagnostic("manifest", "manifest.yaml", message);
   }
+  assertOwnedPolicyPresetAssets(packageRoot, manifest.value);
+  assertWebSearchProviderProfileAssets(packageRoot, manifest.value);
   const adapterArtifacts = listAdapterArtifacts(packageRoot);
   assertRequiredAdapterArtifacts(adapterArtifacts, manifest.value);
   const managedImageArtifacts = requiredManagedImageArtifacts(manifest.value);

@@ -32,7 +32,9 @@ const hasSystemPython = fs.existsSync("/usr/bin/python3");
 const fixtures: string[] = [];
 
 function makeFixture(): { dir: string; backup: Buffer } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-sqlite-restore-"));
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-sqlite-restore-")),
+  );
   fixtures.push(dir);
   const sourceDb = path.join(dir, "source.db");
   execFileSync("/usr/bin/python3", ["-c", CREATE_SOURCE_DB_PY, sourceDb]);

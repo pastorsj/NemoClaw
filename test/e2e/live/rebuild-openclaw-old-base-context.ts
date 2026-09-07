@@ -4,15 +4,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { directDockerfileCopySources } from "../../../scripts/lib/dockerfile-copy-sources.mts";
+import { directDockerfileContextSources } from "../../../scripts/lib/dockerfile-copy-sources.mts";
 import { REPO_ROOT } from "../fixtures/paths.ts";
 
-const DOCKERFILE_BASE = path.join(
-  REPO_ROOT,
-  "packages",
-  "nemoclaw-openclaw",
-  "Dockerfile.base",
-);
+const DOCKERFILE_BASE = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile.base");
 const DOCKERIGNORE = path.join(REPO_ROOT, ".dockerignore");
 const OLD_OPENCLAW_VERSION = "2026.3.11";
 const BLUEPRINT_RELPATH = "nemoclaw-blueprint/blueprint.yaml";
@@ -22,7 +17,7 @@ export function oldBaseContextSources(): string[] {
 }
 
 export function directDockerfileBaseCopySources(dockerfilePath = DOCKERFILE_BASE): string[] {
-  return directDockerfileCopySources(dockerfilePath, "Dockerfile.base").map(({ source }) => {
+  return directDockerfileContextSources(dockerfilePath, "Dockerfile.base").map(({ source }) => {
     validateOldBaseContextSource(source);
     return source;
   });

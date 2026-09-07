@@ -8,6 +8,11 @@ export interface RunSandboxConfigSyncDeps {
   runConnectScript: (sandboxName: string, scriptContent: string) => void;
 }
 
+export interface SandboxConfigSyncOptions {
+  /** Retain the pre-package OpenClaw permission repair for an explicit legacy row. */
+  legacyOpenClawPermissions?: boolean;
+}
+
 export interface NemoClawConfigSyncDeps {
   getProviderSelectionConfig(provider: string, model: string): ProviderSelectionConfig | null;
   run(argv: string[], options: Record<string, unknown>): unknown;
@@ -23,16 +28,20 @@ export function createNemoClawConfigSync(deps: NemoClawConfigSyncDeps) {
     model: string,
     revalidateSandboxIdentity: (operation: string) => void = skipSandboxIdentityRevalidation,
   ): void {
-    runSandboxConfigSync(sandboxName, {
-      getSelectionConfig: () => deps.getProviderSelectionConfig(provider, model),
-      runConnectScript: (name, scriptContent) => {
-        revalidateSandboxIdentity(`synchronize OpenClaw config in sandbox '${name}'`);
-        deps.run(deps.openshellArgv(sandboxConfigSyncArgs(name)), {
-          stdio: ["pipe", "ignore", "inherit"],
-          input: scriptContent,
-        });
+    runSandboxConfigSync(
+      sandboxName,
+      {
+        getSelectionConfig: () => deps.getProviderSelectionConfig(provider, model),
+        runConnectScript: (name, scriptContent) => {
+          revalidateSandboxIdentity(`synchronize OpenClaw config in sandbox '${name}'`);
+          deps.run(deps.openshellArgv(sandboxConfigSyncArgs(name)), {
+            stdio: ["pipe", "ignore", "inherit"],
+            input: scriptContent,
+          });
+        },
       },
-    });
+      { legacyOpenClawPermissions: true },
+    );
   };
 }
 
@@ -41,28 +50,30 @@ export function sandboxConfigSyncArgs(sandboxName: string): string[] {
   return ["sandbox", "exec", "-n", sandboxName, "--no-tty", "--", "/bin/bash", "-s"];
 }
 
-// Write `~/.nemoclaw/config.json` and normalize OpenClaw config-dir permissions
-// inside the sandbox. Idempotent — safe to invoke from the rebuild resume
-// path where the Dockerfile leaves config.json as a zero-byte placeholder
-// that crashes the OpenClaw nemoclaw plugin's loadOnboardConfig. Fixes #3999.
-export function runSandboxConfigSync(sandboxName: string, deps: RunSandboxConfigSyncDeps): void {
+/** Write the shared provider-selection record into a sandbox. */
+export function runSandboxConfigSync(
+  sandboxName: string,
+  deps: RunSandboxConfigSyncDeps,
+  options: SandboxConfigSyncOptions = {},
+): void {
   const selectionConfig = deps.getSelectionConfig();
   if (!selectionConfig) return;
   const sandboxConfig = { ...selectionConfig, onboardedAt: new Date().toISOString() };
-  const script = buildSandboxConfigSyncScript(sandboxConfig);
+  const script = buildSandboxConfigSyncScript(sandboxConfig, options);
   deps.runConnectScript(sandboxName, script);
 }
 
-export function buildSandboxConfigSyncScript(selectionConfig: ProviderSelectionConfig): string {
-  // Do not rewrite openclaw.json at runtime. Model routing is handled by the
-  // host-side gateway (`openshell inference set` in Step 5), not from inside
-  // the sandbox. We write the NemoClaw selection config and normalize the
-  // mutable-default OpenClaw config permissions after the gateway has had a
-  // chance to perform its own startup initialization.
+export function buildSandboxConfigSyncScript(
+  selectionConfig: ProviderSelectionConfig,
+  options: SandboxConfigSyncOptions = {},
+): string {
+  // Model routing is handled by the host-side gateway (`openshell inference
+  // set` in Step 5), not from inside the sandbox. Package receipts own every
+  // harness config artifact; this script always writes only NemoClaw state.
   return `
 set -euo pipefail
-# OpenShell exec and the OpenClaw gateway can expose different HOME values.
-# The managed gateway always reads its NemoClaw state from /sandbox.
+# OpenShell exec and the managed workload can expose different HOME values.
+# NemoClaw's shared sandbox state always lives below /sandbox.
 nemoclaw_dir="/sandbox/.nemoclaw"
 nemoclaw_config="$nemoclaw_dir/config.json"
 mkdir -p -m 700 "$nemoclaw_dir"
@@ -75,6 +86,14 @@ cat > "$nemoclaw_config" <<'EOF_NEMOCLAW_CFG'
 ${JSON.stringify(selectionConfig, null, 2)}
 EOF_NEMOCLAW_CFG
 chmod 600 "$nemoclaw_config"
+${options.legacyOpenClawPermissions === true ? buildLegacyOpenClawPermissionsScript() : ""}
+exit
+`.trim();
+}
+
+/** Compatibility-only permission repair for registry rows without package receipts. */
+function buildLegacyOpenClawPermissionsScript(): string {
+  return `
 config_dir=/sandbox/.openclaw
 if [ -d "$config_dir" ]; then
   config_dir_owner="$(stat -c '%U' "$config_dir" 2>/dev/null || echo unknown)"
@@ -88,6 +107,5 @@ if [ -d "$config_dir" ]; then
     fi
   fi
 fi
-exit
 `.trim();
 }

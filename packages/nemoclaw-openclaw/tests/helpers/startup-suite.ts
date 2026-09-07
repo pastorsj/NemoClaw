@@ -13,7 +13,6 @@ import { readOpenClawStartupSource } from "./startup";
 export { readOpenClawStartupSource };
 
 export const OPENCLAW_PACKAGE = path.resolve(import.meta.dirname, "../..");
-const REPOSITORY_ROOT = path.resolve(OPENCLAW_PACKAGE, "../..");
 const APPROVAL_POLICY_SOURCE = path.join(OPENCLAW_PACKAGE, "runtime", "device-approval.py");
 export const MUTABLE_CONFIG_NORMALIZER = path.join(
   OPENCLAW_PACKAGE,
@@ -23,7 +22,7 @@ export const MUTABLE_CONFIG_NORMALIZER = path.join(
 export const INSTALLED_APPROVAL_POLICY =
   "/usr/local/lib/nemoclaw/openclaw_device_approval_policy.py";
 const PRELOAD_SCRIPTS = path.join(OPENCLAW_PACKAGE, "runtime", "preloads");
-export const CHANNEL_RUNTIME_SCRIPTS = path.join(REPOSITORY_ROOT, "src/lib/messaging/channels");
+export const CHANNEL_RUNTIME_SCRIPTS = path.join(OPENCLAW_PACKAGE, "messaging", "runtime");
 export const JSON5_MODULE = path.join(OPENCLAW_PACKAGE, "plugin", "node_modules", "json5");
 const OPENCLAW_AUTO_PAIR = path.join(OPENCLAW_PACKAGE, "runtime", "auto-pair.py");
 

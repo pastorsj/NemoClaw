@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isDeepStrictEqual } from "node:util";
+
 import { createBuiltInChannelManifestRegistry } from "./channels/built-ins";
 import { createBuiltInRenderTemplateResolver } from "./channels/template-resolver";
 import { planHealthChecks } from "./compiler/engines/health-check-engine";
@@ -34,6 +36,10 @@ import type {
   SandboxMessagingRuntimeSetupPlan,
 } from "./manifest";
 import {
+  createChannelManifestRegistry,
+  type ChannelManifestRegistry,
+} from "./manifest/registry";
+import {
   channelHooksFromManifest,
   compilerContext,
   hasFullChannelShape,
@@ -45,6 +51,8 @@ import {
 export interface SandboxMessagingHydrationOptions {
   /** Explicit environment seam for deterministic rehydration without ambient credentials. */
   readonly environment?: Readonly<Record<string, string | undefined>>;
+  /** Exact composed manifests for a receipt-backed plan. */
+  readonly manifests?: readonly ChannelManifest[];
 }
 
 export function hydrateDerivedSandboxMessagingPlanFields(
@@ -52,34 +60,65 @@ export function hydrateDerivedSandboxMessagingPlanFields(
   options: SandboxMessagingHydrationOptions = {},
 ): SandboxMessagingPlan {
   const environment = options.environment ?? process.env;
-  const manifestRegistry = createBuiltInChannelManifestRegistry();
+  if (plan.packageBuild !== undefined && options.manifests === undefined) {
+    throw new Error("Receipt-backed messaging plan hydration requires exact composed manifests");
+  }
+  const refreshFromExactManifests = options.manifests !== undefined;
+  const manifestRegistry = refreshFromExactManifests
+    ? createChannelManifestRegistry(options.manifests)
+    : createBuiltInChannelManifestRegistry();
+  if (
+    refreshFromExactManifests &&
+    plan.channels.some((channel) => {
+      const manifest = manifestRegistry.get(channel.channelId);
+      return !manifest || !manifest.supportedAgents.includes(plan.agent);
+    })
+  ) {
+    throw new Error("Messaging plan channel is missing from its exact composed manifests");
+  }
   const channels = plan.channels.map((channel) =>
-    hydrateChannelFromManifest(plan, channel, manifestRegistry.get(channel.channelId), environment),
+    hydrateChannelFromManifest(
+      plan,
+      channel,
+      manifestRegistry.get(channel.channelId),
+      environment,
+      refreshFromExactManifests,
+    ),
   );
   const hydratedPlan = { ...plan, channels };
   const manifests = channels.flatMap((channel) => {
     const manifest = manifestRegistry.get(channel.channelId);
     return manifest ? [manifest] : [];
   });
-  return {
+  const hydrated = {
     ...hydratedPlan,
     networkPolicy: planNetworkPolicy(manifests, compilerContext(hydratedPlan)),
     agentRender:
-      plan.agentRender.length > 0
+      !refreshFromExactManifests && plan.agentRender.length > 0
         ? plan.agentRender
         : agentRenderFromManifests(hydratedPlan, manifestRegistry, environment),
     buildSteps:
-      plan.buildSteps.length > 0
+      !refreshFromExactManifests && plan.buildSteps.length > 0
         ? plan.buildSteps
         : buildStepsFromManifests(hydratedPlan, manifests),
-    runtimeSetup: runtimeSetupHasEntries(plan.runtimeSetup)
+    runtimeSetup: !refreshFromExactManifests && runtimeSetupHasEntries(plan.runtimeSetup)
       ? plan.runtimeSetup
       : planRuntimeSetup(manifests, plan.agent, channels),
     stateUpdates:
-      plan.stateUpdates.length > 0 ? plan.stateUpdates : manifests.flatMap(planStateUpdates),
+      !refreshFromExactManifests && plan.stateUpdates.length > 0
+        ? plan.stateUpdates
+        : manifests.flatMap(planStateUpdates),
     healthChecks:
-      plan.healthChecks.length > 0 ? plan.healthChecks : manifests.flatMap(planHealthChecks),
+      !refreshFromExactManifests && plan.healthChecks.length > 0
+        ? plan.healthChecks
+        : manifests.flatMap(planHealthChecks),
   };
+  if (!refreshFromExactManifests) return hydrated;
+  const { packageBuild: _storedPackageBuild, ...withoutStoredPackageBuild } = hydrated;
+  const packageBuild = resolvePackageBuildProfile(manifests);
+  return packageBuild
+    ? { ...withoutStoredPackageBuild, packageBuild }
+    : withoutStoredPackageBuild;
 }
 
 function hydrateChannelFromManifest(
@@ -87,10 +126,11 @@ function hydrateChannelFromManifest(
   channel: SandboxMessagingChannelPlan,
   manifest: ChannelManifest | undefined,
   environment: Readonly<Record<string, string | undefined>>,
+  refreshFromExactManifest: boolean,
 ): SandboxMessagingChannelPlan {
   const { hostForward: _oldHostForward, ...channelWithoutHostForward } = channel;
   const disabled = channel.disabled || plan.disabledChannels.includes(channel.channelId);
-  const inputs = hasFullChannelShape(channel)
+  const inputs = !refreshFromExactManifest && hasFullChannelShape(channel)
     ? normalizeFullInputs(channel.channelId, channel.inputs)
     : normalizePersistedInputs(channel, manifest);
   const configured = channel.configured;
@@ -106,12 +146,33 @@ function hydrateChannelFromManifest(
     disabled,
     active: channel.active,
     inputs,
+    ...(refreshFromExactManifest
+      ? manifest?.credentialProvider
+        ? { credentialProvider: manifest.credentialProvider }
+        : {}
+      : {}),
     ...(hostForward ? { hostForward } : {}),
     hooks:
-      channel.hooks.length > 0
+      !refreshFromExactManifest && channel.hooks.length > 0
         ? channel.hooks
         : channelHooksFromManifest(plan.agent, channel.channelId, manifest),
   };
+}
+
+function resolvePackageBuildProfile(
+  manifests: readonly ChannelManifest[],
+): NonNullable<ChannelManifest["packageBuild"]> | undefined {
+  const profiles = manifests.flatMap((manifest) =>
+    manifest.packageBuild ? [manifest.packageBuild] : [],
+  );
+  if (profiles.length === 0) return undefined;
+  if (
+    profiles.length !== manifests.length ||
+    profiles.some((profile) => !isDeepStrictEqual(profile, profiles[0]))
+  ) {
+    throw new Error("Messaging channel manifests must share one receipt-backed build profile");
+  }
+  return profiles[0];
 }
 
 function buildStepsFromManifests(
@@ -233,7 +294,7 @@ function runtimeSetupHasEntries(setup: SandboxMessagingRuntimeSetupPlan | undefi
 
 function agentRenderFromManifests(
   plan: SandboxMessagingPlan,
-  manifestRegistry: ReturnType<typeof createBuiltInChannelManifestRegistry>,
+  manifestRegistry: ChannelManifestRegistry,
   environment: Readonly<Record<string, string | undefined>>,
 ): SandboxMessagingAgentRenderPlan[] {
   const render: SandboxMessagingAgentRenderPlan[] = [];

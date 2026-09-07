@@ -118,9 +118,7 @@ function futureSandbox(receipt = futureWorkload()): SandboxEntry {
 
 function useFuturePackageResolver(): void {
   managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = vi.fn((entry) => {
-    if (!isDeepStrictEqual(entry.harnessPackage, FUTURE_PACKAGE)) {
-      throw new Error("installed future harness receipt changed");
-    }
+    expect(isDeepStrictEqual(entry.harnessPackage, FUTURE_PACKAGE)).toBe(true);
     return {
       recordedAgent: FUTURE_PACKAGE.id,
       effectiveAgentId: FUTURE_PACKAGE.id,
@@ -303,11 +301,10 @@ describe("managed snapshot profile restore", () => {
       futureSandbox(receipt),
       provider(),
     );
-    if (support.kind !== "unsupported") {
-      throw new Error("expected package clone support to be unavailable");
-    }
+    expect(support.kind).toBe("unsupported");
+    const unsupportedSupport = support as Extract<typeof support, { kind: "unsupported" }>;
 
-    expect(support).toMatchObject({
+    expect(unsupportedSupport).toMatchObject({
       kind: "unsupported",
       reason: "receipt-backed package clone rebind is not implemented",
       authority: {
@@ -317,12 +314,14 @@ describe("managed snapshot profile restore", () => {
         profile: { profileKind: "package", harnessPackage: FUTURE_PACKAGE },
       },
     });
-    expect(Object.isFrozen(support)).toBe(true);
+    expect(Object.isFrozen(unsupportedSupport)).toBe(true);
     expect(restorePlan).toMatchObject({
       authority: { harnessPackage: FUTURE_PACKAGE },
       providerRestoreAuthority: {
         agent: FUTURE_PACKAGE.id,
-        profileFingerprint: fingerprintManagedStartupDurableProfile(support.authority.profile),
+        profileFingerprint: fingerprintManagedStartupDurableProfile(
+          unsupportedSupport.authority.profile,
+        ),
       },
     });
   });

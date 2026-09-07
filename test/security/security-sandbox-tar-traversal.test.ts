@@ -542,6 +542,48 @@ describe("Fix: safeTarExtract blocks malicious archives and extracts safe ones",
     }
   });
 
+  it("uses the receipt-selected package symlink rules instead of legacy harness rules", async () => {
+    const { safeTarExtract } = await loadSandboxState();
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-package-symlink-"));
+    try {
+      const rejectedDir = path.join(workDir, "rejected");
+      fs.mkdirSync(rejectedDir);
+      const legacyArchive = buildTar([
+        {
+          path: "extensions/example/node_modules/openclaw",
+          type: "2",
+          linkTarget: "/usr/local/lib/node_modules/openclaw",
+        },
+      ]);
+
+      const rejected = safeTarExtract(legacyArchive, rejectedDir, {
+        isAllowedPackageSymlink: () => false,
+      });
+
+      expect(rejected.success).toBe(false);
+      expect(rejected.error).toContain("symlink");
+
+      const acceptedDir = path.join(workDir, "accepted");
+      fs.mkdirSync(acceptedDir);
+      const packageArchive = buildTar([
+        {
+          path: "extensions/example/bin/runner",
+          type: "2",
+          linkTarget: "/opt/example/bin/runner",
+        },
+      ]);
+      const accepted = safeTarExtract(packageArchive, acceptedDir, {
+        isAllowedPackageSymlink: (relativePath, target) =>
+          relativePath === "extensions/example/bin/runner" &&
+          target === "/opt/example/bin/runner",
+      });
+
+      expect(accepted.success).toBe(true);
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
   it("still rejects an absolute /usr/local symlink at a non-whitelisted path", async () => {
     const { safeTarExtract } = await loadSandboxState();
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-whitelist-block-"));

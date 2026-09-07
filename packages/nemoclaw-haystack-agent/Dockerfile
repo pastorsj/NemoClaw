@@ -5,6 +5,7 @@
 # hadolint global ignore=DL3066,SC2016
 
 ARG BASE_IMAGE
+ARG NEMOCLAW_CORPORATE_CA_B64=
 FROM ${BASE_IMAGE}
 
 ARG NEMOCLAW_MODEL=nvidia/nemotron-3-super-120b-a12b
@@ -12,8 +13,48 @@ ARG NEMOCLAW_INFERENCE_API=openai-completions
 ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1
 ARG NEMOCLAW_TEMPERATURE=0
 ARG NEMOCLAW_MAX_TURNS=8
+ARG NEMOCLAW_SYSTEM_INSTRUCTION=Answer the user's request directly. Do not claim tools or durable memory.
+ARG NEMOCLAW_BUILD_ID=default
+ARG NEMOCLAW_PROXY_HOST=10.200.0.1
+ARG NEMOCLAW_PROXY_PORT=3128
 
 USER root
+
+ARG NEMOCLAW_CORPORATE_CA_B64
+
+# A receipt-backed build may carry one operator-supplied corporate proxy CA.
+# Validate it as CA certificates, add it to the system trust store, and retain
+# the normalized bundle for the root entrypoint to merge with OpenShell trust.
+# hadolint ignore=DL3059,DL4006
+RUN if [ -n "${NEMOCLAW_CORPORATE_CA_B64}" ]; then \
+      command -v base64 >/dev/null 2>&1 || { echo "[nemoclaw] base64 is required to decode NEMOCLAW_CORPORATE_CA_B64" >&2; exit 1; }; \
+      command -v update-ca-certificates >/dev/null 2>&1 || { echo "[nemoclaw] update-ca-certificates is required to install NEMOCLAW_CORPORATE_CA_B64" >&2; exit 1; }; \
+      case "${NEMOCLAW_CORPORATE_CA_B64}" in *[!A-Za-z0-9+/=]*) echo "[nemoclaw] NEMOCLAW_CORPORATE_CA_B64 must be single-line base64" >&2; exit 1 ;; esac; \
+      install -d -o root -g root -m 0755 /usr/local/share/nemoclaw /usr/local/share/ca-certificates \
+      && { printf '%s' "${NEMOCLAW_CORPORATE_CA_B64}" | base64 --decode > /tmp/nemoclaw-corporate-ca.decoded 2>/dev/null \
+           || { echo "[nemoclaw] NEMOCLAW_CORPORATE_CA_B64 is not valid base64" >&2; exit 1; }; } \
+      && node -e 'const fs = require("node:fs"); const { X509Certificate } = require("node:crypto"); const source = process.argv[1]; const target = process.argv[2]; const anchors = process.argv[3]; const pem = fs.readFileSync(source, "utf8"); const blocks = pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g); if (!blocks?.length) process.exit(1); const normalized = blocks.map((block) => block.trim()); normalized.forEach((block, index) => { if (!new X509Certificate(block).ca) process.exit(1); fs.writeFileSync(`${anchors}/nemoclaw-corporate-ca-${String(index + 1).padStart(2, "0")}.crt`, `${block}\n`); }); fs.writeFileSync(target, `${normalized.join("\n")}\n`);' /tmp/nemoclaw-corporate-ca.decoded /usr/local/share/nemoclaw/corporate-ca.pem /usr/local/share/ca-certificates \
+      && rm -f /tmp/nemoclaw-corporate-ca.decoded \
+      && chown root:root /usr/local/share/nemoclaw/corporate-ca.pem /usr/local/share/ca-certificates/nemoclaw-corporate-ca-*.crt \
+      && chmod 0444 /usr/local/share/nemoclaw/corporate-ca.pem /usr/local/share/ca-certificates/nemoclaw-corporate-ca-*.crt \
+      && update-ca-certificates; \
+    fi
+
+# The entrypoint trusts only these root-owned image inputs. Runtime environment
+# values with the same names are ignored so they cannot redirect inference.
+RUN case "$NEMOCLAW_PROXY_HOST" in \
+        ''|*[!A-Za-z0-9._-]*) echo "ERROR: NEMOCLAW_PROXY_HOST is invalid" >&2; exit 1 ;; \
+    esac \
+    && case "$NEMOCLAW_PROXY_PORT" in \
+        ''|*[!0-9]*) echo "ERROR: NEMOCLAW_PROXY_PORT is invalid" >&2; exit 1 ;; \
+    esac \
+    && [ "$NEMOCLAW_PROXY_PORT" -ge 1 ] \
+    && [ "$NEMOCLAW_PROXY_PORT" -le 65535 ] \
+    && install -d -o root -g root -m 0755 /usr/local/share/nemoclaw \
+    && printf '%s\n' "$NEMOCLAW_PROXY_HOST" > /usr/local/share/nemoclaw/haystack-proxy-host \
+    && printf '%s\n' "$NEMOCLAW_PROXY_PORT" > /usr/local/share/nemoclaw/haystack-proxy-port \
+    && chown root:root /usr/local/share/nemoclaw/haystack-proxy-host /usr/local/share/nemoclaw/haystack-proxy-port \
+    && chmod 0444 /usr/local/share/nemoclaw/haystack-proxy-host /usr/local/share/nemoclaw/haystack-proxy-port
 
 # The current immutable POC base predates the shared NemoClaw curl probe.
 # Dockerfile.base now owns this dependency; keep this conditional compatibility
@@ -101,7 +142,9 @@ ENV HOME=/sandbox \
     NEMOCLAW_INFERENCE_API=${NEMOCLAW_INFERENCE_API} \
     NEMOCLAW_INFERENCE_BASE_URL=${NEMOCLAW_INFERENCE_BASE_URL} \
     NEMOCLAW_TEMPERATURE=${NEMOCLAW_TEMPERATURE} \
-    NEMOCLAW_MAX_TURNS=${NEMOCLAW_MAX_TURNS}
+    NEMOCLAW_MAX_TURNS=${NEMOCLAW_MAX_TURNS} \
+    NEMOCLAW_SYSTEM_INSTRUCTION=${NEMOCLAW_SYSTEM_INSTRUCTION} \
+    NEMOCLAW_BUILD_ID=${NEMOCLAW_BUILD_ID}
 
 USER sandbox
 WORKDIR /sandbox
@@ -128,7 +171,12 @@ RUN chown root:sandbox /sandbox \
     && printf '%s' '{}' > /sandbox/.nemoclaw/config.json \
     && chown sandbox:sandbox /sandbox/.nemoclaw/config.json
 
-USER sandbox
-
+ARG NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER=root
+RUN case "$NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER" in \
+        root|sandbox) ;; \
+        *) echo "ERROR: NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER must be root or sandbox" >&2; exit 1 ;; \
+    esac \
+    && command -v setpriv >/dev/null 2>&1
+USER ${NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER}
 ENTRYPOINT ["/usr/local/bin/nemoclaw-start"]
 CMD []

@@ -105,6 +105,19 @@ vi.mock("../../agent-runtime/manifest-loader", () => ({
     packageRoot,
     agentAliases: [],
     agentAliasSummary: null,
+    mcpCapability: {
+      support: "disabled",
+      reason: "This test package does not declare managed MCP support.",
+    },
+    stateLifecycle: {
+      backup_quiescence: { kind: "not-required" },
+      snapshot_restore: [],
+      rebuild: {
+        managed_extensions: { support: "disabled", reason: "Not used by this fixture." },
+        scheduled_work: { support: "disabled", reason: "Not used by this fixture." },
+        post_restore: { kind: "not-required" },
+      },
+    },
   })),
 }));
 

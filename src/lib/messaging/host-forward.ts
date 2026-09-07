@@ -1,7 +1,20 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { SandboxMessagingHostForwardPlan, SandboxMessagingPlan } from "./manifest";
+import type { SandboxEntry } from "../state/registry/types";
+import { createBuiltInChannelManifestRegistry } from "./channels/built-ins";
+import type {
+  ChannelManifest,
+  SandboxMessagingHostForwardPlan,
+  SandboxMessagingPlan,
+} from "./manifest";
+import { listMessagingChannelsForSandboxAuthority } from "./profile-authority";
+
+export function listSandboxMessagingHostForwardManifests(
+  entry: Pick<SandboxEntry, "agent" | "harnessPackage" | "harnessPackageMigration">,
+): ChannelManifest[] {
+  return listMessagingChannelsForSandboxAuthority(entry, createBuiltInChannelManifestRegistry());
+}
 
 export function getActiveMessagingHostForward(
   plan: SandboxMessagingPlan | null | undefined,

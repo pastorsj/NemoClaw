@@ -7,6 +7,7 @@ import type {
   HarnessProcessLifecycleAction,
   HarnessProcessLifecycleDeclaration,
 } from "@nvidia/nemoclaw-harness-contract";
+import { isImmutableSandboxCommandPath } from "@nvidia/nemoclaw-harness-contract/manifest-validator";
 
 import type { AgentDefinition } from "../../agent/defs";
 import * as agentRuntime from "../../agent/runtime";
@@ -16,7 +17,7 @@ import {
   resolvePrivilegedSandboxTarget,
   withPrivilegedSandboxExecutionLease,
 } from "../../sandbox/privileged-exec";
-import { readRegisteredSandboxAuthority } from "../../onboard/package/package-authority";
+import { readRegisteredSandboxAuthority } from "./authority/package";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/identity";
 
 export type SandboxProcessLifecycleAction = HarnessProcessLifecycleAction;
@@ -120,6 +121,12 @@ export function buildSandboxProcessLifecyclePlan(
   }
   if (declaration.support === "unsupported") {
     return Object.freeze({ kind: "unsupported", reason: declaration.reason });
+  }
+  if (!isImmutableSandboxCommandPath(declaration.command[0] as string)) {
+    return Object.freeze({
+      kind: "unsupported",
+      reason: "the package process lifecycle command is not stored in the immutable image",
+    });
   }
   return Object.freeze({
     kind: "command",

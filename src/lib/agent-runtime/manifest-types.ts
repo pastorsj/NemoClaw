@@ -2,13 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
+  HarnessAgentRosterCapability,
   HarnessManifestRecord,
   HarnessManifestScalar,
   HarnessManifestValue,
   HarnessManagedImageDeclaration,
+  HarnessInferenceApiOverride,
   HarnessMcpAdapterIdentifier,
   HarnessMcpCapability,
   HarnessMcpSupport,
+  HarnessPolicyCapability,
+  HarnessProviderAuthCapability,
+  HarnessToolGatewayCapability,
+  HarnessSecondaryForwardAllocationDeclaration,
   HarnessSandboxCreateDeclaration,
   HarnessSkillCapability,
   HarnessStateLifecycleDeclaration,
@@ -20,6 +26,7 @@ import type { AgentRuntime } from "./runtime/manifest";
 import type { AgentWebAuth } from "./web-auth";
 
 export type {
+  HarnessAgentRosterCapability,
   HarnessAgentManifest,
   HarnessManagedBaseImageDeclaration,
   HarnessManagedBaseImagePin,
@@ -34,6 +41,10 @@ export type {
   HarnessMcpAdapterIdentifier,
   HarnessMcpCapability,
   HarnessMcpSupport,
+  HarnessPolicyCapability,
+  HarnessProviderAuthCapability,
+  HarnessToolGatewayCapability,
+  HarnessSecondaryForwardAllocationDeclaration,
   HarnessSandboxCreateDeclaration,
   HarnessSandboxDriver,
   HarnessSandboxTmpfsMountDeclaration,
@@ -54,6 +65,9 @@ export interface AgentHealthProbe {
   url: string;
   port: number;
   timeout_seconds: number;
+  success_statuses?: readonly number[];
+  port_resolution?: "sandbox-secondary-forward";
+  secondary_forward?: HarnessSecondaryForwardAllocationDeclaration;
 }
 
 export interface AgentConfigPaths {
@@ -148,11 +162,24 @@ export interface AgentInference {
   provider_type?: string;
   provider_options?: string[];
   default_model?: string;
+  /** Receipt-backed requirements for core-owned local inference runtimes. */
+  contextWindowRequirements?: readonly {
+    readonly provider: "ollama-local";
+    readonly minimumTokens: number;
+  }[];
   refresh_route_for_messaging_providers?: readonly string[];
+  /** Core-owned compatibility bridge from NEMOCLAW_PROVIDER_KEY to hosted inference. */
+  provider_key_credential_alias?: "hosted-inference";
   sandbox_smoke?: {
     readonly kind: "compatible-endpoint";
     readonly config_path: `/sandbox/${string}`;
   };
+  route_probe?: {
+    readonly terminal_connect?: "required";
+    readonly models_404?: "inference-invocation";
+  };
+  /** Provider/API requirements declared by the selected package's config adapter. */
+  providerApiOverrides?: readonly HarnessInferenceApiOverride[];
 }
 
 export type AgentMcpSupport = HarnessMcpSupport;
@@ -199,6 +226,10 @@ export interface AgentDefinition {
   config?: ManifestRecord;
   inference?: AgentInference;
   mcp?: AgentMcpCapability;
+  agent_roster?: HarnessAgentRosterCapability;
+  policy?: HarnessPolicyCapability;
+  provider_auth?: HarnessProviderAuthCapability;
+  tool_gateways?: HarnessToolGatewayCapability;
   web_search?: HarnessWebSearchCapability;
   skills?: HarnessSkillCapability;
   state_lifecycle?: HarnessStateLifecycleDeclaration;
@@ -223,6 +254,10 @@ export interface AgentDefinition {
   readonly configPaths: AgentConfigPaths;
   readonly inferenceProviderOptions: string[];
   readonly mcpCapability: AgentMcpCapability;
+  readonly agentRosterCapability: HarnessAgentRosterCapability | null;
+  readonly policyCapability: HarnessPolicyCapability;
+  readonly providerAuthCapability?: HarnessProviderAuthCapability | null;
+  readonly toolGatewayCapability?: HarnessToolGatewayCapability | null;
   readonly skillCapability: HarnessSkillCapability;
   readonly stateLifecycle: HarnessStateLifecycleDeclaration;
   readonly managedImage: HarnessManagedImageDeclaration | null;

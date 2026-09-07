@@ -20,7 +20,7 @@ function runHermes(
   try {
     const out = execSync(`node "${HERMES_CLI}" ${args}`, {
       encoding: "utf-8",
-      timeout: execTimeout(),
+      timeout: execTimeout(15_000),
       env: {
         ...process.env,
         HOME: fs.mkdtempSync(path.join(os.tmpdir(), "nemohermes-test-")),
@@ -48,7 +48,7 @@ function runNemoClaw(
   try {
     const out = execSync(`node "${NEMOCLAW_CLI}" ${args}`, {
       encoding: "utf-8",
-      timeout: execTimeout(),
+      timeout: execTimeout(15_000),
       env: {
         ...process.env,
         HOME: fs.mkdtempSync(path.join(os.tmpdir(), "nemohermes-test-")),

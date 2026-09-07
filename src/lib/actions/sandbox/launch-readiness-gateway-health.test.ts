@@ -41,6 +41,36 @@ describe("launch-readiness gateway health scope", () => {
     ]);
   });
 
+  it("uses the package-declared successful health statuses", async () => {
+    const capture = vi.fn(async (_args: string[]) => ({
+      status: 0,
+      output: "__NEMOCLAW_SANDBOX_EXEC_STARTED__\nRUNNING\n",
+      stdout: "__NEMOCLAW_SANDBOX_EXEC_STARTED__\nRUNNING\n",
+      stderr: "",
+    }));
+    const agent = {
+      runtime: { kind: "gateway" },
+      healthProbe: {
+        url: "http://127.0.0.1:19001/health",
+        port: 19001,
+        timeout_seconds: 10,
+        success_statuses: [204],
+      },
+    } as unknown as ReturnType<typeof loadAgent>;
+
+    await expect(
+      isSandboxGatewayRunningForStatus("alpha", "nemoclaw-8091", {
+        getSessionAgent: () => agent,
+        getHealthProbeUrl: () => agent.healthProbe!.url,
+        capture: capture as never,
+      }),
+    ).resolves.toBe(true);
+
+    const shellCommand = capture.mock.calls[0]?.[0]?.at(-1);
+    expect(shellCommand).toContain('case "$HTTP_CODE" in 204)');
+    expect(shellCommand).not.toContain("200|401");
+  });
+
   it("pins Hermes readiness checks to its recorded OpenShell gateway (#10302)", async () => {
     const gatewayHealth = vi.fn(async () => true);
     const forwardsHealthy = vi.fn(() => true);
@@ -128,6 +158,40 @@ describe("Deep Agents Code OpenRouter launch readiness", () => {
       model: MODEL,
       preferredInferenceApi: null,
     });
+  });
+
+  it("does not give a receipt-backed same-ID package the legacy DCode probe boundary", async () => {
+    const currentDeps = dcodeHealthDeps({ ok: true });
+    const { smoke_boundary: _legacyBoundary, ...runtime } = dcodeAgent.runtime!;
+    const packageAgent = { ...dcodeAgent, runtime };
+    const packageEntry = {
+      ...dcodeEntry(),
+      harnessPackage: {
+        kind: "agent-runtime" as const,
+        id: "langchain-deepagents-code",
+        packageVersion: "9.9.9",
+        contentDigest: "d".repeat(64),
+      },
+    };
+
+    await expect(
+      requireLaunchSemanticHealth(
+        SANDBOX,
+        GATEWAY,
+        "langchain-deepagents-code",
+        packageEntry,
+        packageAgent,
+        true,
+        currentDeps,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(currentDeps.inferenceInvocationProbe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentName: "langchain-deepagents-code",
+        probeBoundary: { kind: "login-shell" },
+      }),
+    );
   });
 
   it("rejects readiness and names the inference request when invocation fails (#9834)", async () => {

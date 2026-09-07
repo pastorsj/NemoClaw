@@ -471,7 +471,7 @@ describe("finalization handlers", () => {
       webSearchEnabled: true,
       webSearchProvider: "brave",
     });
-    expect(callsOn.verifyWebSearch).toHaveBeenCalledWith("my-assistant", agent, "brave");
+    expect(callsOn.verifyWebSearch).toHaveBeenCalledWith("my-assistant", agent, "brave", false);
     // Probe runs after sandbox-process recovery so the post-policy state is live.
     expect(callsOn.verifyWebSearch.mock.invocationCallOrder[0]).toBeGreaterThan(
       callsOn.recoverProcesses.mock.invocationCallOrder[0],

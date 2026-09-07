@@ -29,7 +29,7 @@ describe("oclif metadata lookup", () => {
     );
   });
 
-  it("publishes the fixed voice-gateway descriptor contract without path flags (#9235)", () => {
+  it("publishes the fixed deployment descriptor without credential path flags (#9235)", () => {
     const cli = path.join(process.cwd(), "bin", "nemoclaw.js");
     const result = spawnSync(
       process.execPath,
@@ -43,8 +43,9 @@ describe("oclif metadata lookup", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).not.toContain("--deployment-credential-file");
     expect(result.stdout).not.toContain("--openclaw-credential-file");
+    expect(result.stdout).not.toContain("--gateway-url");
     expect(result.stdout).toContain("descriptor 3");
-    expect(result.stdout).toContain("descriptor 4");
+    expect(result.stdout).not.toContain("descriptor 4");
   });
 
   it("keeps generated manifest command IDs aligned with oclif Config", async () => {

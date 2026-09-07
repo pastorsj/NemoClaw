@@ -2,19 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { BUILT_IN_CHANNEL_MANIFESTS, getMessagingConfigEnvAliases } from "./messaging/channels";
+import type { ChannelManifest } from "./messaging/manifest";
 import { listChannels } from "./sandbox/channels";
 
 export type MessagingChannelConfig = Record<string, string>;
 
 const channels = listChannels();
-const manifestConfigInputs = BUILT_IN_CHANNEL_MANIFESTS.flatMap((manifest) =>
-  manifest.inputs
-    .filter((input) => input.kind === "config")
-    .map((input) => ({
-      envKey: input.envKey,
-      validValues: "validValues" in input ? input.validValues : undefined,
-    })),
-);
+function manifestConfigInputsFor(manifests: readonly ChannelManifest[]) {
+  return manifests.flatMap((manifest) =>
+    manifest.inputs
+      .filter((input) => input.kind === "config")
+      .map((input) => ({
+        envKey: input.envKey,
+        validValues: "validValues" in input ? input.validValues : undefined,
+      })),
+  );
+}
+
+const manifestConfigInputs = manifestConfigInputsFor(BUILT_IN_CHANNEL_MANIFESTS);
 const validValuesByKey = new Map<string, ReadonlySet<string>>(
   manifestConfigInputs.flatMap((input) => {
     if (
@@ -93,9 +98,25 @@ export type InvalidMessagingChannelConfigEnvEntry = {
  */
 export function detectInvalidMessagingChannelConfigEnvValues(
   env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+  manifests?: readonly ChannelManifest[],
 ): InvalidMessagingChannelConfigEnvEntry[] {
+  const selectedValidValues =
+    manifests === undefined
+      ? validValuesByKey
+      : new Map<string, ReadonlySet<string>>(
+          manifestConfigInputsFor(manifests).flatMap((input) => {
+            if (
+              typeof input.envKey !== "string" ||
+              input.envKey.length === 0 ||
+              !Array.isArray(input.validValues)
+            ) {
+              return [];
+            }
+            return [[input.envKey, new Set(input.validValues)] as const];
+          }),
+        );
   const violations: InvalidMessagingChannelConfigEnvEntry[] = [];
-  for (const [key, validVals] of validValuesByKey) {
+  for (const [key, validVals] of selectedValidValues) {
     const rawValue = (env[key] ?? "").trim();
     if (rawValue && !validVals.has(rawValue)) {
       violations.push({ key, rawValue, validValues: [...validVals] });

@@ -148,7 +148,7 @@ describe("Pi candidate lifecycle integration", () => {
   it("backs up only the state the Pi manifest declares persistent (#7927)", () => {
     const agent = loadAgent("pi", CANDIDATE_ENV);
 
-    expect(agent.backupStateDirs).toEqual(["sessions", "prompts", "themes"]);
+    expect(agent.backupStateDirs).toEqual(["sessions", "prompts", "themes", "skills"]);
     expect(agent.nonBackupStateDirs).toEqual(["tools", "bin"]);
     expect(agent.stateFiles.map(({ path: statePath }) => statePath)).toEqual(["settings.json"]);
   });

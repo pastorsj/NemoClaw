@@ -223,6 +223,7 @@ describe("rebuildSandbox flow: target image", () => {
       sandboxEntry: { agent: "hermes" },
       backupPreservedEnv: preservedEnv,
       buildMessagingRebuildPlan: () => messagingPlan,
+      receiptMessagingChannelIds: ["discord"],
       finalizePreparedImage,
     });
 
@@ -234,6 +235,7 @@ describe("rebuildSandbox flow: target image", () => {
       expect.objectContaining({ rebuildTarget: { agentName: "hermes", fromDockerfile: null } }),
       messagingPlan,
       preservedEnv,
+      { messagingManifests: expect.any(Array) },
     );
     expect(harness.onboardSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -272,6 +274,7 @@ describe("rebuildSandbox flow: target image", () => {
         stateUpdates: [],
         healthChecks: [],
       }),
+      receiptMessagingChannelIds: ["discord"],
       finalizePreparedImage: () => ({
         ok: false,
         detail: "final image build failed",

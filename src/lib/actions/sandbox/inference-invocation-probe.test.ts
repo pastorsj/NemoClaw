@@ -172,6 +172,53 @@ describe("sandbox inference invocation probe", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("does not apply the legacy DCode launcher when package authority pins a login shell", () => {
+    const execute = vi.fn(() => ({
+      status: 0,
+      stdout: '200\n{"choices":[{"message":{"content":"OK"}}]}',
+      stderr: "",
+    }));
+    const runOpenshell = vi.fn();
+
+    expect(
+      probeSandboxInferenceInvocation(
+        {
+          ...input,
+          agentName: "langchain-deepagents-code",
+          probeBoundary: { kind: "login-shell" },
+        },
+        { execute, runOpenshell },
+      ),
+    ).toEqual({ ok: true });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(runOpenshell).not.toHaveBeenCalled();
+  });
+
+  it("runs a synthetic package through its declared managed launcher", () => {
+    const runOpenshell = vi.fn(() =>
+      openshellResult(0, '200\n{"choices":[{"message":{"content":"OK"}}]}', ""),
+    );
+    const execute = vi.fn();
+    const futureInput = {
+      ...input,
+      agentName: "future-terminal",
+      probeBoundary: {
+        kind: "managed-launcher" as const,
+        launcher: "/opt/future/bin/probe-exec",
+        home: "/opt/future/probe-home",
+      },
+    };
+
+    expect(probeSandboxInferenceInvocation(futureInput, { runOpenshell, execute })).toEqual({
+      ok: true,
+    });
+    const invokedArgs = (runOpenshell.mock.calls as unknown as [string[]][])[0]?.[0];
+    expect(invokedArgs).toEqual(
+      expect.arrayContaining(["HOME=/opt/future/probe-home", "/opt/future/bin/probe-exec"]),
+    );
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("rejects startup output before Deep Agents Code invocation evidence (#10080)", () => {
     const runOpenshell = vi.fn(() =>
       openshellResult(

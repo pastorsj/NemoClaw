@@ -99,12 +99,7 @@ function isMatchingRepositoryDockerfile(
     packageDirectoryName,
     "Dockerfile",
   );
-  const expectedInstalledDockerfile = path.join(
-    installedPackageRoot,
-    "packages",
-    packageDirectoryName,
-    "Dockerfile",
-  );
+  const expectedInstalledDockerfile = path.join(path.dirname(agent.manifestPath), "Dockerfile");
   if (
     !isCanonicalFile(selectedDockerfile, expectedSourceDockerfile) ||
     !isCanonicalFile(agent.dockerfilePath, expectedInstalledDockerfile)

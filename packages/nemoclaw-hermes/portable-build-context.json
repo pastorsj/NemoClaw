@@ -35,6 +35,8 @@
     "packages/nemoclaw-hermes/host/startup-adapter.cts",
     "packages/nemoclaw-hermes/host/tool-matrix.json",
     "packages/nemoclaw-hermes/messaging/messaging-build.mts",
+    "packages/nemoclaw-hermes/messaging/profile.json",
+    "packages/nemoclaw-hermes/messaging/runtime-profile.json",
     "packages/nemoclaw-hermes/messaging/runtime/googlechat/hermes-adapter.py",
     "packages/nemoclaw-hermes/model-specific-setup/",
     "packages/nemoclaw-hermes/plugin/",
@@ -78,7 +80,6 @@
     "scripts/patch-bundled-npm-brace-expansion.mts",
     "scripts/patch-bundled-npm-tar.mts",
     "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json",
-    "src/lib/tool-disclosure.ts",
     "tools/mcp-tool-discovery-runtime/npm-cache-seed/tar-7.5.21.tgz",
     "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/managed-startup-image-runtime.bundle",
     "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/BUNDLED_PACKAGES.json",
@@ -407,6 +408,10 @@
       "mode": "100644"
     },
     {
+      "path": "packages/nemoclaw-hermes/config/tool-disclosure.ts",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/config/tool-gateway.ts",
       "mode": "100644"
     },
@@ -476,7 +481,15 @@
     },
     {
       "path": "packages/nemoclaw-hermes/messaging/messaging-build.mts",
-      "mode": "100755"
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/messaging/profile.json",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/messaging/runtime-profile.json",
+      "mode": "100644"
     },
     {
       "path": "packages/nemoclaw-hermes/messaging/runtime/googlechat/hermes-adapter.py",
@@ -507,6 +520,14 @@
       "mode": "100644"
     },
     {
+      "path": "packages/nemoclaw-hermes/policies/presets/discord.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/policies/presets/googlechat.yaml",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/policies/presets/local-memory.yaml",
       "mode": "100644"
     },
@@ -531,7 +552,35 @@
       "mode": "100644"
     },
     {
+      "path": "packages/nemoclaw-hermes/policies/presets/slack.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/policies/presets/teams.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/policies/presets/telegram.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/policies/presets/wechat.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/policies/presets/whatsapp.yaml",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/portable-build-context.json",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/provider-profiles/discord.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/provider-profiles/googlechat.yaml",
       "mode": "100644"
     },
     {
@@ -580,7 +629,7 @@
     },
     {
       "path": "packages/nemoclaw-hermes/runtime/inference-reconcile.py",
-      "mode": "100644"
+      "mode": "100755"
     },
     {
       "path": "packages/nemoclaw-hermes/runtime/managed_policy.py",
@@ -592,7 +641,7 @@
     },
     {
       "path": "packages/nemoclaw-hermes/runtime/managed-gateway-profile.py",
-      "mode": "100644"
+      "mode": "100755"
     },
     {
       "path": "packages/nemoclaw-hermes/runtime/mcp-digest.py",
@@ -616,7 +665,7 @@
     },
     {
       "path": "packages/nemoclaw-hermes/runtime/state-restore.sh",
-      "mode": "100644"
+      "mode": "100755"
     },
     {
       "path": "packages/nemoclaw-hermes/runtime/tirith-marker.py",
@@ -688,10 +737,6 @@
     },
     {
       "path": "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json",
-      "mode": "100644"
-    },
-    {
-      "path": "src/lib/tool-disclosure.ts",
       "mode": "100644"
     },
     {

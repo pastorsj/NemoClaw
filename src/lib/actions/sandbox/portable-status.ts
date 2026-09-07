@@ -6,7 +6,7 @@ import {
   readPublishedSandboxAuthority,
   readRegisteredSandboxAuthority,
   type RegisteredSandboxAuthority,
-} from "../../onboard/package/package-authority";
+} from "./authority/package";
 import { classifyHermesPortableRegistry } from "../../onboard/experimental/hermes-portable-onboarding";
 import {
   qualifyPortableAgentLifecycleAuthority,

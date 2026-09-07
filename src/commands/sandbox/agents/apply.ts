@@ -15,16 +15,11 @@ function printApplyHelp(): void {
   console.log(
     `  Reconcile the live sandbox roster against a declarative agents manifest. The verb`,
   );
+  console.log("  asks the installed harness package to plan native additions and deletions.");
+  console.log("  Fields that the package can apply only during a sandbox rebuild are reported as");
   console.log(
-    "  adds missing secondary agents and deletes orphan ones via `openclaw agents add|delete`.",
+    "  warnings. Rerun `nemoclaw onboard --agents <file> --recreate-sandbox` to bake them.",
   );
-  console.log(
-    "  Per-agent `model`, `subagents.*`, top-level `defaults`, and `main` overrides require a",
-  );
-  console.log(
-    "  sandbox rebuild and are reported as warnings; rerun `nemoclaw onboard --agents <file>",
-  );
-  console.log("  --recreate-sandbox` to bake them.");
   console.log("");
   console.log("  Flags:");
   console.log("    -f, --file <agents.yaml>   Path to the manifest (required).");
@@ -39,9 +34,9 @@ export default class SandboxAgentsApplyCommand extends NemoClawCommand {
   static id = "sandbox:agents:apply";
   static customHelp = true;
   static strict = false;
-  static summary = "Reconcile a sandbox's OpenClaw agents against a declarative manifest";
+  static summary = "Reconcile a sandbox's agent roster against a declarative manifest";
   static description =
-    "Read an `agents.yaml` manifest and apply roster diffs (add/delete) to the live sandbox via `openclaw agents add|delete`. Per-agent config fields (`model`, `subagents.*`, top-level `defaults`, `main`) need a rebuild and are surfaced as warnings instead of silent no-ops.";
+    "Read an `agents.yaml` manifest and let the installed harness package plan native roster changes. Package-specific rebuild-only fields are reported rather than silently ignored.";
   static usage = ["<name> agents apply -f <agents.yaml> [--yes] [--non-interactive]"];
   static examples = [
     "<%= config.bin %> sandbox agents apply alpha -f ./agents.yaml",

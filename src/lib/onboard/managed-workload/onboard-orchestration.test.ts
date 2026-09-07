@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -66,6 +67,7 @@ import {
   createManagedWorkloadOnboardRuntime,
   prepareHermesPortableSandboxWorkloadForLifecycle,
   prepareOnboardSandboxWorkloadLaunch,
+  resolveOnboardSandboxWorkloadReceipt,
   shouldActivateManagedRuntime,
 } from "./onboard-orchestration";
 
@@ -365,7 +367,8 @@ describe("managed workload onboard orchestration", () => {
           },
           webSearch: null,
           toolDisclosure: "progressive",
-          hermesToolGateways: [],
+          enabledToolGateways: ["nous-web"],
+          hermesToolGateways: ["legacy-must-not-project"],
           messagingPlan: null,
           dcodeAutoApprovalMode: "disabled",
           observabilityEnabled: false,
@@ -395,10 +398,14 @@ describe("managed workload onboard orchestration", () => {
     const built = runtime.ensurePreparedProfile({
       source: { kind: "managed-image" },
     } as never);
-    if (!built || !("profileKind" in built.profile)) {
-      throw new Error("Expected a receipt-backed package startup profile.");
-    }
+    assert(
+      built && "profileKind" in built.profile,
+      "Expected a receipt-backed package startup profile.",
+    );
 
+    expect(prepareStartupProfile.mock.calls[0]?.[0].input.tools.enabledGateways).toEqual([
+      "nous-web",
+    ]);
     expect(built.profile).toMatchObject({
       agent: "hermes",
       harnessPackage,
@@ -523,7 +530,8 @@ describe("managed workload onboard orchestration", () => {
           hermesDashboardState: { config: null, enabled: false },
           webSearch: null,
           toolDisclosure: "progressive",
-          hermesToolGateways: [],
+          enabledToolGateways: ["future-search"],
+          hermesToolGateways: ["nous-web"],
           messagingPlan: null,
           dcodeAutoApprovalMode: "disabled",
           observabilityEnabled: false,
@@ -552,17 +560,54 @@ describe("managed workload onboard orchestration", () => {
       },
     );
 
-    const built = runtime.ensurePreparedProfile({ source: { kind: "managed-image" } } as never);
-    if (!built || !("profileKind" in built.profile)) throw new Error("expected package profile");
+    const dockerfileWorkload = {
+      source: {
+        kind: "legacy-dockerfile" as const,
+        dockerfilePath: "packages/nemoclaw-future-harness/Dockerfile",
+        reason: "agent-not-managed" as const,
+      },
+      release: null,
+      fallbackDiagnostic: null,
+    };
+    const built = runtime.ensurePreparedProfile(dockerfileWorkload);
+    assert(built && "profileKind" in built.profile, "expected package profile");
 
     expect(resolveAgentInferenceApi).not.toHaveBeenCalled();
     expect(prepareStartupProfile).toHaveBeenCalledOnce();
+    expect(prepareStartupProfile.mock.calls[0]?.[0].input.tools.enabledGateways).toEqual([
+      "future-search",
+    ]);
     expect(buildInitialStartupProfile).toHaveBeenCalledOnce();
     expect(built.profile).toMatchObject({
       agent: "future-harness",
       desiredState: { configuration: { agent: "future-harness", mode: "strict" } },
       packageConfig: { native: { agent: "future-harness", mode: "strict" } },
     });
+    expect(
+      resolveOnboardSandboxWorkloadReceipt({
+        runtime,
+        workload: dockerfileWorkload,
+        registryImageRef: "nemoclaw-future-harness:local",
+        prebuildImageRef: null,
+        firstCreateOutput: "",
+        createOutput: "",
+        buildId: "unused",
+        extractBuiltImageRef: vi.fn(),
+        resolveSandboxImageTagFromCreateOutput: vi.fn(),
+      }).workloadReceipt,
+    ).toEqual({
+      schemaVersion: 1,
+      kind: "legacy-dockerfile",
+      reference: "nemoclaw-future-harness:local",
+      packageStartupProfile: {
+        encodedProfile: built.encodedProfile,
+        startupProfileSha256: built.startupProfileSha256,
+        credentialProxyReplayRequired: built.credentialProxyReplayRequired,
+      },
+      shared: false,
+    });
+    expect(prepareStartupProfile).toHaveBeenCalledOnce();
+    expect(buildInitialStartupProfile).toHaveBeenCalledOnce();
   });
 
   it("uses the Dockerfile when the stock managed-image catalog is unavailable", async () => {
@@ -571,6 +616,7 @@ describe("managed workload onboard orchestration", () => {
       { managedRuntimeEnabled: true, unavailableCatalog: true },
     );
 
+    expect(runtime.receiptAgentDefinition).toBeNull();
     await expect(runtime.ensurePreparedWorkload()).resolves.toMatchObject({
       source: { kind: "legacy-dockerfile" },
     });
@@ -596,6 +642,7 @@ describe("managed workload onboard orchestration", () => {
     );
 
     await expect(runtime.ensurePreparedWorkload()).resolves.toBe(prepared);
+    expect(runtime.receiptAgentDefinition?.name).toBe("openclaw");
     expect(prepareSandboxWorkloadSource).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ harnessPackage }),
     );
@@ -683,6 +730,7 @@ describe("managed workload onboard orchestration", () => {
     };
     const runtime = {
       runtimeProvider: null,
+      receiptAgentDefinition: null,
       ensurePreparedWorkload: vi.fn(async () => prepared),
       ensurePreparedProfile,
     };
@@ -893,6 +941,7 @@ describe("managed workload onboard orchestration", () => {
     await prepareOnboardSandboxWorkloadLaunch({
       runtime: {
         runtimeProvider: null,
+        receiptAgentDefinition: null,
         ensurePreparedWorkload: vi.fn(),
         ensurePreparedProfile: vi.fn(),
       },

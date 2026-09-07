@@ -19,7 +19,11 @@ import {
 import { getDockerGpuSupervisorReconnectTimeoutSecs } from "../../onboard/docker-gpu-supervisor-reconnect";
 import { recreateOpenShellDockerSandboxWithStartupCommand } from "../../onboard/docker-startup-command-patch";
 import { resolveRegisteredRuntimeProvider } from "../../onboard/runtime-provider/selection";
-import { buildSandboxRuntimeEnvArgs } from "../../onboard/sandbox-create-launch";
+import {
+  buildSandboxRuntimeEnvArgs,
+  packageDashboardStateFromRegistry,
+} from "../../onboard/sandbox-create-launch";
+import { resolveRecordedSecondaryForwardPort } from "../../onboard/gateway-binding/secondary-forward";
 import { readManagedWorkloadAuthority } from "../../onboard/workload/authority";
 import { resolveDirectSandboxContainer } from "../../sandbox/privileged-exec";
 import { redact, redactFull } from "../../security/redact";
@@ -177,10 +181,26 @@ function reconstructSupervisorLaunchCommand(
   const manageDashboard = shouldManageDashboardForAgent(agent);
   const resolveDashboardPort = deps.resolveDashboardPort ?? resolveSandboxDashboardPort;
   const dashboardPort = String(resolveDashboardPort(sandboxName));
-  const hermesDashboardEnabled = entry.hermesDashboardEnabled === true;
+  const dashboardState = selectedAgent.harnessPackage
+    ? packageDashboardStateFromRegistry({
+        declaration: agent.dashboardUi ?? null,
+        state: entry.dashboardUi,
+      })
+    : {
+        enabled: entry.hermesDashboardEnabled === true,
+        config:
+          entry.hermesDashboardEnabled === true
+            ? {
+                enabled: true,
+                port: entry.hermesDashboardPort ?? 0,
+                internalPort: entry.hermesDashboardInternalPort ?? 0,
+                tuiEnabled: entry.hermesDashboardTui === true,
+              }
+            : null,
+      };
   const loopbackDashboardUrl = `http://127.0.0.1:${dashboardPort}`;
   let chatUiUrl = manageDashboard ? loopbackDashboardUrl : "";
-  if (manageDashboard && hermesDashboardEnabled) {
+  if (manageDashboard && dashboardState.enabled) {
     const readWorkloadAuthority = deps.readManagedWorkloadAuthority ?? readManagedWorkloadAuthority;
     const profile = readWorkloadAuthority(entry)?.profile;
     const browserUrl =
@@ -197,23 +217,22 @@ function reconstructSupervisorLaunchCommand(
     }
     chatUiUrl = browserUrl;
   }
+  const secondaryForwardAllocation = selectedAgent.harnessPackage
+    ? agent.healthProbe?.secondary_forward
+    : undefined;
   const { envArgs } = buildSandboxRuntimeEnvArgs({
     agent,
     chatUiUrl,
     manageDashboard,
     getDashboardForwardPort: () => dashboardPort,
-    hermesDashboardState: {
-      enabled: hermesDashboardEnabled,
-      config: hermesDashboardEnabled
-        ? {
-            enabled: true,
-            port: entry.hermesDashboardPort ?? 0,
-            internalPort: entry.hermesDashboardInternalPort ?? 0,
-            tuiEnabled: entry.hermesDashboardTui === true,
-          }
-        : null,
-    },
-    hermesApiPort: entry.hermesApiPort,
+    hermesDashboardState: dashboardState,
+    secondaryForward: secondaryForwardAllocation
+      ? {
+          environmentVariable: secondaryForwardAllocation.environment_variable,
+          port: resolveRecordedSecondaryForwardPort(entry, secondaryForwardAllocation),
+        }
+      : null,
+    hermesApiPort: selectedAgent.harnessPackage ? null : entry.hermesApiPort,
     extraPlaceholderKeys: [],
     observabilityEnabled: entry.observabilityEnabled === true,
     sandboxName,

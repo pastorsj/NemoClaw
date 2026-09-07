@@ -54,7 +54,6 @@ import {
 import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import { parseOpenClawAgentText } from "../fixtures/openclaw-agent-output.ts";
 import { runBoundedRetry } from "../../../tools/e2e/retry-evidence.mts";
-import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-target.mts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import {
   agentReplyContainsToken,
@@ -69,10 +68,8 @@ import {
   registerPublicNvidiaSwitchProvider,
   requirePublicNvidiaSwitchKey,
 } from "./public-nvidia-switch-provider.ts";
-import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-oc-inf-switch";
-const OPENCLAW_FABRIC_CONTRACT = readBundledFabricHarnessE2eFixture("openclaw");
 const SWITCH_PROVIDER = process.env.NEMOCLAW_SWITCH_PROVIDER ?? PUBLIC_NVIDIA_SWITCH_PROVIDER;
 const SWITCH_MODEL = process.env.NEMOCLAW_SWITCH_MODEL ?? PUBLIC_NVIDIA_SWITCH_MODEL;
 const SWITCH_INFERENCE_API = process.env.NEMOCLAW_SWITCH_INFERENCE_API ?? "openai-completions";
@@ -893,7 +890,7 @@ test(
         "prepare the switched provider and endpoint",
         "switch the route and verify restart semantics",
         "inspect route configuration and recorded state",
-        "prove inference.local, OpenClaw, and public Fabric agent turns",
+        "prove inference.local and OpenClaw agent turns",
         "apply sandbox retention and record the result",
       ],
     },
@@ -929,7 +926,6 @@ test(
         "registry and onboard session record the switched provider/model",
         "sandbox inference.local returns PONG from the switched model",
         "openclaw agent answers through the switched inference route",
-        "the public Fabric adapter answers through the switched inference route and cleans up",
       ],
     });
 
@@ -1084,7 +1080,7 @@ test(
     await assertOpenClawConfig(sandbox, home);
     await assertRegistryAndSession(home, { mockProvider });
 
-    progress.phase("prove inference.local, OpenClaw, and public Fabric agent turns");
+    progress.phase("prove inference.local and OpenClaw agent turns");
     const inference = await checkSandboxInference(sandbox, artifacts, home);
     if (inference !== "ok") {
       await artifacts.target.complete({
@@ -1106,18 +1102,6 @@ test(
       });
       skip(agentTurn.skipped);
     }
-
-    await runPublicFabricTurn({
-      artifacts,
-      contract: OPENCLAW_FABRIC_CONTRACT,
-      env: commandEnv(home),
-      host,
-      lifecyclePhase: "after-inference-switch",
-      redactionValues,
-      sandbox,
-      sandboxName: SANDBOX_NAME,
-      scanPrivateState: false,
-    });
 
     progress.phase("apply sandbox retention and record the result");
     if (process.env.NEMOCLAW_E2E_KEEP_SANDBOX !== "1") {

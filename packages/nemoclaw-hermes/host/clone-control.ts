@@ -16,6 +16,7 @@ const {
   activateStagedCloneBinding,
   cloneBindingStatus,
   discardStagedCloneBinding,
+  hasRuntimeRefreshCredential,
   registerRuntimeRefreshCredential,
   stageCloneBinding,
   stagedCloneBinding,
@@ -148,6 +149,10 @@ async function handleBrokerControlRequest(req, res, preflightProbe) {
       return;
     }
     sendJson(res, 200, { ok: true });
+    return;
+  }
+  if (req.url === "/credentials/inspect") {
+    sendJson(res, 200, { ok: true, registered: hasRuntimeRefreshCredential(sandbox) });
     return;
   }
   if (req.url === "/credentials/unregister") {

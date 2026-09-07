@@ -359,6 +359,26 @@ export function resolveAgentProviderInferenceApi(
   );
 }
 
+/** Resolve a receipt-backed package's declared provider/API requirement without inspecting its ID. */
+export function resolvePackageProviderInferenceApi(
+  agent: unknown,
+  provider: string | null | undefined,
+  preferredInferenceApi: string | null,
+): string | null {
+  const inference = (
+    agent as {
+      inference?: {
+        providerApiOverrides?: readonly { provider: string; api: string }[];
+      };
+    } | null
+  )?.inference;
+  const coerced = coerceAgentInferenceApi(agent, preferredInferenceApi);
+  return (
+    inference?.providerApiOverrides?.find((candidate) => candidate.provider === provider)?.api ??
+    coerced
+  );
+}
+
 export function parseGatewayInference(output: string | null | undefined): GatewayInference | null {
   if (!output) return null;
   const stripped = output.replace(/\u001b\[[0-9;]*m/g, "");

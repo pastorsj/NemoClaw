@@ -3,6 +3,7 @@
 
 import { hydrateDerivedSandboxMessagingPlanFields } from "../messaging/hydration";
 import type { SandboxMessagingPlan } from "../messaging/manifest";
+import type { ChannelManifest } from "../messaging/manifest";
 import { compactSandboxMessagingPlanForPersistence } from "../messaging/persistence";
 import {
   getConfiguredChannelIdsFromPlan,
@@ -11,7 +12,7 @@ import {
   parseSandboxMessagingPlan,
 } from "../messaging/plan-validation";
 import type { MessagingChannelConfig } from "../messaging-channel-config";
-import type { SandboxRegistry } from "./registry";
+import type { SandboxEntry, SandboxRegistry } from "./registry";
 
 export interface SandboxMessagingState {
   schemaVersion: 1;
@@ -19,8 +20,16 @@ export interface SandboxMessagingState {
 }
 
 type EntryWithMessaging = {
+  harnessPackage?: unknown;
+  harnessPackageMigration?: unknown;
   messaging?: { schemaVersion?: number; plan?: unknown } | null;
 };
+
+export interface RegistryMessagingHydrationOptions {
+  /** Exact composed manifests required by a receipt-backed registry row. */
+  readonly manifests?: readonly ChannelManifest[];
+}
+
 
 export interface RegistryMessagingReadDeps {
   load(): SandboxRegistry;
@@ -59,15 +68,34 @@ export function getMessagingPlanFromEntry(
 
 export function getHydratedMessagingPlanFromEntry(
   entry: EntryWithMessaging | null | undefined,
+  options: RegistryMessagingHydrationOptions = {},
 ): SandboxMessagingPlan | null {
-  const plan = getMessagingPlanFromEntry(entry);
-  return plan ? hydrateDerivedSandboxMessagingPlanFields(plan) : null;
+  const receiptBacked =
+    entry?.harnessPackage != null || entry?.harnessPackageMigration != null;
+  if (receiptBacked && options.manifests === undefined) {
+    throw new Error("Receipt-backed registry messaging hydration requires exact manifests");
+  }
+  if (entry?.messaging?.schemaVersion !== 1) return null;
+  const plan = parseSandboxMessagingPlan(entry.messaging.plan, {
+    ...(options.manifests !== undefined ? { manifests: options.manifests } : {}),
+  });
+  return plan
+    ? hydrateDerivedSandboxMessagingPlanFields(plan, {
+        ...(options.manifests !== undefined ? { manifests: options.manifests } : {}),
+      })
+    : null;
 }
 
+/**
+ * Prepare registry rows for hooks that inspect derived messaging fields.
+ * Receipt-backed rows resolve their own exact package declaration; only
+ * explicit no-receipt rows retain source-catalogue hydration.
+ */
 export function getMessagingChannelConfigFromEntry(
   entry: EntryWithMessaging | null | undefined,
+  options: RegistryMessagingHydrationOptions = {},
 ): MessagingChannelConfig | null {
-  return getMessagingChannelConfigFromPlan(getHydratedMessagingPlanFromEntry(entry));
+  return getMessagingChannelConfigFromPlan(getHydratedMessagingPlanFromEntry(entry, options));
 }
 
 export function getConfiguredMessagingChannelsFromEntry(

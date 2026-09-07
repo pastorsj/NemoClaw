@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   decideSandboxResume,
   hasCompatibleEndpointReasoningDrift,
-  hasHermesCompatibleAnthropicInferenceRouteDrift,
+  hasCompatibleEndpointInferenceApiDrift,
   type SandboxResumeSignals,
 } from "./sandbox-resume";
 
@@ -61,6 +61,7 @@ describe("decideSandboxResume", () => {
     ["messaging credential", { messagingCredentialChanged: true }, true],
     ["Hermes tool gateway", { hermesToolGatewayConfigChanged: true }, true],
     ["observability", { observabilityChanged: true }, false],
+    ["approval mode", { approvalModeChanged: true }, false],
     ["DCode auto-approval", { dcodeAutoApprovalChanged: true }, false],
     ["tool disclosure migration", { toolDisclosureMigrationNeeded: true }, false],
     ["tool disclosure", { toolDisclosureChanged: true }, false],
@@ -72,18 +73,19 @@ describe("decideSandboxResume", () => {
     });
   });
 
-  it("preserves registry fidelity while recreating for Hermes inference route drift", () => {
+  it("preserves registry fidelity while recreating for inference API drift", () => {
     expect(decideSandboxResume(resumeSignals({ inferenceRouteConfigChanged: true }))).toEqual({
       kind: "recreate",
-      note: "  [resume] Hermes inference route configuration changed; recreating sandbox.",
+      note: "  [resume] Inference route API configuration changed; recreating sandbox.",
       removeRegistryEntry: false,
     });
   });
 
   it("treats missing registry API metadata as stale after the session is repaired (#6289)", () => {
     expect(
-      hasHermesCompatibleAnthropicInferenceRouteDrift({
+      hasCompatibleEndpointInferenceApiDrift({
         agentName: "hermes",
+        receiptBackedPackage: false,
         provider: "compatible-anthropic-endpoint",
         model: "claude-sonnet-proxy",
         preferredInferenceApi: "openai-completions",
@@ -98,8 +100,9 @@ describe("decideSandboxResume", () => {
 
   it("reuses a Hermes route only when registry metadata records the OpenAI frontend (#6289)", () => {
     expect(
-      hasHermesCompatibleAnthropicInferenceRouteDrift({
+      hasCompatibleEndpointInferenceApiDrift({
         agentName: "hermes",
+        receiptBackedPackage: false,
         provider: "compatible-anthropic-endpoint",
         model: "claude-sonnet-proxy",
         preferredInferenceApi: "openai-completions",
@@ -113,6 +116,24 @@ describe("decideSandboxResume", () => {
     ).toBe(false);
   });
 
+  it("applies the same API metadata migration to an unknown receipt-backed package", () => {
+    expect(
+      hasCompatibleEndpointInferenceApiDrift({
+        agentName: "future-harness",
+        receiptBackedPackage: true,
+        provider: "compatible-anthropic-endpoint",
+        model: "future-model",
+        preferredInferenceApi: "openai-completions",
+        registryEntry: {
+          name: "saved",
+          agent: "future-harness",
+          provider: "compatible-anthropic-endpoint",
+          model: "future-model",
+        },
+      }),
+    ).toBe(true);
+  });
+
   it.each([
     ["another agent", { agentName: "openclaw" }],
     ["another provider", { provider: "anthropic-prod" }],
@@ -120,8 +141,9 @@ describe("decideSandboxResume", () => {
     ["no selected model", { model: null }],
   ])("does not report Hermes compatible-route drift for %s (#6289)", (_label, overrides) => {
     expect(
-      hasHermesCompatibleAnthropicInferenceRouteDrift({
+      hasCompatibleEndpointInferenceApiDrift({
         agentName: "hermes",
+        receiptBackedPackage: false,
         provider: "compatible-anthropic-endpoint",
         model: "claude-sonnet-proxy",
         preferredInferenceApi: "openai-completions",
@@ -269,9 +291,9 @@ describe("decideSandboxResume", () => {
     ],
     ["agent selection", { resumeAgentChanged: true }, "Agent selection changed"],
     [
-      "Hermes inference route",
+      "inference route API",
       { inferenceRouteConfigChanged: true },
-      "Hermes inference route configuration changed",
+      "Inference route API configuration changed",
     ],
   ] as const)(
     "uses compatibility recreate for %s drift even when not-ready (#10056)",

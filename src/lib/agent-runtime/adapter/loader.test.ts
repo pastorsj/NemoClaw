@@ -6,6 +6,11 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../../test/helpers/adapter-fixtures";
 import { defineHarnessAdapterContract, defineHarnessAdapterOperation } from "./contract";
 import { HarnessAdapterError, loadHarnessAdapter, loadHarnessAdapterFromSource } from "./loader";
 import { installHarnessPackage } from "../package/install";
@@ -102,12 +107,18 @@ function installTestPackage(moduleSource: string): InstalledHarnessPackage {
       "    reason: This synthetic package has fixed inference configuration.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This package does not run scheduled work.",
@@ -115,6 +126,18 @@ function installTestPackage(moduleSource: string): InstalledHarnessPackage {
       "      kind: not-required",
       "",
     ].join("\n"),
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/host/config-adapter.cts",
+    TEST_CONFIG_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/host/messaging-adapter.cts",
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/host/startup-adapter.cts",
+    TEST_STARTUP_ADAPTER_SOURCE,
   );
   writeFixtureFile("packages/nemoclaw-future-harness/host/test-adapter.cts", moduleSource);
   return installHarnessPackage(
@@ -196,6 +219,16 @@ module.exports = {
 
     expect(adapter.build({ value: "probe" })).toEqual({
       value: "isolated:blocked:undefined:undefined:undefined:undefined:undefined:undefined",
+    });
+  });
+
+  it("gives receipt-bound code one stable virtual filename instead of its host store path", () => {
+    const adapter = loadTestAdapter(`
+module.exports = { buildTestPlan() { return { value: __filename }; } };
+`);
+
+    expect(adapter.build({ value: "probe" })).toEqual({
+      value: "nemoclaw-package:future-harness/host/test-adapter.cts",
     });
   });
 

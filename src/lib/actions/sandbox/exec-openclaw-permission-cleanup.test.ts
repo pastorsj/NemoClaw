@@ -174,6 +174,8 @@ describe("execSandbox mutable OpenClaw cleanup (#6047)", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr.join("\n")).toContain("command exit 42; cleanup exit 1");
     expect(result.stderr.join("\n")).toContain("chmod denied");
+    expect(result.stderr.join("\n")).toContain("Sandbox configuration permission cleanup failed");
+    expect(result.stderr.join("\n")).not.toContain("OpenClaw permission cleanup");
     expect(order).toEqual(["repair", "release"]);
   });
 

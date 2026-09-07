@@ -4,8 +4,10 @@
 import type { AgentDefinition } from "../agent/defs";
 import type { HarnessPackageIdentity } from "../agent-runtime/package/identity";
 import type { SandboxEntry } from "../state/registry";
+import { parseManagedImageExtensions } from "../state/snapshot/managed-extensions";
 import { type BackupResult } from "../state/sandbox";
 import * as sandboxState from "../state/sandbox";
+import { allowsLegacyImagePluginProvenance } from "../state/snapshot/legacy-manifest";
 
 export interface PreRecreateBackupAuthority {
   readonly agentDefinition: AgentDefinition;
@@ -33,7 +35,7 @@ export type PreRecreateBackupFailureKind =
   | "partial"
   | "empty"
   | "threw"
-  | "plugin-provenance";
+  | "managed-extension-provenance";
 
 export interface PreRecreateBackupResult {
   ok: boolean;
@@ -48,12 +50,20 @@ export function backupSandboxBeforeRecreate(
   const log = opts.log ?? ((m: string) => console.log(m));
   const errorLog = opts.errorLog ?? ((m: string) => console.error(m));
   const sandboxEntry = opts.sandboxEntry ?? null;
-  const customOpenClaw =
-    opts.requireOpenClawImagePluginProvenance === true ||
-    (Boolean(sandboxEntry?.fromDockerfile) &&
-      (!sandboxEntry?.agent || sandboxEntry.agent === "openclaw"));
+  const sourceBackupAuthority = opts.sourceBackupAuthority ?? null;
+  const receiptRequiresImagePluginProvenance = sourceBackupAuthority?.harnessPackage
+    ? sourceBackupAuthority.agentDefinition.stateLifecycle.rebuild.managed_extensions.support ===
+      "managed"
+    : null;
+  const requiresImagePluginProvenance =
+    receiptRequiresImagePluginProvenance ??
+    (opts.requireOpenClawImagePluginProvenance === true ||
+      (Boolean(sandboxEntry?.fromDockerfile) &&
+        allowsLegacyImagePluginProvenance(sandboxEntry?.agent ?? "openclaw")));
+  const customImageWithPluginProvenance =
+    requiresImagePluginProvenance &&
+    (receiptRequiresImagePluginProvenance === null || Boolean(sandboxEntry?.fromDockerfile));
   try {
-    const sourceBackupAuthority = opts.sourceBackupAuthority ?? null;
     const backup = opts.backupImpl
       ? sourceBackupAuthority
         ? opts.backupImpl(opts.sandboxName, sourceBackupAuthority)
@@ -66,12 +76,25 @@ export function backupSandboxBeforeRecreate(
             );
           })();
     if (backup.success && backup.manifest?.backupPath) {
+      const managedExtensions =
+        sourceBackupAuthority?.harnessPackage &&
+        sourceBackupAuthority.agentDefinition.stateLifecycle.rebuild.managed_extensions.support ===
+          "managed"
+          ? sourceBackupAuthority.agentDefinition.stateLifecycle.rebuild.managed_extensions
+          : null;
+      const hasManagedExtensionProvenance =
+        managedExtensions !== null &&
+        backup.manifest.reconcileManagedImageExtensions === true &&
+        parseManagedImageExtensions(backup.manifest.managedImageExtensions, managedExtensions).ok;
       if (
-        (customOpenClaw || backup.manifest.reconcileOpenClawImagePluginProvenance === true) &&
+        (customImageWithPluginProvenance ||
+          backup.manifest.reconcileManagedImageExtensions === true ||
+          backup.manifest.reconcileOpenClawImagePluginProvenance === true) &&
+        !hasManagedExtensionProvenance &&
         !sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(backup.manifest)
       ) {
         errorLog(
-          "  Custom-image OpenClaw plugin provenance is missing; aborting recreate before delete.",
+          "  Managed image extension provenance is missing; aborting recreate before delete.",
         );
         errorLog(
           "  Keep the sandbox and backup untouched; onboard under a new name and manually migrate user-owned state.",
@@ -79,7 +102,7 @@ export function backupSandboxBeforeRecreate(
         errorLog(
           "  Or take an independent manual backup, then explicitly accept destructive recreation with NEMOCLAW_RECREATE_WITHOUT_BACKUP=1.",
         );
-        return { ok: false, backup, failureKind: "plugin-provenance" };
+        return { ok: false, backup, failureKind: "managed-extension-provenance" };
       }
       log(
         `  ✓ State backed up (${backup.backedUpDirs.length} directories, ${backup.backedUpFiles.length} files)`,

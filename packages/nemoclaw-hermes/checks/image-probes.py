@@ -652,7 +652,7 @@ def verify_googlechat_override_seams() -> None:
         assert actual == count, (
             f"{path}: expected {count} occurrence(s) of {needle!r}, found {actual}. "
             "The Google Chat channel override binds this definition; re-review "
-            "src/lib/messaging/channels/googlechat/runtime/hermes-adapter.py before "
+            "messaging/runtime/googlechat/hermes-adapter.py before "
             "upgrading Hermes."
         )
 

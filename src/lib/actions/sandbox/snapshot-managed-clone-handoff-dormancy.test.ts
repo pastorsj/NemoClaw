@@ -72,9 +72,7 @@ function configureFuturePackageSnapshot(
   profilePackage: HarnessPackageIdentity = FUTURE_PACKAGE,
 ): void {
   managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = vi.fn((entry) => {
-    if (!isDeepStrictEqual(entry.harnessPackage, FUTURE_PACKAGE)) {
-      throw new Error("installed future harness receipt changed");
-    }
+    expect(isDeepStrictEqual(entry.harnessPackage, FUTURE_PACKAGE)).toBe(true);
     return {
       recordedAgent: FUTURE_PACKAGE.id,
       effectiveAgentId: FUTURE_PACKAGE.id,

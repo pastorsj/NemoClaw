@@ -24,6 +24,7 @@ import type {
 } from "../manifest";
 import { createBuiltInMessagingHookRegistry } from "./builtins";
 import { runMessagingHookSync } from "./hook-runner";
+import { legacyMessagingStatusAgents } from "./legacy-status";
 
 export interface MessagingStatusHookRunOptions {
   readonly agent?: MessagingAgentId;
@@ -53,7 +54,7 @@ export function runMessagingStatusHooks(
     : createBuiltInChannelManifestRegistry();
   const agents: ReadonlySet<MessagingAgentId> = options.agent
     ? new Set<MessagingAgentId>([options.agent])
-    : (options.agents ?? new Set<MessagingAgentId>(["openclaw"]));
+    : (options.agents ?? legacyMessagingStatusAgents());
   const hookResults: MessagingStatusHookRunResult[] = [];
   const seen = new Set<string>();
 
@@ -68,7 +69,7 @@ export function runMessagingStatusHooks(
         try {
           const result = runMessagingHookSync(hook, hookRegistry, {
             channelId: manifest.id,
-            inputs: createMessagingStatusHookInputs(options),
+            inputs: createMessagingStatusHookInputs(options, manifest, hook, agent),
           });
           hookResults.push({
             channelId: manifest.id,
@@ -91,8 +92,19 @@ function shouldRunStatusHook(hook: ChannelHookSpec, agent: MessagingAgentId): bo
 
 function createMessagingStatusHookInputs(
   options: MessagingStatusHookRunOptions,
+  manifest: ChannelManifest,
+  hook: ChannelHookSpec,
+  agent: MessagingAgentId,
 ): Record<string, MessagingSerializableValue> {
-  const inputs: Record<string, MessagingSerializableValue> = { ...options.extraInputs };
+  const inputs: Record<string, MessagingSerializableValue> = {
+    ...options.extraInputs,
+    agent,
+    receiptBackedProfile: manifest.packageBuild !== undefined,
+  };
+  if (manifest.packageBuild) inputs.packageConfigRoot = manifest.packageBuild.configRoot;
+  if (hook.statusProbe) {
+    inputs.statusProbe = hook.statusProbe as unknown as MessagingSerializableValue;
+  }
   if (options.currentSandbox) inputs.currentSandbox = options.currentSandbox;
   if (options.registryEntries) {
     inputs.registryEntries = options.registryEntries.map(serializeRegistryEntry);

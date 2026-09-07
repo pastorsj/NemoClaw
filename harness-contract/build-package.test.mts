@@ -84,7 +84,9 @@ function createPackageFixture(additionalFiles: readonly string[] = []): PackageF
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This package does not run scheduled work.",
@@ -94,6 +96,10 @@ function createPackageFixture(additionalFiles: readonly string[] = []): PackageF
       "  support: disabled",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "",
     ].join("\n"),
   );
@@ -107,6 +113,11 @@ function createPackageFixture(additionalFiles: readonly string[] = []): PackageF
   writeFile(
     packageRoot,
     "host/messaging-adapter.cts",
+    '"use strict";\nmodule.exports = Object.freeze({});\n',
+  );
+  writeFile(
+    packageRoot,
+    "host/startup-adapter.cts",
     '"use strict";\nmodule.exports = Object.freeze({});\n',
   );
   writeFile(packageRoot, "tests/should-not-publish.txt", "authoring only\n");
@@ -145,7 +156,7 @@ test("materializes a synthetic publish set as one read-only NemoClaw artifact", 
       minimumNemoClawVersion: "0.0.113",
       maximumNemoClawVersionExclusive: "0.0.121",
       manifestPath: "manifest.yaml",
-      fileCount: 9,
+      fileCount: 10,
       readOnly: true,
     });
     assert.deepEqual(
@@ -198,7 +209,7 @@ test("the package builder binary writes one absent output and reports JSON", () 
       minimumNemoClawVersion: "0.0.113",
       maximumNemoClawVersionExclusive: "0.0.121",
       manifestPath: "manifest.yaml",
-      fileCount: 9,
+      fileCount: 10,
       readOnly: true,
     });
     assert.equal(fs.existsSync(path.join(fixture.outputRoot, "nemoclaw-package.json")), true);
@@ -406,7 +417,7 @@ test("the prepared contract archive contains executable builder binaries but no 
   assert.equal(modes.get("dist/build-package.mjs"), 0o755);
   assert.equal(modes.get("dist/materialize-runtime.mjs"), 0o755);
   assert.equal(modes.get("runtime/gateway-runtime.py"), 0o755);
-  assert.equal(modes.get("runtime/messaging-build.mts"), 0o755);
+  assert.equal(modes.get("runtime/messaging-build.mts"), 0o644);
   assert.equal(modes.has("README.md"), true);
   assert.equal(modes.has("build-adapters.d.mts"), true);
   assert.equal(modes.has("build-package.d.mts"), true);
@@ -421,6 +432,14 @@ test("the prepared contract archive contains executable builder binaries but no 
   );
   assert.equal(
     files.some((file) => String(file.path).includes(".test.")),
+    false,
+  );
+  assert.equal(
+    files.some((file) => String(file.path).endsWith(".pyc")),
+    false,
+  );
+  assert.equal(
+    files.some((file) => String(file.path).includes("/__pycache__/")),
     false,
   );
 });

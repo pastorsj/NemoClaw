@@ -12,12 +12,21 @@ import {
   readHermesApiPort,
   reserveCreateSandboxHermesApiPort,
   resolveOnboardHermesApiPort,
+  resolveSandboxHealthPort,
   resolveSandboxHermesApiPort,
   retargetHermesApiPortInUrl,
   withHermesApiPortReservationScope,
 } from "./hermes-api-port";
 
 const noneBound = () => false;
+const futureSecondaryForward = {
+  environment_variable: "FUTURE_GATEWAY_API_PORT",
+  preferred_port: 9100,
+  range_start: 9100,
+  range_end: 9110,
+  label: "future gateway API",
+  remedy: "Stop an existing listener and retry onboarding.",
+} as const;
 
 function forwardList(rows: string[]): string {
   return ["SANDBOX BIND PORT PID STATUS", ...rows].join("\n");
@@ -266,16 +275,30 @@ describe("reserveCreateSandboxHermesApiPort", () => {
     await scope.release();
   });
 
-  it("releases only before the matching Hermes API forward", async () => {
+  it("selects secondary allocation from a synthetic package declaration", async () => {
+    const scope = createHermesApiPortReservationScope();
+    await scope.selectAndReserve({
+      agentName: "future-gateway",
+      secondaryForwardAllocation: futureSecondaryForward,
+      sandboxName: "future-box",
+      env: {},
+      getSandbox: () => ({ secondaryForwardPort: 9107 }),
+      captureForwardList: () => forwardList(["future-box 127.0.0.1 9107 101 running"]),
+      warn: vi.fn(),
+    });
+
+    expect(scope.effectivePort).toBe(9107);
+    expect(scope.registryField).toBe("secondaryForwardPort");
+    expect(scope.environmentVariable).toBe("FUTURE_GATEWAY_API_PORT");
+  });
+
+  it("releases only before the matching secondary forward", async () => {
     const release = vi.fn(async () => undefined);
     const scope = createHermesApiPortReservationScope();
     scope.current = { port: 8643, release };
 
     await scope.releaseBeforeForward("hermes", 18789);
-    await scope.releaseBeforeForward("openclaw", 8643);
-    expect(release).not.toHaveBeenCalled();
-
-    await scope.releaseBeforeForward("hermes", 8643);
+    await scope.releaseBeforeForward("future-harness", 8643);
     expect(release).toHaveBeenCalledOnce();
     expect(scope.current).toBeNull();
   });
@@ -391,6 +414,61 @@ describe("resolveSandboxHermesApiPort", () => {
 
   it("uses the registered port", () => {
     expect(resolveSandboxHermesApiPort({ hermesApiPort: 8645 })).toBe(8645);
+  });
+});
+
+describe("manifest-declared secondary health ports", () => {
+  it("resolves a synthetic package without recognizing its package id", () => {
+    expect(
+      resolveSandboxHealthPort(
+        "future-box",
+        {
+          name: "future-gateway",
+          forwardPort: 19000,
+          forward_ports: [19000, 9100],
+          healthProbe: {
+            port: 9100,
+            port_resolution: "sandbox-secondary-forward",
+            secondary_forward: futureSecondaryForward,
+          },
+        },
+        { getSandbox: () => ({ secondaryForwardPort: 9107 }) },
+      ),
+    ).toBe(9107);
+  });
+
+  it("fails closed when a receipt-backed sandbox drops its allocated port", () => {
+    expect(() =>
+      resolveSandboxHealthPort(
+        "future-box",
+        {
+          name: "future-gateway",
+          forwardPort: 19000,
+          forward_ports: [19000, 9100],
+          healthProbe: {
+            port: 9100,
+            port_resolution: "sandbox-secondary-forward",
+            secondary_forward: futureSecondaryForward,
+          },
+        },
+        { getSandbox: () => ({ harnessPackage: {}, secondaryForwardPort: null }) },
+      ),
+    ).toThrow(/port is missing or outside 9100-9110/u);
+  });
+
+  it("does not infer secondary allocation from a familiar or unknown id", () => {
+    expect(
+      resolveSandboxHealthPort(
+        "future-box",
+        {
+          name: "hermes",
+          forwardPort: 19000,
+          forward_ports: [19000, 9100],
+          healthProbe: { port: 9100 },
+        },
+        { getSandbox: () => ({ hermesApiPort: 9107 }) },
+      ),
+    ).toBe(9100);
   });
 });
 

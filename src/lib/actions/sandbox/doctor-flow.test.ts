@@ -8,6 +8,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 import type { AgentDefinition } from "../../agent/defs";
+import type { ChannelManifest } from "../../messaging/manifest";
 
 type RunSandboxDoctor = (typeof import("./doctor"))["runSandboxDoctor"];
 type PortableAgentReceiptDisposition = ReturnType<
@@ -44,6 +45,8 @@ type DoctorHarnessOptions = {
   registryEntry?: "present" | "missing";
   registryAgent?: string;
   registryOverrides?: Record<string, unknown>;
+  packageMessagingError?: Error;
+  packageMessagingManifests?: readonly ChannelManifest[];
   packageStatusAgent?: SandboxStatusAgentInfo | Error;
   withMcpLifecycleLock?: WithMcpLifecycleLock;
 };
@@ -85,6 +88,7 @@ function createDoctorHarness(
   const agentDefs = requireDist("../../agent/defs.js");
   const agentRuntime = requireDist("../../agent/runtime.js");
   const statusAgentRuntime = requireDist("../../agent-runtime/status-agent.js");
+  const messagingProfileAuthority = requireDist("../../messaging/profile-authority.js");
   const gatewayRuntime = requireDist("../../gateway-runtime-action.js");
   const health = requireDist("../../inference/health.js");
   const dockerDriverPlatform = requireDist("../../onboard/docker-driver-platform.js");
@@ -222,16 +226,34 @@ function createDoctorHarness(
   vi.spyOn(agentRuntime, "getAgentDisplayName").mockReturnValue("OpenClaw");
   const resolveSandboxStatusAgentSpy = vi
     .spyOn(statusAgentRuntime, "resolveSandboxStatusAgent")
-    .mockImplementation((entry: unknown) => {
-      if (options.packageStatusAgent instanceof Error) throw options.packageStatusAgent;
-      if (options.packageStatusAgent) return options.packageStatusAgent;
-      return {
-        agentName: "openclaw",
-        agentDisplayName: "OpenClaw",
-        agentRuntime: "gateway",
-        agentDefinition: null,
-      };
-    });
+    .mockImplementation((_entry: unknown) =>
+      options.packageStatusAgent instanceof Error
+        ? (() => {
+            throw options.packageStatusAgent;
+          })()
+        : (options.packageStatusAgent ?? {
+            agentName: "openclaw",
+            agentDisplayName: "OpenClaw",
+            agentRuntime: "gateway",
+            agentDefinition: null,
+          }),
+    );
+  vi.spyOn(messagingProfileAuthority, "resolveSandboxMessagingProfileAuthority").mockImplementation(
+    () => {
+      options.packageMessagingError === undefined ||
+        (() => {
+          throw options.packageMessagingError;
+        })();
+      const statusAgent =
+        options.packageStatusAgent && !(options.packageStatusAgent instanceof Error)
+          ? options.packageStatusAgent
+          : null;
+      return { agent: statusAgent?.agentDefinition };
+    },
+  );
+  vi.spyOn(messagingProfileAuthority, "listMessagingChannelsForProfile").mockReturnValue([
+    ...(options.packageMessagingManifests ?? []),
+  ]);
   vi.spyOn(sandboxVersion, "checkAgentVersion").mockReturnValue({
     sandboxVersion: "0.1.0",
     expectedVersion: "0.2.0",
@@ -1102,5 +1124,99 @@ describe("runSandboxDoctor flow", () => {
         detail: "unable to resolve agent config paths: agent definition is invalid",
       }),
     );
+  });
+
+  it("keeps same-ID receipt diagnostics on its exact package profile", async () => {
+    const packageAgent = {
+      name: "openclaw",
+      displayName: "Receipt OpenClaw",
+      runtime: { kind: "gateway" },
+      configPaths: {
+        dir: "/sandbox/.receipt-openclaw",
+        configFile: "receipt.json",
+        format: "json",
+      },
+    } as unknown as AgentDefinition;
+    const harness = createDoctorHarness("ollama-local", {
+      registryOverrides: { harnessPackage: harnessPackageIdentity("openclaw") },
+      packageStatusAgent: {
+        agentName: "openclaw",
+        agentDisplayName: "Receipt OpenClaw",
+        agentRuntime: "gateway",
+        agentDefinition: packageAgent,
+      },
+      // An exact package profile may intentionally disable every core channel.
+      // The source OpenClaw catalogue still declares WhatsApp as a QR channel.
+      packageMessagingManifests: [],
+    });
+    harness.configuredMessagingChannelsSpy.mockReturnValue(["whatsapp"]);
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+    expect(report?.checks).toContainEqual(
+      expect.objectContaining({
+        group: "Messaging",
+        label: "Channels",
+        status: "ok",
+        detail: expect.not.stringContaining("inbound delivery is not inferred"),
+      }),
+    );
+    expect(report?.checks).not.toContainEqual(
+      expect.objectContaining({ group: "Messaging", label: "Runtime channel registry" }),
+    );
+    expect(harness.executeSandboxCommandForVerificationSpy).not.toHaveBeenCalled();
+    expect(harness.loadAgentSpy).not.toHaveBeenCalled();
+  });
+
+  it("preserves built-in diagnostics and the OpenClaw runtime probe for no-receipt rows", async () => {
+    const harness = createDoctorHarness();
+    harness.configuredMessagingChannelsSpy.mockReturnValue(["whatsapp"]);
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+    expect(report?.checks).toContainEqual(
+      expect.objectContaining({
+        group: "Messaging",
+        label: "Channels",
+        status: "info",
+        detail: expect.stringContaining("inbound delivery is not inferred"),
+      }),
+    );
+    expect(report?.checks).toContainEqual(
+      expect.objectContaining({ group: "Messaging", label: "Runtime channel registry" }),
+    );
+    expect(harness.executeSandboxCommandForVerificationSpy).toHaveBeenCalledWith(
+      "alpha",
+      expect.stringContaining("/sandbox/.openclaw/openclaw.json"),
+    );
+  });
+
+  it("fails closed when a receipt-backed messaging profile is invalid", async () => {
+    const packageAgent = {
+      name: "openclaw",
+      displayName: "Receipt OpenClaw",
+      runtime: { kind: "gateway" },
+      configPaths: {
+        dir: "/sandbox/.receipt-openclaw",
+        configFile: "receipt.json",
+        format: "json",
+      },
+    } as unknown as AgentDefinition;
+    const harness = createDoctorHarness("ollama-local", {
+      registryOverrides: { harnessPackage: harnessPackageIdentity("openclaw") },
+      packageStatusAgent: {
+        agentName: "openclaw",
+        agentDisplayName: "Receipt OpenClaw",
+        agentRuntime: "gateway",
+        agentDefinition: packageAgent,
+      },
+      packageMessagingError: new Error("installed messaging adapter digest is invalid"),
+    });
+
+    await expect(
+      harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true }),
+    ).rejects.toThrow("installed messaging adapter digest is invalid");
+    expect(harness.executeSandboxCommandForVerificationSpy).not.toHaveBeenCalled();
+    expect(harness.loadAgentSpy).not.toHaveBeenCalled();
   });
 });

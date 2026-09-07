@@ -41,6 +41,11 @@ describe("agent-specific preset resolution", () => {
     const pinnedAgentDefinition = {
       name: "hermes",
       displayName: "Installed Hermes",
+      policyCapability: {
+        owned_presets: [],
+        automatic_presets: [],
+        baseline_exclusion_impacts: {},
+      },
       policyAdditionsPath: writeAgentPolicy(`
 network_policies:
   pypi:
@@ -55,7 +60,7 @@ network_policies:
     binaries:
       - { path: /usr/bin/python3 }
 `),
-    } as AgentDefinition;
+    } as unknown as AgentDefinition;
 
     const preset = loadPresetForSandbox("alpha", "pypi", {
       agentDefinition: pinnedAgentDefinition,

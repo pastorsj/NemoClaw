@@ -4,11 +4,34 @@
 # Local POC final image. Source builds must provide the package base explicitly.
 
 ARG BASE_IMAGE
+ARG NEMOCLAW_CORPORATE_CA_B64=
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
 
 # hadolint ignore=DL3066
 USER root
+
+ARG NEMOCLAW_CORPORATE_CA_B64
+
+# A source-built package must be able to carry the same operator-supplied trust
+# anchor as a managed image. Validate every certificate before changing the
+# image trust store; an empty argument is intentionally a no-op.
+# hadolint ignore=DL3059,DL4006
+RUN if [ -n "${NEMOCLAW_CORPORATE_CA_B64}" ]; then \
+      command -v base64 >/dev/null 2>&1 || { echo "[nemoclaw] base64 is required to decode NEMOCLAW_CORPORATE_CA_B64" >&2; exit 1; }; \
+      command -v update-ca-certificates >/dev/null 2>&1 || { echo "[nemoclaw] update-ca-certificates is required to install NEMOCLAW_CORPORATE_CA_B64" >&2; exit 1; }; \
+      case "${NEMOCLAW_CORPORATE_CA_B64}" in *[!A-Za-z0-9+/=]*) echo "[nemoclaw] NEMOCLAW_CORPORATE_CA_B64 must be single-line base64" >&2; exit 1 ;; esac; \
+      install -d -o root -g root -m 0755 /usr/local/share/nemoclaw /usr/local/share/ca-certificates \
+      && { printf '%s' "${NEMOCLAW_CORPORATE_CA_B64}" | base64 --decode > /tmp/nemoclaw-corporate-ca.decoded 2>/dev/null \
+           || { echo "[nemoclaw] NEMOCLAW_CORPORATE_CA_B64 is not valid base64" >&2; exit 1; }; } \
+      && awk '/-----BEGIN CERTIFICATE-----/{f=1} f{print} /-----END CERTIFICATE-----/{f=0}' /tmp/nemoclaw-corporate-ca.decoded > /usr/local/share/nemoclaw/corporate-ca.pem \
+      && rm -f /tmp/nemoclaw-corporate-ca.decoded \
+      && { node -e 'const fs = require("node:fs"); const { X509Certificate } = require("node:crypto"); const pemPath = process.argv[1]; const anchorDir = process.argv[2]; const pem = fs.readFileSync(pemPath, "utf8"); const blocks = pem.match(/-----BEGIN CERTIFICATE-----[\\s\\S]*?-----END CERTIFICATE-----/g); if (!blocks?.length) process.exit(1); fs.writeFileSync(pemPath, blocks.map((block) => block.trim()).join("\\n") + "\\n"); blocks.forEach((block, index) => { if (!new X509Certificate(block).ca) process.exit(1); fs.writeFileSync(anchorDir + "/nemoclaw-corporate-ca-" + String(index + 1).padStart(2, "0") + ".crt", block.trim() + "\\n"); });' /usr/local/share/nemoclaw/corporate-ca.pem /usr/local/share/ca-certificates \
+           || { echo "[nemoclaw] NEMOCLAW_CORPORATE_CA_B64 must contain only valid CA certificates" >&2; exit 1; }; } \
+      && chown root:root /usr/local/share/nemoclaw/corporate-ca.pem /usr/local/share/ca-certificates/nemoclaw-corporate-ca-*.crt \
+      && chmod 0444 /usr/local/share/nemoclaw/corporate-ca.pem /usr/local/share/ca-certificates/nemoclaw-corporate-ca-*.crt \
+      && update-ca-certificates; \
+    fi
 
 COPY packages/nemoclaw-fabric/pyproject.toml packages/nemoclaw-fabric/README.md /opt/nemoclaw-fabric-runner/
 COPY packages/nemoclaw-fabric/src/ /opt/nemoclaw-fabric-runner/src/
@@ -61,6 +84,17 @@ RUN set -eu; \
 ARG NEMOCLAW_MODEL=nvidia/nemotron-3-super-120b-a12b
 ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1
 ARG NEMOCLAW_INFERENCE_API=openai-completions
+ARG NEMOCLAW_BUILD_ID=default
+ARG NEMOCLAW_PROXY_HOST=10.200.0.1
+ARG NEMOCLAW_PROXY_PORT=3128
+
+# Runtime routing comes from image-baked, root-owned values rather than an
+# ambient process environment that could contain host credentials.
+RUN install -d -o root -g root -m 0755 /usr/local/share/nemoclaw \
+    && printf '%s\n' "$NEMOCLAW_PROXY_HOST" > /usr/local/share/nemoclaw/deepseek-proxy-host \
+    && printf '%s\n' "$NEMOCLAW_PROXY_PORT" > /usr/local/share/nemoclaw/deepseek-proxy-port \
+    && chown root:root /usr/local/share/nemoclaw/deepseek-proxy-host /usr/local/share/nemoclaw/deepseek-proxy-port \
+    && chmod 0444 /usr/local/share/nemoclaw/deepseek-proxy-host /usr/local/share/nemoclaw/deepseek-proxy-port
 
 # hadolint ignore=DL3064
 ENV HOME=/sandbox \
@@ -70,7 +104,8 @@ ENV HOME=/sandbox \
     DSH_TELEMETRY_DISABLED=1 \
     NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
     NEMOCLAW_INFERENCE_BASE_URL=${NEMOCLAW_INFERENCE_BASE_URL} \
-    NEMOCLAW_INFERENCE_API=${NEMOCLAW_INFERENCE_API}
+    NEMOCLAW_INFERENCE_API=${NEMOCLAW_INFERENCE_API} \
+    NEMOCLAW_BUILD_ID=${NEMOCLAW_BUILD_ID}
 
 WORKDIR /sandbox
 # hadolint ignore=DL3066
@@ -102,6 +137,14 @@ RUN chown root:sandbox /sandbox \
         /sandbox/.nemoclaw/snapshots /sandbox/.nemoclaw/staging \
     && printf '%s' '{}' > /sandbox/.nemoclaw/config.json \
     && chown sandbox:sandbox /sandbox/.nemoclaw/config.json
+
+ARG NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER=root
+RUN case "$NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER" in \
+        root|sandbox) ;; \
+        *) echo "ERROR: NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER must be root or sandbox" >&2; exit 1 ;; \
+    esac
+
+USER ${NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER}
 
 ENTRYPOINT ["/usr/local/bin/nemoclaw-start"]
 CMD []

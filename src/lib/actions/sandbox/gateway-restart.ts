@@ -91,6 +91,64 @@ export type GatewayRestartResult =
       healthPassed: true;
     };
 
+export type RunningGatewayRevalidation =
+  | { refused: false }
+  | {
+      refused: true;
+      reason: "agent-missing" | "exec-failed" | "unexpected-marker";
+      stderr: string;
+    };
+
+type GatewaySupervisorRequest = (
+  sandboxName: string,
+  action: "restart" | "recover" | "probe",
+  timeout?: number,
+) => { status: number; stdout: string; stderr: string } | null;
+
+function printControllerStderr(stderr: string): void {
+  if (!stderr.trim()) return;
+  for (const line of stderr.split(/\r?\n/u)) {
+    if (line.trim()) console.error(`  ${line}`);
+  }
+}
+
+/** Revalidate a receipt-backed running gateway through its reviewed package controller. */
+export function enforceRunningGatewayRevalidation(
+  sandboxName: string,
+  agent: AgentDefinition | undefined,
+  requestGatewaySupervisorAction: GatewaySupervisorRequest,
+  required = true,
+): RunningGatewayRevalidation | null {
+  if (!required) return null;
+  if (!agent) {
+    console.error("");
+    console.error(`  ${R}Agent definition could not be loaded for sandbox '${sandboxName}'.${R}`);
+    console.error("  Refusing recovery because the package revalidation contract is unavailable.");
+    return { refused: true, reason: "agent-missing", stderr: "" };
+  }
+  const result = requestGatewaySupervisorAction(sandboxName, "recover");
+  if (!result) {
+    console.error("");
+    console.error(
+      `  ${R}Running gateway revalidation could not run in sandbox '${sandboxName}'.${R}`,
+    );
+    console.error("  Refusing recovery because the package controller could not be reached.");
+    return { refused: true, reason: "exec-failed", stderr: "" };
+  }
+  if (result.status === 0 && result.stdout.includes("GATEWAY_PID=")) {
+    return { refused: false };
+  }
+  printControllerStderr(result.stderr);
+  console.error("");
+  console.error(
+    `  ${R}Running gateway revalidation did not complete cleanly in sandbox '${sandboxName}'.${R}`,
+  );
+  console.error(
+    "  Refusing recovery; inspect the package controller output before re-running the recover command.",
+  );
+  return { refused: true, reason: "unexpected-marker", stderr: result.stderr };
+}
+
 type SandboxAgentRecord = {
   agent?: string | null;
   harnessPackage?: HarnessPackageIdentity | null;
@@ -354,7 +412,9 @@ export function restartSandboxGatewayWithDeps(
     restartResult?.status === 0 &&
     restartResult.stdout.split(/\r?\n/).some((line) => line.startsWith("GATEWAY_PID="));
   if (!hasRestartMarker) {
-    const failure = classifyGatewayRestartFailure(restartResult);
+    const failure = classifyGatewayRestartFailure(restartResult, {
+      allowLegacyHarnessMarkers: !receiptBacked,
+    });
     const gatewayLogTail = receiptBacked
       ? []
       : collectLegacyGatewayFailureLog(sandboxName, persistedAgent, deps.executeSandboxExecCommand);

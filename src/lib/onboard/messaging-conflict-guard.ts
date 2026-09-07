@@ -27,6 +27,8 @@ import {
   runMessagingHook,
 } from "../messaging/hooks";
 import type { MessagingChannelId, SandboxMessagingPlan } from "../messaging/manifest";
+import type { SandboxEntry } from "../state/registry";
+import { hydrateMessagingRegistryEntriesForAuthority } from "../state/registry/messaging-authority";
 
 export interface MessagingConflictGuardDeps {
   readonly sandboxName: string;
@@ -42,9 +44,7 @@ export interface MessagingConflictGuardDeps {
    */
   readonly currentSandboxDisabledChannels?: readonly string[];
   /** Registry facade: list/update sandboxes (state/registry satisfies this). */
-  readonly registry: ConflictRegistry & {
-    listSandboxes: () => { sandboxes: ConflictRegistryEntry[]; defaultSandbox?: string | null };
-  };
+  readonly registry: ConflictRegistry;
   readonly isNonInteractive: () => boolean;
   /** Interactive "Continue anyway?" prompt; resolves true to proceed. */
   readonly promptContinue: () => Promise<boolean>;
@@ -113,10 +113,31 @@ export async function enforceMessagingChannelConflicts(
         ],
       }
     : null;
+  if (!currentPlan) return;
+
+  let registrySnapshot: { sandboxes: SandboxEntry[]; defaultSandbox?: string | null } | undefined;
+  const resolveRegistrySnapshot = (check: string) => {
+    if (registrySnapshot) return registrySnapshot;
+    try {
+      const stored = registry.listSandboxes();
+      registrySnapshot = {
+        ...stored,
+        // Production passes the full registry rows through the narrower
+        // conflict facade; retain their receipt fields at this authority edge.
+        sandboxes: hydrateMessagingRegistryEntriesForAuthority(stored.sandboxes as SandboxEntry[]),
+      };
+      return registrySnapshot;
+    } catch (error) {
+      return abortIncompleteConflictCheck(deps, check, error);
+    }
+  };
+  const authorityRegistry: ConflictRegistry = {
+    listSandboxes: () => resolveRegistrySnapshot("messaging channel conflicts"),
+  };
 
   // Axis 1: credential-scoped conflict (#1953). Every active credential-bearing
   // channel must carry complete hashes so onboarding and rebuild fail closed.
-  if (currentPlan) {
+  {
     const incompleteChannels = findChannelsWithIncompleteCredentialHashes(currentPlan);
     if (incompleteChannels.length > 0) {
       deps.error(
@@ -130,7 +151,7 @@ export async function enforceMessagingChannelConflicts(
 
     let conflicts: ReturnType<typeof findChannelConflictsFromPlan>;
     try {
-      conflicts = findChannelConflictsFromPlan(sandboxName, currentPlan, registry);
+      conflicts = findChannelConflictsFromPlan(sandboxName, currentPlan, authorityRegistry);
     } catch (error) {
       abortIncompleteConflictCheck(deps, "messaging channel conflicts", error);
     }
@@ -153,25 +174,23 @@ export async function enforceMessagingChannelConflicts(
   // Axis 2: channel-owned pre-enable checks. These may run even when credential
   // hashes are unavailable because a channel may have a non-credential conflict
   // axis.
-  if (currentPlan) {
-    await enforceMessagingPreEnableHooks(deps, currentPlan);
-  }
+  await enforceMessagingPreEnableHooks(
+    deps,
+    currentPlan,
+    () => resolveRegistrySnapshot("messaging pre-enable checks").sandboxes,
+  );
 }
 
 async function enforceMessagingPreEnableHooks(
   deps: MessagingConflictGuardDeps,
   currentPlan: SandboxMessagingPlan,
+  loadRegistryEntries: () => readonly ConflictRegistryEntry[],
 ): Promise<void> {
   const requests = MessagingSetupApplier.listPreEnableChecks(currentPlan);
   if (requests.length === 0) return;
 
   const hookRegistry = createBuiltInMessagingHookRegistry();
-  let registryEntries: ConflictRegistryEntry[];
-  try {
-    registryEntries = deps.registry.listSandboxes().sandboxes;
-  } catch (error) {
-    abortIncompleteConflictCheck(deps, "messaging pre-enable checks", error);
-  }
+  const registryEntries = loadRegistryEntries();
   const additionalInputs = createMessagingPreEnableHookInputs({
     currentSandbox: deps.sandboxName,
     currentGatewayName: deps.gatewayName,
@@ -189,6 +208,7 @@ async function enforceMessagingPreEnableHooks(
             handler: request.handler,
             inputs: request.inputKeys,
             outputs: request.outputs,
+            packageOperation: request.packageOperation,
             onFailure: request.onFailure,
           },
           hookRegistry,

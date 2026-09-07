@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentDefinition } from "../../agent/defs";
 import { MessagingSetupApplier } from "../../messaging/applier/setup-applier";
 import type { SandboxMessagingPlan } from "../../messaging/manifest";
+import type { SandboxMessagingProfileAuthority } from "../../messaging/profile-authority";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { SandboxEntry } from "../../state/registry";
 import { stageRebuildMessagingPlanOrBail } from "./rebuild-messaging-phase";
@@ -49,6 +50,61 @@ const OPENCLAW_AUTHORITY = {
   harnessPackage: OPENCLAW_PACKAGE,
   harnessPackageMigration: null,
 } satisfies ResolvedSandboxAgent;
+
+const receiptTelegramPlan = {
+  ...emptyStoredMessagingPlan,
+  channels: [
+    {
+      channelId: "telegram",
+      displayName: "Telegram",
+      authMode: "token-paste",
+      active: true,
+      selected: true,
+      configured: true,
+      disabled: false,
+      inputs: [{ inputId: "botToken", credentialAvailable: true }],
+      hooks: [],
+    },
+  ],
+  packageBuild: {
+    configRoot: "~/.source-openclaw",
+    packageManagers: [],
+  },
+} as unknown as SandboxMessagingPlan;
+
+function exactReceiptMessagingProfile(): SandboxMessagingProfileAuthority {
+  return {
+    agent: OPENCLAW_AUTHORITY.definition,
+    packageAuthority: OPENCLAW_AUTHORITY,
+    integration: {
+      kind: "channels",
+      packageId: "openclaw",
+      build: {
+        configRoot: "~/.receipt-openclaw",
+        packageManagers: [],
+      },
+      channels: [
+        {
+          channelId: "telegram",
+          config: {
+            visibility: [],
+            renders: [
+              {
+                id: "receipt-telegram-render",
+                kind: "json-fragment",
+                target: "~/.receipt-openclaw/receipt.json",
+                path: "channels.telegram",
+                value: { enabled: true },
+              },
+            ],
+          },
+          policy: [],
+          lifecycle: { hookIds: [] },
+        },
+      ],
+    },
+  };
+}
 
 describe("stageMessagingManifestPlanForRebuild non-messaging agent guard", () => {
   afterEach(() => {
@@ -152,6 +208,92 @@ describe("stageMessagingManifestPlanForRebuild non-messaging agent guard", () =>
     expect(writePlanEnvSpy).toHaveBeenCalledTimes(1);
     expect(messages).toContain("Messaging manifest rebuild plan staged: telegram");
     expect(result).not.toBeNull();
+  });
+
+  it("uses same-ID receipt profile content instead of source catalogue content", async () => {
+    const writePlanEnvSpy = vi
+      .spyOn(MessagingSetupApplier, "writePlanToEnv")
+      .mockImplementation(() => undefined);
+    const resolveProfile = vi.fn(() => exactReceiptMessagingProfile());
+
+    const result = await stageMessagingManifestPlanForRebuild(
+      "openclaw-sandbox",
+      {
+        name: "openclaw-sandbox",
+        agent: null,
+        harnessPackage: OPENCLAW_PACKAGE,
+        messaging: { schemaVersion: 1, plan: receiptTelegramPlan },
+      },
+      OPENCLAW_AUTHORITY.definition,
+      vi.fn(),
+      {
+        agentAuthority: OPENCLAW_AUTHORITY,
+        resolveMessagingProfileAuthority: resolveProfile,
+      },
+    );
+
+    expect(resolveProfile).toHaveBeenCalledWith(OPENCLAW_AUTHORITY);
+    expect(result?.packageBuild?.configRoot).toBe("~/.receipt-openclaw");
+    expect(result?.agentRender).toContainEqual(
+      expect.objectContaining({
+        renderId: "receipt-telegram-render",
+        target: "~/.receipt-openclaw/receipt.json",
+      }),
+    );
+    expect(result?.agentRender.some((render) => render.target.includes("~/.openclaw/"))).toBe(
+      false,
+    );
+    expect(writePlanEnvSpy).toHaveBeenCalledWith(result);
+  });
+
+  it("fails closed when a receipt-backed staging caller omits package authority", async () => {
+    const writePlanEnvSpy = vi.spyOn(MessagingSetupApplier, "writePlanToEnv");
+
+    await expect(
+      stageMessagingManifestPlanForRebuild(
+        "openclaw-sandbox",
+        {
+          name: "openclaw-sandbox",
+          agent: null,
+          harnessPackage: OPENCLAW_PACKAGE,
+          messaging: { schemaVersion: 1, plan: receiptTelegramPlan },
+        },
+        OPENCLAW_AUTHORITY.definition,
+        vi.fn(),
+      ),
+    ).rejects.toThrow("Receipt-backed messaging rebuild requires exact pinned package authority");
+    expect(writePlanEnvSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the resolved messaging profile mismatches package authority", async () => {
+    const mismatchedAuthority = {
+      ...OPENCLAW_AUTHORITY,
+      harnessPackage: { ...OPENCLAW_PACKAGE, packageVersion: "2.0.0" },
+    } satisfies ResolvedSandboxAgent;
+    const mismatchedProfile = {
+      ...exactReceiptMessagingProfile(),
+      packageAuthority: mismatchedAuthority,
+    } satisfies SandboxMessagingProfileAuthority;
+    const writePlanEnvSpy = vi.spyOn(MessagingSetupApplier, "writePlanToEnv");
+
+    await expect(
+      stageMessagingManifestPlanForRebuild(
+        "openclaw-sandbox",
+        {
+          name: "openclaw-sandbox",
+          agent: null,
+          harnessPackage: OPENCLAW_PACKAGE,
+          messaging: { schemaVersion: 1, plan: receiptTelegramPlan },
+        },
+        OPENCLAW_AUTHORITY.definition,
+        vi.fn(),
+        {
+          agentAuthority: OPENCLAW_AUTHORITY,
+          resolveMessagingProfileAuthority: () => mismatchedProfile,
+        },
+      ),
+    ).rejects.toThrow("Receipt-backed messaging profile does not match pinned package authority");
+    expect(writePlanEnvSpy).not.toHaveBeenCalled();
   });
 });
 

@@ -12,7 +12,6 @@ import {
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
 import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
-import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-target.mts";
 import { DEFAULT_HOSTED_INFERENCE_BASE_URL } from "../fixtures/hosted-inference.ts";
 import { inferenceResponseModel } from "../fixtures/inference-switch-retry.ts";
 import {
@@ -60,10 +59,8 @@ import {
   registerPublicNvidiaSwitchProvider,
   requirePublicNvidiaSwitchKey,
 } from "./public-nvidia-switch-provider.ts";
-import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const TIMEOUT_MS = testTimeout(45 * 60_000);
-const HERMES_FABRIC_CONTRACT = readBundledFabricHarnessE2eFixture("hermes");
 const MOCK_BASELINE_API_KEY = "hermes-inference-switch-baseline-credential";
 const MOCK_BASELINE_MODEL = "hermes-inference-switch-baseline-model";
 const HERMES_DASHBOARD_INTERNAL_PORT =
@@ -272,32 +269,6 @@ test(
     expect((await apiKeyShape(sandbox, home)).exitCode).toBe(0);
     expect(config.stdout).not.toMatch(/^models:\s*$/mu);
 
-    const fabricConfig = await sandbox.exec(SANDBOX_NAME, ["cat", "/sandbox/.hermes/fabric.json"], {
-      artifactName: "hermes-fabric-config-after-switch",
-      env: commandEnv(),
-      redactionValues,
-      timeoutMs: 30_000,
-    });
-    expect(fabricConfig.exitCode, resultText(fabricConfig)).toBe(0);
-    const fabricModel = (
-      JSON.parse(fabricConfig.stdout) as {
-        models?: {
-          default?: {
-            api_key_env?: unknown;
-            base_url?: unknown;
-            model?: unknown;
-            provider?: unknown;
-          };
-        };
-      }
-    ).models?.default;
-    expect(fabricModel).toEqual({
-      api_key_env: "HERMES_FABRIC_API_KEY",
-      base_url: expectedBaseUrl(),
-      model: SWITCH_MODEL,
-      provider: "custom",
-    });
-
     const dashboardConfig = await sandbox.exec(
       SANDBOX_NAME,
       ["cat", "/sandbox/.hermes/profiles/dashboard-home/config.yaml"],
@@ -442,18 +413,6 @@ test(
     expect(chat.exitCode, resultText(chat)).toBe(0);
     expect(chatContent(chat.stdout)).toMatch(/PONG/i);
     expect(inferenceResponseModel(chat.stdout)).toBe(SWITCH_MODEL);
-
-    await runPublicFabricTurn({
-      artifacts,
-      contract: HERMES_FABRIC_CONTRACT,
-      env: commandEnv(),
-      host,
-      lifecyclePhase: "after-inference-switch",
-      redactionValues,
-      sandbox,
-      sandboxName: SANDBOX_NAME,
-      scanPrivateState: false,
-    });
 
     progress.phase("run Hermes CLI adapter forms against switched provider");
     const hermesCli = await runHermesCliPongWithRetry({

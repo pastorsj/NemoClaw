@@ -5,10 +5,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SandboxEntry } from "../../state/registry";
-import {
-  assertUnambiguousDestroyContainerIdentity,
-  cleanupSandboxServices,
-} from "./destroy";
+import { assertUnambiguousDestroyContainerIdentity, cleanupSandboxServices } from "./destroy";
 
 const SANDBOX = "mybox";
 const mainPidDir = path.resolve("/tmp", `nemoclaw-services-${SANDBOX}`);
@@ -72,6 +69,38 @@ describe("cleanupSandboxServices Google Chat tunnel cleanup (#7317)", () => {
     );
 
     expect(rmSync).toHaveBeenCalledWith(googlechatPidDir, { recursive: true, force: true });
+  });
+
+  it("fails before registry retirement when legacy provider cleanup does not converge", () => {
+    const deleteProvider = vi.fn(() => ({
+      ok: false,
+      status: 1,
+      stderr: "gateway timeout",
+      stdout: "",
+      recoveryFailures: [],
+    }));
+
+    expect(() =>
+      cleanupSandboxServices(
+        SANDBOX,
+        { stopHostServices: false },
+        {
+          deleteProvider,
+          getSandbox: vi.fn(() => null),
+          listSandboxes: vi.fn(() => ({ sandboxes: [], defaultSandbox: null })),
+          rmSync: vi.fn(),
+          runOpenshell: vi.fn(() => ({ status: 0 })),
+          stopGooglechatWebhookTunnel: vi.fn(() => googlechatPidDir),
+          googlechatWebhookTunnelPidDir: vi.fn(() => googlechatPidDir),
+          withOllamaModelOwnershipLock: (operation) => operation(),
+        },
+      ),
+    ).toThrow(/provider 'mybox-.+' cleanup did not converge/u);
+
+    expect(deleteProvider).toHaveBeenCalledWith(
+      expect.stringMatching(/^mybox-/u),
+      expect.objectContaining({ allowedSandboxes: [SANDBOX] }),
+    );
   });
 });
 

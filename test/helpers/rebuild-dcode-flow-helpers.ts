@@ -4,7 +4,22 @@
 import { expect } from "vitest";
 
 import { expectNoSandboxDelete } from "./rebuild-delete-assertions";
-import type { RebuildFlowHarness } from "./rebuild-flow-generic-harness";
+import {
+  createRebuildFlowHarness,
+  type RebuildFlowHarness,
+  type RebuildFlowOverrides,
+} from "./rebuild-flow-generic-harness";
+
+/** Build the explicit no-receipt fixture for the retained DCode compatibility path. */
+export function createLegacyDcodeRebuildHarness(
+  overrides: RebuildFlowOverrides = {},
+): RebuildFlowHarness {
+  return createRebuildFlowHarness({
+    ...overrides,
+    agentName: "langchain-deepagents-code",
+    legacyNoReceiptAgentAuthority: true,
+  });
+}
 
 export function makeDcodeSandboxEntry(): Record<string, unknown> {
   return {

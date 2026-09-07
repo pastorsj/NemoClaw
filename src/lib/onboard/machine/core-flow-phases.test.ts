@@ -966,6 +966,7 @@ describe("core onboard flow phases", () => {
           harnessPackage: null,
           harnessPackageMigration: null,
         },
+        providerAuthMethod: null,
       },
     );
     expect(result.context.hermesToolGateways).toEqual(["nous-web"]);

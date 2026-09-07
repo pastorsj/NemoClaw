@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SandboxHostMount } from "../state/registry/types";
+import type { AgentDefinition } from "../agent/defs";
 import type { HarnessSandboxTmpfsMountDeclaration } from "../agent-runtime/manifest-types";
 import type { MessagingChannelConfig } from "../messaging-channel-config";
 import type { DockerGpuRoutePlan } from "./docker-gpu-route";
@@ -31,6 +32,7 @@ export type SandboxCreatePolicyRequest = {
     readonly additionalPresets: readonly string[];
     readonly hostLocalInferenceRouteOnly?: true;
     readonly agentName?: string | null;
+    readonly observabilityEnabled?: boolean;
     readonly policyTier: string | null;
   };
 };
@@ -53,6 +55,9 @@ export type SandboxCreateIntent = {
   readonly reusableMessagingProviders: readonly string[];
   readonly extraProviders: readonly string[];
   readonly staleExtraProviders: readonly string[];
+  /** Receipt-backed package managed-tool IDs. */
+  readonly toolGatewaySelections?: readonly string[];
+  /** No-receipt Hermes compatibility selections. */
   readonly hermesToolGateways: readonly string[];
   readonly policy: SandboxCreatePolicyRequest;
   readonly sandboxGpuDevice?: string | null;
@@ -80,6 +85,7 @@ export type ResolveSandboxCreateIntentInput = {
   reusableMessagingProviders: readonly string[];
   extraProviders?: readonly string[];
   staleExtraProviders?: readonly string[];
+  toolGatewaySelections?: readonly string[];
   hermesToolGateways: readonly string[];
   sandboxGpuConfig: SandboxGpuCreateConfig;
   gpuCreateArgs: readonly string[];
@@ -90,11 +96,14 @@ export type ResolveSandboxCreateIntentInput = {
   sandboxGpuLogMessage: string | null;
   extraPlaceholderKeys?: readonly string[];
   agentName?: string | null;
+  observabilityEnabled?: boolean;
   policyTier?: string | null;
 };
 
 export type MaterializeSandboxCreatePlanInput = {
   intent: SandboxCreateIntent;
+  /** Exact receipt-pinned definition used only for package-owned policy assets. */
+  packageAgentDefinition?: AgentDefinition;
   fromRef: string;
   managedStateMounts?: readonly ManagedStateVolumeMount[];
   /** Opaque provider-owned OpenShell driver-config key for the managed state mount. */

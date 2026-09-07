@@ -505,7 +505,14 @@ function collectRegisteredSandboxChecks(
     cliName: CLI_NAME,
   });
   if (permsCheck) checks.push(permsCheck);
-  checks.push(...collectMessagingDoctorChecks(sandboxName, sb, sandboxReachable));
+  checks.push(
+    ...collectMessagingDoctorChecks(
+      sandboxName,
+      sb,
+      sandboxReachable,
+      agentAuthority.kind === "resolved" ? agentAuthority.definition : null,
+    ),
+  );
   return checks;
 }
 

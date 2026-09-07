@@ -487,7 +487,7 @@ describe("sandbox directory backup semantics", () => {
     expect(fs.existsSync(path.join(BACKUPS_ROOT, "alpha"))).toBe(false);
   });
 
-  it("rejects a custom OpenClaw backup with missing image-plugin provenance (#6108)", () => {
+  it("rejects a custom image backup with missing managed-extension provenance (#6108)", () => {
     writeOpenClawRegistry("custom-openclaw", {
       fromDockerfile: "/tmp/Dockerfile.custom",
     });
@@ -496,7 +496,9 @@ describe("sandbox directory backup semantics", () => {
 
     expect(backup.success).toBe(false);
     expect(backup.manifest).toBeUndefined();
-    expect(backup.error).toBe("registered OpenClaw image plugin provenance is missing or invalid");
+    expect(backup.error).toBe(
+      "registered managed image extension provenance is missing or invalid",
+    );
     expect(fs.existsSync(path.join(BACKUPS_ROOT, "custom-openclaw"))).toBe(false);
   });
 
@@ -541,7 +543,7 @@ describe("sandbox directory backup semantics", () => {
 
       writeOpenClawRegistry("alpha", {
         fromDockerfile: "/tmp/Dockerfile.custom",
-        openclawImagePluginInstalls: [],
+        managedImageExtensions: [],
       });
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.TMPDIR = stagingRoot;
@@ -555,14 +557,19 @@ describe("sandbox directory backup semantics", () => {
       expect(backup.manifest?.backupContentSha256).toMatch(/^[0-9a-f]{64}$/u);
       expect(backup.manifest?.backedUpDirs).toEqual(existingDirs);
       expect(backup.manifest?.stateDirs.at(-1)).toBe("workspace-research");
-      expect(backup.manifest?.reconcileOpenClawImagePluginProvenance).toBe(true);
-      expect(backup.manifest?.openclawImagePluginInstalls).toEqual([]);
+      expect(backup.manifest?.reconcileManagedImageExtensions).toBe(true);
+      expect(backup.manifest?.managedImageExtensions).toEqual([]);
       const discoveryCommand = fs
         .readFileSync(sshLog, "utf-8")
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line).cmd as string)
-        .find((command) => command.includes("[ -d "));
+        .find(
+          (command) =>
+            command.startsWith("{ [ -d ") ||
+            command.startsWith("{ for d ") ||
+            command.startsWith("[ -d "),
+        );
       expect(discoveryCommand).toContain("'/sandbox/.openclaw/workspace-'*/");
       expect(fs.readdirSync(stagingRoot)).toEqual([]);
 
@@ -635,7 +642,11 @@ describe("sandbox directory backup semantics", () => {
         path.join(binDir, "ssh"),
         `#!/usr/bin/env node
 const cmd = process.argv[process.argv.length - 1] || "";
-if (cmd.includes("[ -d ")) process.stdout.write("workspace\\n");
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) process.stdout.write("workspace\\n");
 if (cmd.includes("openclaw.json") && cmd.includes("cat --")) process.exit(2);
 process.exit(0);
 `,
@@ -700,7 +711,11 @@ function readStdin() {
     if (n === 0) break;
   }
 }
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.stdout.write(existingDirs.join("\\n") + "\\n");
   process.exit(0);
 }
@@ -801,7 +816,11 @@ const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.stdout.write(existingDirs.join("\\n") + "\\n");
   process.exit(0);
 }
@@ -865,7 +884,11 @@ const { spawnSync } = require("node:child_process");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 const openclawDir = ${JSON.stringify(openclawDir)};
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.stdout.write(existingDirs.join("\\n") + "\\n");
   process.exit(0);
 }
@@ -923,7 +946,11 @@ process.exit(0);
         `#!/usr/bin/env node
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.stdout.write(existingDirs.join("\\n") + "\\n");
   process.exit(0);
 }
@@ -976,7 +1003,11 @@ process.exit(0);
         `#!/usr/bin/env node
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.stdout.write(existingDirs.join("\\n") + "\\n");
   process.exit(0);
 }
@@ -1032,7 +1063,11 @@ process.exit(0);
           `#!/usr/bin/env node
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.stdout.write(existingDirs.join("\\n") + "\\n");
   process.exit(0);
 }
@@ -1085,7 +1120,11 @@ const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.stdout.write(existingDirs.join("\\n") + "\\n");
   process.exit(0);
 }
@@ -1152,7 +1191,11 @@ const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.stdout.write(existingDirs.join("\\n") + "\\n");
   process.exit(0);
 }
@@ -1229,7 +1272,11 @@ process.exit(0);
         `#!/usr/bin/env node
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.stdout.write(existingDirs.join("\\n") + "\\n");
   process.exit(0);
 }
@@ -1339,7 +1386,11 @@ if (cmd.includes("config.toml") && cmd.includes("cat --")) {
 if (cmd.includes(".env") || cmd.includes(".mcp.json")) {
   process.exit(99);
 }
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   process.stdout.write(".state\\nskills\\nagent/skills\\n");
   process.exit(0);
 }

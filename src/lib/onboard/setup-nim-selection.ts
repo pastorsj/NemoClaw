@@ -23,6 +23,15 @@ export {
 
 export type SetupNimSelectionBackNavigation = Readonly<{ kind: "NEMOCLAW_BACK_TO_SELECTION" }>;
 
+/** Return a recovered model only when onboarding is restoring sandbox state. */
+export function readRequestedOrRecoveredModel(
+  requestedModel: string | null,
+  recoveredFromSandbox: boolean,
+  recoveredModel: string | null,
+): string | null {
+  return requestedModel || (recoveredFromSandbox ? recoveredModel : null);
+}
+
 /** Defaults passed into Ollama model selection and runtime context adoption. */
 export type OllamaModelSelectionDefaults = {
   requestedModel: string | null;
@@ -40,6 +49,11 @@ export type SetupNimSelectionState<THermesAuthMethod = unknown> = {
   endpointUrl: string | null;
   credentialEnv: string | null;
   hermesAuthMethod: THermesAuthMethod | null;
+  /** Receipt-backed package authentication choice; legacy rows use hermesAuthMethod. */
+  providerAuthMethod?: string | null;
+  /** Receipt-backed package managed-tool choices. */
+  toolGatewaySelections?: string[];
+  /** No-receipt Hermes compatibility choices. */
   hermesToolGateways: string[];
   preferredInferenceApi: string | null;
   compatibleEndpointReasoning?: string | null;

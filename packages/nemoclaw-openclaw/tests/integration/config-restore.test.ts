@@ -33,10 +33,15 @@ function installOpenClawRestorePackage() {
     path.join(PACKAGE_ROOT, "manifest.yaml"),
     path.join(packageRoot, "manifest.yaml"),
   );
-  fs.copyFileSync(
-    path.join(PACKAGE_ROOT, "host", "restore-adapter.cts"),
-    path.join(packageRoot, "host", "restore-adapter.cts"),
-  );
+  for (const entry of fs.readdirSync(path.join(PACKAGE_ROOT, "host"), {
+    withFileTypes: true,
+  })) {
+    if (!entry.isFile() || !entry.name.endsWith(".cts")) continue;
+    fs.copyFileSync(
+      path.join(PACKAGE_ROOT, "host", entry.name),
+      path.join(packageRoot, "host", entry.name),
+    );
+  }
   fs.writeFileSync(
     path.join(sourceRoot, "nemoclaw-package.json"),
     `${JSON.stringify({

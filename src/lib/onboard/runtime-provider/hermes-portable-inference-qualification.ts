@@ -20,7 +20,8 @@ export function assertHermesPortableInferenceSandbox(input: {
 }
 
 export function assertHermesPortableInferenceStartupRequest(input: {
-  readonly application: string;
+  /** A receipt object cannot enter this exact no-receipt product lane. */
+  readonly application: unknown;
   readonly service: string;
   readonly hostOllama: boolean;
   readonly hasResumeReceipt: boolean;

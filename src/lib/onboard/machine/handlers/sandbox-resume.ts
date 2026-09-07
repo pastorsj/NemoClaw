@@ -29,6 +29,8 @@ export interface SandboxResumeSignals {
   readonly messagingCredentialChanged: boolean;
   readonly hermesToolGatewayConfigChanged: boolean;
   readonly observabilityChanged?: boolean;
+  readonly approvalModeChanged?: boolean;
+  /** Legacy no-receipt Deep Agents Code drift signal. */
   readonly dcodeAutoApprovalChanged?: boolean;
   readonly toolDisclosureMigrationNeeded: boolean;
   readonly toolDisclosureChanged: boolean;
@@ -42,21 +44,23 @@ export function hasHostMountConfigDrift(left: unknown, right: unknown): boolean 
 
 interface InferenceRouteResumeInput {
   readonly agentName: string | null | undefined;
+  readonly receiptBackedPackage: boolean;
   readonly provider: string | null | undefined;
   readonly model: string | null | undefined;
   readonly preferredInferenceApi: string | null;
   readonly registryEntry: SandboxEntry | null;
 }
 
-export function hasHermesCompatibleAnthropicInferenceRouteDrift({
+export function hasCompatibleEndpointInferenceApiDrift({
   agentName,
+  receiptBackedPackage,
   provider,
   model,
   preferredInferenceApi,
   registryEntry,
 }: InferenceRouteResumeInput): boolean {
   if (
-    agentName !== "hermes" ||
+    (!receiptBackedPackage && agentName !== "hermes") ||
     provider !== "compatible-anthropic-endpoint" ||
     preferredInferenceApi !== "openai-completions" ||
     !model
@@ -177,6 +181,7 @@ function canReuseSandbox(signals: SandboxResumeSignals): boolean {
     !signals.messagingCredentialChanged &&
     !signals.hermesToolGatewayConfigChanged &&
     !signals.observabilityChanged &&
+    !signals.approvalModeChanged &&
     !signals.dcodeAutoApprovalChanged &&
     !signals.toolDisclosureMigrationNeeded &&
     !signals.toolDisclosureChanged &&
@@ -230,7 +235,7 @@ function compatibilityResumeDecision(signals: SandboxResumeSignals): SandboxResu
   if (signals.inferenceRouteConfigChanged) {
     return {
       kind: "recreate",
-      note: "  [resume] Hermes inference route configuration changed; recreating sandbox.",
+      note: "  [resume] Inference route API configuration changed; recreating sandbox.",
       // Preserve registry-only fidelity until createSandbox captures it for
       // the guarded recreate path.
       removeRegistryEntry: false,
@@ -239,7 +244,7 @@ function compatibilityResumeDecision(signals: SandboxResumeSignals): SandboxResu
   return null;
 }
 
-function runtimeConfigurationResumeDecision(
+function sandboxHostConfigurationResumeDecision(
   signals: SandboxResumeSignals,
 ): SandboxResumeDecision | null {
   if (signals.recreateSandboxRequested) {
@@ -270,6 +275,12 @@ function runtimeConfigurationResumeDecision(
       removeRegistryEntry: false,
     };
   }
+  return null;
+}
+
+function sandboxServiceConfigurationResumeDecision(
+  signals: SandboxResumeSignals,
+): SandboxResumeDecision | null {
   if (signals.messagingChannelConfigChanged) {
     return {
       kind: "recreate",
@@ -299,6 +310,14 @@ function runtimeConfigurationResumeDecision(
       removeRegistryEntry: false,
     };
   }
+  if (signals.approvalModeChanged && signals.sandboxReuseState !== "not_ready") {
+    return {
+      kind: "recreate",
+      note: "  [resume] Approval-mode configuration changed; recreating sandbox.",
+      // Preserve registry-only fidelity until createSandbox captures it.
+      removeRegistryEntry: false,
+    };
+  }
   if (signals.dcodeAutoApprovalChanged && signals.sandboxReuseState !== "not_ready") {
     return {
       kind: "recreate",
@@ -308,6 +327,15 @@ function runtimeConfigurationResumeDecision(
     };
   }
   return null;
+}
+
+function runtimeConfigurationResumeDecision(
+  signals: SandboxResumeSignals,
+): SandboxResumeDecision | null {
+  return (
+    sandboxHostConfigurationResumeDecision(signals) ??
+    sandboxServiceConfigurationResumeDecision(signals)
+  );
 }
 
 function continuesJournaledRecreate(signals: SandboxResumeSignals): boolean {

@@ -14,6 +14,11 @@ import type {
 } from "../../messaging/applier/types";
 import type { MessagingHookOutputMap } from "../../messaging/hooks";
 import type { SandboxMessagingPlan } from "../../messaging/manifest";
+import { createBuiltInChannelManifestRegistry } from "../../messaging/channels/built-ins";
+import {
+  listMessagingChannelsForProfile,
+  resolveAgentMessagingProfileAuthority,
+} from "../../messaging/profile-authority";
 import { retirePendingRemovalMessagingPlanChannels } from "../../messaging/compiler/workflow-planner";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { SandboxEntry } from "../../state/registry";
@@ -22,6 +27,13 @@ import { checkPinnedAgentAuthority } from "./rebuild/authority";
 import { stageMessagingManifestPlanForRebuild } from "./rebuild-messaging-stage";
 
 export { stageMessagingManifestPlanForRebuild };
+
+export function listRebuildMessagingManifests(authority: ResolvedSandboxAgent) {
+  return listMessagingChannelsForProfile(
+    resolveAgentMessagingProfileAuthority(authority),
+    createBuiltInChannelManifestRegistry(),
+  );
+}
 
 function assertPinnedMessagingAgentAuthority(
   sandboxEntry: SandboxEntry,
@@ -47,6 +59,7 @@ export async function stageRebuildMessagingPlanOrBail(
       sandboxEntry,
       agentAuthority.definition,
       log,
+      { agentAuthority },
     );
   } catch (err) {
     // Source boundary: persisted registry messaging plans and current channel

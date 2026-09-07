@@ -1274,6 +1274,33 @@ describe("Teams host-forward lifecycle (PRA-2)", () => {
     return plan?.channels?.find((channel) => channel.channelId === "teams")?.hostForward;
   }
 
+  it("fails closed before hooks or mutation when another Teams row has unavailable receipt authority", async () => {
+    setTeamsEnv();
+    const unavailable = makeTeamsEntry("beta", { port: "3978" });
+    unavailable.harnessPackage = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "9.9.9",
+      contentDigest: "a".repeat(64),
+    };
+    unavailable.messaging = {
+      schemaVersion: 1,
+      plan: {
+        ...unavailable.messaging!.plan,
+        packageBuild: { configRoot: "/sandbox/.missing-openclaw", packageManagers: [] },
+        credentialBindings: [],
+      },
+    };
+    arrangeRegistry({ current: makeEmptyEntry("alpha"), others: [unavailable] });
+
+    await expect(
+      addSandboxChannel("alpha", { channel: "teams", force: true }),
+    ).rejects.toThrow(/package|integrity/u);
+    expect(upsertMock).not.toHaveBeenCalled();
+    expect(updateSandboxMock).not.toHaveBeenCalled();
+    expect(rebuildSandboxMock).not.toHaveBeenCalled();
+  });
+
   it("channels add teams starts the MSTEAMS_PORT host forward after rebuild-now completes", async () => {
     setTeamsEnv();
     arrangeRegistry({ current: makeEmptyEntry("alpha") });
@@ -1284,6 +1311,8 @@ describe("Teams host-forward lifecycle (PRA-2)", () => {
     expect(ensureMessagingHostForwardAfterRebuildMock).toHaveBeenCalledWith(
       "alpha",
       expect.any(Object),
+      undefined,
+      expect.any(Array),
     );
     expect(ensureMessagingHostForwardAfterRebuildMock.mock.invocationCallOrder[0]).toBeGreaterThan(
       rebuildSandboxMock.mock.invocationCallOrder[0],
@@ -1306,6 +1335,8 @@ describe("Teams host-forward lifecycle (PRA-2)", () => {
     expect(ensureMessagingHostForwardAfterRebuildMock).toHaveBeenCalledWith(
       "alpha",
       expect.any(Object),
+      undefined,
+      expect.any(Array),
     );
     expect(ensureMessagingHostForwardAfterRebuildMock.mock.invocationCallOrder[0]).toBeGreaterThan(
       rebuildSandboxMock.mock.invocationCallOrder[0],

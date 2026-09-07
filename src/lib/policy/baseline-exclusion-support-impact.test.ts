@@ -28,13 +28,13 @@ const BASELINES = [
 
 describe("baseline exclusion supported-feature disclosure (#7178)", () => {
   it("names the affected Hermes feature for nous_research", () => {
-    expect(getBaselineExclusionFeatureImpact("hermes", "nous_research")).toBe(
+    expect(getBaselineExclusionFeatureImpact({ agent: "hermes" }, "nous_research")).toBe(
       "Hermes public metadata lookup and agent updates may stop working.",
     );
   });
 
   it("names a different affected feature for another baseline entry", () => {
-    expect(getBaselineExclusionFeatureImpact("openclaw", "npm_registry")).toBe(
+    expect(getBaselineExclusionFeatureImpact({ agent: "openclaw" }, "npm_registry")).toBe(
       "OpenClaw plugin installation from npm may stop working.",
     );
   });
@@ -48,11 +48,47 @@ describe("baseline exclusion supported-feature disclosure (#7178)", () => {
       );
 
       expect(excludableKeys).not.toHaveLength(0);
-      expect(excludableKeys.every((key) => !(getBaselineExclusionFeatureImpact(agent, key) === null))).toBe(true);
+      expect(
+        excludableKeys.every((key) => getBaselineExclusionFeatureImpact({ agent }, key) !== null),
+      ).toBe(true);
     },
   );
 
   it("returns no disclosure for an unreviewed baseline entry", () => {
-    expect(getBaselineExclusionFeatureImpact("hermes", "future_entry")).toBeNull();
+    expect(getBaselineExclusionFeatureImpact({ agent: "hermes" }, "future_entry")).toBeNull();
+  });
+
+  it("uses receipt policy metadata without recognizing the harness identifier", () => {
+    expect(
+      getBaselineExclusionFeatureImpact(
+        {
+          agent: "future-harness",
+          policyCapability: {
+            owned_presets: [],
+            automatic_presets: [],
+            baseline_exclusion_impacts: {
+              future_entry: "A future harness feature may stop working.",
+            },
+          },
+        },
+        "future_entry",
+      ),
+    ).toBe("A future harness feature may stop working.");
+  });
+
+  it("does not fall back to legacy metadata for a receipt-backed package", () => {
+    expect(
+      getBaselineExclusionFeatureImpact(
+        {
+          agent: "openclaw",
+          policyCapability: {
+            owned_presets: [],
+            automatic_presets: [],
+            baseline_exclusion_impacts: {},
+          },
+        },
+        "npm_registry",
+      ),
+    ).toBeNull();
   });
 });

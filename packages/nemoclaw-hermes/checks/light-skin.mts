@@ -5,11 +5,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const { NEMOCLAW_HERMES_LIGHT_SKIN_REVIEWED_HERMES_VERSIONS } =
-  await import("../../../src/lib/domain/sandbox/connect-env");
+const HERMES_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const HERMES_DOCKERFILE_BASE = "Dockerfile.base";
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const HERMES_DOCKERFILE_BASE = "packages/nemoclaw-hermes/Dockerfile.base";
+/** Hermes releases for which this package's light-terminal compatibility shim was reviewed. */
+export const HERMES_LIGHT_SKIN_REVIEWED_VERSIONS = [
+  "v2026.6.19",
+  "v2026.7.1",
+  "v2026.8.27",
+] as const;
 
 export function checkHermesLightSkinBoundary(options: {
   dockerfileText: string;
@@ -23,7 +27,7 @@ export function checkHermesLightSkinBoundary(options: {
   if (!reviewedVersions.includes(pinnedVersion)) {
     return [
       "Hermes light terminal compatibility skin needs re-review.",
-      `${HERMES_DOCKERFILE_BASE} pins ${pinnedVersion}, but connect-env.ts was reviewed for ${reviewedVersions.join(", ")}.`,
+      `${HERMES_DOCKERFILE_BASE} pins ${pinnedVersion}, but the package compatibility check was reviewed for ${reviewedVersions.join(", ")}.`,
       "Remove the NemoClaw-managed light skin if upstream Hermes is readable in light terminals, or update the reviewed version constant after validating it still needs the shim.",
     ].join(" ");
   }
@@ -31,10 +35,13 @@ export function checkHermesLightSkinBoundary(options: {
 }
 
 function main(): void {
-  const dockerfileText = fs.readFileSync(path.join(REPO_ROOT, HERMES_DOCKERFILE_BASE), "utf8");
+  const dockerfileText = fs.readFileSync(
+    path.join(HERMES_PACKAGE_ROOT, HERMES_DOCKERFILE_BASE),
+    "utf8",
+  );
   const error = checkHermesLightSkinBoundary({
     dockerfileText,
-    reviewedVersions: NEMOCLAW_HERMES_LIGHT_SKIN_REVIEWED_HERMES_VERSIONS,
+    reviewedVersions: HERMES_LIGHT_SKIN_REVIEWED_VERSIONS,
   });
   if (error) throw new Error(error);
 }

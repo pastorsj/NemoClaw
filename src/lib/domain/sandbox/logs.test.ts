@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildEnableSandboxAuditLogsArgs,
   buildSandboxLogsArgs,
-  buildSandboxOpenclawGatewayLogsArgs,
+  buildSandboxManagedGatewayLogsArgs,
   describeLogProbeResult,
   GATEWAY_LOG_SOURCE_TAG,
   getLogsProbeTimeoutMs,
@@ -32,9 +32,9 @@ describe("sandbox logs helpers", () => {
     });
   });
 
-  it("builds OpenClaw gateway and OpenShell log argv", () => {
+  it("builds managed gateway and OpenShell log argv", () => {
     expect(
-      buildSandboxOpenclawGatewayLogsArgs("alpha", {
+      buildSandboxManagedGatewayLogsArgs("alpha", {
         follow: true,
         lines: "25",
         since: null,
@@ -50,6 +50,23 @@ describe("sandbox logs helpers", () => {
       "25",
       "-f",
       "/tmp/gateway.log",
+    ]);
+    expect(
+      buildSandboxManagedGatewayLogsArgs(
+        "alpha",
+        { follow: false, lines: "10", since: null },
+        "/var/log/future-agent/gateway.log",
+      ),
+    ).toEqual([
+      "sandbox",
+      "exec",
+      "-n",
+      "alpha",
+      "--",
+      "tail",
+      "-n",
+      "10",
+      "/var/log/future-agent/gateway.log",
     ]);
     expect(
       buildSandboxLogsArgs("alpha", {

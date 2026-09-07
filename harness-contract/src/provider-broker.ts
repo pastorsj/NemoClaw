@@ -5,7 +5,9 @@
 export type HarnessProviderBrokerOperation =
   | "describe-provider"
   | "register-refresh-provider"
-  | "ensure-broker";
+  | "ensure-broker"
+  | "inspect-broker"
+  | "teardown-broker";
 
 export type HarnessProviderBrokerCapability =
   | {
@@ -44,13 +46,62 @@ export type HarnessProviderBrokerControllerRequest =
       readonly operation: "ensure-broker";
       readonly sandboxName: string;
       readonly refreshToken: string;
+    }
+  | {
+      readonly operation: "inspect-broker";
+      readonly sandboxName: string;
+    }
+  | {
+      readonly operation: "teardown-broker";
+      readonly sandboxName: string;
     };
 
+export type HarnessProviderBrokerRegistrationResult = {
+  readonly ok: true;
+  readonly providerName: string;
+  readonly credentialEnv: string;
+  readonly credentialValue: string;
+  readonly brokerReady?: never;
+  readonly sandboxRegistered?: never;
+  readonly teardownComplete?: never;
+};
+
+export type HarnessProviderBrokerEnsureResult = {
+  readonly ok: true;
+  readonly providerName: string;
+  readonly credentialEnv?: never;
+  readonly credentialValue?: never;
+  readonly brokerReady?: never;
+  readonly sandboxRegistered?: never;
+  readonly teardownComplete?: never;
+};
+
+export type HarnessProviderBrokerSetupResult =
+  | HarnessProviderBrokerRegistrationResult
+  | HarnessProviderBrokerEnsureResult;
+
+export type HarnessProviderBrokerInspectionResult = {
+  readonly ok: true;
+  readonly providerName: string;
+  readonly brokerReady: boolean;
+  readonly sandboxRegistered: boolean;
+  readonly credentialEnv?: never;
+  readonly credentialValue?: never;
+  readonly teardownComplete?: never;
+};
+
+export type HarnessProviderBrokerTeardownResult = {
+  readonly ok: true;
+  readonly providerName: string;
+  readonly teardownComplete: true;
+  readonly brokerReady?: never;
+  readonly sandboxRegistered?: never;
+  readonly credentialEnv?: never;
+  readonly credentialValue?: never;
+};
+
 export type HarnessProviderBrokerControllerResult =
-  | {
-      readonly ok: true;
-      readonly providerName: string;
-      readonly credentialEnv?: string;
-      readonly credentialValue?: string;
-    }
+  | HarnessProviderBrokerSetupResult
+  | HarnessProviderBrokerInspectionResult
+  | HarnessProviderBrokerTeardownResult
   | { readonly ok: false; readonly message: string };

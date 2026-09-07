@@ -12,6 +12,7 @@ export const WECHAT_OPENCLAW_ACCOUNT_FILE_CONTRACT = {
   channelId: "wechat",
   planHookId: "wechat-seed-openclaw-account",
   handlerId: "wechat.seedOpenClawAccount",
+  packageHandlerId: "common.packageBuildFiles",
   outputId: "openclawWeixinAccountFile",
   kind: "build-file",
   required: true,

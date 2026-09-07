@@ -99,12 +99,14 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
       support: "disabled",
       reason: "test fixture",
     },
+    agentRosterCapability: null,
+    policyCapability: { owned_presets: [], automatic_presets: [], baseline_exclusion_impacts: {} },
     skillCapability: { support: "disabled", reason: "test fixture" },
     stateLifecycle: {
       backup_quiescence: { kind: "not-required" },
       snapshot_restore: [],
       rebuild: {
-        image_plugin_provenance: "not-required",
+        managed_extensions: { support: "disabled", reason: "Test package has no managed extensions." },
         scheduled_work: {
           support: "disabled",
           reason: "This package does not run scheduled work.",

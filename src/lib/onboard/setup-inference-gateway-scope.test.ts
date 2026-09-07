@@ -134,6 +134,7 @@ describe("gateway-scoped onboarding OpenShell commands", () => {
       null,
       undefined,
       GATEWAY,
+      {},
     );
   });
 
@@ -203,6 +204,7 @@ describe("gateway-scoped onboarding OpenShell commands", () => {
       "http://host.openshell.internal:4000/v1",
       { NVIDIA_INFERENCE_API_KEY: "test-secret" },
       GATEWAY,
+      {},
     );
   });
 

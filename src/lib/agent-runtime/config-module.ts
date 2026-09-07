@@ -56,7 +56,7 @@ export type {
   HarnessConfigUrlPolicy,
   HarnessConfigUrlRequest,
   HarnessExitZeroCommand,
-  HarnessImagePluginInstall,
+  HarnessManagedExtension,
   HarnessMutableConfigPlan,
   HarnessMutableConfigRequest,
 } from "./adapter/config";

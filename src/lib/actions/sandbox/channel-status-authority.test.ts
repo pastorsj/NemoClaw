@@ -55,7 +55,7 @@ function packageProfile(
 function messagingChannels(...channelIds: string[]) {
   return channelIds.map((channelId) => ({
     channelId,
-    config: { renders: [] },
+    config: { renders: [], visibility: [] },
     policy: [],
     lifecycle: { hookIds: [] },
   }));
@@ -63,8 +63,8 @@ function messagingChannels(...channelIds: string[]) {
 
 function channelFromRegistry(registry: ChannelManifestRegistry, channelId: string) {
   const channel = registry.get(channelId);
-  if (!channel) throw new Error(`test channel '${channelId}' is missing`);
-  return channel;
+  expect(channel, `test channel '${channelId}' is missing`).toBeDefined();
+  return channel!;
 }
 
 function packageChannelFromRegistry(

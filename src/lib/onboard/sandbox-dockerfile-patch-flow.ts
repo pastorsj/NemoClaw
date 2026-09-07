@@ -3,6 +3,7 @@
 
 import type { AgentDefinition } from "../agent/defs";
 import type { WebSearchConfig } from "../inference/web-search";
+import type { ChannelManifest } from "../messaging";
 import {
   SandboxBaseImageResolutionError,
   type SandboxBaseImageResolutionMetadata,
@@ -12,6 +13,10 @@ import { DEFAULT_TOOL_DISCLOSURE, type ToolDisclosure } from "../tool-disclosure
 import type { DcodeAutoApprovalMode } from "./dcode-auto-approval";
 import { legacyManagedDockerfilePatchOptions } from "./package/legacy-onboard";
 import type { SelectedDockerGpuRoute } from "./docker-gpu-route";
+import {
+  type PackageDockerfilePlan,
+  patchPackageDockerfile,
+} from "./package/dockerfile-patch";
 import type { SandboxGpuConfig } from "./sandbox-gpu-mode";
 
 type DockerRunResult = { status: number | null };
@@ -20,6 +25,7 @@ type ResolvedSandboxBaseImage = NonNullable<ReturnType<PullAndResolveBaseImageDi
 type EnforceDockerGpuPatchPreserveNetwork =
   typeof import("./docker-gpu-local-inference").enforceDockerGpuPatchPreserveNetwork;
 type PatchStagedDockerfile = typeof import("./dockerfile-patch").patchStagedDockerfile;
+type PatchPackageDockerfile = typeof import("./package/dockerfile-patch").patchPackageDockerfile;
 
 export type SandboxDockerfilePatchDeps = {
   pullAndResolveBaseImageDigest?: PullAndResolveBaseImageDigest;
@@ -28,6 +34,7 @@ export type SandboxDockerfilePatchDeps = {
   enforceDockerGpuPatchPreserveNetwork?: EnforceDockerGpuPatchPreserveNetwork;
   isWsl?: () => boolean;
   patchStagedDockerfile?: PatchStagedDockerfile;
+  patchPackageDockerfile?: PatchPackageDockerfile;
   now?: () => number;
 };
 
@@ -50,6 +57,10 @@ export type PrepareSandboxDockerfilePatchInput = {
   webSearchConfig: WebSearchConfig | null;
   toolDisclosure?: ToolDisclosure;
   rebuildPreservedEnv?: readonly PreservedEnvFile[];
+  /** Exact composed manifests required when the staged messaging plan is receipt-backed. */
+  messagingManifests?: readonly ChannelManifest[];
+  /** Complete fallback inputs rendered by the receipt-pinned package adapter. */
+  packageDockerfilePlan?: PackageDockerfilePlan;
   dcodeAutoApprovalMode?: DcodeAutoApprovalMode;
   hermesToolGateways: string[];
   sandboxGpuConfig: SandboxGpuConfig;
@@ -133,6 +144,8 @@ export async function prepareSandboxDockerfilePatch({
   webSearchConfig,
   toolDisclosure = DEFAULT_TOOL_DISCLOSURE,
   rebuildPreservedEnv,
+  messagingManifests,
+  packageDockerfilePlan,
   dcodeAutoApprovalMode,
   hermesToolGateways,
   sandboxGpuConfig,
@@ -197,6 +210,22 @@ export async function prepareSandboxDockerfilePatch({
       reverifyBridgeReachability: () => reverifySandboxBridgeGatewayReachability(gatewayPort),
     },
   );
+  const metadata = fromDockerfile ? null : (resolved?.metadata ?? preResolvedBaseImageMetadata);
+  if (packageDockerfilePlan) {
+    const patched = (deps.patchPackageDockerfile ?? patchPackageDockerfile)({
+      dockerfilePath: stagedDockerfile,
+      buildId,
+      baseImageRef: resolved?.ref ?? null,
+      ...(metadata ? { baseImageResolutionMetadata: metadata } : {}),
+      trustedManagedDockerfile: !fromDockerfile,
+      plan: packageDockerfilePlan,
+    });
+    return {
+      buildId,
+      dashboardRemoteBindPrepared: patched.dashboardRemoteBindPrepared,
+      resolvedBaseImage: resolved,
+    };
+  }
   const darwinVmCompat = false;
   // Preserve the compatibility ARG only for managed Dockerfiles that are
   // checked in here and known not to consume it. Custom --from Dockerfiles
@@ -218,12 +247,12 @@ export async function prepareSandboxDockerfilePatch({
     null,
     hermesToolGateways,
     (() => {
-      const metadata = fromDockerfile ? null : (resolved?.metadata ?? preResolvedBaseImageMetadata);
       return {
         agentName: managedAgentName,
         buildIdPolicy: legacyManagedPatch.buildIdPolicy,
         toolDisclosure,
         ...(rebuildPreservedEnv ? { rebuildPreservedEnv } : {}),
+        ...(messagingManifests ? { messagingManifests } : {}),
         ...(!fromDockerfile ? { trustedManagedDockerfile: true } : {}),
         ...(!fromDockerfile && legacyManagedPatch.wslDashboardExposure !== undefined
           ? { wslDashboardExposure: legacyManagedPatch.wslDashboardExposure }

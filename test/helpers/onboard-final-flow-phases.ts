@@ -3,6 +3,7 @@
 
 import { vi } from "vitest";
 import type { DashboardDeliveryChain } from "../../src/lib/dashboard/contract";
+import type { HarnessPolicyCapability } from "@nvidia/nemoclaw-harness-contract";
 import type { OnboardMachineEvent } from "../../src/lib/onboard/machine/events";
 import { createFinalOnboardFlowPhases } from "../../src/lib/onboard/machine/final-flow-phases";
 import type { OnboardFlowContext } from "../../src/lib/onboard/machine/flow-context";
@@ -20,7 +21,7 @@ import {
 } from "../../src/lib/state/onboard-session";
 import type { VerifyDeploymentResult } from "../../src/lib/verify-deployment";
 
-export type Agent = { name: string };
+export type Agent = { name: string; policyCapability?: HarnessPolicyCapability };
 type WebSearchConfig = NonNullable<OnboardFlowContext["webSearchConfig"]>;
 
 export type RecorderOverrides = {

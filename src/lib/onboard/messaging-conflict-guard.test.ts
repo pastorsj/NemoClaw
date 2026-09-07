@@ -131,48 +131,49 @@ describe("enforceMessagingChannelConflicts — Slack Socket Mode gateway axis (#
   it.each([
     { mode: "interactive", nonInteractive: false },
     { mode: "non-interactive", nonInteractive: true },
-  ])("aborts an enabled credential-bearing channel with an unavailable hash in $mode mode (#7808)", async ({
-    nonInteractive,
-  }) => {
-    const currentPlan = makePlan("bob", {
-      channels: [tgChannel()],
-      credentialBindings: [{ ...tgBinding(), credentialAvailable: false }],
-    });
-    const listSandboxes = vi.fn(() => ({
-      sandboxes: [
-        planEntry(
-          "alice",
-          makePlan("alice", {
-            channels: [tgChannel()],
-            credentialBindings: [tgBinding("alice-hash")],
-          }),
-        ),
-      ],
-    }));
-    const promptContinue = vi.fn(async () => true);
-    const { deps, error, exit } = makeDeps({
-      currentPlan,
-      registry: {
-        listSandboxes,
-        updateSandbox: vi.fn(() => true),
-      },
-      isNonInteractive: () => nonInteractive,
-      promptContinue,
-    });
+  ])(
+    "aborts an enabled credential-bearing channel with an unavailable hash in $mode mode (#7808)",
+    async ({ nonInteractive }) => {
+      const currentPlan = makePlan("bob", {
+        channels: [tgChannel()],
+        credentialBindings: [{ ...tgBinding(), credentialAvailable: false }],
+      });
+      const listSandboxes = vi.fn(() => ({
+        sandboxes: [
+          planEntry(
+            "alice",
+            makePlan("alice", {
+              channels: [tgChannel()],
+              credentialBindings: [tgBinding("alice-hash")],
+            }),
+          ),
+        ],
+      }));
+      const promptContinue = vi.fn(async () => true);
+      const { deps, error, exit } = makeDeps({
+        currentPlan,
+        registry: {
+          listSandboxes,
+          updateSandbox: vi.fn(() => true),
+        },
+        isNonInteractive: () => nonInteractive,
+        promptContinue,
+      });
 
-    await expect(enforceMessagingChannelConflicts(deps as never)).rejects.toBeInstanceOf(
-      AbortError,
-    );
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("credential hashes are unavailable for telegram"),
-    );
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("Onboarding and rebuild do not support a conflict override"),
-    );
-    expect(listSandboxes).not.toHaveBeenCalled();
-    expect(promptContinue).not.toHaveBeenCalled();
-    expect(exit).toHaveBeenCalledWith(1);
-  });
+      await expect(enforceMessagingChannelConflicts(deps as never)).rejects.toBeInstanceOf(
+        AbortError,
+      );
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining("credential hashes are unavailable for telegram"),
+      );
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining("Onboarding and rebuild do not support a conflict override"),
+      );
+      expect(listSandboxes).not.toHaveBeenCalled();
+      expect(promptContinue).not.toHaveBeenCalled();
+      expect(exit).toHaveBeenCalledWith(1);
+    },
+  );
 
   it("aborts when the credential conflict registry read fails (#7808)", async () => {
     const promptContinue = vi.fn(async () => true);
@@ -200,34 +201,18 @@ describe("enforceMessagingChannelConflicts — Slack Socket Mode gateway axis (#
     expect(exit).toHaveBeenCalledWith(1);
   });
 
-  it("aborts when the pre-enable registry read fails (#7808)", async () => {
-    const listSandboxes = vi
-      .fn()
-      .mockReturnValueOnce({ sandboxes: [], defaultSandbox: null })
-      .mockImplementationOnce(() => {
-        throw new Error("registry unavailable");
-      });
-    const promptContinue = vi.fn(async () => true);
-    const { deps, error, exit } = makeDeps({
+  it("uses one authority snapshot for credential and pre-enable checks", async () => {
+    const listSandboxes = vi.fn(() => ({ sandboxes: [], defaultSandbox: null }));
+    const { deps, error } = makeDeps({
       registry: {
         listSandboxes,
         updateSandbox: vi.fn(() => true),
       },
-      isNonInteractive: () => false,
-      promptContinue,
     });
 
-    await expect(enforceMessagingChannelConflicts(deps as never)).rejects.toBeInstanceOf(
-      AbortError,
-    );
-    expect(error).toHaveBeenCalledWith(
-      "  Could not verify messaging pre-enable checks: registry unavailable",
-    );
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("Onboarding and rebuild do not support a conflict override"),
-    );
-    expect(promptContinue).not.toHaveBeenCalled();
-    expect(exit).toHaveBeenCalledWith(1);
+    await expect(enforceMessagingChannelConflicts(deps as never)).resolves.toBeUndefined();
+    expect(listSandboxes).toHaveBeenCalledTimes(1);
+    expect(error).not.toHaveBeenCalled();
   });
 
   it("does not warn when the only other Slack sandbox is on a different gateway", async () => {

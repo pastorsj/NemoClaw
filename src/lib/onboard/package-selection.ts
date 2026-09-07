@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createAgentAliasMap, resolveAgentNameAlias } from "../agent/aliases";
-import {
-  isCandidateAgent,
-  isCandidateAgentSelectable,
-  requireCandidateAgentSelectable,
-} from "../agent/candidate";
+import { requireCandidateAgentSelectable } from "../agent/candidate";
 import type { AgentChoice, AgentDefinition } from "../agent-runtime/manifest-types";
 import {
   listHarnessPackageInventory,
@@ -200,12 +196,14 @@ function explicitInstalledPackage(
       `Unknown harness package '${selector}'. Known harnesses: ${selectableIds.join(", ")}.`,
     );
   }
-  requireCandidateAgentSelectable(resolvedId, environment);
   const selected = installed.find(({ id }) => id === resolvedId);
   if (selected) return selected;
   if (inventory.installed.some(({ id, state }) => id === resolvedId && state === "damaged")) {
     throw new OnboardHarnessIntegrityError([resolvedId]);
   }
+  // An exact installed receipt is package authority. The product qualification
+  // gate applies only while selecting an uninstalled repository candidate.
+  requireCandidateAgentSelectable(resolvedId, environment);
   throw new OnboardHarnessInstallRequiredError(resolvedId);
 }
 
@@ -216,19 +214,13 @@ async function selectFromInstalledPackages(
 ): Promise<HealthyInstalledHarnessPackageRecord | OnboardHarnessInstallGuidance> {
   const installed = orderInstalledPackages(
     inventory.installed.filter(
-      (record): record is HealthyInstalledHarnessPackageRecord =>
-        record.state === "installed" &&
-        (!isCandidateAgent(record.id) || isCandidateAgentSelectable(record.id, input.environment)),
+      (record): record is HealthyInstalledHarnessPackageRecord => record.state === "installed",
     ),
   );
   const selector = explicitSelector(input);
   if (selector) return explicitInstalledPackage(selector, inventory, installed, input.environment);
   const damagedIds = inventory.installed
-    .filter(
-      ({ id, state }) =>
-        state === "damaged" &&
-        (!isCandidateAgent(id) || isCandidateAgentSelectable(id, input.environment)),
-    )
+    .filter(({ state }) => state === "damaged")
     .map(({ id }) => id);
   if (damagedIds.length > 0) throw new OnboardHarnessIntegrityError(damagedIds);
   if (installed.length === 0) {

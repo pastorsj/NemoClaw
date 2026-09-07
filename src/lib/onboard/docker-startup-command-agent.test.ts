@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentDefinition } from "../agent/defs";
+import type { DockerUlimit } from "./docker-gpu-patch-types";
 import {
   DCODE_DOCKER_ULIMITS,
   resolveDockerStartupCommandPatch,
@@ -15,7 +16,11 @@ const DEFAULT_ENV: NodeJS.ProcessEnv = {};
 
 const legacyAgent = (name: string) => ({ name }) as AgentDefinition;
 
-const packageAgent = (name: string, layout: "artifact" | "source" = "artifact") => {
+const packageAgent = (
+  name: string,
+  layout: "artifact" | "source" = "artifact",
+  requiredUlimits: readonly DockerUlimit[] = [],
+) => {
   const packageRoot = `/var/lib/nemoclaw/harnesses/objects/${"a".repeat(64)}`;
   const manifestPath =
     layout === "source"
@@ -25,6 +30,7 @@ const packageAgent = (name: string, layout: "artifact" | "source" = "artifact") 
     name,
     packageRoot,
     manifestPath,
+    ...(requiredUlimits.length > 0 ? { sandbox_create: { docker_ulimits: requiredUlimits } } : {}),
   } as AgentDefinition;
 };
 
@@ -56,15 +62,32 @@ describe("resolveDockerStartupCommandPatch", () => {
     ).toEqual(DCODE_DOCKER_ULIMITS);
   });
 
+  it("reads DCode Docker limits from its package declaration without an ID branch", () => {
+    expect(
+      resolveDockerStartupCommandPatch(
+        packageAgent("langchain-deepagents-code", "artifact", DCODE_DOCKER_ULIMITS),
+        true,
+        PORTABLE_ENV,
+      ).requiredUlimits,
+    ).toEqual(DCODE_DOCKER_ULIMITS);
+  });
+
+  it("reads Docker limits for an unknown package ID", () => {
+    const declared = [{ name: "nofile", soft: 4096, hard: 8192 }] as const;
+    expect(
+      resolveDockerStartupCommandPatch(
+        packageAgent("future-harness", "artifact", declared),
+        true,
+        DEFAULT_ENV,
+      ).requiredUlimits,
+    ).toEqual(declared);
+  });
+
   it.each(["artifact", "source"] as const)(
     "persists the startup command for a package-backed %s layout without a core name branch",
     (layout) => {
       expect(
-        resolveDockerStartupCommandPatch(
-          packageAgent("future-harness", layout),
-          true,
-          DEFAULT_ENV,
-        ),
+        resolveDockerStartupCommandPatch(packageAgent("future-harness", layout), true, DEFAULT_ENV),
       ).toEqual({
         persistStartupCommand: true,
         requiredUlimits: null,

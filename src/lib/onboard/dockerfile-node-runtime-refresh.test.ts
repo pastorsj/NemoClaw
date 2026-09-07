@@ -89,8 +89,9 @@ describe("managed OpenClaw Node runtime refresh", () => {
 
   it("keeps Dockerfile.base and the managed builder on the same Node image", () => {
     const root = path.resolve(import.meta.dirname, "../../..");
-    const dockerfile = fs.readFileSync(path.join(root, "Dockerfile"), "utf8");
-    const baseDockerfile = fs.readFileSync(path.join(root, "Dockerfile.base"), "utf8");
+    const packageRoot = path.join(root, "packages/nemoclaw-openclaw");
+    const dockerfile = fs.readFileSync(path.join(packageRoot, "Dockerfile"), "utf8");
+    const baseDockerfile = fs.readFileSync(path.join(packageRoot, "Dockerfile.base"), "utf8");
     const builderImage = dockerfile.match(/^FROM (node:[^\s]+) AS builder$/m)?.[1];
     const baseImage = baseDockerfile.match(/^FROM (node:[^\s]+)$/m)?.[1];
 

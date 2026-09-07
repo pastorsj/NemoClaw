@@ -23,9 +23,33 @@ describe("Haystack Agent shell entry points", () => {
   it("routes inference through OpenShell's HTTP proxy", () => {
     const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-haystack-runtime-"));
     const runtimeEnvironment = path.join(temporaryRoot, "proxy-env.sh");
+    const stateRoot = path.join(temporaryRoot, "state");
+    const proxyHost = path.join(temporaryRoot, "proxy-host");
+    const proxyPort = path.join(temporaryRoot, "proxy-port");
     const fixture = path.join(temporaryRoot, "start.sh");
+    fs.mkdirSync(stateRoot, { mode: 0o700 });
+    fs.writeFileSync(proxyHost, "proxy.fixture\n", { mode: 0o444 });
+    fs.writeFileSync(proxyPort, "1234\n", { mode: 0o444 });
+    fs.chmodSync(proxyHost, 0o444);
+    fs.chmodSync(proxyPort, 0o444);
     const source = fs
       .readFileSync(path.join(PACKAGE_ROOT, "start.sh"), "utf8")
+      .replace(
+        'readonly HAYSTACK_STATE_ROOT="/sandbox/.haystack-agent"',
+        `readonly HAYSTACK_STATE_ROOT=${JSON.stringify(stateRoot)}`,
+      )
+      .replace(
+        'readonly MANAGED_PROXY_HOST_FILE="/usr/local/share/nemoclaw/haystack-proxy-host"',
+        `readonly MANAGED_PROXY_HOST_FILE=${JSON.stringify(proxyHost)}`,
+      )
+      .replace(
+        'readonly MANAGED_PROXY_PORT_FILE="/usr/local/share/nemoclaw/haystack-proxy-port"',
+        `readonly MANAGED_PROXY_PORT_FILE=${JSON.stringify(proxyPort)}`,
+      )
+      .replace(
+        "readonly MANAGED_FILE_OWNER_UID=0",
+        `readonly MANAGED_FILE_OWNER_UID=${String(process.getuid?.() ?? 0)}`,
+      )
       .replace(
         "local target=/tmp/nemoclaw-proxy-env.sh",
         `local target=${JSON.stringify(runtimeEnvironment)}`,
@@ -47,8 +71,8 @@ describe("Haystack Agent shell entry points", () => {
             PATH: process.env.PATH ?? "",
             HTTP_PROXY: "http://credential@untrusted.fixture:9999",
             HTTPS_PROXY: "http://credential@untrusted.fixture:9999",
-            NEMOCLAW_PROXY_HOST: "proxy.fixture",
-            NEMOCLAW_PROXY_PORT: "1234",
+            NEMOCLAW_PROXY_HOST: "environment-override.fixture",
+            NEMOCLAW_PROXY_PORT: "9999",
             NO_PROXY: "inference.local",
             no_proxy: "inference.local",
             ALL_PROXY: "http://untrusted.fixture:9999",
@@ -75,6 +99,15 @@ describe("Haystack Agent shell entry points", () => {
       expect(fs.readFileSync(runtimeEnvironment, "utf8")).not.toMatch(
         /credential|inference[.]local|NEMOCLAW_PROXY_/u,
       );
+
+      fs.chmodSync(proxyHost, 0o600);
+      const tampered = spawnSync(fixture, ["/usr/bin/true"], {
+        cwd: PACKAGE_ROOT,
+        encoding: "utf8",
+        env: { PATH: process.env.PATH ?? "" },
+      });
+      expect(tampered.status).not.toBe(0);
+      expect(tampered.stderr).toContain("Unsafe ownership or mode");
     } finally {
       fs.rmSync(temporaryRoot, { force: true, recursive: true });
     }

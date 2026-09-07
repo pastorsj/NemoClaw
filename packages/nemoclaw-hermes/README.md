@@ -10,6 +10,9 @@ continues to own package discovery, onboarding, credential collection and select
 registration, product rollback decisions, and shared messaging orchestration. OpenShell owns
 credential custody and delivery, sandbox lifecycle, and enforcement authority.
 
+The typed package boundary described here is a local proof of concept. It does not change the
+existing Hermes product scope or establish an external package compatibility promise.
+
 ## Package workflow
 
 The workflow reads from top to bottom:
@@ -39,7 +42,7 @@ The workflow reads from top to bottom:
 | `config/` | Builds Hermes `config.yaml`, `.env`, managed policy, model setup, and tool-gateway settings. |
 | `fabric/` | Selects the released Hermes adapter through a bounded package-owned process boundary and pins both Fabric dependency graphs. |
 | `runtime/` | Provides startup modules, commands, and guards installed into the sandbox. `runtime/state/` is the bounded state-mutation subsystem. |
-| `host/` | Contains the typed configuration and MCP adapters, package configuration helpers, image probes, and the host tool-broker process. |
+| `host/` | Contains typed configuration, MCP, messaging, session, startup, provider-auth, and provider-broker adapters plus the broker controller. |
 | `compat/` | Contains version-bound patches for the pinned Hermes release. |
 | `plugin/` | Registers Hermes tools and hooks. `tool_broker.py` contains managed tool-broker compatibility, while channel adapters stay separate. |
 | `checks/` | Provides build probes, the CLI contract validator, source download verification, and the release update command. |
@@ -55,13 +58,24 @@ context loader reads that exact metadata location.
 
 | Capability | Package file | Current behavior |
 | --- | --- | --- |
-| Runtime configuration | `host/config-adapter.cts` | Returns a bounded Hermes configuration transaction and mutable-file probe. |
-| MCP | `host/mcp-adapter.cts` | Implements the seven fixed MCP operations. |
-| Configuration restore | None | Core retains the current Hermes restore strategy. |
+| Command and Fabric | `manifest.runtime` and `fabric/` | Declares interactive, headless, process-lifecycle, and smoke commands; Fabric translates a headless request to Hermes. |
+| Configuration | `host/config-adapter.cts` | Returns bounded mutable configuration and inference-update plans. |
+| Roster | Not declared | Core returns the typed unsupported result for receipt-backed Hermes sandboxes. |
+| MCP | `host/mcp-adapter.cts` | Implements all eight fixed MCP operations. |
+| Messaging | `host/messaging-adapter.cts` and `messaging/` | Declares seven channels and projects package-native configuration. |
+| Sessions | `host/session-adapter.cts` | Implements list, delete, and export plans. |
+| Startup | `host/startup-adapter.cts` | Builds and reconciles the managed-image startup profile. |
+| State and restore | `manifest.state_lifecycle` | Declares quiescence, scheduled-work, file strategies, and post-restore actions. Core applies the finite strategies; no package restore adapter is needed. |
+| Policy and provider profiles | `manifest.policy`, `policies/`, and `provider-profiles/` | Owns Hermes policy presets and provider definitions for messaging, web search, and broker-related routes. |
+| Provider authentication | `host/provider-auth-adapter.cts` | Resolves the declared OAuth device-code or API-key method. Core keeps credentials. |
+| Provider broker | `host/provider-broker-adapter.cts` and `host/provider-broker-control.cts` | Describes, registers or refreshes, ensures, inspects, and tears down the package-owned provider broker. |
+| Managed tools | `manifest.tool_gateways` and package policy presets | Declares five tools, auth compatibility, defaults, aliases, and required policies. |
+| Dashboard and secondary forward | `dashboard_ui` and `health_probe.secondary_forward` | Supplies bounded UI and API port declarations. Core allocates, forwards, and persists neutral state. |
 
-Only files named by the core contract use the typed adapter loader. `host/managed-route.cts`,
-`host/base-qualification.cts`, and the tool-broker files are existing package implementations with
-their own consumers. Their `.cts` or `host/` location does not make them typed adapter operations.
+Only files named by the core contract use the typed adapter loader. `host/managed-route.cts` and
+`host/base-qualification.cts` have separate package consumers. The provider-broker adapter and
+controller are part of the typed contract; the older HTTP broker implementation remains their
+package-owned runtime machinery.
 
 ## Runtime flow
 
@@ -96,8 +110,8 @@ The package projects the managed model route into `fabric.json` and passes only 
 credential through the protected startup environment. NemoClaw core resolves the package command
 without importing Hermes-specific code.
 
-The host broker is a separate fixed process workflow. It does not run through the typed adapter
-loader:
+The typed provider-broker adapter selects the fixed host workflow. The controller owns its bounded
+register, readiness, inspection, and teardown operations:
 
 | Module | Host broker responsibility |
 | --- | --- |
@@ -142,7 +156,8 @@ updates the reviewed release pins.
 `tests/config`, `tests/runtime`, `tests/host`, `tests/compat`, `tests/image`, and
 `tests/integration` follow the Hermes workflow described above. Package-owned fixtures and support
 stay under `tests/fixtures` and `tests/helpers`. Python plugin tests remain beside the plugin source
-as `plugin/test_*.py`.
+as `plugin/test_*.py`. `messaging/runtime` is the canonical source for Hermes channel adapters,
+and their native behavior tests live under `tests/runtime`.
 
 Install the package lock and run the checkout-independent TypeScript and Python tests:
 
@@ -159,6 +174,12 @@ Tests that exercise the composed build and current NemoClaw boundaries run throu
 exact temporary NemoClaw revision, overlays only Hermes, runs the complete package command, and
 verifies `nemoclaw harness install hermes`, `nemoclaw harness list`, and the temporary-home
 installation inventory.
+
+`test:package` is package-only and does not import NemoClaw source. It proves package adapters,
+runtime code, and artifacts. The revision-pinned `composed` rehearsal supplies the host operating
+system, runtime provider, hardware, and image-selection behavior from the selected NemoClaw
+commit. Image qualification and focused live tests prove combinations that need real OpenShell or
+external services.
 
 `npm test` does not run `test:fabric` separately because the composed Fabric lane in
 `test:nemoclaw` includes its direct cases.

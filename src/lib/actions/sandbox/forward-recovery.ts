@@ -21,18 +21,17 @@ import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
 import type { AgentDefinition } from "../../agent/defs";
 import * as agentRuntime from "../../agent/runtime";
 import { DASHBOARD_PORT, HERMES_OPENAI_API_PORT } from "../../core/ports";
-import { getActiveMessagingHostForward } from "../../messaging/host-forward";
+import {
+  getActiveMessagingHostForward,
+  listSandboxMessagingHostForwardManifests,
+} from "../../messaging/host-forward";
 import { hydrateDerivedSandboxMessagingPlanFields } from "../../messaging/hydration";
-import type { SandboxMessagingHostForwardPlan } from "../../messaging/manifest";
+import type { ChannelManifest, SandboxMessagingHostForwardPlan } from "../../messaging/manifest";
 import { parseSandboxMessagingPlan } from "../../messaging/plan-validation";
 import { isRemoteDashboardBindRequested } from "../../onboard/dockerfile-remote-dashboard-bind-contract";
 import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import { retireProductionLegacySandboxForwards } from "../../onboard/forward-service-migration";
-import {
-  resolveSandboxHermesApiPort,
-  resolveSandboxHealthPort,
-  retargetAgentHealthUrl,
-} from "../../onboard/hermes-api-port";
+import { resolveSandboxHealthPort, retargetAgentHealthUrl } from "../../onboard/hermes-api-port";
 import { isWsl } from "../../platform";
 import * as registry from "../../state/registry";
 import { isLocalForwardReachable, type SandboxForwardHealth } from "./forward-health";
@@ -123,7 +122,12 @@ type SandboxPortAgent = {
   name?: string;
   forwardPort?: unknown;
   forward_ports?: unknown;
-  healthProbe?: { port?: number; url?: string } | null;
+  healthProbe?: {
+    port?: number;
+    url?: string;
+    port_resolution?: "sandbox-secondary-forward";
+    secondary_forward?: import("../../onboard/gateway-binding/secondary-forward").SecondaryForwardAllocation;
+  } | null;
   runtime?: { kind?: unknown };
 } | null;
 
@@ -239,11 +243,7 @@ export function resolveSandboxHealthProbeUrl(
     const resolvedPort = resolveSandboxHealthPort(sandboxName, agent, {
       getSandbox: deps.getSandbox ?? registry.getSandbox,
     });
-    return retargetAgentHealthUrl(
-      healthProbeUrl,
-      agent.healthProbe?.port,
-      resolvedPort,
-    );
+    return retargetAgentHealthUrl(healthProbeUrl, agent.healthProbe?.port, resolvedPort);
   }
   return `http://127.0.0.1:${resolveSandboxDashboardPort(sandboxName, deps)}/health`;
 }
@@ -268,15 +268,26 @@ export function teardownSandboxDashboardForward(
     if (registeredAgent && !agentRuntime.hasGatewayRuntime(registeredAgent)) return true;
     const resolvePort = deps.resolveSandboxDashboardPort ?? resolveSandboxDashboardPort;
     const primaryPort = resolvePort(sandboxName, { getSandbox: () => sandbox });
-    const hermesDashboardPort =
-      sandbox.hermesDashboardEnabled === true && isValidPort(sandbox.hermesDashboardPort)
+    const hermesDashboardPort = sandbox.harnessPackage
+      ? sandbox.dashboardUi?.enabled === true && isValidPort(sandbox.dashboardUi.publicPort)
+        ? sandbox.dashboardUi.publicPort
+        : null
+      : sandbox.hermesDashboardEnabled === true && isValidPort(sandbox.hermesDashboardPort)
         ? sandbox.hermesDashboardPort
         : null;
     const ports = new Set<number>([primaryPort]);
     if (hermesDashboardPort !== null) ports.add(hermesDashboardPort);
-    const parsedMessaging = parseSandboxMessagingPlan(sandbox.messaging?.plan, { sandboxName });
+    const messagingManifests = receiptMessagingManifests(sandbox);
+    const messagingHydration =
+      messagingManifests === undefined ? {} : { manifests: messagingManifests };
+    const parsedMessaging = parseSandboxMessagingPlan(sandbox.messaging?.plan, {
+      sandboxName,
+      ...messagingHydration,
+    });
     const messagingForward = getActiveMessagingHostForward(
-      parsedMessaging ? hydrateDerivedSandboxMessagingPlanFields(parsedMessaging) : null,
+      parsedMessaging
+        ? hydrateDerivedSandboxMessagingPlanFields(parsedMessaging, messagingHydration)
+        : null,
     );
     if (messagingForward) ports.add(messagingForward.port);
     for (const port of resolveDeclaredAgentForwardPorts(
@@ -484,9 +495,26 @@ function getSandboxMessagingHostForward(
   sandboxName: string,
 ): SandboxMessagingHostForwardPlan | null {
   const entry = registry.getSandbox(sandboxName);
-  const parsed = parseSandboxMessagingPlan(entry?.messaging?.plan, { sandboxName });
-  const plan = parsed ? hydrateDerivedSandboxMessagingPlanFields(parsed) : null;
+  const messagingManifests = receiptMessagingManifests(entry);
+  const messagingHydration =
+    messagingManifests === undefined ? {} : { manifests: messagingManifests };
+  const parsed = parseSandboxMessagingPlan(entry?.messaging?.plan, {
+    sandboxName,
+    ...messagingHydration,
+  });
+  const plan = parsed
+    ? hydrateDerivedSandboxMessagingPlanFields(parsed, messagingHydration)
+    : null;
   return getActiveMessagingHostForward(plan);
+}
+
+function receiptMessagingManifests(
+  entry: ReturnType<typeof registry.getSandbox>,
+): readonly ChannelManifest[] | undefined {
+  if (!entry || (entry.harnessPackage == null && entry.harnessPackageMigration == null)) {
+    return undefined;
+  }
+  return listSandboxMessagingHostForwardManifests(entry);
 }
 
 export function ensureMessagingHostForwardHealthy(
@@ -533,7 +561,16 @@ function resolveDeclaredAgentForwardPorts(
     if (!Number.isInteger(candidate) || candidate < 1024 || candidate > 65535) continue;
     if (covered.has(candidate)) continue;
     const port =
-      candidate === HERMES_OPENAI_API_PORT ? resolveSandboxHermesApiPort(sandbox ?? {}) : candidate;
+      candidate === agent?.healthProbe?.port
+        ? (resolveSandboxHealthPort("forward-recovery", agent, {
+            getSandbox: () => sandbox,
+          }) ?? candidate)
+        : sandbox?.harnessPackage == null &&
+            (agent?.name === "hermes" || sandbox?.agent === "hermes") &&
+            candidate === HERMES_OPENAI_API_PORT &&
+            isValidPort(sandbox?.hermesApiPort)
+          ? sandbox.hermesApiPort
+          : candidate;
     if (covered.has(port)) continue;
     covered.add(port);
     ports.push(port);

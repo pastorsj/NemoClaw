@@ -3,6 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import type { SandboxEntry } from "../state/registry";
 import type { RebuildManifest, RestoreResult } from "../state/sandbox";
 import { finalizeCreatedSandbox } from "./created-sandbox-finalization";
 
@@ -26,6 +27,14 @@ const packageIdentity = {
   contentDigest: "a".repeat(64),
 };
 
+function preparedRestoreAuthority(sandboxName: string) {
+  const prepared = { name: sandboxName } as SandboxEntry;
+  return {
+    prepareRegistration: () => prepared,
+    revalidatePreparedRegistration: (target: SandboxEntry) => target,
+  };
+}
+
 describe("ordinary recreate restore authority", () => {
   it("rejects legacy snapshot restore when its reconciled package changes", () => {
     const changedPackage = { ...packageIdentity, contentDigest: "b".repeat(64) };
@@ -35,27 +44,29 @@ describe("ordinary recreate restore authority", () => {
       .mockReturnValue(changedPackage);
     const register = vi.fn();
     const error = vi.fn();
-    const restoreRecreatedSandboxState = vi.fn((_name, _backup, options): RestoreResult => {
-      try {
-        options.validateBeforeMutation?.();
-        return {
-          success: true,
-          restoredDirs: [],
-          failedDirs: [],
-          restoredFiles: [],
-          failedFiles: [],
-        };
-      } catch (cause) {
-        return {
-          success: false,
-          restoredDirs: [],
-          failedDirs: ["manifest"],
-          restoredFiles: [],
-          failedFiles: [],
-          error: String(cause),
-        };
-      }
-    });
+    const restoreRecreatedSandboxState = vi.fn(
+      (_name, _backup, _options, resolveTarget): RestoreResult => {
+        try {
+          resolveTarget?.();
+          return {
+            success: true,
+            restoredDirs: [],
+            failedDirs: [],
+            restoredFiles: [],
+            failedFiles: [],
+          };
+        } catch (cause) {
+          return {
+            success: false,
+            restoredDirs: [],
+            failedDirs: ["manifest"],
+            restoredFiles: [],
+            failedFiles: [],
+            error: String(cause),
+          };
+        }
+      },
+    );
 
     expect(() =>
       finalizeCreatedSandbox(
@@ -71,6 +82,7 @@ describe("ordinary recreate restore authority", () => {
           preferredInferenceApi: null,
         },
         {
+          ...preparedRestoreAuthority("dcode"),
           readSandboxStateBackupManifest: () => legacyManifest,
           captureSnapshotRestoreAuthority: () => ({
             schemaVersion: 1,
@@ -94,15 +106,13 @@ describe("ordinary recreate restore authority", () => {
 
     expect(revalidateHarnessPackageAuthority).toHaveBeenNthCalledWith(
       1,
-      "prepare legacy restore for sandbox 'dcode'",
+      "preparing state restore for sandbox 'dcode'",
     );
     expect(revalidateHarnessPackageAuthority).toHaveBeenNthCalledWith(
       2,
-      "restore files for sandbox 'dcode'",
+      "restoring files for sandbox 'dcode'",
     );
     expect(register).not.toHaveBeenCalled();
-    expect(error.mock.calls.flat().join("\n")).toContain(
-      "snapshot harness package authority changed",
-    );
+    expect(error.mock.calls.flat().join("\n")).toContain("harness package authority changed");
   });
 });

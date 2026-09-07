@@ -6,6 +6,7 @@ import path from "node:path";
 import { TextDecoder } from "node:util";
 import YAML from "yaml";
 
+import type { AgentDefinition } from "../agent/defs";
 import { isObjectRecord } from "../core/json-types";
 import { getMessagingPolicyKeysByChannel } from "../messaging/channels";
 import type { MessagingChannelConfig } from "../messaging-channel-config";
@@ -23,6 +24,7 @@ import {
 } from "../readiness/station-qualification";
 import { requiredMessagingChannelPolicyPresets } from "./messaging-policy-presets";
 import { requiredOpenclawOtelPolicyPresets } from "./openclaw-otel-policy-presets";
+import { evaluatePackagePolicyPresets } from "./policy-authority/package-activation";
 import { filterSuppressedAgentRequiredPresets } from "./policy-tier-suppression";
 import { cleanupTempDir, createExactTempFileCleanup, secureTempFile } from "./temp-files";
 import { isHermesPortableProduct } from "./experimental/portable-product-qualification";
@@ -316,6 +318,9 @@ type InitialPolicyOptions = {
   stationGb300SysfsReadOnlyPaths?: readonly string[];
   additionalPresets?: string[];
   agentName?: string | null;
+  /** Exact receipt-pinned package definition; absent for legacy onboarding. */
+  agentDefinition?: AgentDefinition;
+  observabilityEnabled?: boolean;
   sandboxName?: string;
   policyTier?: string | null;
   messagingConfig?: MessagingChannelConfig | null;
@@ -488,36 +493,57 @@ function resolveInitialSandboxCreatePolicy(
     }
   };
   try {
-    // Fail closed: the OpenClaw OTEL preset is added at create time only when the
-    // selected policy tier is known and is not Restricted. When the tier is null
-    // (interactive flow that selects later) the preset is deferred to the
-    // post-boot policy step, so a later Restricted selection cannot leave a
-    // transient host-local OTLP egress allowance during sandbox boot. The same
-    // suppression filter still runs so an explicit `policyTier: "restricted"`
-    // (non-interactive flow) drops openclaw-pricing from `additionalPresets`.
+    // Receipt-backed packages declare their own create-time activation and tier
+    // suppression. A null tier defers every automatic package preset until the
+    // post-boot policy step, preventing a later Restricted choice from leaving a
+    // transient package route during sandbox boot. The exact OpenClaw rules below
+    // remain only for explicit no-receipt compatibility.
     const tierKnown = typeof options.policyTier === "string" && options.policyTier.length > 0;
-    const otelCreateTimePresets =
-      tierKnown && options.policyTier !== "restricted"
+    const packagePolicyEvaluation = evaluatePackagePolicyPresets(
+      options.agentDefinition?.policyCapability,
+      {
+        phase: "sandbox-create",
+        observabilityEnabled: options.observabilityEnabled,
+        tierName: options.policyTier,
+        env: process.env,
+      },
+    );
+    const automaticCreateTimePresets = options.agentDefinition
+      ? tierKnown
+        ? [...packagePolicyEvaluation.activePresets]
+        : []
+      : tierKnown && options.policyTier !== "restricted"
         ? requiredOpenclawOtelPolicyPresets(options.agentName ?? "openclaw")
         : [];
     const isHermesPolicyFromPath = isHermesPolicyPath(basePolicyPath);
     const policyAgent = options.agentName ?? (isHermesPolicyFromPath ? "hermes" : null);
     const messagingCreateTimePresets =
       requiredMessagingChannelPolicyPresets(activeMessagingChannels);
-    const requestedCreateTimePresets = filterSuppressedAgentRequiredPresets(
-      [
-        ...new Set([
-          ...messagingCreateTimePresets,
-          ...otelCreateTimePresets,
-          ...(options.additionalPresets || []),
-        ]),
-      ],
-      options.policyTier ?? null,
-      options.agentName ?? null,
-    );
+    const requestedPresets = [
+      ...new Set([
+        ...messagingCreateTimePresets,
+        ...automaticCreateTimePresets,
+        ...(options.additionalPresets || []),
+      ]),
+    ];
+    const requestedCreateTimePresets = options.agentDefinition
+      ? requestedPresets.filter(
+          (name) =>
+            !packagePolicyEvaluation.inactivePresets.has(name) &&
+            !packagePolicyEvaluation.suppressedPresets.has(name),
+        )
+      : filterSuppressedAgentRequiredPresets(
+          requestedPresets,
+          options.policyTier ?? null,
+          options.agentName ?? null,
+        );
     const dedupe = (values: string[]) => [...new Set(values.filter(Boolean))];
 
-    if (policyAgent) {
+    // Package baselines keep optional messaging routes in package-owned presets,
+    // so receipt-backed creation never needs a core channel-to-harness lookup.
+    // Historical baselines may still contain those routes and use this explicit
+    // no-receipt cleanup until their compatibility lane is retired.
+    if (!options.agentDefinition && policyAgent) {
       const filtered = filterInactiveMessagingPolicies(
         basePolicy,
         activeMessagingChannels,
@@ -553,6 +579,7 @@ function resolveInitialSandboxCreatePolicy(
 
     const mergedPolicy = policies.mergePresetNamesIntoPolicy(basePolicy, createTimePresets, {
       agent: policyAgent,
+      agentDefinition: options.agentDefinition,
       sandboxName: options.sandboxName,
       credentialBoundMessagingChannels: activeMessagingChannels,
       messagingConfig: options.messagingConfig,

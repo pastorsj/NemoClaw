@@ -34,10 +34,22 @@ function installOpenClawRestorePackage() {
     path.join(PACKAGE_ROOT, "manifest.yaml"),
     path.join(packageRoot, "manifest.yaml"),
   );
-  fs.copyFileSync(
-    path.join(PACKAGE_ROOT, "host", "restore-adapter.cts"),
-    path.join(packageRoot, "host", "restore-adapter.cts"),
-  );
+  for (const entry of fs.readdirSync(path.join(PACKAGE_ROOT, "host"), {
+    withFileTypes: true,
+  })) {
+    if (!entry.isFile() || !entry.name.endsWith(".cts")) continue;
+    fs.copyFileSync(
+      path.join(PACKAGE_ROOT, "host", entry.name),
+      path.join(packageRoot, "host", entry.name),
+    );
+  }
+  for (const relativePath of ["messaging/profile.json", "provider-profiles/googlechat.yaml"]) {
+    fs.mkdirSync(path.dirname(path.join(packageRoot, relativePath)), {
+      recursive: true,
+      mode: 0o700,
+    });
+    fs.copyFileSync(path.join(PACKAGE_ROOT, relativePath), path.join(packageRoot, relativePath));
+  }
   fs.writeFileSync(
     path.join(sourceRoot, "nemoclaw-package.json"),
     `${JSON.stringify({
@@ -132,7 +144,11 @@ function readStdin() {
   }
   return Buffer.concat(chunks);
 }
-if (cmd.includes("[ -d ")) { process.exit(0); }
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) { process.exit(0); }
 if (cmd.includes("openclaw.json") && cmd.includes("cat --")) {
   ${configReadDenial}
   process.stdout.write(fs.readFileSync(path.join(dir, "openclaw.json")));

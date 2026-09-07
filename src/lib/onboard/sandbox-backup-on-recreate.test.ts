@@ -61,6 +61,14 @@ describe("backupSandboxBeforeRecreate", () => {
     const agentDefinition = {
       name: "hermes",
       packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+      stateLifecycle: {
+        rebuild: {
+          managed_extensions: {
+            support: "disabled",
+            reason: "Test package has no managed extensions.",
+          },
+        },
+      },
     };
     const backup = makeBackup();
     const validateBeforePublish = vi.fn();
@@ -116,10 +124,89 @@ describe("backupSandboxBeforeRecreate", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.failureKind).toBe("plugin-provenance");
+    expect(result.failureKind).toBe("managed-extension-provenance");
     expect(errorLog).toHaveBeenCalledWith(
       expect.stringContaining("aborting recreate before delete"),
     );
+  });
+
+  it("uses a future receipt package's managed-extension declaration", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "c".repeat(64),
+    };
+    const result = backupSandboxBeforeRecreate({
+      sandboxName: "future",
+      sandboxEntry: {
+        name: "future",
+        agent: "future-harness",
+        harnessPackage,
+        fromDockerfile: "/tmp/Dockerfile.custom",
+      },
+      sourceBackupAuthority: {
+        harnessPackage,
+        agentDefinition: {
+          name: "future-harness",
+          stateLifecycle: {
+            rebuild: {
+              managed_extensions: {
+                support: "managed",
+                controller: { command: ["/future-state"], timeout_seconds: 10 },
+                state_directory: "extensions",
+                preserved_directories: [],
+                allowed_symlinks: [],
+              },
+            },
+          },
+        } as never,
+      },
+      backupImpl: () => makeBackup(),
+      log: vi.fn(),
+      errorLog: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ ok: false, failureKind: "managed-extension-provenance" });
+  });
+
+  it("does not infer image-plugin behavior for a receipt package named OpenClaw", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "openclaw",
+      packageVersion: "1.0.0",
+      contentDigest: "d".repeat(64),
+    };
+    const backup = makeBackup();
+    const result = backupSandboxBeforeRecreate({
+      sandboxName: "openclaw",
+      sandboxEntry: {
+        name: "openclaw",
+        agent: "openclaw",
+        harnessPackage,
+        fromDockerfile: "/tmp/Dockerfile.custom",
+      },
+      sourceBackupAuthority: {
+        harnessPackage,
+        agentDefinition: {
+          name: "openclaw",
+          stateLifecycle: {
+            rebuild: {
+              managed_extensions: {
+                support: "disabled",
+                reason: "Test package has no managed extensions.",
+              },
+            },
+          },
+        } as never,
+      },
+      requireOpenClawImagePluginProvenance: true,
+      backupImpl: () => backup,
+      log: vi.fn(),
+      errorLog: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ ok: true, backup, failureKind: "none" });
   });
 
   it("rejects an unmarked backup for an orphan custom OpenClaw target (#6108)", () => {
@@ -134,7 +221,7 @@ describe("backupSandboxBeforeRecreate", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.failureKind).toBe("plugin-provenance");
+    expect(result.failureKind).toBe("managed-extension-provenance");
     expect(errorLog).toHaveBeenCalledWith(expect.stringContaining("new name"));
     expect(errorLog).toHaveBeenCalledWith(
       expect.stringContaining("NEMOCLAW_RECREATE_WITHOUT_BACKUP=1"),

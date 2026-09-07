@@ -43,13 +43,15 @@ describe("printAgentPassthroughHelp", () => {
     }
 
     expect(output).toContain("[prompt-or-agent-flags...]");
-    expect(output).toContain("For non-OpenClaw packages with a Fabric command");
+    expect(output).toContain("For packages with a Fabric command");
     expect(output).toContain("-m/--message with optional --json uses private standard input");
     expect(output).toContain(
       "OpenClaw plain positional prompts can use Fabric and private standard input",
     );
     expect(output).toContain("Except for -h/--help, OpenClaw selector and option calls");
-    expect(output).toContain("OpenClaw -h/--help prints this wrapper summary locally");
+    expect(output).toContain(
+      "Legacy no-receipt OpenClaw -h/--help prints this wrapper summary locally",
+    );
     expect(output).toContain("exec -- openclaw agent --help");
     expect(output).toContain("Hermes package with a Fabric headless command accepts");
     expect(output).not.toContain(

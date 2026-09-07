@@ -26,18 +26,20 @@ export function runTerminalAgentConnectProbe({
   sandboxName: string;
 }): void {
   const routeResult = ensureInferenceRoute(sandboxName, { quiet: true });
-  // Dcode is the terminal runtime whose configured inference.local route is
-  // itself part of readiness. Keep this fail-fast agent-scoped so terminal
-  // runtimes without the dcode managed-proxy contract retain legacy smoke-only
-  // behavior when their route result is absent or inconclusive.
+  // A package can declare that its configured inference.local route is itself
+  // part of terminal readiness. The route implementation remains core-owned;
+  // the manifest only selects whether an explicit negative result is fatal.
   //
   // routeHealthy tri-state: `true` = route probe ran and succeeded,
   // `false` = route probe ran and explicitly failed (broken managed proxy),
   // `null` = probe was not run or was indeterminate. Only an explicit `false`
-  // from the dcode probe short-circuits the connect flow — `null` falls
-  // through to the smoke command so non-dcode agents (and dcode runs where
+  // from a required probe short-circuits the connect flow — `null` falls
+  // through to the smoke command so other agents (and runs where
   // the probe genuinely could not be executed) are not spuriously blocked.
-  if (agent.name === "langchain-deepagents-code" && routeResult.routeHealthy === false) {
+  if (
+    agent.inference?.route_probe?.terminal_connect === "required" &&
+    routeResult.routeHealthy === false
+  ) {
     console.error(
       `  Probe failed: ${agentName} could not reach the managed inference.local route in '${sandboxName}'.`,
     );

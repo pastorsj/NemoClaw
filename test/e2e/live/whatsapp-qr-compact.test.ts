@@ -17,18 +17,13 @@ import { type ShellProbe, trustedShellCommand } from "../fixtures/shell-probe.ts
 // It intentionally does not require a WhatsApp account, phone scan, sandbox,
 // Docker, or NVIDIA_INFERENCE_API_KEY: the contract is the renderer boundary.
 
-const DOCKERFILE_BASE = path.join(
+const DOCKERFILE_BASE = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile.base");
+const PRELOAD_SOURCE = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "Dockerfile.base",
-);
-const PRELOAD_SOURCE = path.join(
-  REPO_ROOT,
-  "src",
-  "lib",
   "messaging",
-  "channels",
+  "runtime",
   "whatsapp",
   "runtime",
   "whatsapp-qr-compact.ts",
@@ -230,7 +225,22 @@ async function compileProductionPreload(shellProbe: ShellProbe, workdir: string)
   const compile = await runCommand(
     shellProbe,
     path.join(REPO_ROOT, "node_modules", ".bin", "tsc"),
-    ["-p", path.join(REPO_ROOT, "tsconfig.runtime-preloads.json"), "--outDir", outDir],
+    [
+      PRELOAD_SOURCE,
+      "--outDir",
+      outDir,
+      "--rootDir",
+      path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "messaging", "runtime"),
+      "--target",
+      "ES2022",
+      "--module",
+      "commonjs",
+      "--strict",
+      "--esModuleInterop",
+      "--skipLibCheck",
+      "--types",
+      "node",
+    ],
     {
       artifactName: "compile-compact-qr-preload",
       cwd: REPO_ROOT,
@@ -238,15 +248,7 @@ async function compileProductionPreload(shellProbe: ShellProbe, workdir: string)
     },
   );
   expect(compile.status, `runtime preload compile failed\n${compile.stderr}`).toBe(0);
-  const preload = path.join(
-    outDir,
-    "lib",
-    "messaging",
-    "channels",
-    "whatsapp",
-    "runtime",
-    "whatsapp-qr-compact.js",
-  );
+  const preload = path.join(outDir, "whatsapp", "runtime", "whatsapp-qr-compact.js");
   expect(await pathExists(preload), `compiled compact-QR preload missing: ${preload}`).toBe(true);
   return preload;
 }

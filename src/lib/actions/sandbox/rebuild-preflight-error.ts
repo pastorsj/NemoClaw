@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RD as _RD, R } from "../../cli/terminal-style";
+import { redact } from "../../security/redact";
 import type { RebuildBail } from "./rebuild-credential-preflight";
+
+/** Redact an untrusted failure detail before it is printed by rebuild preflight. */
+export function redactRebuildPreflightDetail(detail: string): string {
+  return redact(detail);
+}
 
 export function printRebuildPreflightFailure(
   summary: string,

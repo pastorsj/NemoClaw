@@ -5,11 +5,19 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { TextDecoder } from "node:util";
 
+import type {
+  HarnessMessagingBuildFileTemplate,
+  HarnessMessagingChannelProfile,
+  HarnessMessagingHookOperation,
+  HarnessWhatsappStatusProbe,
+} from "@nvidia/nemoclaw-harness-contract";
+
 import {
   HARNESS_MESSAGING_ADAPTER_CONTRACT,
   type HarnessMessagingDisabledIntegration,
   type HarnessMessagingIntegration,
   type HarnessMessagingProfileReference,
+  validateHarnessMessagingBuildProfile,
   validateHarnessMessagingChannelProfiles,
 } from "./adapter/messaging";
 import {
@@ -28,6 +36,7 @@ import {
   validateHarnessPackageTree,
 } from "./package/tree";
 import type { HarnessPackageIdentity } from "./package/types";
+import { assertMessagingCredentialProviderProfileMatches } from "./messaging-provider";
 
 export type { HarnessMessagingIntegration } from "./adapter/messaging";
 
@@ -37,6 +46,7 @@ interface DeclaredMessagingIntegration {
 }
 
 const PROFILE_MAX_BYTES = 128 * 1024;
+const PROVIDER_PROFILE_MAX_BYTES = 64 * 1024;
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 export class HarnessMessagingModuleError extends Error {
@@ -137,11 +147,56 @@ function readChannelProfiles(
       { cause: error },
     );
   }
+  const profiles = validateHarnessMessagingChannelProfiles(parsed);
+  validateChannelProfileSemantics(profiles, (profile) => {
+    const providerPath = path.posix.join(
+      path.posix.dirname(installed.packageManifest.envelope.manifest),
+      profile.profilePath,
+    );
+    const providerEntry = authority.entries.find(
+      (candidate) => candidate.relativePath === providerPath,
+    );
+    if (
+      !providerEntry ||
+      providerEntry.type !== "file" ||
+      providerEntry.stat.size > BigInt(PROVIDER_PROFILE_MAX_BYTES)
+    ) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging credential provider profile is missing or oversized",
+      );
+    }
+    let providerSource: string;
+    try {
+      providerSource = UTF8_DECODER.decode(
+        readVerifiedFile(providerEntry, PROVIDER_PROFILE_MAX_BYTES),
+      );
+    } catch (error) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging credential provider profile is invalid",
+        "invalid-adapter",
+        { cause: error },
+      );
+    }
+    try {
+      assertMessagingCredentialProviderProfileMatches(profile, providerSource);
+    } catch (error) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging credential provider profile disagrees with its declaration",
+        "invalid-adapter",
+        { cause: error },
+      );
+    }
+  });
   assertTreeAuthority(authority);
-  return validateHarnessMessagingChannelProfiles(parsed);
+  return profiles;
 }
 
-function validateChannelProfileSemantics(profiles: ReturnType<typeof readChannelProfiles>): void {
+function validateChannelProfileSemantics(
+  profiles: readonly HarnessMessagingChannelProfile[],
+  validateCredentialProvider: (
+    provider: NonNullable<HarnessMessagingChannelProfile["credentialProvider"]>,
+  ) => void,
+): void {
   const channelIds = new Set<string>();
   for (const profile of profiles) {
     if (channelIds.has(profile.channelId)) {
@@ -150,6 +205,37 @@ function validateChannelProfileSemantics(profiles: ReturnType<typeof readChannel
       );
     }
     channelIds.add(profile.channelId);
+    if (profile.credentialProvider) validateCredentialProvider(profile.credentialProvider);
+    const visibilityKeys = new Set<string>();
+    for (const entry of profile.config.visibility) {
+      const key = entry.key ?? entry.inputId;
+      if (visibilityKeys.has(key)) {
+        throw new HarnessMessagingModuleError(
+          `Installed harness messaging profile repeats config visibility key '${key}'`,
+        );
+      }
+      visibilityKeys.add(key);
+      if (
+        (entry.kind === "structured" && (!entry.path || entry.envKey !== undefined)) ||
+        (entry.kind === "env" && (!entry.envKey || entry.path !== undefined))
+      ) {
+        throw new HarnessMessagingModuleError(
+          `Installed harness messaging profile has invalid config visibility source '${key}'`,
+        );
+      }
+      if (
+        path.posix.isAbsolute(entry.target) ||
+        entry.target.includes("\\") ||
+        entry.target.split("/").includes("..") ||
+        (entry.targetInputId
+          ? entry.target.split("{{input}}").length !== 2
+          : entry.target.includes("{{input}}"))
+      ) {
+        throw new HarnessMessagingModuleError(
+          `Installed harness messaging profile has unsafe config visibility target '${entry.target}'`,
+        );
+      }
+    }
     for (const statePath of profile.config.statePaths ?? []) {
       if (!isSafePackageStatePath(statePath)) {
         throw new HarnessMessagingModuleError(
@@ -188,6 +274,212 @@ function validateChannelProfileSemantics(profiles: ReturnType<typeof readChannel
         );
       }
     }
+    const statusProbe = profile.lifecycle.statusProbe;
+    const usesWhatsappStatusHook = profile.lifecycle.hookIds.includes("whatsapp-status-health");
+    if ((statusProbe !== undefined || usesWhatsappStatusHook) && profile.channelId !== "whatsapp") {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging status probe is assigned to the wrong channel",
+      );
+    }
+    if (usesWhatsappStatusHook !== (statusProbe !== undefined)) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness WhatsApp status hook requires one status probe",
+      );
+    }
+    if (statusProbe) validateStatusProbe(statusProbe);
+    validateHookOperations(profile);
+  }
+}
+
+function validateHookOperations(profile: HarnessMessagingChannelProfile): void {
+  const selectedHookIds = new Set(profile.lifecycle.hookIds);
+  const operationHookIds = new Set<string>();
+  for (const operation of profile.lifecycle.hookOperations ?? []) {
+    if (!selectedHookIds.has(operation.hookId) || operationHookIds.has(operation.hookId)) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging hook operation must name one selected hook exactly once",
+      );
+    }
+    operationHookIds.add(operation.hookId);
+    if (operation.kind === "sandbox-command") {
+      validateFixedCommands([operation.command]);
+      if ((operation.output === "channel-health") !== (operation.context === "channel-health")) {
+        throw new HarnessMessagingModuleError(
+          "Installed harness channel-health command must consume the bounded status context",
+        );
+      }
+      continue;
+    }
+    if (operation.kind === "config-prompt") continue;
+    validateBuildFileOperation(operation);
+  }
+}
+
+function validateBuildFileOperation(
+  operation: Extract<HarnessMessagingHookOperation, { readonly kind: "build-files" }>,
+): void {
+  const inputIds = new Set(operation.inputIds);
+  const outputIds = new Set<string>();
+  for (const output of operation.outputs) {
+    if (outputIds.has(output.id)) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging build-file operation repeats an output",
+      );
+    }
+    outputIds.add(output.id);
+    if ((output.content === undefined) === (output.merge === undefined)) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging build-file template must declare content or merge",
+      );
+    }
+    validateBuildFilePathTemplate(output.pathTemplate, inputIds);
+    validateBuildFileTemplateValue(output, inputIds);
+  }
+}
+
+function validateBuildFilePathTemplate(pathTemplate: string, inputIds: ReadonlySet<string>): void {
+  if (
+    path.posix.isAbsolute(pathTemplate) ||
+    pathTemplate.includes("\\") ||
+    /[\0\r\n]/u.test(pathTemplate)
+  ) {
+    throw new HarnessMessagingModuleError(
+      "Installed harness messaging build-file template has an unsafe path",
+    );
+  }
+  const renderedShape = pathTemplate.replace(/\{\{input:([^{}]+)\}\}/gu, (_match, inputId) => {
+    if (!inputIds.has(String(inputId))) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging build-file path references an undeclared input",
+      );
+    }
+    return "value";
+  });
+  if (
+    renderedShape.includes("{{") ||
+    renderedShape
+      .split("/")
+      .some((segment) => segment === "" || segment === "." || segment === "..")
+  ) {
+    throw new HarnessMessagingModuleError(
+      "Installed harness messaging build-file template has an invalid path",
+    );
+  }
+}
+
+function validateBuildFileTemplateValue(
+  output: HarnessMessagingBuildFileTemplate,
+  inputIds: ReadonlySet<string>,
+): void {
+  const pending: unknown[] = [output.content !== undefined ? output.content : output.merge];
+  let nodes = 0;
+  while (pending.length > 0) {
+    const value = pending.pop();
+    nodes += 1;
+    if (nodes > 4096) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging build-file template is too complex",
+      );
+    }
+    if (typeof value === "string" && value.includes("{{")) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging build-file values must use typed input markers",
+      );
+    }
+    if (!value || typeof value !== "object") continue;
+    if (Array.isArray(value)) {
+      pending.push(...value);
+      continue;
+    }
+    const record = value as Readonly<Record<string, unknown>>;
+    if (Object.hasOwn(record, "$input")) {
+      const keys = Object.keys(record);
+      if (
+        (keys.length !== 1 && !(keys.length === 2 && record.optional === true)) ||
+        typeof record.$input !== "string" ||
+        !inputIds.has(record.$input)
+      ) {
+        throw new HarnessMessagingModuleError(
+          "Installed harness messaging build-file template has an invalid input marker",
+        );
+      }
+      continue;
+    }
+    if (Object.hasOwn(record, "$generated")) {
+      if (Object.keys(record).length !== 1 || record.$generated !== "iso-timestamp") {
+        throw new HarnessMessagingModuleError(
+          "Installed harness messaging build-file template has an invalid generated marker",
+        );
+      }
+      continue;
+    }
+    if (Object.hasOwn(record, "optional")) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging build-file template has a misplaced optional marker",
+      );
+    }
+    for (const key of Object.keys(record)) validateBuildFileTemplateKey(key, inputIds);
+    pending.push(...Object.values(record));
+  }
+}
+
+function validateBuildFileTemplateKey(key: string, inputIds: ReadonlySet<string>): void {
+  const renderedShape = key.replace(/\{\{input:([^{}]+)\}\}/gu, (_match, inputId) => {
+    if (!inputIds.has(String(inputId))) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging build-file key references an undeclared input",
+      );
+    }
+    return "value";
+  });
+  if (
+    renderedShape.includes("{{") ||
+    /[\0\r\n]/u.test(renderedShape) ||
+    ["__proto__", "constructor", "prototype"].includes(renderedShape)
+  ) {
+    throw new HarnessMessagingModuleError(
+      "Installed harness messaging build-file template has an invalid object key",
+    );
+  }
+}
+
+function validateStatusProbe(probe: HarnessWhatsappStatusProbe): void {
+  validateFixedCommands([
+    probe.pairingCommand,
+    ...(probe.kind === "channel-status-json" ? [probe.command] : []),
+  ]);
+  if (probe.kind !== "session-files") return;
+  const relativePaths = [
+    probe.primaryCredentialPath,
+    probe.alternateCredentialPath,
+    ...(probe.configuredSessionPath ? [probe.configuredSessionPath.configPath] : []),
+  ];
+  if (
+    relativePaths.some((relativePath) => !isSafePackageStatePath(relativePath)) ||
+    probe.primaryCredentialPath === probe.alternateCredentialPath
+  ) {
+    throw new HarnessMessagingModuleError(
+      "Installed harness messaging status probe has an unsafe or repeated session path",
+    );
+  }
+  for (const label of [probe.primaryLabel, probe.alternateLabel]) {
+    if (label.trim().length === 0 || /[\0\r\n]/u.test(label)) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging status probe has an invalid session label",
+      );
+    }
+  }
+}
+
+function validateFixedCommands(commands: readonly { readonly argv: readonly string[] }[]): void {
+  for (const command of commands) {
+    if (
+      command.argv.some((argument) => argument.trim().length === 0 || /[\0\r\n]/u.test(argument))
+    ) {
+      throw new HarnessMessagingModuleError(
+        "Installed harness messaging status probe has an invalid command argument",
+      );
+    }
   }
 }
 
@@ -221,8 +513,8 @@ export function loadHarnessMessagingIntegration(
     const described = adapter.describeIntegration({ packageId: identity.id });
     requireDeclarationAgreement(identity, declaration, described);
     if (described.kind === "disabled") return described;
+    validateHarnessMessagingBuildProfile(described.build);
     const channels = readChannelProfiles(identity, described.profilePath, options);
-    validateChannelProfileSemantics(channels);
     const channelById = new Map(channels.map((profile) => [profile.channelId, profile]));
     if (
       channelById.size !== described.channelIds.length ||

@@ -7,10 +7,8 @@ import {
   createHarnessPackageFixture,
   type HarnessPackageFixture,
 } from "../../../test/helpers/harness-packages";
-import {
-  activateHarnessPackage,
-  readInstalledHarnessPackage,
-} from "../../lib/agent-runtime/package/store";
+import { activateHarnessPackage } from "../../lib/agent-runtime/package/activation";
+import { readInstalledHarnessPackage } from "../../lib/agent-runtime/package/store";
 import { PUBLIC_DISPLAY_ENTRIES } from "../../lib/cli/public-display-defaults";
 import HarnessActivateCommand, { harnessActivateCommandDependencies } from "./activate";
 

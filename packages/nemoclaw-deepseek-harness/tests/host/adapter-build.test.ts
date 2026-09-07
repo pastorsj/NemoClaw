@@ -38,6 +38,7 @@ describe("DeepSeek Harness host adapter build", () => {
     expect(paths).toContain("host/config-adapter.cts");
     expect(paths).toContain("host/messaging-adapter.cts");
     expect(paths).toContain("host/session-adapter.cts");
+    expect(paths).toContain("host/startup-adapter.cts");
     expect(paths.some((candidate) => candidate.startsWith("host/source/"))).toBe(false);
   });
 });

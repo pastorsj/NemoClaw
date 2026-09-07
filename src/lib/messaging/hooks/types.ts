@@ -26,6 +26,7 @@ export interface MessagingHookContext extends MessagingHookRunContext {
   readonly hookId: string;
   readonly phase: ChannelHookPhase;
   readonly outputDeclarations?: readonly ChannelHookOutputSpec[];
+  readonly packageOperation?: import("@nvidia/nemoclaw-harness-contract").HarnessMessagingHookOperation;
 }
 
 /** One named output emitted by a hook handler. */

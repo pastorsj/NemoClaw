@@ -34,6 +34,16 @@ export function resolveLegacyInferenceProbeAgentName(
   return sandbox?.agent === "langchain-deepagents-code" ? sandbox.agent : null;
 }
 
+/** Preserve the pre-receipt DCode/OpenRouter model-catalog exception. */
+export function resolveLegacyModels404Probe(
+  sandbox: registry.SandboxEntry | null,
+  provider: string | null | undefined,
+): "inference-invocation" | null {
+  return resolveLegacyInferenceProbeAgentName(sandbox) && provider?.trim() === "openrouter-api"
+    ? "inference-invocation"
+    : null;
+}
+
 /** Preserve the pre-receipt OpenClaw markerless delivery check. */
 export function needsLegacyManagedGatewayDeliveryProof(sandbox: registry.SandboxEntry): boolean {
   if (sandbox.harnessPackage != null || sandbox.harnessPackageMigration != null) return false;

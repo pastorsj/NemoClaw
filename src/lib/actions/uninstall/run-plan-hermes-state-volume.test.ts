@@ -55,6 +55,7 @@ async function runManagedHermesVolumeUninstall(
   mode: "foreign" | "owned" | "remove-fails",
   destroyUserData: boolean,
   containerMode: "absent" | "foreign" | "owned" = "absent",
+  harnessPackage?: Readonly<Record<string, unknown>>,
 ) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-hermes-volume-"));
   const stateDir = path.join(home, ".nemoclaw");
@@ -73,6 +74,7 @@ async function runManagedHermesVolumeUninstall(
           name: "hermes",
           openshellDriver: "docker",
           workload: { kind: "managed-image" },
+          ...(harnessPackage ? { harnessPackage } : {}),
         },
       },
     }),
@@ -271,7 +273,7 @@ describe("managed Hermes state volume uninstall", () => {
       expect(harness.events.indexOf("openshell sandbox delete --all")).toBeLessThan(
         harness.events.indexOf(`docker volume rm ${harness.volumeName}`),
       );
-      expect(harness.logs).toContain("Removed managed Hermes state volume for 'hermes'.");
+      expect(harness.logs).toContain("Removed managed agent state volume for 'hermes'.");
     } finally {
       harness.cleanup();
     }
@@ -299,9 +301,28 @@ describe("managed Hermes state volume uninstall", () => {
       expect(fs.existsSync(harness.registryFile)).toBe(true);
       expect(harness.events.some((event) => event.startsWith("npm "))).toBe(false);
       expect(harness.errors).toContain(
-        `Managed Hermes state volume '${harness.volumeName}' could not be removed.`,
+        `Managed state volume '${harness.volumeName}' could not be removed.`,
       );
       expect(harness.errors).toContain("Preserved NemoClaw state so exact cleanup can be retried.");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("does not fall back to native Hermes cleanup when receipt authority is missing", async () => {
+    const harness = await runManagedHermesVolumeUninstall("owned", true, "absent", {
+      kind: "agent-runtime",
+      id: "hermes",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    });
+    try {
+      expect(harness.result.exitCode).toBe(1);
+      expect(harness.volumePresent()).toBe(true);
+      expect(fs.existsSync(harness.registryFile)).toBe(true);
+      expect(harness.dockerCalls).toEqual([]);
+      expect(harness.events).not.toContain("openshell sandbox delete --all");
+      expect(harness.errors.join("\n")).toMatch(/package.*integrity|package.*store/iu);
     } finally {
       harness.cleanup();
     }

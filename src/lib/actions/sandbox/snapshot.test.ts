@@ -75,7 +75,7 @@ describe("runSandboxSnapshot", () => {
               : { kind: "not-required" },
           snapshot_restore: packageId === "openclaw" ? ["repair-mutable-config"] : [],
           rebuild: {
-            image_plugin_provenance: "not-required",
+            managed_extensions: { support: "disabled", reason: "Test package has no managed extensions." },
             scheduled_work: { support: "disabled", reason: "This package does not run scheduled work." },
             post_restore: { kind: "not-required" },
           },

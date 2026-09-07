@@ -3,6 +3,7 @@
 
 import type { SandboxMessagingPlan } from "../../messaging/manifest";
 import type { ToolDisclosure } from "../../tool-disclosure";
+import type { HarnessStartupApprovalMode } from "@nvidia/nemoclaw-harness-contract";
 import type { ResolvedCorporateCa } from "../corporate-ca-types";
 import type { DcodeAutoApprovalMode } from "../dcode-auto-approval";
 import type { HermesDashboardOnboardState } from "../hermes-dashboard";
@@ -70,9 +71,15 @@ export interface ManagedStartupOnboardProfileInput {
     readonly provider?: "brave" | "tavily";
   } | null;
   readonly toolDisclosure: ToolDisclosure;
+  /** Receipt-backed package managed-tool IDs. */
+  readonly enabledToolGateways?: readonly string[];
+  /** No-receipt Hermes compatibility selections. */
   readonly hermesToolGateways: readonly string[];
   readonly messagingPlan: SandboxMessagingPlan | null;
-  readonly dcodeAutoApprovalMode: DcodeAutoApprovalMode;
+  /** Package-neutral value passed to a receipt-backed startup adapter. */
+  readonly approvalMode?: HarnessStartupApprovalMode;
+  /** Legacy no-receipt Deep Agents Code compatibility value. */
+  readonly dcodeAutoApprovalMode?: DcodeAutoApprovalMode;
   readonly observabilityEnabled: boolean;
   readonly environment: NodeJS.ProcessEnv;
   /** CA material that the host resolved and validated before profile construction. */
@@ -266,7 +273,9 @@ export function buildManagedStartupOnboardProfile(
     hermesToolGateways: agent === "hermes" ? input.hermesToolGateways : [],
     messagingPlan: capabilities.supportsMessaging ? input.messagingPlan : null,
     dcodeAutoApprovalMode:
-      agent === "langchain-deepagents-code" ? input.dcodeAutoApprovalMode : null,
+      agent === "langchain-deepagents-code"
+        ? (input.approvalMode ?? input.dcodeAutoApprovalMode ?? "disabled")
+        : null,
     observabilityEnabled: agent === "langchain-deepagents-code" ? input.observabilityEnabled : null,
     environment,
     corporateCa: input.corporateCa,

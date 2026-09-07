@@ -4,6 +4,8 @@
 import { listMessagingProviderSuffixes } from "../messaging/channels";
 import { listMessagingBridgeProfiles } from "./messaging-bridge-provider";
 import { NAME_MAX_LENGTH, NAME_VALID_PATTERN } from "../name-validation";
+import { reportsExactProviderNotFound } from "../adapters/openshell/provider-diagnostic-cli";
+import { isValidCliOpenShellProviderIdentifier } from "../adapters/openshell/provider-metadata-cli";
 
 export {
   applyExtraProviderReconciliation,
@@ -22,12 +24,30 @@ export function removeManagedHermesStateVolume(
 }
 
 export function removeManagedAgentStateVolumes(
-  context: import("./managed-workload/hermes-state-volume").ManagedHermesStateVolumeContext,
-  deps: import("./managed-workload/hermes-state-volume").ManagedHermesStateVolumeDeps = {},
-): readonly import("./managed-workload/hermes-state-volume").ManagedAgentStateVolumeCleanupResult[] {
+  context: import("./managed-workload/agent-state-volume").ManagedAgentStateVolumeContext,
+  deps: import("./managed-workload/agent-state-volume").ManagedAgentStateVolumeDeps = {},
+): readonly import("./managed-workload/managed-state-volumes").ManagedStateVolumeCleanupResult[] {
   const volumeModule =
-    require("./managed-workload/hermes-state-volume") as typeof import("./managed-workload/hermes-state-volume");
+    require("./managed-workload/agent-state-volume") as typeof import("./managed-workload/agent-state-volume");
   return volumeModule.removeManagedAgentStateVolumes(context, deps);
+}
+
+export function prepareManagedAgentStateVolumeCleanup(
+  context: import("./managed-workload/agent-state-volume").ManagedAgentStateVolumeContext,
+  deps: import("./managed-workload/agent-state-volume").ManagedAgentStateVolumeDeps = {},
+): import("./managed-workload/agent-state-volume").PreparedManagedAgentStateVolumeCleanup {
+  const volumeModule =
+    require("./managed-workload/agent-state-volume") as typeof import("./managed-workload/agent-state-volume");
+  return volumeModule.prepareManagedAgentStateVolumeCleanup(context, deps);
+}
+
+export function removePreparedManagedAgentStateVolumes(
+  prepared: import("./managed-workload/agent-state-volume").PreparedManagedAgentStateVolumeCleanup,
+  deps: import("./managed-workload/agent-state-volume").ManagedAgentStateVolumeDeps = {},
+): readonly import("./managed-workload/managed-state-volumes").ManagedStateVolumeCleanupResult[] {
+  const volumeModule =
+    require("./managed-workload/agent-state-volume") as typeof import("./managed-workload/agent-state-volume");
+  return volumeModule.removePreparedManagedAgentStateVolumes(prepared, deps);
 }
 
 export type SandboxProviderRunOpenshell = (
@@ -153,17 +173,30 @@ export function detachSandboxProviders(
   sandboxName: string,
   deps: DetachSandboxProvidersDeps = {},
 ): DetachSandboxProvidersResult {
+  return detachNamedSandboxProviders(
+    sandboxName,
+    SANDBOX_PROVIDER_SUFFIXES.map((suffix) => `${sandboxName}-${suffix}`),
+    deps,
+  );
+}
+
+/** Detach only provider names whose ownership was established by the caller. */
+export function detachNamedSandboxProviders(
+  sandboxName: string,
+  providerNames: readonly string[],
+  deps: DetachSandboxProvidersDeps = {},
+): DetachSandboxProvidersResult {
   const runOpenshell = deps.runOpenshell ?? defaultRunOpenshell;
   const detached: string[] = [];
   const failures: Array<{ name: string; output: string }> = [];
-  for (const suffix of SANDBOX_PROVIDER_SUFFIXES) {
-    const name = `${sandboxName}-${suffix}`;
+  for (const name of [...new Set(providerNames)]) {
+    if (!isValidCliOpenShellProviderIdentifier(name)) {
+      throw new Error(`Invalid OpenShell provider name '${name}'.`);
+    }
     // OpenShell resolves provider detach by mutable sandbox name. These checks detect
     // replacement and stop later detaches; they do not make this command an atomic,
     // identity-bound mutation. Operators must not mutate the sandbox concurrently.
-    deps.revalidateSandboxIdentity?.(
-      `detaching provider '${name}' from sandbox '${sandboxName}'`,
-    );
+    deps.revalidateSandboxIdentity?.(`detaching provider '${name}' from sandbox '${sandboxName}'`);
     const result = runOpenshell(["sandbox", "provider", "detach", sandboxName, name], {
       ignoreError: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -275,7 +308,20 @@ export function runSandboxProviderPreDeleteCleanup(
   sandboxName: string,
   deps: SandboxRecreateCleanupDeps = {},
 ): DetachSandboxProvidersResult {
-  const result = detachSandboxProviders(sandboxName, {
+  return runNamedSandboxProviderPreDeleteCleanup(
+    sandboxName,
+    SANDBOX_PROVIDER_SUFFIXES.map((suffix) => `${sandboxName}-${suffix}`),
+    deps,
+  );
+}
+
+/** Run pre-delete cleanup for an exact, caller-authorized provider inventory. */
+export function runNamedSandboxProviderPreDeleteCleanup(
+  sandboxName: string,
+  providerNames: readonly string[],
+  deps: SandboxRecreateCleanupDeps = {},
+): DetachSandboxProvidersResult {
+  const result = detachNamedSandboxProviders(sandboxName, providerNames, {
     runOpenshell: deps.runOpenshell,
     revalidateSandboxIdentity: deps.revalidateSandboxIdentity,
     tolerateMissingSandbox: deps.tolerateMissingSandbox,
@@ -352,8 +398,11 @@ export function deleteProviderWithRecovery(
       });
     }
   }
+  const finalOutput = `${bufferOrStringToText(result.stderr)}${bufferOrStringToText(result.stdout)}`;
+  const alreadyGone =
+    result.status === 1 && reportsExactProviderNotFound(finalOutput, providerName, 64 * 1024);
   return {
-    ok: result.status === 0,
+    ok: result.status === 0 || alreadyGone,
     status: result.status,
     stderr: bufferOrStringToText(result.stderr),
     stdout: bufferOrStringToText(result.stdout),

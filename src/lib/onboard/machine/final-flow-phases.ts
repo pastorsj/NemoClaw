@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type {
+  HarnessPolicyCapability,
+  HarnessToolGatewayCapability,
+} from "@nvidia/nemoclaw-harness-contract";
+
 import type { WebSearchConfig, WebSearchProvider } from "../../inference/web-search";
 import { assertSandboxCreatedContext, type OnboardFlowContext } from "./flow-context";
 import {
@@ -78,6 +83,8 @@ export function createFinalOnboardFlowPhases<
       session: context.session,
       hermesAuthMethod: context.hermesAuthMethod,
       hermesToolGateways: context.hermesToolGateways,
+      toolGatewaySelections: context.toolGatewaySelections ?? [],
+      receiptBackedPackage: context.session?.harnessPackage != null,
       deps: options.agentSetupDeps,
     });
     return {
@@ -88,6 +95,15 @@ export function createFinalOnboardFlowPhases<
 
   const policiesPhase = createPoliciesPhase<Context>(async (context) => {
     assertSandboxCreatedContext(context, "policies");
+    const packagePolicyCapability = (
+      context.agent as { policyCapability?: HarnessPolicyCapability } | null
+    )?.policyCapability;
+    const toolGatewayCapability = (
+      context.agent as { toolGatewayCapability?: HarnessToolGatewayCapability } | null
+    )?.toolGatewayCapability;
+    if (context.session?.harnessPackage != null && !packagePolicyCapability) {
+      throw new Error("The receipt-pinned harness definition has no validated policy capability.");
+    }
     const policiesResult = await handlePoliciesState({
       resume: context.resume,
       preserveRebuildLivePolicy: options.preserveRebuildLivePolicy,
@@ -104,7 +120,14 @@ export function createFinalOnboardFlowPhases<
       webSearchConfigChanged: context.webSearchConfigChanged === true,
       webSearchSupported: context.webSearchSupported,
       hermesToolGateways: context.hermesToolGateways,
+      toolGatewaySelections: context.toolGatewaySelections ?? [],
+      toolGatewayCapability:
+        context.session?.harnessPackage != null && toolGatewayCapability?.support === "managed"
+          ? toolGatewayCapability
+          : null,
       agent: context.agent,
+      packagePolicyCapability:
+        context.session?.harnessPackage != null ? packagePolicyCapability : null,
       deps: options.policiesDeps,
     });
     return {
@@ -127,6 +150,7 @@ export function createFinalOnboardFlowPhases<
       agent: context.agent,
       hermesAuthMethod: context.hermesAuthMethod,
       hermesToolGateways: context.hermesToolGateways,
+      toolGatewaySelections: context.toolGatewaySelections ?? [],
       stagedLegacyKeys: options.finalization.stagedLegacyKeys,
       migratedLegacyKeys: options.finalization.migratedLegacyKeys,
       webSearchEnabled,
@@ -153,6 +177,7 @@ export function createFinalOnboardFlowPhases<
       agent: context.agent,
       hermesAuthMethod: context.hermesAuthMethod,
       hermesToolGateways: context.hermesToolGateways,
+      toolGatewaySelections: context.toolGatewaySelections ?? [],
       stagedLegacyKeys: options.finalization.stagedLegacyKeys,
       migratedLegacyKeys: options.finalization.migratedLegacyKeys,
       webSearchEnabled,

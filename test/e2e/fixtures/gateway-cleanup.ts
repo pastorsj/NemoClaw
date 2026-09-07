@@ -5,8 +5,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { DEFAULT_GATEWAY_PORT } from "../../../src/lib/core/ports.ts";
-import { resolveGatewayName } from "../../../src/lib/onboard/gateway-binding.ts";
 import type { CleanupRegistry } from "./cleanup.ts";
 import { resultText } from "./clients/command.ts";
 import type { HostCliClient } from "./clients/host.ts";
@@ -17,6 +15,7 @@ const GATEWAY_CLEANUP_MODULE = path.join(REPO_ROOT, "dist/lib/actions/sandbox/de
 const OPENSHELL_RUNTIME_MODULE = path.join(REPO_ROOT, "dist/lib/adapters/openshell/runtime.js");
 const DEFAULT_GATEWAY_CLEANUP_TIMEOUT_MS = 2 * 60_000;
 const DEFAULT_PORT_RELEASE_TIMEOUT_MS = 30_000;
+const DEFAULT_GATEWAY_PORT = 8080;
 
 // Reuse NemoClaw's ownership-aware gateway cleanup, but defer registration
 // removal until the fixture has independently proved that the exact listener
@@ -61,7 +60,10 @@ const attempt = () => {
 attempt();
 `;
 
-type IsolatedGatewayCleanupHost = Pick<HostCliClient, "cleanupGatewayRegistration" | "command">;
+export type IsolatedGatewayCleanupHost = Pick<
+  HostCliClient,
+  "cleanupGatewayRegistration" | "command"
+>;
 
 export interface IsolatedGatewayCleanupOptions {
   artifactName: string;
@@ -84,7 +86,9 @@ function validateIsolatedGatewayCleanup(options: IsolatedGatewayCleanupOptions):
     throw new Error("Isolated gateway cleanup requires a non-default port from 1024 to 65535");
   }
 
-  const expectedGatewayName = resolveGatewayName(options.gatewayPort);
+  // Isolated journeys reject the default port above, so their canonical
+  // gateway identity is always the stable per-port form.
+  const expectedGatewayName = `nemoclaw-${String(options.gatewayPort)}`;
   if (options.gatewayName !== expectedGatewayName) {
     throw new Error(
       `Isolated gateway cleanup requires canonical gateway '${expectedGatewayName}' for port ${String(options.gatewayPort)}`,
@@ -132,6 +136,30 @@ function requireSuccessfulCleanupCommand(
   throw new Error(
     `${description} failed; gateway registration and private HOME '${home}' were preserved: ${resultText(result)}`,
   );
+}
+
+/** Prove the isolated port is bindable before this journey claims gateway ownership. */
+export async function requireIsolatedGatewayAvailable(
+  host: Pick<IsolatedGatewayCleanupHost, "command">,
+  options: IsolatedGatewayCleanupOptions,
+): Promise<void> {
+  validateIsolatedGatewayCleanup(options);
+  const portReleaseTimeoutMs = options.portReleaseTimeoutMs ?? DEFAULT_PORT_RELEASE_TIMEOUT_MS;
+  const result = await host.command(
+    process.execPath,
+    ["-e", PORT_RELEASE_PROBE_SCRIPT, String(options.gatewayPort), "0"],
+    {
+      artifactName: `${options.artifactName}-initial-port-availability`,
+      env: options.environment,
+      redactionValues: options.redactionValues,
+      timeoutMs: Math.min(portReleaseTimeoutMs, 10_000),
+    },
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Gateway port ${String(options.gatewayPort)} was already occupied; no listener was changed`,
+    );
+  }
 }
 
 /** Release one test-owned standalone gateway, then remove its registration and private HOME. */

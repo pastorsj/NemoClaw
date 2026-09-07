@@ -53,6 +53,7 @@ import {
   normalizeSandboxPolicyAttribution,
   normalizePendingSandboxCreateIdentity,
   normalizeSnapshotSourceRegistryFingerprint,
+  parseSandboxProviderBrokerOwnership,
   retainedDefaultSandbox,
 } from "./registry-normalization";
 import * as reversibleRemoval from "./registry-reversible-removal";
@@ -79,7 +80,12 @@ export {
 } from "./registry/mcp-credential-reservations";
 
 import { isDcodeAutoApprovalMode } from "../onboard/dcode-auto-approval";
+import { isSandboxApprovalMode } from "../onboard/managed-startup/startup-controls";
 import { cloneSandboxHostMounts, hasUnsafeHostMountTerminalText } from "./registry/host-mount";
+import {
+  cloneSandboxDashboardUiState,
+  migrateLegacyDashboardUiState,
+} from "./registry/dashboard-ui";
 import type { PendingSandboxCreateIdentity, SandboxEntry } from "./registry/types";
 import {
   cloneSandboxMessagingState,
@@ -127,9 +133,7 @@ export { hasUnsafeHostMountTerminalText, normalizeSandboxPolicyAttribution };
 
 export type SandboxRemovalReceipt = reversibleRemoval.RegistryRemovalReceipt<SandboxEntry>;
 
-export function getSandbox(name: string): SandboxEntry | null {
-  return load().sandboxes[name] || null;
-}
+export { getSandbox } from "./registry/read";
 
 export function getDefault(): string | null {
   const data = load();
@@ -442,6 +446,9 @@ export function registerSandbox(
       throw new Error("Cannot register a sandbox with invalid serving profile provenance");
     }
     const normalizedPolicyEntry = normalizeSandboxPolicyAttribution(entry);
+    if (!normalizedPolicyEntry.harnessPackage && entry.dashboardUi !== undefined) {
+      throw new Error("Cannot register a no-receipt sandbox with package dashboard state");
+    }
     const workload = cloneSandboxWorkloadReceipt(entry.workload, {
       harnessPackage: normalizedPolicyEntry.harnessPackage ?? null,
     });
@@ -532,9 +539,17 @@ export function registerSandbox(
       toolDisclosure: normalizeToolDisclosure(entry.toolDisclosure) ?? undefined,
       observabilityEnabled:
         typeof entry.observabilityEnabled === "boolean" ? entry.observabilityEnabled : undefined,
-      dcodeAutoApprovalMode: isDcodeAutoApprovalMode(entry.dcodeAutoApprovalMode)
-        ? entry.dcodeAutoApprovalMode
-        : undefined,
+      approvalMode: isSandboxApprovalMode(entry.approvalMode)
+        ? entry.approvalMode
+        : normalizedPolicyEntry.harnessPackage &&
+            isDcodeAutoApprovalMode(entry.dcodeAutoApprovalMode)
+          ? entry.dcodeAutoApprovalMode
+          : undefined,
+      dcodeAutoApprovalMode:
+        !normalizedPolicyEntry.harnessPackage &&
+        isDcodeAutoApprovalMode(entry.dcodeAutoApprovalMode)
+          ? entry.dcodeAutoApprovalMode
+          : undefined,
       webSearchProvider:
         entry.webSearchEnabled === true &&
         (entry.webSearchProvider === "brave" || entry.webSearchProvider === "tavily")
@@ -556,10 +571,28 @@ export function registerSandbox(
             ...(install.loadPaths !== undefined ? { loadPaths: [...install.loadPaths] } : {}),
           }))
         : undefined,
+      managedImageExtensions: Array.isArray(entry.managedImageExtensions)
+        ? entry.managedImageExtensions.map((extension) => ({
+            id: extension.id,
+            directory: extension.directory,
+            configPaths: [...extension.configPaths],
+          }))
+        : undefined,
       nemoclawVersion: entry.nemoclawVersion || null,
       fromDockerfile: entry.fromDockerfile || null,
-      hermesAuthMethod:
-        entry.hermesAuthMethod === "oauth" || entry.hermesAuthMethod === "api_key"
+      providerAuthMethod: normalizedPolicyEntry.harnessPackage
+        ? typeof entry.providerAuthMethod === "string" &&
+          /^[a-z][a-z0-9-]{0,63}$/u.test(entry.providerAuthMethod)
+          ? entry.providerAuthMethod
+          : entry.hermesAuthMethod === "api_key"
+            ? "api-key"
+            : entry.hermesAuthMethod === "oauth"
+              ? "oauth"
+              : undefined
+        : undefined,
+      hermesAuthMethod: normalizedPolicyEntry.harnessPackage
+        ? undefined
+        : entry.hermesAuthMethod === "oauth" || entry.hermesAuthMethod === "api_key"
           ? entry.hermesAuthMethod
           : null,
       imageTag: entry.imageTag || null,
@@ -573,15 +606,47 @@ export function registerSandbox(
       ),
       messaging: cloneSandboxMessagingState(entry.messaging),
       mcp: normalizeSandboxMcpState(entry.mcp),
-      hermesToolGateways:
-        Array.isArray(entry.hermesToolGateways) && entry.hermesToolGateways.length > 0
-          ? [...entry.hermesToolGateways]
+      toolGatewaySelections: normalizedPolicyEntry.harnessPackage
+        ? Array.isArray(entry.toolGatewaySelections) && entry.toolGatewaySelections.length > 0
+          ? [...entry.toolGatewaySelections]
+          : Array.isArray(entry.hermesToolGateways) && entry.hermesToolGateways.length > 0
+            ? [...entry.hermesToolGateways]
+            : undefined
+        : undefined,
+      providerBroker:
+        normalizedPolicyEntry.harnessPackage && entry.providerBroker
+          ? parseSandboxProviderBrokerOwnership(
+              entry.providerBroker,
+              normalizedPolicyEntry.harnessPackage,
+            )
           : undefined,
-      hermesDashboardEnabled: entry.hermesDashboardEnabled === true ? true : undefined,
-      hermesDashboardPort: entry.hermesDashboardPort ?? undefined,
-      hermesDashboardInternalPort: entry.hermesDashboardInternalPort ?? undefined,
-      hermesDashboardTui: entry.hermesDashboardTui === true ? true : undefined,
+      hermesToolGateways: !normalizedPolicyEntry.harnessPackage
+        ? Array.isArray(entry.hermesToolGateways) && entry.hermesToolGateways.length > 0
+          ? [...entry.hermesToolGateways]
+          : undefined
+        : undefined,
+      dashboardUi: normalizedPolicyEntry.harnessPackage
+        ? (cloneSandboxDashboardUiState(entry.dashboardUi, "save") ??
+          migrateLegacyDashboardUiState(entry))
+        : undefined,
+      hermesDashboardEnabled:
+        !normalizedPolicyEntry.harnessPackage && entry.hermesDashboardEnabled === true
+          ? true
+          : undefined,
+      hermesDashboardPort: !normalizedPolicyEntry.harnessPackage
+        ? (entry.hermesDashboardPort ?? undefined)
+        : undefined,
+      hermesDashboardInternalPort: !normalizedPolicyEntry.harnessPackage
+        ? (entry.hermesDashboardInternalPort ?? undefined)
+        : undefined,
+      hermesDashboardTui:
+        !normalizedPolicyEntry.harnessPackage && entry.hermesDashboardTui === true
+          ? true
+          : undefined,
       hermesApiPort: entry.hermesApiPort ?? undefined,
+      secondaryForwardPort:
+        entry.secondaryForwardPort ??
+        (normalizedPolicyEntry.harnessPackage ? (entry.hermesApiPort ?? undefined) : undefined),
       dashboardPort: entry.dashboardPort ?? undefined,
       dashboardRemoteBindPrepared: entry.dashboardRemoteBindPrepared === true ? true : undefined,
       gatewayName: entry.gatewayName ?? undefined,

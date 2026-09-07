@@ -12,6 +12,7 @@ import {
   isReviewedMessagingChannelPolicyUpgrade,
   listMessagingChannelPolicyPresets,
   loadMessagingChannelPolicyPreset,
+  materializeMessagingChannelPolicyContent,
   materializeMessagingPolicySandboxName,
   resolveMessagingChannelPolicyPresetPath,
 } from "./policy";
@@ -97,6 +98,26 @@ describe("messaging channel policy presets", () => {
     expect(
       policy.loadMessagingChannelPolicyPreset("discord", { sandboxName: "test-sandbox" }),
     ).toBe(content);
+  });
+
+  it("materializes package-loaded content without a harness identity", () => {
+    const content = [
+      "preset:",
+      "  name: future-channel",
+      "network_policies:",
+      "  future_bridge:",
+      "    endpoints:",
+      "      - host: bridge.example",
+      "        credential_binding:",
+      '          provider: "{sandboxName}-future-bridge"',
+      "",
+    ].join("\n");
+
+    expect(
+      materializeMessagingChannelPolicyContent(content, "future-channel", {
+        sandboxName: "future-sandbox",
+      }),
+    ).toContain('provider: "future-sandbox-future-bridge"');
   });
 
   it("rejects policy content with an unresolved sandbox placeholder", () => {

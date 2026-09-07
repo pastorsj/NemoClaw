@@ -206,6 +206,7 @@ export const slackManifest = {
       phase: "health-check",
       handler: "slack.openclawBridgeHealth",
       agents: ["openclaw"],
+      packageOperationRequired: true,
       onFailure: "abort",
     },
     {
@@ -225,6 +226,7 @@ export const slackManifest = {
       handler: "slack.statusHealth",
       providesReadiness: true,
       agents: ["openclaw"],
+      packageOperationRequired: true,
       outputs: [
         {
           id: "channelHealth",

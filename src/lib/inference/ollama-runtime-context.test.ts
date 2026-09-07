@@ -7,6 +7,7 @@ import { OLLAMA_PORT } from "../core/ports";
 import {
   applyOllamaRuntimeContextWindow,
   getOllamaContextWindowFloorForAgent,
+  getPackageOllamaContextWindowFloor,
   MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW,
   MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
   type OllamaRuntimeRunCaptureFn,
@@ -176,6 +177,30 @@ describe("Ollama runtime context helpers", () => {
     expect(failure.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
     expect(env.NEMOCLAW_CONTEXT_WINDOW).toBeUndefined();
     expect(messages.some((m) => m.includes("Raising Ollama runtime context window"))).toBe(false);
+  });
+
+  it("resolves receipt-backed context floors from package data without same-ID legacy fallback", () => {
+    expect(
+      getPackageOllamaContextWindowFloor({
+        name: "future-harness",
+        inference: {
+          contextWindowRequirements: [{ provider: "ollama-local", minimumTokens: 49_152 }],
+        },
+      }),
+    ).toBe(49_152);
+    expect(getPackageOllamaContextWindowFloor({ name: "hermes" })).toBe(
+      MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW,
+    );
+    expect(
+      getPackageOllamaContextWindowFloor({
+        name: "hermes",
+        inference: {
+          contextWindowRequirements: [
+            { provider: "ollama-local", minimumTokens: MIN_HERMES_OLLAMA_CONTEXT_WINDOW },
+          ],
+        },
+      }),
+    ).toBe(MIN_HERMES_OLLAMA_CONTEXT_WINDOW);
   });
 
   it("does not let an explicit prompt budget hide a below-floor Hermes daemon", () => {

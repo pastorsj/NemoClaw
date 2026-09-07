@@ -43,6 +43,8 @@ export interface SandboxCreateLaunchInput {
   hermesDashboardState: HermesDashboardOnboardState;
   /** Reserved host port for this Hermes sandbox's OpenAI-compatible API. */
   hermesApiPort?: number | null;
+  /** Reserved secondary-forward port owned by a receipt-pinned package declaration. */
+  secondaryForward?: SandboxRuntimeEnvArgsInput["secondaryForward"];
   manageDashboard?: boolean;
   openshellShellCommand: OpenshellShellCommand;
   openshellArgv?: OpenshellArgv;
@@ -116,6 +118,7 @@ export function managedBootstrapCreateArgs(
 }
 
 export { buildSandboxRuntimeEnvArgs, type SandboxRuntimeEnvArgsInput };
+export { packageDashboardStateFromRegistry } from "./dashboard/package-dashboard";
 
 export function prepareSandboxCreateLaunch(input: SandboxCreateLaunchInput): SandboxCreateLaunch {
   const env = input.env ?? process.env;
@@ -127,6 +130,7 @@ export function prepareSandboxCreateLaunch(input: SandboxCreateLaunchInput): San
     getDashboardForwardPort: input.getDashboardForwardPort,
     hermesDashboardState: input.hermesDashboardState,
     hermesApiPort: input.hermesApiPort,
+    secondaryForward: input.secondaryForward,
     extraPlaceholderKeys: input.extraPlaceholderKeys,
     observabilityEnabled: input.observabilityEnabled,
     sandboxName: input.sandboxName,

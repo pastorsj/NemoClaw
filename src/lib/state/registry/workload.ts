@@ -4,8 +4,9 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
-import { harnessPackageIdentitiesEqual } from "../../agent-runtime/package/identity-validation";
+import { harnessPackageIdentitiesEqual } from "../../agent-runtime/package/identity-read";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
+import { MANAGED_IMAGE_REPOSITORIES } from "../../onboard/managed-image/qualified-images";
 import {
   decodeManagedStartupDurableProfile,
   isManagedStartupPackageProfile,
@@ -13,7 +14,7 @@ import {
   MANAGED_STARTUP_PROFILE_MAX_ENCODED_BYTES,
 } from "../../onboard/managed-startup/profile";
 import { parseNativeArtifactWorkloadReceiptV1 } from "../../onboard/workload/native-artifact";
-import type { SandboxWorkloadReceipt } from "./types";
+import type { SandboxPackageStartupProfileReceipt, SandboxWorkloadReceipt } from "./types";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const REVISION_PATTERN = /^[0-9a-f]{40}$/u;
@@ -88,6 +89,52 @@ function decodeCanonicalStandardBase64(value: unknown): Buffer | null {
     : null;
 }
 
+function clonePackageStartupProfileReceipt(
+  value: SandboxPackageStartupProfileReceipt | undefined,
+  authority: SandboxWorkloadReceiptAuthority | undefined,
+): SandboxPackageStartupProfileReceipt | undefined {
+  if (value === undefined || value === null || typeof value !== "object") return undefined;
+  const encodedProfileBytes = decodeCanonicalBase64Url(value.encodedProfile);
+  if (
+    encodedProfileBytes === null ||
+    !SHA256_PATTERN.test(value.startupProfileSha256) ||
+    createHash("sha256").update(value.encodedProfile, "utf8").digest("hex") !==
+      value.startupProfileSha256 ||
+    typeof value.credentialProxyReplayRequired !== "boolean"
+  ) {
+    return undefined;
+  }
+  let profile: ReturnType<typeof decodeManagedStartupDurableProfile>;
+  try {
+    profile = decodeManagedStartupDurableProfile(value.encodedProfile);
+  } catch {
+    return undefined;
+  }
+  if (
+    !isManagedStartupPackageProfile(profile) ||
+    !packageProfileMatchesAuthority(profile, authority)
+  ) {
+    return undefined;
+  }
+  const corporateCaBytes =
+    value.corporateCaB64 === undefined ? null : decodeCanonicalStandardBase64(value.corporateCaB64);
+  if (value.corporateCaB64 !== undefined && corporateCaBytes === null) return undefined;
+  const expectedCorporateCaSha256 = profile.corporateCa.bundleSha256;
+  if (
+    (expectedCorporateCaSha256 === null) !== (corporateCaBytes === null) ||
+    (corporateCaBytes !== null &&
+      createHash("sha256").update(corporateCaBytes).digest("hex") !== expectedCorporateCaSha256)
+  ) {
+    return undefined;
+  }
+  return {
+    encodedProfile: value.encodedProfile,
+    startupProfileSha256: value.startupProfileSha256,
+    credentialProxyReplayRequired: value.credentialProxyReplayRequired,
+    ...(value.corporateCaB64 === undefined ? {} : { corporateCaB64: value.corporateCaB64 }),
+  };
+}
+
 export function cloneSandboxWorkloadReceipt(
   value: SandboxWorkloadReceipt | undefined,
   authority?: SandboxWorkloadReceiptAuthority,
@@ -104,10 +151,18 @@ export function cloneSandboxWorkloadReceipt(
     if (value.shared !== false || (value.reference !== null && !nonEmptyString(value.reference))) {
       return undefined;
     }
+    const packageStartupProfile = clonePackageStartupProfileReceipt(
+      value.packageStartupProfile,
+      authority,
+    );
+    if (value.packageStartupProfile !== undefined && packageStartupProfile === undefined) {
+      return undefined;
+    }
     return {
       schemaVersion: 1,
       kind: "legacy-dockerfile",
       reference: value.reference,
+      ...(packageStartupProfile === undefined ? {} : { packageStartupProfile }),
       shared: false,
     };
   }
@@ -139,6 +194,12 @@ export function cloneSandboxWorkloadReceipt(
     return undefined;
   }
   if (!isManagedStartupPackageProfile(profile) && !STOCK_COHORT_PATTERN.test(value.sourceCohort)) {
+    return undefined;
+  }
+  if (
+    !isManagedStartupPackageProfile(profile) &&
+    !value.reference.startsWith(`${MANAGED_IMAGE_REPOSITORIES[profile.agent]}@sha256:`)
+  ) {
     return undefined;
   }
   if (!packageProfileMatchesAuthority(profile, authority)) return undefined;

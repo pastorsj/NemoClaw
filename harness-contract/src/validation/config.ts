@@ -4,12 +4,22 @@
 import {
   fail,
   isCanonicalAbsolutePath,
+  isCanonicalRelativeFilePath,
+  isCanonicalSandboxPath,
   type ManifestRecord,
   requireExactFields,
   requireKnownFields,
   requireRecord,
   requireString,
 } from "./shared.js";
+
+function requireConfigFilePath(value: unknown, field: string): string {
+  const file = requireString(value, field);
+  if (file.length > 4096 || !isCanonicalRelativeFilePath(file)) {
+    fail(field, "must be a canonical relative file path of at most 4096 characters");
+  }
+  return file;
+}
 
 function validateConfigTarget(manifest: ManifestRecord): void {
   const config = requireRecord(manifest.config, "config");
@@ -28,25 +38,19 @@ function validateConfigTarget(manifest: ManifestRecord): void {
     "config",
   );
   const directory = requireString(config.dir, "config.dir");
-  if (directory.length === 0 || directory.length > 4096 || !/^\/[^\u0000\r\n]*$/u.test(directory)) {
-    fail("config.dir", "must be an absolute path of at most 4096 characters");
+  if (directory.length > 4096 || !isCanonicalSandboxPath(directory)) {
+    fail(
+      "config.dir",
+      "must be a canonical absolute path below /sandbox of at most 4096 characters",
+    );
   }
-  const configFile = requireString(config.config_file, "config.config_file");
-  if (
-    configFile.length === 0 ||
-    configFile.length > 4096 ||
-    !/^[^/\\\u0000\r\n][^\\\u0000\r\n]*$/u.test(configFile)
-  ) {
-    fail("config.config_file", "must be a relative file path of at most 4096 characters");
-  }
+  requireConfigFilePath(config.config_file, "config.config_file");
   const format = requireString(config.format, "config.format");
   if (format.length === 0 || format.length > 64) {
     fail("config.format", "must contain between 1 and 64 characters");
   }
   for (const key of ["auth_file", "env_file"] as const) {
-    if (config[key] !== undefined && typeof config[key] !== "string") {
-      fail(`config.${key}`, "must be a string");
-    }
+    if (config[key] !== undefined) requireConfigFilePath(config[key], `config.${key}`);
   }
   if (config.mutable_access !== undefined && config.mutable_access !== "private") {
     fail("config.mutable_access", "must be private");
@@ -54,9 +58,12 @@ function validateConfigTarget(manifest: ManifestRecord): void {
   if (
     config.shields_files !== undefined &&
     (!Array.isArray(config.shields_files) ||
-      config.shields_files.some((entry) => typeof entry !== "string"))
+      config.shields_files.length > 32 ||
+      config.shields_files.some(
+        (entry) => typeof entry !== "string" || !isCanonicalRelativeFilePath(entry),
+      ))
   ) {
-    fail("config.shields_files", "must be an array of strings");
+    fail("config.shields_files", "must contain at most 32 canonical relative file paths");
   }
 }
 
@@ -181,6 +188,34 @@ function validateInferenceUpdate(manifest: ManifestRecord, inference: ManifestRe
   }
 }
 
+function validateContextWindowRequirements(inference: ManifestRecord): void {
+  const requirements = inference.context_window_requirements;
+  if (requirements === undefined) return;
+  if (!Array.isArray(requirements) || requirements.length < 1 || requirements.length > 8) {
+    fail(
+      "inference.context_window_requirements",
+      "must contain 1 through 8 local inference requirements",
+    );
+  }
+  const providers = new Set<string>();
+  requirements.forEach((value, index) => {
+    const field = `inference.context_window_requirements[${String(index)}]`;
+    const requirement = requireRecord(value, field);
+    requireExactFields(requirement, new Set(["minimum_tokens", "provider"]), field);
+    if (requirement.provider !== "ollama-local" || providers.has(requirement.provider)) {
+      fail(`${field}.provider`, "must be the unique supported provider ollama-local");
+    }
+    if (
+      !Number.isInteger(requirement.minimum_tokens) ||
+      (requirement.minimum_tokens as number) < 16_384 ||
+      (requirement.minimum_tokens as number) > 4_194_304
+    ) {
+      fail(`${field}.minimum_tokens`, "must be an integer from 16384 through 4194304");
+    }
+    providers.add(requirement.provider);
+  });
+}
+
 /** Validate config ownership and the declared inference update behavior. */
 export function validateHarnessConfig(manifest: ManifestRecord): void {
   validateConfigTarget(manifest);
@@ -190,18 +225,22 @@ export function validateHarnessConfig(manifest: ManifestRecord): void {
     new Set([
       "base_url_config_key",
       "config_update",
+      "context_window_requirements",
       "default_model",
       "model_config_key",
       "provider_options",
+      "provider_key_credential_alias",
       "provider_type",
       "proxy_support",
       "refresh_route_for_messaging_providers",
+      "route_probe",
       "sandbox_smoke",
     ]),
     new Set(["config_update"]),
     "inference",
   );
   validateInferenceUpdate(manifest, inference);
+  validateContextWindowRequirements(inference);
   if (inference.provider_type !== undefined && typeof inference.provider_type !== "string") {
     fail("inference.provider_type", "must be a string");
   }
@@ -230,6 +269,12 @@ export function validateHarnessConfig(manifest: ManifestRecord): void {
   ) {
     fail("inference.proxy_support", "must be implicit or explicit");
   }
+  if (
+    inference.provider_key_credential_alias !== undefined &&
+    inference.provider_key_credential_alias !== "hosted-inference"
+  ) {
+    fail("inference.provider_key_credential_alias", "must be hosted-inference");
+  }
   if (inference.refresh_route_for_messaging_providers !== undefined) {
     const providers = inference.refresh_route_for_messaging_providers;
     if (
@@ -256,12 +301,32 @@ export function validateHarnessConfig(manifest: ManifestRecord): void {
     if (smoke.kind !== "compatible-endpoint") {
       fail("inference.sandbox_smoke.kind", "must be compatible-endpoint");
     }
-    if (
-      typeof smoke.config_path !== "string" ||
-      !smoke.config_path.startsWith("/sandbox/") ||
-      !isCanonicalAbsolutePath(smoke.config_path)
-    ) {
+    if (typeof smoke.config_path !== "string" || !isCanonicalSandboxPath(smoke.config_path)) {
       fail("inference.sandbox_smoke.config_path", "must be a canonical path below /sandbox");
+    }
+  }
+  if (inference.route_probe !== undefined) {
+    const routeProbe = requireRecord(inference.route_probe, "inference.route_probe");
+    requireKnownFields(
+      routeProbe,
+      new Set(["models_404", "terminal_connect"]),
+      new Set(),
+      "inference.route_probe",
+    );
+    if (Object.keys(routeProbe).length === 0) {
+      fail("inference.route_probe", "must select at least one core-owned probe behavior");
+    }
+    if (routeProbe.terminal_connect !== undefined && routeProbe.terminal_connect !== "required") {
+      fail("inference.route_probe.terminal_connect", "must be required");
+    }
+    if (
+      routeProbe.terminal_connect === "required" &&
+      requireRecord(manifest.runtime, "runtime").kind !== "terminal"
+    ) {
+      fail("inference.route_probe.terminal_connect", "requires runtime.kind terminal");
+    }
+    if (routeProbe.models_404 !== undefined && routeProbe.models_404 !== "inference-invocation") {
+      fail("inference.route_probe.models_404", "must be inference-invocation");
     }
   }
 }

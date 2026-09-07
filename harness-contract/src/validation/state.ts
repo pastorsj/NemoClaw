@@ -5,6 +5,7 @@ import {
   CONTROL_CHARACTER_PATTERN,
   fail,
   isCanonicalAbsolutePath,
+  isImmutableSandboxCommandPath,
   type ManifestRecord,
   requireExactFields,
   requireKnownFields,
@@ -12,7 +13,8 @@ import {
   requireString,
 } from "./shared.js";
 
-const SNAPSHOT_RESTORE_ACTIONS = new Set(["repair-mutable-config"]);
+const SNAPSHOT_RESTORE_ACTIONS = new Set(["repair-mutable-config", "restart-runtime"]);
+const CREDENTIAL_ENV_TERMS = new Set(["AUTH", "CREDENTIAL", "KEY", "PASSWORD", "SECRET", "TOKEN"]);
 
 const SNAPSHOT_HANDOFF_PATTERN = /^rebuild-policy-handoff\.[0-9a-f]{64}\.yaml$/u;
 
@@ -22,6 +24,21 @@ function isSnapshotControlPath(value: string): boolean {
     root === "rebuild-manifest.json" ||
     root === ".nemoclaw-rebuild-recovery.json" ||
     SNAPSHOT_HANDOFF_PATTERN.test(root)
+  );
+}
+
+function isCanonicalHomeRenderTarget(value: string): boolean {
+  if (!value.startsWith("~/") || value.includes("\\")) return false;
+  const segments = value.slice(2).split("/");
+  return (
+    segments.length > 0 &&
+    segments.every(
+      (segment) =>
+        segment.length > 0 &&
+        segment !== "." &&
+        segment !== ".." &&
+        /^[A-Za-z0-9._-]+$/u.test(segment),
+    )
   );
 }
 
@@ -362,8 +379,8 @@ function validateBackupQuiescence(value: unknown): void {
     fail(`${field}.command`, "must be a non-empty bounded argument array");
   }
   const executable = declaration.command[0] as string;
-  if (!isCanonicalAbsolutePath(executable)) {
-    fail(`${field}.command[0]`, "must be a canonical absolute path");
+  if (!isImmutableSandboxCommandPath(executable)) {
+    fail(`${field}.command[0]`, "must be an immutable image-owned executable path");
   }
   if (
     !Number.isInteger(declaration.timeout_seconds) ||
@@ -403,6 +420,164 @@ function validateStateCommand(value: unknown, field: string): void {
   }
 }
 
+function validateImmutableStateCommand(value: unknown, field: string): void {
+  validateStateCommand(value, field);
+  const command = (value as ManifestRecord).command as readonly string[];
+  if (!isImmutableSandboxCommandPath(command[0] as string)) {
+    fail(`${field}.command[0]`, "must be an immutable image-owned executable path");
+  }
+}
+
+function validateDirectStateDirectory(value: unknown, field: string): string {
+  const candidate = validateRelativeStatePath(value, field);
+  if (candidate.includes("/") || !/^[A-Za-z0-9._-]+$/u.test(candidate)) {
+    fail(field, "must be one canonical state-directory name");
+  }
+  return candidate;
+}
+
+function validateSymlinkSourcePattern(value: unknown, field: string): string {
+  const candidate = requireString(value, field);
+  if (
+    candidate.length === 0 ||
+    candidate.length > 512 ||
+    candidate.startsWith("/") ||
+    candidate.includes("\\") ||
+    CONTROL_CHARACTER_PATTERN.test(candidate)
+  ) {
+    fail(field, "must be a bounded canonical relative pattern");
+  }
+  const segments = candidate.split("/");
+  if (
+    segments.some(
+      (segment) =>
+        segment.length === 0 ||
+        segment === "." ||
+        segment === ".." ||
+        (segment !== "*" && !/^[A-Za-z0-9._-]+$/u.test(segment)),
+    )
+  ) {
+    fail(field, "may use '*' only as a complete path segment");
+  }
+  return candidate;
+}
+
+function validateManagedExtensions(value: unknown, manifest: ManifestRecord): void {
+  const field = "state_lifecycle.rebuild.managed_extensions";
+  const declaration = requireRecord(value, field);
+  if (declaration.support === "disabled") {
+    requireExactFields(declaration, new Set(["support", "reason"]), field);
+    if (!requireString(declaration.reason, `${field}.reason`).trim()) {
+      fail(`${field}.reason`, "must not be empty");
+    }
+    return;
+  }
+  if (declaration.support !== "managed") {
+    fail(`${field}.support`, "must be managed or disabled");
+  }
+  requireExactFields(
+    declaration,
+    new Set([
+      "support",
+      "controller",
+      "state_directory",
+      "preserved_directories",
+      "allowed_symlinks",
+    ]),
+    field,
+  );
+  validateImmutableStateCommand(declaration.controller, `${field}.controller`);
+  const stateDirectory = validateDirectStateDirectory(
+    declaration.state_directory,
+    `${field}.state_directory`,
+  );
+  const declaredStateDirectories = Array.isArray(manifest.state_dirs)
+    ? manifest.state_dirs.flatMap((entry) => {
+        if (typeof entry === "string") return [entry];
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+        const path = (entry as ManifestRecord).path;
+        return typeof path === "string" ? [path] : [];
+      })
+    : [];
+  if (!declaredStateDirectories.includes(stateDirectory)) {
+    fail(`${field}.state_directory`, "must name a declared state_dirs path");
+  }
+  if (
+    !Array.isArray(declaration.preserved_directories) ||
+    declaration.preserved_directories.length > 64 ||
+    new Set(declaration.preserved_directories).size !== declaration.preserved_directories.length
+  ) {
+    fail(`${field}.preserved_directories`, "must contain at most 64 unique directory names");
+  }
+  declaration.preserved_directories.forEach((entry, index) => {
+    validateDirectStateDirectory(entry, `${field}.preserved_directories[${String(index)}]`);
+  });
+  if (!Array.isArray(declaration.allowed_symlinks) || declaration.allowed_symlinks.length > 16) {
+    fail(`${field}.allowed_symlinks`, "must contain at most 16 rules");
+  }
+  const patterns = new Set<string>();
+  declaration.allowed_symlinks.forEach((entry, index) => {
+    const ruleField = `${field}.allowed_symlinks[${String(index)}]`;
+    const rule = requireRecord(entry, ruleField);
+    const sourcePattern = validateSymlinkSourcePattern(
+      rule.source_pattern,
+      `${ruleField}.source_pattern`,
+    );
+    if (!sourcePattern.startsWith(`${stateDirectory}/`)) {
+      fail(`${ruleField}.source_pattern`, "must remain inside the managed state directory");
+    }
+    if (patterns.has(sourcePattern)) fail(`${ruleField}.source_pattern`, "must be unique");
+    patterns.add(sourcePattern);
+    if (rule.kind === "exact-target") {
+      requireExactFields(rule, new Set(["kind", "source_pattern", "targets"]), ruleField);
+      if (
+        !Array.isArray(rule.targets) ||
+        rule.targets.length === 0 ||
+        rule.targets.length > 16 ||
+        new Set(rule.targets).size !== rule.targets.length ||
+        rule.targets.some(
+          (target) =>
+            typeof target !== "string" ||
+            target.length > 4096 ||
+            CONTROL_CHARACTER_PATTERN.test(target) ||
+            !isCanonicalAbsolutePath(target),
+        )
+      ) {
+        fail(`${ruleField}.targets`, "must contain unique canonical absolute paths");
+      }
+      return;
+    }
+    if (rule.kind !== "relative-within") {
+      fail(`${ruleField}.kind`, "must be exact-target or relative-within");
+    }
+    requireExactFields(
+      rule,
+      new Set(["kind", "source_pattern", "root_ancestor_depth", "forbidden_prefixes"]),
+      ruleField,
+    );
+    if (
+      !Number.isInteger(rule.root_ancestor_depth) ||
+      (rule.root_ancestor_depth as number) < 0 ||
+      (rule.root_ancestor_depth as number) > 8
+    ) {
+      fail(`${ruleField}.root_ancestor_depth`, "must be an integer from 0 through 8");
+    }
+    if (
+      !Array.isArray(rule.forbidden_prefixes) ||
+      rule.forbidden_prefixes.length > 8 ||
+      new Set(rule.forbidden_prefixes).size !== rule.forbidden_prefixes.length
+    ) {
+      fail(`${ruleField}.forbidden_prefixes`, "must contain at most eight unique paths");
+    }
+    rule.forbidden_prefixes.forEach((prefix, prefixIndex) => {
+      validateRelativeStatePath(prefix, `${ruleField}.forbidden_prefixes[${String(prefixIndex)}]`);
+    });
+  });
+  if (manifest.managed_image === undefined) {
+    fail(field, "requires managed_image runtime identity authority");
+  }
+}
+
 function validateScheduledWork(value: unknown): void {
   const field = "state_lifecycle.rebuild.scheduled_work";
   const declaration = requireRecord(value, field);
@@ -428,7 +603,7 @@ function validateScheduledWork(value: unknown): void {
     ]),
     field,
   );
-  validateStateCommand(declaration.controller, `${field}.controller`);
+  validateImmutableStateCommand(declaration.controller, `${field}.controller`);
   validateRelativeStatePath(declaration.jobs_path, `${field}.jobs_path`);
   validateRelativeStatePath(declaration.scripts_path, `${field}.scripts_path`);
   validateRelativeStatePath(declaration.profiles_path, `${field}.profiles_path`);
@@ -495,16 +670,52 @@ function validatePostRestore(value: unknown): void {
 function validateRebuildState(value: unknown, manifest: ManifestRecord): void {
   const field = "state_lifecycle.rebuild";
   const declaration = requireRecord(value, field);
-  requireExactFields(
+  requireKnownFields(
     declaration,
-    new Set(["image_plugin_provenance", "scheduled_work", "post_restore"]),
+    new Set(["managed_extensions", "post_restore", "preserved_environment", "scheduled_work"]),
+    new Set(["managed_extensions", "post_restore", "scheduled_work"]),
     field,
   );
-  if (
-    declaration.image_plugin_provenance !== "required" &&
-    declaration.image_plugin_provenance !== "not-required"
-  ) {
-    fail(`${field}.image_plugin_provenance`, "must be required or not-required");
+  validateManagedExtensions(declaration.managed_extensions, manifest);
+  if (declaration.preserved_environment !== undefined) {
+    const preserved = requireRecord(
+      declaration.preserved_environment,
+      `${field}.preserved_environment`,
+    );
+    requireExactFields(preserved, new Set(["files"]), `${field}.preserved_environment`);
+    if (!Array.isArray(preserved.files) || preserved.files.length > 8) {
+      fail(`${field}.preserved_environment.files`, "must contain at most eight files");
+    }
+    const paths = new Set<string>();
+    preserved.files.forEach((value, index) => {
+      const itemField = `${field}.preserved_environment.files[${String(index)}]`;
+      const item = requireRecord(value, itemField);
+      requireExactFields(item, new Set(["path", "patterns", "render_target"]), itemField);
+      const relativePath = validateRelativeStatePath(item.path, `${itemField}.path`);
+      if (paths.has(relativePath)) fail(`${itemField}.path`, "must be unique");
+      paths.add(relativePath);
+      const renderTarget = requireString(item.render_target, `${itemField}.render_target`);
+      if (!isCanonicalHomeRenderTarget(renderTarget)) {
+        fail(`${itemField}.render_target`, "must be a canonical home-relative render target");
+      }
+      if (
+        !Array.isArray(item.patterns) ||
+        item.patterns.length === 0 ||
+        item.patterns.length > 16 ||
+        new Set(item.patterns).size !== item.patterns.length ||
+        item.patterns.some((pattern) => {
+          if (typeof pattern !== "string") return true;
+          return (
+            !/^[A-Z0-9_*]+$/u.test(pattern) ||
+            !pattern.includes("*") ||
+            pattern.replaceAll("*", "").length === 0 ||
+            pattern.split(/[*_]+/u).some((term) => CREDENTIAL_ENV_TERMS.has(term))
+          );
+        })
+      ) {
+        fail(`${itemField}.patterns`, "must contain unique bounded environment key patterns");
+      }
+    });
   }
   validateScheduledWork(declaration.scheduled_work);
   validatePostRestore(declaration.post_restore);
@@ -554,6 +765,22 @@ function validateStateLifecycle(manifest: ManifestRecord): void {
     "state_lifecycle.snapshot_restore",
     SNAPSHOT_RESTORE_ACTIONS,
   );
+  if (
+    Array.isArray(lifecycle.snapshot_restore) &&
+    lifecycle.snapshot_restore.includes("restart-runtime")
+  ) {
+    const runtime = requireRecord(manifest.runtime, "runtime");
+    if (runtime.kind !== "gateway") {
+      fail("state_lifecycle.snapshot_restore", "restart-runtime requires runtime.kind gateway");
+    }
+    const processLifecycle = requireRecord(runtime.process_lifecycle, "runtime.process_lifecycle");
+    if (processLifecycle.support !== "managed") {
+      fail(
+        "state_lifecycle.snapshot_restore",
+        "restart-runtime requires managed runtime.process_lifecycle",
+      );
+    }
+  }
   validateRebuildState(lifecycle.rebuild, manifest);
 }
 

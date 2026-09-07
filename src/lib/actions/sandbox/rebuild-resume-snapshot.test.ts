@@ -19,6 +19,11 @@ import * as agentRuntime from "../../agent/runtime";
 import * as gatewayRuntime from "../../gateway-runtime-action";
 import * as nim from "../../inference/nim";
 import * as gatewayTeardownAuthority from "../../onboard/gateway-teardown-authority";
+import {
+  buildManagedStartupPackageProfile,
+  managedStartupSettingsFromProfile,
+} from "../../onboard/managed-startup/package-profile";
+import type { ManagedStartupJsonObject } from "../../onboard/managed-startup/profile";
 import * as sessionRecovery from "../../onboard/session-recovery";
 import * as sandboxList from "../../openshell-sandbox-list";
 import * as sandboxVersion from "../../sandbox/version";
@@ -26,6 +31,7 @@ import type { Session } from "../../state/onboard-session";
 import * as onboardSession from "../../state/onboard-session";
 import * as registry from "../../state/registry";
 import * as sandboxSession from "../../state/sandbox-session";
+import { managedStartupE2eProfile } from "../../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
 import * as destroy from "./destroy";
 import * as mcpBridgeProvider from "./mcp-bridge-provider";
 import { rebuildSandbox } from "./rebuild";
@@ -107,6 +113,18 @@ describe("rebuild resume snapshot repair", () => {
     const installedPackage = installRebuildHarnessPackage(openclawAgent.effectiveAgentId);
     expect(installedPackage).not.toBeNull();
     openclawPackage = installedPackage!;
+    const desiredStartupState = managedStartupSettingsFromProfile(
+      managedStartupE2eProfile("openclaw"),
+    );
+    const startupProfile = buildManagedStartupPackageProfile({
+      harnessPackage: openclawPackage,
+      desiredState: desiredStartupState,
+      packageConfig: {
+        settings: desiredStartupState as unknown as ManagedStartupJsonObject,
+      },
+      credentialProxyReplayRequired: false,
+      dashboardRemoteBindPrepared: false,
+    });
 
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -215,6 +233,17 @@ describe("rebuild resume snapshot repair", () => {
         agent: openclawAgent.recordedAgent,
         harnessPackage: openclawPackage,
         harnessPackageMigration: null,
+        workload: {
+          schemaVersion: 1,
+          kind: "legacy-dockerfile",
+          reference: null,
+          packageStartupProfile: {
+            encodedProfile: startupProfile.encodedProfile,
+            startupProfileSha256: startupProfile.startupProfileSha256,
+            credentialProxyReplayRequired: false,
+          },
+          shared: false,
+        },
         nimContainer: null,
         nemoclawVersion: "0.1.0",
         dashboardPort: 18789,

@@ -130,6 +130,16 @@ function projectWorkload(workload: SandboxWorkloadReceipt | undefined): unknown 
       schemaVersion: workload.schemaVersion,
       kind: workload.kind,
       reference: workload.reference,
+      packageStartupProfile: workload.packageStartupProfile
+        ? {
+            startupProfileSha256: workload.packageStartupProfile.startupProfileSha256,
+            credentialProxyReplayRequired:
+              workload.packageStartupProfile.credentialProxyReplayRequired,
+            corporateCaSha256: workload.packageStartupProfile.corporateCaB64
+              ? exactContentDigest(workload.packageStartupProfile.corporateCaB64)
+              : null,
+          }
+        : null,
       shared: workload.shared,
     };
   }
@@ -302,6 +312,8 @@ export function projectLaunchReadinessAgent(agent: AgentDefinition): unknown {
           path: agent.dashboardUi.path,
           enableEnv: agent.dashboardUi.enableEnv,
           portEnv: agent.dashboardUi.portEnv,
+          internalPort: agent.dashboardUi.internalPort,
+          internalPortEnv: agent.dashboardUi.internalPortEnv,
           tuiEnv: agent.dashboardUi.tuiEnv,
         }
       : null,
@@ -415,8 +427,14 @@ export function buildLaunchReadinessRegistryProjection(
   if (sandboxGpuDevice !== null && typeof sandboxGpuDevice !== "string") {
     throw new ObservationError("config");
   }
+  const packageAuthority = resolveLaunchHarnessPackageAuthority(entry, agent);
   const hermesAuthMethod = entry.hermesAuthMethod ?? null;
-  if (hermesAuthMethod !== null && hermesAuthMethod !== "oauth" && hermesAuthMethod !== "api_key") {
+  if (
+    packageAuthority.status === "absent" &&
+    hermesAuthMethod !== null &&
+    hermesAuthMethod !== "oauth" &&
+    hermesAuthMethod !== "api_key"
+  ) {
     throw new ObservationError("config");
   }
   if (
@@ -425,8 +443,6 @@ export function buildLaunchReadinessRegistryProjection(
   ) {
     throw new ObservationError("config");
   }
-  const packageAuthority = resolveLaunchHarnessPackageAuthority(entry, agent);
-
   return {
     version: 3,
     name: entry.name,
@@ -468,22 +484,32 @@ export function buildLaunchReadinessRegistryProjection(
     webSearchProvider: entry.webSearchProvider ?? null,
     toolDisclosure: entry.toolDisclosure ?? null,
     observabilityEnabled: entry.observabilityEnabled === true,
-    dcodeAutoApprovalMode: entry.dcodeAutoApprovalMode ?? null,
+    approvalMode: entry.harnessPackage ? (entry.approvalMode ?? null) : null,
+    dcodeAutoApprovalMode: entry.harnessPackage ? null : (entry.dcodeAutoApprovalMode ?? null),
     messagingSha256: launchReadinessDigest(projectMessagingState(entry)),
     mcpSha256: launchReadinessDigest(projectMcpState(entry.mcp)),
-    hermesToolGateways: [...(entry.hermesToolGateways ?? [])],
-    hermesInferenceProvider: normalizeLaunchReadinessString(entry.hermesInferenceProvider),
-    hermesAuthMethod,
-    hermesDashboardEnabled: entry.hermesDashboardEnabled === true,
-    hermesDashboardPort: entry.hermesDashboardPort ?? null,
-    hermesDashboardInternalPort: entry.hermesDashboardInternalPort ?? null,
-    hermesDashboardTui: entry.hermesDashboardTui === true,
+    toolGatewaySelections: entry.harnessPackage ? [...(entry.toolGatewaySelections ?? [])] : [],
+    hermesToolGateways: entry.harnessPackage ? [] : [...(entry.hermesToolGateways ?? [])],
+    hermesInferenceProvider: entry.harnessPackage
+      ? null
+      : normalizeLaunchReadinessString(entry.hermesInferenceProvider),
+    providerAuthMethod: entry.harnessPackage ? (entry.providerAuthMethod ?? null) : null,
+    hermesAuthMethod: entry.harnessPackage ? null : hermesAuthMethod,
+    dashboardUi: entry.harnessPackage ? (entry.dashboardUi ?? null) : null,
+    hermesDashboardEnabled: !entry.harnessPackage && entry.hermesDashboardEnabled === true,
+    hermesDashboardPort: entry.harnessPackage ? null : (entry.hermesDashboardPort ?? null),
+    hermesDashboardInternalPort: entry.harnessPackage
+      ? null
+      : (entry.hermesDashboardInternalPort ?? null),
+    hermesDashboardTui: !entry.harnessPackage && entry.hermesDashboardTui === true,
     dashboardPort: entry.dashboardPort ?? null,
     dashboardRemoteBindPrepared: entry.dashboardRemoteBindPrepared === true,
-    openclawImagePluginInstalls: (entry.openclawImagePluginInstalls ?? []).map((install) => ({
-      id: install.id,
-      installPath: install.installPath,
-      loadPaths: install.loadPaths ? [...install.loadPaths] : null,
-    })),
+    openclawImagePluginInstalls: entry.harnessPackage
+      ? []
+      : (entry.openclawImagePluginInstalls ?? []).map((install) => ({
+          id: install.id,
+          installPath: install.installPath,
+          loadPaths: install.loadPaths ? [...install.loadPaths] : null,
+        })),
   };
 }

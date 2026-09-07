@@ -241,12 +241,11 @@ function listAvailableHarnessPackages(
       );
     }
     const expectedDirectory = `${BUNDLED_PACKAGE_DIRECTORY_PREFIX}${available.id}`;
-    const expectedManifest = `packages/${expectedDirectory}/manifest.yaml`;
     if (
       entry.name !== expectedDirectory ||
       path.basename(available.packageRoot) !== expectedDirectory ||
       available.packageRoot !== path.join(bundledRoot, expectedDirectory) ||
-      readPackage.manifestPath !== expectedManifest
+      readPackage.manifestPath !== "manifest.yaml"
     ) {
       throw new HarnessPackageCatalogIntegrityError(
         `Bundled harness '${available.id}' does not match the package contract`,

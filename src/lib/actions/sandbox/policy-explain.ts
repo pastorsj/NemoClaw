@@ -21,8 +21,18 @@ import {
   type PolicyContext,
   renderPolicyContextMarkdown,
 } from "../../policy/context";
+import {
+  captureSandboxCommandAgentAuthority,
+  readSandboxCommandAgentEntry,
+  requireCurrentSandboxCommandAgentAuthority,
+  type SandboxCommandAgentAuthority,
+} from "../../sandbox/command-agent";
+import { shellQuote } from "../../shared/shell-quote";
+import type { SandboxEntry } from "../../state/registry";
+import { LEGACY_POLICY_CONTEXT_SANDBOX_PATH } from "./legacy/policy-context";
 
-export const POLICY_CONTEXT_SANDBOX_PATH = "/sandbox/.openclaw/workspace/POLICY.md";
+/** Compatibility export for callers that report the historical no-receipt target. */
+export const POLICY_CONTEXT_SANDBOX_PATH = LEGACY_POLICY_CONTEXT_SANDBOX_PATH;
 
 export type SandboxExec = (
   sandboxName: string,
@@ -41,6 +51,50 @@ export interface ExplainPolicyDeps {
   logJson?: (value: unknown) => void;
   exec?: SandboxExec;
   warn?: (line: string) => void;
+  resolveTarget?: (sandboxName: string) => PolicyContextWriteTarget | null;
+}
+
+export interface PolicyContextWriteTarget {
+  readonly targetPath: string;
+  readonly assertCurrentAuthority?: () => void;
+}
+
+export interface PolicyContextTargetDependencies {
+  readonly getSandbox: (sandboxName: string) => SandboxEntry | null;
+  readonly captureAuthority: (entry: SandboxEntry) => SandboxCommandAgentAuthority;
+  readonly requireCurrentAuthority: (
+    expected: SandboxCommandAgentAuthority,
+    currentEntry: SandboxEntry | null,
+  ) => SandboxCommandAgentAuthority;
+}
+
+const DEFAULT_TARGET_DEPENDENCIES: PolicyContextTargetDependencies = {
+  getSandbox: readSandboxCommandAgentEntry,
+  captureAuthority: captureSandboxCommandAgentAuthority,
+  requireCurrentAuthority: requireCurrentSandboxCommandAgentAuthority,
+};
+
+/** Resolve a package-declared policy context target, with explicit no-receipt compatibility. */
+export function resolvePolicyContextWriteTarget(
+  sandboxName: string,
+  dependencies: PolicyContextTargetDependencies = DEFAULT_TARGET_DEPENDENCIES,
+): PolicyContextWriteTarget | null {
+  const entry = dependencies.getSandbox(sandboxName);
+  if (entry?.harnessPackageMigration && !entry.harnessPackage) {
+    throw new Error("sandbox package migration has no current package receipt");
+  }
+  if (!entry?.harnessPackage) {
+    return Object.freeze({ targetPath: LEGACY_POLICY_CONTEXT_SANDBOX_PATH });
+  }
+  const authority = dependencies.captureAuthority(entry);
+  const targetPath = authority.definition.policyCapability.context_target;
+  if (!targetPath) return null;
+  return Object.freeze({
+    targetPath,
+    assertCurrentAuthority: () => {
+      dependencies.requireCurrentAuthority(authority, dependencies.getSandbox(sandboxName));
+    },
+  });
 }
 
 export interface WritePolicyContextResult {
@@ -56,10 +110,14 @@ export interface WritePolicyContextResult {
     | "loader-vitest"
     | "no-runtime"
     | "unexpected-loader"
+    | "unsupported"
+    | "authority-invalid"
     | "sandbox-unreachable"
     | "exec-failed";
   /** Error captured by the loader, if any. */
   errorMessage?: string;
+  /** Exact package-declared destination used for the attempted write. */
+  targetPath?: string;
 }
 
 type ExecutorLoad =
@@ -122,14 +180,11 @@ function loadExecutor(): ExecutorLoad {
  *   semicolons, backticks, command substitutions, redirections, newlines —
  *   reaches `base64 -d` as inert data rather than the parent shell. The
  *   hostile-markdown negative test in policy-explain.test.ts guards this.
- * - The destination path is the module-scoped constant
- *   {@link POLICY_CONTEXT_SANDBOX_PATH}. We do not accept user-controlled
- *   paths here; any future caller that wants a variable path must
- *   shell-quote it before reaching this helper.
- * - The intermediate `mkdir -p` and `chmod 0644` reuse the same constant
- *   path so the command never mixes interpolated user data with shell
- *   tokens. The `dir` derivation is a string operation on the constant
- *   path and never sees external input.
+ * - The destination is a contract-validated package path and every path
+ *   token is shell-quoted before interpolation. No user-provided path reaches
+ *   this helper.
+ * - The intermediate `mkdir -p` and `chmod 0644` use that same validated
+ *   destination. The parent directory is derived only after validation.
  * - The payload is first written to a freshly-created sibling temp file
  *   with restrictive permissions (umask 077 + mktemp template), then
  *   atomically replaces the target via `mv -fT`. Replacement uses the
@@ -142,13 +197,16 @@ function loadExecutor(): ExecutorLoad {
 function buildWriteCommand(markdown: string, targetPath: string): string {
   const encoded = Buffer.from(markdown, "utf-8").toString("base64");
   const dir = targetPath.replace(/\/[^/]+$/, "") || "/";
+  const quotedDirectory = shellQuote(dir);
+  const quotedTemplate = shellQuote(`${dir}/.POLICY.md.XXXXXX`);
+  const quotedTarget = shellQuote(targetPath);
   return [
-    `mkdir -p ${dir}`,
+    `mkdir -p -- ${quotedDirectory}`,
     "umask 077",
-    `__pm_tmp=$(mktemp ${dir}/.POLICY.md.XXXXXX)`,
+    `__pm_tmp=$(mktemp ${quotedTemplate})`,
     `printf '%s' '${encoded}' | base64 -d > "$__pm_tmp"`,
     `chmod 0644 "$__pm_tmp"`,
-    `mv -fT -- "$__pm_tmp" ${targetPath}`,
+    `mv -fT -- "$__pm_tmp" ${quotedTarget}`,
   ].join(" && ");
 }
 
@@ -158,6 +216,26 @@ export function writePolicyContextToSandbox(
 ): WritePolicyContextResult {
   const build = deps.build ?? buildPolicyContext;
   const render = deps.render ?? renderPolicyContextMarkdown;
+  const resolveTarget = deps.resolveTarget ?? resolvePolicyContextWriteTarget;
+  let target: PolicyContextWriteTarget | null;
+  try {
+    target = resolveTarget(sandboxName);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      written: false,
+      reason: `policy-context package authority is invalid: ${message}`,
+      failure: "authority-invalid",
+      errorMessage: message,
+    };
+  }
+  if (!target) {
+    return {
+      written: false,
+      reason: "the selected harness package does not declare a policy context target",
+      failure: "unsupported",
+    };
+  }
   let exec: SandboxExec | undefined = deps.exec;
   if (!exec) {
     const load = loadExecutor();
@@ -179,19 +257,37 @@ export function writePolicyContextToSandbox(
   }
   const ctx = build(sandboxName);
   const markdown = render(ctx);
-  const command = buildWriteCommand(markdown, POLICY_CONTEXT_SANDBOX_PATH);
+  const command = buildWriteCommand(markdown, target.targetPath);
+  try {
+    target.assertCurrentAuthority?.();
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      written: false,
+      reason: `policy-context package authority changed: ${message}`,
+      failure: "authority-invalid",
+      errorMessage: message,
+      targetPath: target.targetPath,
+    };
+  }
   const result = exec(sandboxName, command);
   if (result === null) {
-    return { written: false, reason: "sandbox unreachable", failure: "sandbox-unreachable" };
+    return {
+      written: false,
+      reason: "sandbox unreachable",
+      failure: "sandbox-unreachable",
+      targetPath: target.targetPath,
+    };
   }
   if (result.status !== 0) {
     return {
       written: false,
       reason: `write failed (status ${String(result.status)}): ${result.stderr || "(no stderr)"}`,
       failure: "exec-failed",
+      targetPath: target.targetPath,
     };
   }
-  return { written: true };
+  return { written: true, targetPath: target.targetPath };
 }
 
 export function explainSandboxPolicy(
@@ -214,7 +310,8 @@ export function explainSandboxPolicy(
     const writeResult = writePolicyContextToSandbox(sandboxName, { ...deps, build, render });
     if (!writeResult.written) {
       const detail = writeResult.reason ?? "unknown reason";
-      warn(`  Could not seed ${POLICY_CONTEXT_SANDBOX_PATH}: ${detail}.`);
+      const destination = writeResult.targetPath ?? "the harness policy context file";
+      warn(`  Could not seed ${destination}: ${detail}.`);
     }
   }
   return ctx;

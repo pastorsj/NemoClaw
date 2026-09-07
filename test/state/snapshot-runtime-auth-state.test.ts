@@ -17,6 +17,7 @@ import {
   createSnapshotBackupAuthorityFixture,
   createSnapshotRestoreAuthorityFixture,
 } from "../helpers/snapshot-authority";
+import { restoreEnv } from "../helpers/env-test-helpers";
 
 // sandbox-state computes its backup root from HOME at module load time. Assign
 // HOME directly because Vitest restores stubbed variables before each test.
@@ -36,8 +37,7 @@ const sandboxState = (await import(
 const OPENCLAW_PACKAGE = installHomeOpenClawRestorePackageFixture(TMP_HOME).identity;
 
 afterAll(() => {
-  if (ORIGINAL_HOME === undefined) delete process.env.HOME;
-  else process.env.HOME = ORIGINAL_HOME;
+  restoreEnv("HOME", ORIGINAL_HOME);
   fs.rmSync(TMP_HOME, { recursive: true, force: true });
 });
 
@@ -133,7 +133,11 @@ if (cmd.includes("-xf - -C ")) {
 }
 // Restore: best-effort chown; usability probe over restored dirs.
 if (cmd.startsWith("chown ")) { process.exit(0); }
-if (cmd.includes("[ -d ")) { process.exit(0); }
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) { process.exit(0); }
 // Backup + config merge: read the live openclaw.json.
 if (cmd.includes("openclaw.json") && cmd.includes("cat --")) {
   process.stdout.write(fs.readFileSync(path.join(dir, "openclaw.json")));

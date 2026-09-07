@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  createBuiltInChannelManifestRegistry,
   getActiveMessagingHostForward,
   MessagingHostStateApplier,
+  type ChannelManifest,
   type SandboxMessagingPlan,
 } from "../messaging";
 import { hydrateDerivedSandboxMessagingPlanFields } from "../messaging/hydration";
 import type { SandboxMessagingHostForwardPlan } from "../messaging/manifest";
 import { parseSandboxMessagingPlan } from "../messaging/plan-validation";
+import { listMessagingChannelsForSandboxAuthority } from "../messaging/profile-authority";
 import * as registry from "../state/registry";
 import { retireProductionLegacySandboxForwards } from "./forward-service-migration";
 
@@ -51,23 +54,36 @@ export interface MessagingHostForwardRollbackOptions {
 
 export function resolveMessagingHostForward(
   plan: SandboxMessagingPlan | null | undefined,
+  manifests?: readonly ChannelManifest[],
 ): SandboxMessagingHostForwardPlan | null {
-  const normalizedPlan = plan ? parseSandboxMessagingPlan(plan) : null;
+  const hydrationOptions = manifests === undefined ? {} : { manifests };
+  const normalizedPlan = plan ? parseSandboxMessagingPlan(plan, hydrationOptions) : null;
   if (!normalizedPlan) return null;
-  const hydratedPlan = hydrateDerivedSandboxMessagingPlanFields(normalizedPlan);
+  const hydratedPlan = hydrateDerivedSandboxMessagingPlanFields(normalizedPlan, hydrationOptions);
   return getActiveMessagingHostForward(hydratedPlan);
 }
 
-function resolveMessagingPlanForSandbox(sandboxName: string): SandboxMessagingPlan | null {
+function resolveMessagingPlanForSandbox(sandboxName: string): {
+  readonly plan: SandboxMessagingPlan | null;
+  readonly manifests?: readonly ChannelManifest[];
+} {
+  const entry = registry.getSandbox(sandboxName);
+  const receiptBacked = entry?.harnessPackage != null || entry?.harnessPackageMigration != null;
+  const manifests =
+    entry && receiptBacked
+      ? listMessagingChannelsForSandboxAuthority(entry, createBuiltInChannelManifestRegistry())
+      : undefined;
   const envState = MessagingHostStateApplier.readPlanStateFromEnv();
-  if (envState?.plan.sandboxName === sandboxName) return envState.plan;
-  return registry.getSandbox(sandboxName)?.messaging?.plan ?? null;
+  const plan =
+    envState?.plan.sandboxName === sandboxName ? envState.plan : (entry?.messaging?.plan ?? null);
+  return manifests === undefined ? { plan } : { plan, manifests };
 }
 
 export function resolveMessagingHostForwardForSandbox(
   sandboxName: string,
 ): SandboxMessagingHostForwardPlan | null {
-  return resolveMessagingHostForward(resolveMessagingPlanForSandbox(sandboxName));
+  const context = resolveMessagingPlanForSandbox(sandboxName);
+  return resolveMessagingHostForward(context.plan, context.manifests);
 }
 
 export function ensureMessagingHostForwardIfConfigured({
@@ -76,14 +92,17 @@ export function ensureMessagingHostForwardIfConfigured({
   ensureForward,
   note,
   rollbackOnFailure,
+  manifests,
 }: {
   readonly sandboxName: string;
   readonly plan: SandboxMessagingPlan | null | undefined;
   readonly ensureForward: (sandboxName: string, port: number, label: string) => boolean;
   readonly note: (message: string) => void;
   readonly rollbackOnFailure?: MessagingHostForwardRollbackOptions;
+  /** Exact composed manifests required for a receipt-backed plan. */
+  readonly manifests?: readonly ChannelManifest[];
 }): boolean {
-  const forward = resolveMessagingHostForward(plan);
+  const forward = resolveMessagingHostForward(plan, manifests);
   if (!forward) return true;
 
   const ok = ensureForward(sandboxName, forward.port, forward.label);
@@ -106,9 +125,11 @@ export function ensureMessagingHostForwardForSandbox({
   readonly note: (message: string) => void;
   readonly rollbackOnFailure?: MessagingHostForwardRollbackOptions;
 }): boolean {
+  const context = resolveMessagingPlanForSandbox(sandboxName);
   return ensureMessagingHostForwardIfConfigured({
     sandboxName,
-    plan: resolveMessagingPlanForSandbox(sandboxName),
+    plan: context.plan,
+    ...(context.manifests === undefined ? {} : { manifests: context.manifests }),
     ensureForward,
     note,
     rollbackOnFailure,

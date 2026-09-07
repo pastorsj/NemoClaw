@@ -9,6 +9,7 @@ import { RETRIABLE_HTTP_PROBE_STATUSES } from "../../inference/probe/transient-h
 import {
   buildSandboxInferenceRouteProbeArgs,
   classifyInferenceRouteFailureLabel,
+  type InferenceRouteProbeAgent,
   isDcodeManagedExecMissingDetail,
   parseSandboxInferenceRouteProbeResult,
 } from "./connect-inference-route-probe";
@@ -41,6 +42,8 @@ export type SandboxInferenceRouteHealth = {
 export async function probeSandboxInferenceGatewayHealth(
   sandboxName: string,
   options: {
+    /** Receipt-derived definition; omit only for pre-receipt compatibility. */
+    agent?: InferenceRouteProbeAgent;
     captureOpenshellImpl?: typeof captureOpenshellForStatus;
     gatewayName?: string;
     getSessionAgentImpl?: typeof agentRuntime.getSessionAgent;
@@ -49,14 +52,13 @@ export async function probeSandboxInferenceGatewayHealth(
   const endpoint = "https://inference.local/v1/models";
   const capture = options.captureOpenshellImpl ?? captureOpenshellForStatus;
   const getSessionAgent = options.getSessionAgentImpl ?? agentRuntime.getSessionAgent;
+  const agent = Object.hasOwn(options, "agent")
+    ? (options.agent ?? null)
+    : getSessionAgent(sandboxName);
   let result: Awaited<ReturnType<typeof captureOpenshellForStatus>>;
   try {
     result = await capture(
-      buildSandboxInferenceRouteProbeArgs(
-        sandboxName,
-        getSessionAgent(sandboxName),
-        options.gatewayName,
-      ),
+      buildSandboxInferenceRouteProbeArgs(sandboxName, agent, options.gatewayName),
       {
         ignoreError: true,
         includeStreams: true,
@@ -223,8 +225,10 @@ function buildInvokedRouteHealth(
 }
 
 export type SandboxInferenceRouteHealthContext = {
-  agentName: string | null;
+  /** Pre-receipt compatibility selector; receipt-backed callers set models404. */
+  agentName?: string | null;
   provider: string | null;
+  models404?: "inference-invocation" | null;
 };
 
 /**
@@ -238,14 +242,32 @@ export type SandboxInferenceRouteHealthContext = {
  * accept the 404, because the route status alone proves nothing about whether
  * the sandbox can invoke its selected model.
  */
-export function isDcodeOpenRouterModelsRoute404(
+export function isModelsRoute404InvocationFallback(
   context: SandboxInferenceRouteHealthContext,
   httpStatus: number,
 ): boolean {
   return (
-    context.agentName === DCODE_AGENT_NAME &&
-    context.provider?.trim() === "openrouter-api" &&
+    (context.models404 !== undefined
+      ? context.models404 === "inference-invocation"
+      : context.agentName === DCODE_AGENT_NAME && context.provider?.trim() === "openrouter-api") &&
     httpStatus === 404
+  );
+}
+
+/** Compatibility predicate for registry rows created before package receipts. */
+export function isDcodeOpenRouterModelsRoute404(
+  context: { agentName: string | null; provider: string | null },
+  httpStatus: number,
+): boolean {
+  return isModelsRoute404InvocationFallback(
+    {
+      models404:
+        context.agentName === DCODE_AGENT_NAME && context.provider?.trim() === "openrouter-api"
+          ? "inference-invocation"
+          : null,
+      provider: context.provider,
+    },
+    httpStatus,
   );
 }
 
@@ -266,7 +288,9 @@ function routeStatusAccepted(
 ): boolean {
   if (gateway.httpStatus >= 200 && gateway.httpStatus < 300) return true;
   if (gateway.httpStatus === 404) {
-    return isDcodeOpenRouterModelsRoute404(context, gateway.httpStatus) && invocation?.ok === true;
+    return (
+      isModelsRoute404InvocationFallback(context, gateway.httpStatus) && invocation?.ok === true
+    );
   }
   return (gateway.httpStatus === 401 || gateway.httpStatus === 403) && invocation?.ok === true;
 }

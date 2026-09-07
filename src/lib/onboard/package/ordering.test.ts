@@ -329,7 +329,7 @@ describe("onboarding harness package ordering", () => {
     ["removed", (receiptPath: string) => fs.rmSync(receiptPath)],
     ["changed", (receiptPath: string) => fs.writeFileSync(receiptPath, "{}\n", { mode: 0o600 })],
   ] as const)(
-    "rejects a Pi mutation after its qualification receipt is %s",
+    "keeps a receipt-pinned Pi mutation valid after its legacy qualification receipt is %s",
     async (_failure, changeReceipt) => {
       const pinned = fixture.install("pi");
       const receiptPath = path.join(fixture.fixtureRoot, "pi-qualification.json");
@@ -362,9 +362,7 @@ describe("onboarding harness package ordering", () => {
       operation.beforeRuntimeEffects();
       changeReceipt(receiptPath);
 
-      expect(() => operation.revalidateSessionAuthority(session, "start Pi")).toThrow(
-        /release candidate.*not selectable/u,
-      );
+      expect(() => operation.revalidateSessionAuthority(session, "start Pi")).not.toThrow();
       expect(resolvePi).toHaveBeenCalledTimes(3);
       expect(resolvePi.mock.calls[2]?.[1]).toMatchObject({
         requireLifecycleEligibility: true,

@@ -125,7 +125,9 @@ describe("sandbox config sync helpers", () => {
         provider: "compatible-endpoint",
         providerLabel: "Other OpenAI-compatible endpoint",
       } as const;
-      const script = buildSandboxConfigSyncScript(selection);
+      const script = buildSandboxConfigSyncScript(selection, {
+        legacyOpenClawPermissions: true,
+      });
 
       runConfigSyncScript(script, homeDir, "1234");
 
@@ -142,6 +144,38 @@ describe("sandbox config sync helpers", () => {
       expect(modeBits(openclawConfig)).toBe(0o660);
       expect(modeBits(openclawHash)).toBe(0o660);
       expect(modeBits(fabricConfig)).toBe(0o600);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  itUnix("leaves harness config untouched for a receipt-backed package", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-sync-home-"));
+    try {
+      const harnessDir = path.join(homeDir, ".openclaw");
+      const harnessConfig = path.join(harnessDir, "openclaw.json");
+      fs.mkdirSync(harnessDir, { mode: 0o755 });
+      fs.writeFileSync(harnessConfig, "package-owned config\n", { mode: 0o644 });
+      const script = buildSandboxConfigSyncScript(
+        {
+          endpointType: "custom",
+          endpointUrl: "https://inference.local/v1",
+          ncpPartner: null,
+          model: "model",
+          profile: "inference-local",
+          credentialEnv: "OPENAI_API_KEY",
+          provider: "provider",
+          providerLabel: "Provider",
+        },
+        { legacyOpenClawPermissions: false },
+      );
+
+      runConfigSyncScript(script, homeDir, "1234");
+
+      expect(script).not.toContain("/sandbox/.openclaw");
+      expect(fs.readFileSync(harnessConfig, "utf8")).toBe("package-owned config\n");
+      expect(modeBits(harnessDir)).toBe(0o755);
+      expect(modeBits(harnessConfig)).toBe(0o644);
     } finally {
       fs.rmSync(homeDir, { recursive: true, force: true });
     }

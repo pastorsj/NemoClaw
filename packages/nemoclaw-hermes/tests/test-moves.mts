@@ -13,6 +13,8 @@ function createTestMoveRecords(
 }
 
 export const hermesPackageTestMoves = createTestMoveRecords({
+  "src/lib/messaging/channels/googlechat/runtime/hermes-adapter.test.ts":
+    "tests/runtime/googlechat-adapter.test.ts",
   "test/e2e/support/hermes-langfuse-credential-patch.test.ts":
     "tests/compat/langfuse-credentials.test.ts",
   "test/hermes-api-port-startup.test.ts": "tests/runtime/port-startup.test.ts",

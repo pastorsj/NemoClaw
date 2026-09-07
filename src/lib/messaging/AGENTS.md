@@ -35,6 +35,20 @@ The design goal is to keep messaging channel behavior out of core onboard/rebuil
 | `diagnostics.ts` | Manifest-derived channel diagnostics used by status/doctor paths. |
 | `utils.ts` | Agent/channel availability and selection helpers. |
 
+## Runtime Asset Ownership
+
+Harness-native runtime code is canonical in its harness package:
+
+- OpenClaw preloads live under `packages/nemoclaw-openclaw/messaging/runtime/`.
+- Hermes messaging adapters live under `packages/nemoclaw-hermes/messaging/runtime/`.
+
+The nine matching files under `channels/*/runtime/` are legacy-only mirrors for explicit
+no-receipt compatibility. Do not edit those mirrors independently. The bounded parity test at
+`test/runtime/messaging/asset-parity.test.ts` keeps every mirror byte-identical to its canonical
+package asset until the no-receipt lane can be retired. New harness packages own their runtime
+assets and native behavior tests; core owns only the serializable messaging contract and generic
+planning/application behavior.
+
 ## Core Invariants
 
 - Manifests and compiled plans are serializable data. Do not put functions, classes, live clients, or raw secret values in them.
@@ -72,8 +86,8 @@ Start with `channels/<channel>/manifest.ts`.
 2. Add template placeholders to `channels/<channel>/template-resolver.ts` when static render data needs derived values such as allowlists, booleans, proxy URLs, or Hermes/OpenClaw schema differences.
 3. Add hook implementations under `channels/<channel>/hooks/` only for side effects or checks that cannot be represented as static manifest data.
 4. Register hook handlers in the channel `hooks/index.ts` and in `hooks/builtins.ts`.
-5. Add runtime preload assets under `channels/<channel>/runtime/` only when the agent runtime needs boot/connect-time shims or diagnostics.
-6. Add or update `src/lib/messaging/channels/<channel>/policy/<agent>.yaml` when the manifest declares a channel policy preset.
+5. Add runtime preload or adapter assets to the owning harness package when that runtime needs boot/connect-time shims or diagnostics. Do not add another core mirror unless the explicit no-receipt compatibility lane consumes it.
+6. Add or update the policy preset in the owning harness package when a receipt-backed package declares it. Keep a root `channels/<channel>/policy/<agent>.yaml` mirror only when the explicit no-receipt compatibility lane still consumes that preset.
 7. Cover the behavior with manifest/compiler tests plus applier/onboard/channel CLI tests when host effects change.
 
 ## Where Changes Belong
@@ -92,7 +106,9 @@ Use the narrowest test that covers the changed surface:
 - Manifest shape and plan compilation: `npx vitest run src/lib/messaging/compiler src/lib/messaging/manifest src/lib/messaging/channels`
 - Hook behavior: `npx vitest run src/lib/messaging/hooks src/lib/messaging/channels/<channel>/hooks`
 - Host/OpenShell application: `npx vitest run src/lib/messaging/applier`
+- Package-native runtime behavior: `npm --prefix packages/nemoclaw-openclaw run test:package` or `npm --prefix packages/nemoclaw-hermes run test:package`
 - Build-time render/install behavior: `npx vitest run test/runtime/messaging/messaging-build-applier.test.ts`
+- Legacy mirror parity: `npx vitest run test/runtime/messaging/asset-parity.test.ts`
 - Onboard/channel CLI integration: `npx vitest run test/onboarding/onboard-messaging.test.ts test/channels/channels-add-preset.test.ts src/lib/onboard/messaging-channel-setup.test.ts`
 
 Add focused negative tests for invalid credentials, unauthorized senders, denied network access, malformed configuration, and cleanup when those behaviors are in scope.

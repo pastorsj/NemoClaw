@@ -7,10 +7,9 @@ import type { StateFileRestoreOwnership } from "../agent/defs.js";
 import type {
   HarnessConfigRestoreHostModule,
   HarnessConfigRestoreWritePlan,
-  HarnessImagePluginInstall,
+  HarnessManagedExtension,
 } from "../agent-runtime/config-module.js";
 import { redactFull, shellQuote } from "../runner.js";
-import { listManagedChannelNames } from "./restore/managed-channels.js";
 import { buildKeyAllowlistMergeRestoreCommand } from "./state-file-key-merge.js";
 
 export interface StateFileRestoreSpec {
@@ -19,10 +18,11 @@ export interface StateFileRestoreSpec {
 }
 
 export interface PackageConfigRestoreContext {
-  readonly agentName: string;
   readonly adapter: HarnessConfigRestoreHostModule;
-  readonly freshImagePluginInstalls?: readonly HarnessImagePluginInstall[];
-  readonly previousImagePluginInstalls?: readonly HarnessImagePluginInstall[];
+  /** Runtime-native channel names derived from the exact package messaging profile. */
+  readonly managedChannelNames: readonly string[];
+  readonly freshManagedExtensions?: readonly HarnessManagedExtension[];
+  readonly previousManagedExtensions?: readonly HarnessManagedExtension[];
 }
 
 interface PackageConfigRestoreInput {
@@ -62,6 +62,81 @@ function stateFileRemotePath(dir: string, filePath: string): string {
   return `${dir.replace(/\/+$/, "")}/${filePath}`;
 }
 
+type StateParentSafetyMode = "create" | "read";
+
+function canonicalStateFileSegments(filePath: string): readonly string[] {
+  const segments = filePath.split("/");
+  if (
+    filePath.length === 0 ||
+    filePath.startsWith("/") ||
+    filePath.includes("\\") ||
+    /[\x00-\x1f\x7f]/u.test(filePath) ||
+    segments.some((segment) => segment === "" || segment === "." || segment === "..")
+  ) {
+    throw new Error("State file paths must be canonical relative paths");
+  }
+  return segments;
+}
+
+/**
+ * Check every package-declared parent below the trusted state root before a
+ * restore reads or writes it. This rejects a persisted intermediate symlink;
+ * the surrounding rebuild transaction, rather than these shell checks, owns
+ * runtime quiescence. It is not a same-UID, hostile-concurrency boundary.
+ */
+function buildStateParentSafetyChecks(
+  dir: string,
+  filePath: string,
+  mode: StateParentSafetyMode,
+  failureLabel = "state parent",
+  failureExit = 10,
+  missingExit = 2,
+): readonly string[] {
+  const stateRoot = dir.replace(/\/+$/, "");
+  if (
+    !stateRoot.startsWith("/") ||
+    stateRoot === "/" ||
+    stateRoot.includes("\\") ||
+    /[\x00-\x1f\x7f]/u.test(stateRoot)
+  ) {
+    throw new Error("State root must be a canonical absolute directory");
+  }
+  const stateRootSegments = stateRoot.split("/").slice(1);
+  if (
+    stateRootSegments.some(
+      (segment) => segment === "" || segment === "." || segment === "..",
+    )
+  ) {
+    throw new Error("State root must be a canonical absolute directory");
+  }
+  const parentSegments = canonicalStateFileSegments(filePath).slice(0, -1);
+  const checks = [`state_root=${shellQuote(stateRoot)}`];
+  let rootComponent = "";
+  for (const segment of stateRootSegments) {
+    rootComponent += `/${segment}`;
+    checks.push(
+      `state_root_component=${shellQuote(rootComponent)}`,
+      `[ -d "$state_root_component" ] && [ ! -L "$state_root_component" ] || { echo "unsafe ${failureLabel}: $state_root_component" >&2; exit ${String(failureExit)}; }`,
+    );
+  }
+  let candidate = stateRoot;
+  for (const segment of parentSegments) {
+    candidate = `${candidate}/${segment}`;
+    checks.push(`state_parent=${shellQuote(candidate)}`);
+    if (mode === "create") {
+      checks.push(
+        `if [ -e "$state_parent" ] || [ -L "$state_parent" ]; then [ -d "$state_parent" ] && [ ! -L "$state_parent" ] || { echo "unsafe ${failureLabel}: $state_parent" >&2; exit ${String(failureExit)}; }; else mkdir -- "$state_parent" || { echo "cannot create ${failureLabel}: $state_parent" >&2; exit ${String(failureExit)}; }; fi`,
+      );
+    } else {
+      checks.push(
+        `[ ! -e "$state_parent" ] && [ ! -L "$state_parent" ] && exit ${String(missingExit)}`,
+        `[ -d "$state_parent" ] && [ ! -L "$state_parent" ] || { echo "unsafe ${failureLabel}: $state_parent" >&2; exit ${String(failureExit)}; }`,
+      );
+    }
+  }
+  return checks;
+}
+
 function readCurrentPackageConfig(
   sshArgs: readonly string[],
   dir: string,
@@ -75,7 +150,8 @@ function readCurrentPackageConfig(
   const remotePath = stateFileRemotePath(dir, specPath);
   const command = [
     `src=${shellQuote(remotePath)}`,
-    '[ ! -e "$src" ] && exit 2',
+    ...buildStateParentSafetyChecks(dir, specPath, "read"),
+    '[ ! -e "$src" ] && [ ! -L "$src" ] && exit 2',
     '[ -f "$src" ] && [ ! -L "$src" ] || { echo "unsafe state file: $src" >&2; exit 10; }',
     'cat -- "$src"',
   ].join("; ");
@@ -113,9 +189,9 @@ function buildPackageConfigRestoreInput(
     result = context.adapter.mergeConfigState({
       backupContent: backupContents.toString("utf8"),
       currentContent: current.kind === "read" ? current.content.toString("utf8") : null,
-      managedChannelNames: listManagedChannelNames(context.agentName),
-      previousImagePluginInstalls: context.previousImagePluginInstalls ?? null,
-      freshImagePluginInstalls: context.freshImagePluginInstalls ?? null,
+      managedChannelNames: [...context.managedChannelNames],
+      previousManagedExtensions: context.previousManagedExtensions ?? null,
+      freshManagedExtensions: context.freshManagedExtensions ?? null,
     });
   } catch {
     // Adapter execution, schema validation, and size validation all fail at
@@ -162,6 +238,7 @@ export function buildStateFileRestoreCommand(
   refreshConfigRecoveryAnchors = false,
   configHashFiles: readonly string[] = [spec.path],
 ): string {
+  canonicalStateFileSegments(spec.path);
   const protectedFiles = refreshConfigRecoveryAnchors
     ? requireConfigHashFiles(spec.path, configHashFiles)
     : [];
@@ -182,10 +259,13 @@ export function buildStateFileRestoreCommand(
     // stale ones before the check reads them, the check's own after it ends.
     return [
       `dst=${quotedRemotePath}`,
+      ...buildStateParentSafetyChecks(dir, spec.path, "create"),
       'parent="$(dirname "$dst")"',
-      '[ ! -L "$parent" ] || { echo "refusing symlinked state parent: $parent" >&2; exit 10; }',
-      '[ ! -L "$dst" ] || { echo "refusing symlinked sqlite target: $dst" >&2; exit 11; }',
-      'mkdir -p "$parent"',
+      '{ [ ! -e "$dst" ] && [ ! -L "$dst" ]; } || { [ -f "$dst" ] && [ ! -L "$dst" ]; } || { echo "unsafe sqlite state target: $dst" >&2; exit 11; }',
+      'wal="${dst}-wal"',
+      '{ [ ! -e "$wal" ] && [ ! -L "$wal" ]; } || { [ -f "$wal" ] && [ ! -L "$wal" ]; } || { echo "unsafe sqlite WAL target: $wal" >&2; exit 12; }',
+      'shm="${dst}-shm"',
+      '{ [ ! -e "$shm" ] && [ ! -L "$shm" ]; } || { [ -f "$shm" ] && [ ! -L "$shm" ]; } || { echo "unsafe sqlite SHM target: $shm" >&2; exit 12; }',
       'tmp="$(mktemp /tmp/nemoclaw-sqlite-restore.XXXXXX)"',
       'staged="$(mktemp "${parent}/.nemoclaw-sqlite-staged.XXXXXX")"',
       'trap \'rm -f "$tmp" "$staged" "${staged}-wal" "${staged}-shm"\' EXIT',
@@ -206,10 +286,9 @@ export function buildStateFileRestoreCommand(
     // failure then falls into the next step's `|| { ...; exit N; }` guard.
     "set -e",
     `dst=${quotedRemotePath}`,
+    ...buildStateParentSafetyChecks(dir, spec.path, "create"),
     'parent="$(dirname "$dst")"',
-    '[ ! -L "$parent" ] || { echo "refusing symlinked state parent: $parent" >&2; exit 10; }',
-    '[ ! -L "$dst" ] || { echo "refusing symlinked state target: $dst" >&2; exit 11; }',
-    'mkdir -p "$parent"',
+    '{ [ ! -e "$dst" ] && [ ! -L "$dst" ]; } || { [ -f "$dst" ] && [ ! -L "$dst" ]; } || { echo "unsafe state target: $dst" >&2; exit 11; }',
     'tmp="$(mktemp "${parent}/.nemoclaw-restore.XXXXXX")"',
     'trap \'rm -f "$tmp" "${anchor_tmp:-}" "${hash_tmp:-}"\' EXIT',
     'cat > "$tmp"',
@@ -229,6 +308,7 @@ export function buildStateFileRestoreCommand(
       const variable = `protected_${String(index)}`;
       steps.push(
         `${variable}=${shellQuote(stateFileRemotePath(dir, file))}`,
+        ...buildStateParentSafetyChecks(dir, file, "read", "protected config parent", 19, 20),
         `[ ! -L "$${variable}" ] || { echo "refusing symlinked protected config: $${variable}" >&2; exit 19; }`,
         `[ -f "$${variable}" ] || { echo "protected config is not a regular file: $${variable}" >&2; exit 20; }`,
       );
@@ -261,7 +341,7 @@ export function buildStateFileRestoreCommand(
     // stale `.last-good` recovery target.
     steps.push(
       'last_good="${dst}.last-good"',
-      '[ ! -L "$last_good" ] || { echo "refusing symlinked last-good target: $last_good" >&2; exit 13; }',
+      '{ [ ! -e "$last_good" ] && [ ! -L "$last_good" ]; } || { [ -f "$last_good" ] && [ ! -L "$last_good" ]; } || { echo "refusing symlinked last-good target or non-regular target: $last_good" >&2; exit 13; }',
       'anchor_tmp="$(mktemp "${parent}/.nemoclaw-lastgood.XXXXXX")" || { echo "failed to stage last-good anchor" >&2; exit 14; }',
       'cat "$tmp" > "$anchor_tmp" || { echo "failed to write last-good anchor" >&2; exit 14; }',
       'chmod 660 "$anchor_tmp" 2>/dev/null || true',

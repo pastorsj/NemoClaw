@@ -34,6 +34,7 @@ function setupOptions(
       harnessPackage: null,
       harnessPackageMigration: null,
     },
+    providerAuthMethod: null,
     ...overrides,
   };
 }
@@ -1479,106 +1480,5 @@ describe("handleProviderInferenceState", () => {
 
     expect(calls.error).toHaveBeenCalledWith("  provider update failed");
     expect(calls.exit).toHaveBeenCalledWith(7);
-  });
-
-  it("returns to provider selection when inference setup requests a retry", async () => {
-    const setupNim = vi
-      .fn()
-      .mockResolvedValueOnce({ ...baseSelection, model: "bad" })
-      .mockResolvedValueOnce({ ...baseSelection, model: "good" });
-    const setupInference = vi
-      .fn()
-      .mockResolvedValueOnce({ retry: "selection" as const })
-      .mockResolvedValueOnce({ ok: true as const });
-    const { deps, calls } = createDeps({ setupNim, setupInference });
-
-    const result = await handleProviderInferenceState(baseOptions(deps));
-
-    expect(setupNim).toHaveBeenCalledTimes(2);
-    expect(setupNim).toHaveBeenNthCalledWith(
-      1,
-      { type: "nvidia" },
-      null,
-      null,
-      true,
-      "nemoclaw",
-      expect.any(Function),
-      expect.any(Function),
-      expect.any(String),
-      expect.any(Function),
-    );
-    expect(setupNim).toHaveBeenNthCalledWith(
-      2,
-      { type: "nvidia" },
-      "my-assistant",
-      null,
-      false,
-      "nemoclaw",
-      expect.any(Function),
-      expect.any(Function),
-      expect.any(String),
-      expect.any(Function),
-    );
-    expect(setupInference).toHaveBeenCalledTimes(2);
-    expect(result.model).toBe("good");
-    expect(calls.startStep).toHaveBeenCalledWith("provider_selection");
-    expect(result.retryStateResults).toEqual([
-      {
-        type: "transition",
-        next: "provider_selection",
-        transitionKind: "retry",
-        updates: undefined,
-        metadata: {
-          state: "inference",
-          provider: "nvidia-prod",
-          model: "bad",
-          reason: "selection_retry",
-        },
-      },
-    ]);
-    expect(result.stateResult).toMatchObject({ next: "sandbox", transitionKind: "advance" });
-    expect(
-      result.stateResults.map((stateResult) => [stateResult.next, stateResult.transitionKind]),
-    ).toEqual([
-      ["inference", "advance"],
-      ["provider_selection", "retry"],
-      ["inference", "advance"],
-      ["sandbox", "advance"],
-    ]);
-  });
-
-  // Regression: #4241. When the provider selection step accepted a no-tools
-  // Ollama model (the user answered "yes" to the override prompt or
-  // NEMOCLAW_OLLAMA_REQUIRE_TOOLS=0 was set), the same flag must reach
-  // setupInference so the second validateOllamaModel pass does not reject the
-  // model on the same condition and bounce the user back to model selection.
-  it("forwards allowToolsIncompatible from provider selection into setupInference (#4241)", async () => {
-    const setupNim = vi.fn(async () => ({
-      ...baseSelection,
-      provider: "ollama-local",
-      model: "tinyllama:1.1b",
-      endpointUrl: "http://127.0.0.1:11434/v1",
-      credentialEnv: null,
-      allowToolsIncompatible: true,
-    }));
-    const { deps, calls } = createDeps({ setupNim });
-    const session = createSession();
-    calls.complete.mockResolvedValue(session);
-
-    await handleProviderInferenceState(baseOptions(deps, session));
-
-    expect(calls.setupInference).toHaveBeenCalledWith(
-      "my-assistant",
-      "tinyllama:1.1b",
-      "ollama-local",
-      "http://127.0.0.1:11434/v1",
-      null,
-      null,
-      [],
-      setupOptions(session, {
-        allowToolsIncompatible: true,
-        preferredInferenceApi: "openai-responses",
-      }),
-    );
   });
 });

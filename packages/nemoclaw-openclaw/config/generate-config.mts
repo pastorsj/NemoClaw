@@ -31,7 +31,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { readToolDisclosureEnv } from "../../../src/lib/tool-disclosure.ts";
+import { readToolDisclosureEnv } from "./tool-disclosure.ts";
 import { buildOpenClawAgentList, parseExtraAgentConfig } from "./agent-config.mts";
 import { applyOpenClawSetupEffects, findMatchingModelSetups } from "./model-setup.mts";
 

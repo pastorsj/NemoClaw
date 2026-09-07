@@ -9,20 +9,26 @@ import type {
 export interface PreservedEnvInventory {
   readonly path: string;
   readonly patterns: readonly string[];
+  readonly render_target: string;
+  readonly legacy_render_target_optional?: boolean;
 }
 
 export interface PreservedEnvFile {
   readonly path: string;
   readonly assignments: readonly string[];
+  readonly renderTarget?: string;
 }
 
 export const HERMES_PRESERVED_ENV_INVENTORY: readonly PreservedEnvInventory[] = [
   {
     path: ".env",
     patterns: ["*_HOME_CHANNEL", "*_HOME_CHANNEL_NAME", "*_HOME_CHANNEL_THREAD_ID"],
+    render_target: "~/.hermes/.env",
+    legacy_render_target_optional: true,
   },
 ];
 const ENV_KEY_RE = /^[A-Z_][A-Z0-9_]*$/;
+const SECRET_ENV_KEY_RE = /(?:^|_)(?:AUTH|CREDENTIAL|KEY|PASSWORD|SECRET|TOKEN)(?:_|$)/u;
 const ENV_PATTERN_RE = /^[A-Z0-9_*]+$/;
 const MAX_ENV_FILE_BYTES = 1024 * 1024;
 const MAX_ENV_ASSIGNMENT_BYTES = 8192;
@@ -91,15 +97,25 @@ export function validatePreservedEnvFiles(
     }
     const record = candidate as Record<string, unknown>;
     if (
-      Object.keys(record).some((key) => key !== "path" && key !== "assignments") ||
+      Object.keys(record).some(
+        (key) => key !== "path" && key !== "assignments" && key !== "renderTarget",
+      ) ||
       typeof record.path !== "string" ||
+      (record.renderTarget !== undefined && typeof record.renderTarget !== "string") ||
       !Array.isArray(record.assignments) ||
       seenPaths.has(record.path)
     ) {
       return false;
     }
     const inventory = inventoryByPath.get(record.path);
-    if (!inventory) return false;
+    if (
+      !inventory ||
+      (record.renderTarget === undefined
+        ? !inventory.legacy_render_target_optional
+        : record.renderTarget !== inventory.render_target)
+    ) {
+      return false;
+    }
     const seenKeys = new Set<string>();
     for (const assignment of record.assignments) {
       if (
@@ -122,64 +138,92 @@ export function validatePreservedEnvFiles(
   });
 }
 
-export function mergeHermesPreservedEnvIntoMessagingPlan(
+export function mergePreservedEnvironmentIntoMessagingPlan(
   plan: SandboxMessagingPlan,
   preservedFiles: readonly PreservedEnvFile[] | undefined,
 ): SandboxMessagingPlan;
-export function mergeHermesPreservedEnvIntoMessagingPlan(
+export function mergePreservedEnvironmentIntoMessagingPlan(
   plan: null,
   preservedFiles: readonly PreservedEnvFile[] | undefined,
 ): null;
-export function mergeHermesPreservedEnvIntoMessagingPlan(
+export function mergePreservedEnvironmentIntoMessagingPlan(
   plan: SandboxMessagingPlan | null,
   preservedFiles: readonly PreservedEnvFile[] | undefined,
 ): SandboxMessagingPlan | null {
-  if (!plan || plan.agent !== "hermes" || !preservedFiles || preservedFiles.length === 0) {
+  if (!plan || !preservedFiles || preservedFiles.length === 0) {
     return plan;
   }
-  if (!validatePreservedEnvFiles(preservedFiles, HERMES_PRESERVED_ENV_INVENTORY)) {
-    throw new Error("Invalid preserved environment assignments");
-  }
-  const assignments = preservedFiles
-    .filter((file) => file.path === ".env")
-    .flatMap((file) => file.assignments);
-  if (assignments.length === 0) return plan;
-
-  const enabledChannels = plan.channels.filter(
-    (channel) => channel.active && !channel.disabled,
-  );
-  // Prefer a channel that already renders into ~/.hermes/.env so the preserved
-  // lines ride along with an existing entry. Fall back to any enabled channel:
-  // whether a channel renders env lines depends on its inputs, and anchoring
-  // only on that would silently drop the captured home-channel values whenever
-  // no channel happens to render one.
-  const activeChannel =
-    enabledChannels.find((channel) =>
-      plan.agentRender.some(
-        (render) =>
-          render.channelId === channel.channelId &&
-          render.kind === "env-lines" &&
-          render.agent === "hermes" &&
-          render.target === "~/.hermes/.env",
-      ),
-    ) ?? enabledChannels[0];
-  if (!activeChannel) return plan;
-
-  const preservedRender: SandboxMessagingEnvLinesRenderPlan = {
-    channelId: activeChannel.channelId,
-    renderId: "hermes-preserved-home-channels",
-    hookId: "hermes-preserved-home-channels",
-    handler: "common.staticOutputs",
-    kind: "env-lines",
-    agent: "hermes",
-    target: "~/.hermes/.env",
-    lines: assignments,
-    templateRefs: [],
-  };
+  const enabledChannels = plan.channels.filter((channel) => channel.active && !channel.disabled);
+  const preservedRenders = preservedFiles.flatMap((file, index) => {
+    const target =
+      file.renderTarget ??
+      (plan.packageBuild === undefined && plan.agent === "hermes" && file.path === ".env"
+        ? "~/.hermes/.env"
+        : null);
+    if (
+      !target ||
+      !isCanonicalHomeRenderTarget(target) ||
+      file.assignments.some((assignment) => {
+        const separator = assignment.indexOf("=");
+        const key = separator > 0 ? assignment.slice(0, separator) : "";
+        return (
+          !ENV_KEY_RE.test(key) ||
+          SECRET_ENV_KEY_RE.test(key) ||
+          /[\r\n\u0000]/u.test(assignment) ||
+          Buffer.byteLength(assignment, "utf8") > MAX_ENV_ASSIGNMENT_BYTES
+        );
+      })
+    ) {
+      throw new Error("Invalid preserved environment assignments");
+    }
+    if (file.assignments.length === 0) return [];
+    if (enabledChannels.length === 0) {
+      throw new Error("Cannot restore preserved environment without an enabled messaging channel");
+    }
+    const activeChannel =
+      enabledChannels.find((channel) =>
+        plan.agentRender.some(
+          (render) =>
+            render.channelId === channel.channelId &&
+            render.kind === "env-lines" &&
+            render.agent === plan.agent &&
+            render.target === target,
+        ),
+      ) ?? enabledChannels[0];
+    const renderId = `preserved-environment-${String(index + 1)}`;
+    const render: SandboxMessagingEnvLinesRenderPlan = {
+      channelId: activeChannel.channelId,
+      renderId,
+      hookId: renderId,
+      handler: "common.staticOutputs",
+      kind: "env-lines",
+      agent: plan.agent,
+      target,
+      lines: file.assignments,
+      templateRefs: [],
+    };
+    return [render];
+  });
+  if (preservedRenders.length === 0) return plan;
   return {
     ...plan,
     // Preserved values are applied first. A current manifest render for the
     // same key remains authoritative because the env merger processes it later.
-    agentRender: [preservedRender, ...plan.agentRender],
+    agentRender: [...preservedRenders, ...plan.agentRender],
   };
+}
+
+function isCanonicalHomeRenderTarget(target: string): boolean {
+  if (!target.startsWith("~/") || target.includes("\\")) return false;
+  const segments = target.slice(2).split("/");
+  return (
+    segments.length > 0 &&
+    segments.every(
+      (segment) =>
+        segment.length > 0 &&
+        segment !== "." &&
+        segment !== ".." &&
+        /^[A-Za-z0-9._-]+$/u.test(segment),
+    )
+  );
 }

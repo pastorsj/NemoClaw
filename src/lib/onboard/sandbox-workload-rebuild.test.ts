@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -310,9 +311,11 @@ function futureContract(generation: "old" | "new"): PackageManagedImageContract<
 
 function resolveFuturePackage() {
   managedWorkloadAuthorityDependencies.resolvePackageBackedSandboxAgent = vi.fn((row) => {
-    if (row.harnessPackage?.contentDigest !== FUTURE_PACKAGE.contentDigest) {
-      throw new Error("package receipt drifted");
-    }
+    assert.equal(
+      row.harnessPackage?.contentDigest,
+      FUTURE_PACKAGE.contentDigest,
+      "package receipt drifted",
+    );
     return {
       recordedAgent: FUTURE_PACKAGE.id,
       effectiveAgentId: FUTURE_PACKAGE.id,
@@ -396,7 +399,7 @@ function completeHandoff(
   agent: ShippedManagedImageAgent,
   catalog: Awaited<ReturnType<typeof prepareManagedWorkloadRebuildHandoff>>,
 ): ManagedWorkloadRebuildHandoff {
-  if (!catalog || catalog.harnessPackage) throw new Error("expected legacy handoff");
+  assert(catalog && !catalog.harnessPackage, "expected legacy handoff");
   return {
     ...catalog,
     replacementProfile: profileTransport(agent),
@@ -406,9 +409,10 @@ function completeHandoff(
 function legacyPreviousProfile(
   handoff: NonNullable<Awaited<ReturnType<typeof prepareManagedWorkloadRebuildHandoff>>>,
 ): ManagedStartupProfile {
-  if (isManagedStartupPackageProfile(handoff.previousProfile)) {
-    throw new Error("expected a legacy managed startup profile");
-  }
+  assert(
+    !isManagedStartupPackageProfile(handoff.previousProfile),
+    "expected a legacy managed startup profile",
+  );
   return handoff.previousProfile;
 }
 
@@ -444,7 +448,7 @@ describe("managed workload rebuild preflight", () => {
       },
       version: "0.0.100",
     });
-    if (!catalog?.harnessPackage) throw new Error("expected package handoff");
+    assert(catalog?.harnessPackage, "expected package handoff");
     const reconcileStartupProfile = vi.fn((request) => ({
       kind: "package-config" as const,
       packageConfig: { nativeRevision: 2, model: request.desiredState.inference.model },
@@ -458,7 +462,7 @@ describe("managed workload rebuild preflight", () => {
     }));
     const desiredState = futureDesiredState(true);
     const staged = stageManagedPackageWorkloadRebuildProfile(catalog, desiredState);
-    if (!staged.harnessPackage) throw new Error("expected staged package handoff");
+    assert(staged.harnessPackage, "expected staged package handoff");
     const rebuiltReceipt = buildManagedWorkloadRebuildReceipt(staged, provider());
 
     expect(prepare).toHaveBeenCalledWith(
@@ -593,7 +597,7 @@ describe("managed workload rebuild preflight", () => {
       }));
 
       const staged = stageManagedPackageWorkloadRebuildProfile(catalog, previousDesiredState);
-      if (!staged.harnessPackage) throw new Error("expected package rebuild handoff");
+      assert(staged.harnessPackage, "expected package rebuild handoff");
 
       expect(reconcileStartupProfile).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -917,27 +921,9 @@ describe("managed workload rebuild preflight", () => {
   });
 
   it("rebuilds from the receipt-pinned package repository instead of the core catalogue map", async () => {
-    const repository = "registry.example/team/openclaw-qualified";
-    const managedImage = {
-      repository,
-      architectures: ["linux/amd64"],
-      runtime_identity: { uid: 4321, gid: 4322, workdir: "/sandbox" },
-    } as const;
-    const previousReceipt = {
-      ...receipt("openclaw", "old"),
-      reference: `${repository}@sha256:${"a".repeat(64)}`,
-    };
-    const row = {
-      ...entry("openclaw"),
-      imageTag: previousReceipt.reference,
-      workload: previousReceipt,
-    };
-    const next = managedContract("openclaw", "new");
-    const replacementContract = {
-      ...next,
-      image: repository,
-      reference: `${repository}@${next.digest}` as const,
-    };
+    resolveFuturePackage();
+    const row = futureEntry();
+    const replacementContract = futureContract("new");
     managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = vi.fn(async () => ({
       source: {
         kind: "managed-image" as const,
@@ -951,15 +937,16 @@ describe("managed workload rebuild preflight", () => {
     const catalog = await prepareManagedWorkloadRebuildHandoff(row, {
       runtime: runtime(),
       provider: provider(),
-      agentDefinition: { name: "openclaw", managedImage },
+      agentDefinition: { name: FUTURE_PACKAGE.id, managedImage: FUTURE_MANAGED_IMAGE },
     });
-    const result = buildManagedWorkloadRebuildReceipt(
-      completeHandoff("openclaw", catalog),
-      provider(),
-    );
+    assert(catalog?.harnessPackage, "expected package handoff");
 
-    expect(result.reference).toBe(replacementContract.reference);
-    expect(result.reference).not.toContain(MANAGED_IMAGE_REPOSITORIES.openclaw);
+    expect(catalog.replacement.source).toMatchObject({
+      kind: "managed-image",
+      reference: replacementContract.reference,
+      contract: { image: FUTURE_MANAGED_IMAGE.repository },
+    });
+    expect(catalog.replacement.source.reference).not.toContain(MANAGED_IMAGE_REPOSITORIES.openclaw);
   });
 
   it("rejects a cross-agent replacement contract and profile before receipt creation", async () => {
@@ -970,7 +957,7 @@ describe("managed workload rebuild preflight", () => {
       runtime: runtime(),
       provider: provider(),
     });
-    if (!catalog || catalog.harnessPackage) throw new Error("expected legacy handoff");
+    assert(catalog && !catalog.harnessPackage, "expected legacy handoff");
     const crossAgentHandoff: ManagedWorkloadRebuildHandoff = {
       ...catalog,
       replacement: replacement("hermes"),

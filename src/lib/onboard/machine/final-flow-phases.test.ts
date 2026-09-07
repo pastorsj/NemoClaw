@@ -38,6 +38,51 @@ describe("final onboard flow phases", () => {
     expect(result.context.selectedMessagingChannels).toEqual(["slack", "discord"]);
   });
 
+  it("fails closed when a receipt-backed package omits its policy declaration", async () => {
+    const [, policiesPhase] = createPhases("agent_setup");
+    const session = createSession({
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "future-harness",
+        packageVersion: "1.0.0",
+        contentDigest: "a".repeat(64),
+      },
+    });
+
+    await expect(
+      policiesPhase.run(context({ agent: { name: "future-harness" }, session })),
+    ).rejects.toThrow("has no validated policy capability");
+  });
+
+  it("accepts an explicit empty policy declaration from a receipt-backed package", async () => {
+    const setupPoliciesWithSelection = vi.fn(async () => ["balanced"]);
+    const [, policiesPhase] = createPhases("agent_setup", [], { setupPoliciesWithSelection });
+    const session = createSession({
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "future-harness",
+        packageVersion: "1.0.0",
+        contentDigest: "a".repeat(64),
+      },
+    });
+
+    await policiesPhase.run(
+      context({
+        agent: {
+          name: "future-harness",
+          policyCapability: {
+            owned_presets: [],
+            automatic_presets: [],
+            baseline_exclusion_impacts: {},
+          },
+        },
+        session,
+      }),
+    );
+
+    expect(setupPoliciesWithSelection).toHaveBeenCalledOnce();
+  });
+
   it("rejects final phases when required context is missing", async () => {
     const [branchPhase, policiesPhase, finalizationPhase, postVerifyPhase] =
       createPhases("openclaw");

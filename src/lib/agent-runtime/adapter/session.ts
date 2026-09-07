@@ -37,7 +37,10 @@ export type {
 const SESSION_ADAPTER_SOURCE_MAX_BYTES = 512 * 1024;
 const SESSION_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
 const SESSION_MUTATION_OUTPUT_MAX_BYTES = 1024 * 1024;
-const SESSION_ADAPTER_VALUE_MAX_BYTES = SESSION_OUTPUT_MAX_BYTES + 1024 * 1024;
+// The common loader enforces a 64 MiB request/result envelope. Keep this
+// contract at that shared ceiling; the worker owns the serialized overhead
+// boundary separately.
+const SESSION_ADAPTER_VALUE_MAX_BYTES = SESSION_OUTPUT_MAX_BYTES;
 
 const sessionManifestSchema: AnySchemaObject = Object.freeze({
   type: "object",

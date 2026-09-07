@@ -3,7 +3,13 @@
 
 # OpenClaw agent runtime package
 
-This package is the OpenClaw integration layer for NemoClaw. The package owns OpenClaw-specific configuration, image contents, startup behavior, runtime helpers, plugins, and compatibility code. NemoClaw core owns package discovery, onboarding, credential collection and selection, OpenShell registration, policy requests, and product rollback decisions. OpenShell owns credential custody and delivery, sandbox lifecycle, and enforcement authority.
+This package is the OpenClaw integration layer for NemoClaw. It owns OpenClaw configuration,
+image contents, startup, runtime helpers, plugins, and compatibility code. NemoClaw core owns
+package discovery, onboarding, credential selection, OpenShell registration, policy requests, and
+rollback decisions. OpenShell owns credential custody, sandbox lifecycle, and enforcement.
+
+The typed package boundary described here is a local proof of concept. It does not change the
+existing OpenClaw product scope or establish an external package compatibility promise.
 
 ## Package workflow
 
@@ -23,7 +29,9 @@ The fixed `runtime/generate-config.sh` command lets the existing managed-startup
 package-owned native generator at one path. The planner still admits only the closed set of managed
 startup agent IDs.
 
-Nested production projects use `npm-shrinkwrap.json`. npm publishes that standard lockfile, and the image build copies it to the existing in-image `package-lock.json` paths consumed by integrity checks. This keeps a registry-installed harness reproducible without changing the runtime layout.
+Nested production projects use `npm-shrinkwrap.json`. npm publishes this lockfile. The image build
+copies it to the in-image `package-lock.json` paths used by integrity checks. This preserves
+reproducible installation without changing the runtime layout.
 
 ## Directory guide
 
@@ -31,7 +39,7 @@ Nested production projects use `npm-shrinkwrap.json`. npm publishes that standar
 | --- | --- |
 | `config/` | Generates native OpenClaw configuration and holds the plugin manifest schema. |
 | `fabric/` | Implements the small OpenClaw adapter and pins its Fabric dependency graph. |
-| `host/` | Contains typed configuration, MCP, and restore adapters plus package configuration and CLI helpers. |
+| `host/` | Contains typed roster, configuration, MCP, messaging, session, startup, and restore adapters plus package configuration and CLI helpers. |
 | `runtime/` | Holds in-sandbox commands, protection helpers, preloads, state plans, and locked dependency graphs. |
 | `compat/` | Holds upstream-version patches, legacy cleanup, and reviewed npm remediation. |
 | `plugin/` | Implements the NemoClaw commands that OpenClaw loads through its plugin mechanism. |
@@ -46,13 +54,21 @@ The package root contains the files that NemoClaw and package tools discover dir
 
 | Capability | Package file | Current behavior |
 | --- | --- | --- |
-| Runtime configuration | `host/config-adapter.cts` | Returns a bounded OpenClaw configuration transaction and mutable-file posture. |
-| MCP | `host/mcp-adapter.cts` | Implements the seven fixed MCP operations. |
-| Configuration restore | `host/restore-adapter.cts` | Merges package configuration and returns a finite write plan. |
+| Command and Fabric | `manifest.runtime` and `fabric/` | Declares interactive, headless, native agent, process-lifecycle, pairing, session-qualification, semantic-turn, and smoke commands; Fabric translates headless requests. |
+| Configuration | `host/config-adapter.cts` | Returns bounded mutable configuration and inference-update plans. |
+| Roster | `host/agent-roster-adapter.cts` | Owns native list, add, delete, inspection, reconciliation, and rebuild distinctions. |
+| MCP | `host/mcp-adapter.cts` | Implements all eight fixed MCP operations. |
+| Messaging | `host/messaging-adapter.cts` and `messaging/` | Declares seven channels and projects package-native configuration. |
+| Sessions | `host/session-adapter.cts` | Implements list, delete, reset, and export plans. |
+| Startup | `host/startup-adapter.cts` | Builds and reconciles the managed-image startup profile. |
+| State and restore | `manifest.state_lifecycle` and `host/restore-adapter.cts` | Declares managed extensions and post-restore actions; merges `openclaw.json` through a bounded write plan. |
+| Policy and provider profiles | `manifest.policy`, `policies/`, and `provider-profiles/` | Owns OpenClaw presets and provider definitions for web search and messaging. |
+| Provider auth, broker, and managed tools | The broker is disabled | Provider authentication and managed tools are not declared. |
+| Dashboard and secondary forward | `manifest.dashboard` | Declares the gateway browser surface. It does not declare optional `dashboard_ui` or a secondary forward. |
 
-Only these adapter files use the generic typed loader. `host/config-runtime.cts` is an image
-configuration helper. `host/cli-grammar.cts` remains a package-owned transition helper and is not a
-current typed contract operation.
+These adapter files use the generic typed loader. `host/config-runtime.cts` is an image
+configuration helper. `host/cli-grammar.cts` is limited to native agent-output interpretation that
+has not moved to a separate typed operation.
 
 ## Runtime flow
 
@@ -68,6 +84,13 @@ request into OpenClaw's stable headless command, validates the response envelope
 child process on cancellation or timeout. NemoClaw core selects the receipt-pinned headless command
 without importing the OpenClaw Fabric adapter.
 
+The optional semantic-turn path uses `runtime/semantic-turn.sh` and `runtime/semantic-turn.mts`.
+The shell wrapper reads the existing protected gateway environment in the sandbox. The TypeScript
+adapter translates the closed semantic request into OpenClaw WebSocket frames and returns only
+`started`, `text`, `completed`, or `failed` events. OpenClaw credentials, run IDs, and native frames
+stay inside the package. NemoClaw core executes the declared command through OpenShell and owns the
+receipt check, timeout, stream limits, event delivery, and cancellation.
+
 `start.sh` is the readable process entry point. It loads package-owned modules from `runtime/`, then prepares state, applies provider routing, configures the gateway, and supervises the OpenClaw process. The modules keep each startup responsibility visible without adding callbacks to NemoClaw core:
 
 - `runtime/runtime-state.sh` protects and recovers native configuration state.
@@ -78,10 +101,11 @@ without importing the OpenClaw Fabric adapter.
 - `runtime/sandbox-setup.sh` migrates state and prepares workspaces and plugins.
 - `runtime/process-control.sh` starts, monitors, restarts, and stops the gateway.
 - `runtime/auto-pair.py` implements the bounded automatic-pairing watcher.
+- `runtime/semantic-turn.mts` translates the generic semantic-turn schema to the native gateway.
 
 The `plugin/` code runs inside OpenClaw. Other `runtime/` helpers run as bounded commands in the sandbox.
 
-NemoClaw core loads the configuration, MCP, and restore adapter files only after it verifies the
+NemoClaw core loads the agent-roster, configuration, MCP, and restore adapter files only after it verifies the
 installed package receipt. Those files return bounded data or command plans. Core retains product
 authorization, transaction, rollback, credential selection, and OpenShell registration decisions.
 OpenShell retains credential custody and delivery, sandbox lifecycle, and enforcement authority.
@@ -127,7 +151,11 @@ preserving its public exports, progress protocol, rollback behavior, and focused
 assertions that depend on core E2E fixtures or scripts, so it runs in the composed
 `test:nemoclaw` lane. A test in that directory contacts a live boundary only when its explicit
 environment gate is enabled. Package-owned helpers stay under `tests/helpers`. Native plugin unit
-tests remain beside their source under `plugin/src`.
+tests remain beside their source under `plugin/src`. `messaging/runtime` is the canonical source
+for OpenClaw channel preloads, and their native behavior tests live under `tests/runtime` and
+`tests/compat`. The OpenClaw semantic-turn and native WebSocket tests also live under
+`tests/runtime`; core tests cover only receipt-pinned command orchestration and the generic event
+grammar.
 
 Install the package and nested plugin locks, then run the checkout-independent lane:
 
@@ -145,6 +173,12 @@ rehearsals documented in [`packages/README.md`](../README.md) with package ID `o
 composed rehearsal installs the nested plugin lock, builds the temporary CLI and plugin, runs both
 package lanes, and verifies `nemoclaw harness install openclaw`, the human inventory, and the
 receipt-verified digest from `nemoclaw harness list --json`.
+
+`test:package` is package-only. It proves package adapters, runtime code, plugin behavior, checks,
+and artifacts without importing NemoClaw source. The revision-pinned `composed` rehearsal supplies
+the host operating system, runtime provider, hardware, and image-selection behavior from the
+selected NemoClaw commit. Image qualification and focused live tests prove combinations that need
+real OpenShell or external services.
 
 `npm run test:fabric` tests the adapter without a NemoClaw source checkout.
 `npm run test:fabric:composed` additionally runs the same adapter through the generic runner from

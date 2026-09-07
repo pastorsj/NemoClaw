@@ -145,6 +145,7 @@ function printIndeterminateRebuildGatewayProvider(provider: string): void {
 
 export function shouldVerifyRebuildGatewayProvider(
   provider: string | null | undefined,
+  options: { receiptBacked?: boolean } = {},
 ): provider is string {
   // Remote registrations can hold the only copy of a provider credential, so
   // their absence is unrecoverable. Local registrations are reconstructible:
@@ -152,8 +153,8 @@ export function shouldVerifyRebuildGatewayProvider(
   // upsert the local provider with locally available credentials.
   return Boolean(
     provider &&
-      !isLocalInferenceProvider(provider) &&
-      provider !== hermesProviderAuth.HERMES_PROVIDER_NAME,
+    !isLocalInferenceProvider(provider) &&
+    (options.receiptBacked || provider !== hermesProviderAuth.HERMES_PROVIDER_NAME),
   );
 }
 
@@ -179,9 +180,12 @@ export function checkRebuildGatewayProviderOrBail(
     allowProviderReconfigure?: boolean;
     hostCredentialAvailable?: boolean;
     onProviderReconfigureRequired?: (provider: string, credentialEnv: string) => void;
+    receiptBacked?: boolean;
   } = {},
 ): boolean {
-  if (!shouldVerifyRebuildGatewayProvider(provider)) return true;
+  if (!shouldVerifyRebuildGatewayProvider(provider, { receiptBacked: options.receiptBacked })) {
+    return true;
+  }
 
   const registration = inspectRebuildGatewayProviderRegistration(provider, log);
   if (registration === "registered") return true;

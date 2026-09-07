@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type {
+  HarnessPolicyCapability,
+  HarnessToolGatewayCapability,
+} from "@nvidia/nemoclaw-harness-contract";
+
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
 import type { Session, SessionUpdates } from "../../../state/onboard-session";
 import { normalizeAgentNameForResumeState } from "../../agent-resume-state";
@@ -42,7 +47,13 @@ export interface PoliciesStateOptions<Agent, WebSearchConfig> {
   webSearchConfigChanged?: boolean;
   webSearchSupported: boolean;
   hermesToolGateways: string[];
+  toolGatewaySelections?: readonly string[];
+  toolGatewayCapability?: Extract<
+    HarnessToolGatewayCapability,
+    { readonly support: "managed" }
+  > | null;
   agent: Agent;
+  packagePolicyCapability?: HarnessPolicyCapability | null;
   deps: {
     loadSession(): Session | null;
     getActiveSandbox(sandboxName: string): ActiveSandboxPolicyState | null | undefined;
@@ -75,6 +86,11 @@ export interface PoliciesStateOptions<Agent, WebSearchConfig> {
         disabledChannels: string[] | null | undefined;
         enabledChannels: string[];
         hermesToolGateways: string[];
+        toolGatewaySelections?: readonly string[] | null;
+        toolGatewayCapability?: Extract<
+          HarnessToolGatewayCapability,
+          { readonly support: "managed" }
+        > | null;
         packagePolicyPresets?: readonly string[] | null;
         agent?: string | null;
         observabilityEnabled?: boolean | null;
@@ -82,6 +98,7 @@ export interface PoliciesStateOptions<Agent, WebSearchConfig> {
         webSearchConfigChanged: boolean;
         webSearchSupported: boolean;
         tierName?: string | null;
+        packagePolicyCapability?: HarnessPolicyCapability | null;
       },
     ): PolicyResumeSelection;
     arePolicyPresetsApplied(sandboxName: string, selectedPresets: string[]): boolean;
@@ -108,7 +125,13 @@ export interface PoliciesStateOptions<Agent, WebSearchConfig> {
         tierName?: string | null;
         webSearchSupported: boolean;
         hermesToolGateways: string[];
+        toolGatewaySelections?: readonly string[] | null;
+        toolGatewayCapability?: Extract<
+          HarnessToolGatewayCapability,
+          { readonly support: "managed" }
+        > | null;
         packagePolicyPresets?: readonly string[] | null;
+        packagePolicyCapability?: HarnessPolicyCapability | null;
         onSelection: (policyPresets: string[]) => void;
       },
     ): Promise<string[]>;
@@ -140,7 +163,10 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
   webSearchConfigChanged = false,
   webSearchSupported,
   hermesToolGateways,
+  toolGatewaySelections = [],
+  toolGatewayCapability = null,
   agent,
+  packagePolicyCapability = null,
   deps,
 }: PoliciesStateOptions<Agent, WebSearchConfig>): Promise<PoliciesStateResult> {
   const latestSession = deps.loadSession();
@@ -215,12 +241,15 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
     disabledChannels,
     enabledChannels: policyMessagingChannels,
     hermesToolGateways,
+    toolGatewaySelections,
+    toolGatewayCapability,
     agent: normalizeAgentNameForResumeState((agent as { name?: string } | null)?.name),
     observabilityEnabled,
     webSearchConfig,
     webSearchConfigChanged,
     webSearchSupported,
     tierName: null,
+    packagePolicyCapability,
   });
   const livePolicyPresetsForSupport = policyResumeSelection.policyPresets;
   const staleLocalInferencePolicy =
@@ -271,9 +300,12 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
       tierName: null,
       webSearchSupported,
       hermesToolGateways,
+      toolGatewaySelections,
+      toolGatewayCapability,
       packagePolicyPresets:
-        (agent as { mcpCapability?: { policy_presets?: readonly string[] } } | null)
-          ?.mcpCapability?.policy_presets ?? null,
+        (agent as { mcpCapability?: { policy_presets?: readonly string[] } } | null)?.mcpCapability
+          ?.policy_presets ?? null,
+      packagePolicyCapability,
       onSelection: () => undefined,
     });
     if (hostLocalInferenceRouteOnly) verifySandboxInferenceRoute();

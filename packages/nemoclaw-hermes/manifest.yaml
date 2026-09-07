@@ -21,7 +21,7 @@ license: MIT
 homepage: "https://github.com/NousResearch/hermes-agent"
 
 # ── Binary & process ────────────────────────────────────────────
-install_method: curl  # curl install.sh | bash
+install_method: curl # curl install.sh | bash
 binary_path: /usr/local/bin/hermes
 version_command: "hermes --version"
 expected_version: "0.20.6"
@@ -59,10 +59,12 @@ gateway_command: "hermes gateway run"
 # kind and command let NemoClaw avoid a package-name decision.
 runtime:
   kind: gateway
+  gateway_log_path: /tmp/gateway.log
   command_shell: /bin/sh
   interactive_command: "hermes"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.hermes/fabric.json"
   prompt_transport: stdin
+  prompt_protocol: fabric-cli
   # Core invokes this package-owned controller with one finite lifecycle action
   # and a core-generated nonce. Core still owns privileged sandbox execution.
   process_lifecycle:
@@ -90,7 +92,16 @@ runtime:
 health_probe:
   url: "http://localhost:8642/health"
   port: 8642
+  port_resolution: sandbox-secondary-forward
+  secondary_forward:
+    environment_variable: NEMOCLAW_HERMES_API_PORT
+    preferred_port: 8642
+    range_start: 8642
+    range_end: 8652
+    label: Hermes API
+    remedy: Destroy a listed Hermes sandbox or stop a listed non-OpenShell listener, then rerun onboarding.
   timeout_seconds: 90
+  success_statuses: [200]
 
 # ── Dashboard / UI ──────────────────────────────────────────────
 # NemoClaw prebakes Hermes' dashboard assets and launches `hermes dashboard`
@@ -103,6 +114,17 @@ dashboard:
   path: "/"
   health_path: "/api/status"
   auth: session
+# Optional Hermes WebUI settings. NemoClaw reads these names and bounds from
+# the receipt-pinned package instead of selecting Hermes behavior by package ID.
+dashboard_ui:
+  label: Hermes dashboard
+  path: /
+  port: 9119
+  enable_env: NEMOCLAW_HERMES_DASHBOARD
+  port_env: NEMOCLAW_HERMES_DASHBOARD_PORT
+  internal_port: 19119
+  internal_port_env: NEMOCLAW_HERMES_DASHBOARD_INTERNAL_PORT
+  tui_env: NEMOCLAW_HERMES_DASHBOARD_TUI
 forward_ports:
   - 18789
   - 8642
@@ -111,17 +133,24 @@ forward_ports:
 config:
   dir: /sandbox/.hermes
   config_file: config.yaml
-  env_file: .env                  # relative to dir — API keys
-  auth_file: auth.json            # OAuth tokens (Nous Portal, Codex, etc.)
+  env_file: .env # relative to dir — API keys
+  auth_file: auth.json # OAuth tokens (Nous Portal, Codex, etc.)
   format: yaml
 
 # ── State lifecycle ────────────────────────────────────────────
 state_lifecycle:
   backup_quiescence:
     kind: not-required
-  snapshot_restore: []
+  snapshot_restore: [restart-runtime]
   rebuild:
-    image_plugin_provenance: not-required
+    managed_extensions:
+      support: disabled
+      reason: Hermes does not preserve image-owned extensions during rebuild.
+    preserved_environment:
+      files:
+        - path: .env
+          patterns: ["*_HOME_CHANNEL", "*_HOME_CHANNEL_NAME", "*_HOME_CHANNEL_THREAD_ID"]
+          render_target: ~/.hermes/.env
     scheduled_work:
       support: managed
       controller:
@@ -239,12 +268,153 @@ provider_broker:
     - describe-provider
     - register-refresh-provider
     - ensure-broker
+    - inspect-broker
+    - teardown-broker
+
+# One package-owned inference provider entry. NemoClaw owns the picker, secret
+# custody, OpenShell registration, and route validation; this package owns the
+# provider identity, model catalogue, auth choices, and alias normalization.
+provider_auth:
+  support: managed
+  adapter: provider-auth
+  operation: resolve-auth-method
+  request_environment:
+    - NEMOCLAW_HERMES_AUTH_METHOD
+    - NEMOCLAW_HERMES_AUTH
+    - NEMOCLAW_NOUS_AUTH_METHOD
+  default_method: oauth
+  selection:
+    key: hermesProvider
+    aliases: [hermes, hermes-provider, hermesprovider, nous, nous-portal]
+    label: "Hermes Provider (Moonshot, Z-AI, MiniMax, Qwen, Xiaomi, Tencent, StepFun, xAI, Arcee)"
+    provider_name: hermes-provider
+    provider_type: openai
+    endpoint_url: https://inference-api.nousresearch.com/v1
+    help_url: https://portal.nousresearch.com/manage-subscription
+    preferred_inference_api: openai-completions
+    default_model: moonshotai/kimi-k2.6
+    models:
+      - moonshotai/kimi-k2.6
+      - xiaomi/mimo-v2.5-pro
+      - xiaomi/mimo-v2.5
+      - tencent/hy3-preview
+      - anthropic/claude-opus-4.7
+      - anthropic/claude-opus-4.6
+      - anthropic/claude-sonnet-4.6
+      - anthropic/claude-sonnet-4.5
+      - anthropic/claude-haiku-4.5
+      - openai/gpt-5.5
+      - openai/gpt-5.4-mini
+      - openai/gpt-5.3-codex
+      - google/gemini-3-pro-preview
+      - google/gemini-3-flash-preview
+      - google/gemini-3.1-pro-preview
+      - google/gemini-3.1-flash-lite-preview
+      - qwen/qwen3.5-plus-02-15
+      - qwen/qwen3.5-35b-a3b
+      - stepfun/step-3.5-flash
+      - minimax/minimax-m2.7
+      - minimax/minimax-m2.5
+      - minimax/minimax-m2.5:free
+      - z-ai/glm-5.1
+      - z-ai/glm-5v-turbo
+      - z-ai/glm-5-turbo
+      - x-ai/grok-4.20-beta
+      - nvidia/nemotron-3-super-120b-a12b
+      - arcee-ai/trinity-large-thinking
+      - openai/gpt-5.5-pro
+      - openai/gpt-5.4-nano
+  methods:
+    - id: oauth
+      label: Nous Portal OAuth (authenticate via browser)
+      kind: oauth-device-code
+      credential_env: OPENAI_API_KEY
+      device_code:
+        portal_base_url: https://portal.nousresearch.com
+        client_id: hermes-cli
+        scope: inference:mint_agent_key
+        minimum_credential_ttl_seconds: 1800
+    - id: api-key
+      label: Nous API Key (paste a key from the provider dashboard)
+      kind: api-key
+      credential_env: NOUS_API_KEY
+      source_env: NOUS_API_KEY
+      prompt_label: Nous API Key
+
+# Optional tools served by the package-owned provider broker. NemoClaw owns
+# selection and credentials; this package owns names, auth compatibility, and
+# the policy presets needed by each selected gateway.
+tool_gateways:
+  support: managed
+  selection_label: Hermes managed Nous tools (OAuth subscription only)
+  selection_prompt: Managed tools
+  request_environment:
+    - NEMOCLAW_HERMES_TOOL_GATEWAYS
+    - NEMOCLAW_HERMES_TOOL_GATEWAY_PRESETS
+  incompatible_auth_message: Hermes managed tool gateways require Nous Portal OAuth/subscription; API-key mode is inference-only.
+  gateways:
+    - id: nous-web
+      aliases: [web]
+      label: Web search/extract
+      description: Firecrawl via Nous managed gateway
+      default_selected: true
+      authentication_methods: [oauth]
+      policy_presets: [nous-web]
+    - id: nous-image
+      aliases: [image]
+      label: Image generation
+      description: FAL queue via Nous managed gateway
+      default_selected: true
+      authentication_methods: [oauth]
+      policy_presets: [nous-image]
+    - id: nous-audio
+      aliases: [audio]
+      label: Audio TTS/STT
+      description: OpenAI-compatible audio via Nous managed gateway
+      default_selected: true
+      authentication_methods: [oauth]
+      policy_presets: [nous-audio]
+    - id: nous-browser
+      aliases: [browser]
+      label: Cloud browser
+      description: Browser Use via Nous managed gateway
+      default_selected: true
+      authentication_methods: [oauth]
+      policy_presets: [nous-browser]
+    - id: nous-code
+      aliases: [code]
+      label: Managed code execution
+      description: Modal via Nous managed gateway
+      default_selected: false
+      authentication_methods: [oauth]
+      policy_presets: [nous-code]
 
 # ── Web search ──────────────────────────────────────────────────
 web_search:
   support: providers
   providers:
-    - tavily
+    - provider: tavily
+      credential_env: TAVILY_API_KEY
+      profile_type: tavily-hermes-v1
+      config_verification:
+        path: /sandbox/.hermes/config.yaml
+        format: yaml
+        assertions:
+          - path: [web, backend]
+            equals: tavily
+        credential_paths: []
+      egress_verification:
+        method: POST
+        url: https://api.tavily.com/search
+        parameters:
+          - name: query
+            value: NVIDIA
+          - name: max_results
+            value: 1
+        credential:
+          kind: json-body
+          name: api_key
+        result_array_path: [results]
   tool_gateway_conflicts:
     - provider: tavily
       tool_gateway: nous-web
@@ -282,6 +452,9 @@ messaging:
 # provider: "custom" + base_url in config.yaml. This is how we
 # route through OpenShell's inference.local proxy.
 inference:
+  context_window_requirements:
+    - provider: ollama-local
+      minimum_tokens: 64000
   config_update:
     support: mutable
     provider_api_overrides:
@@ -301,9 +474,28 @@ inference:
   provider_type: custom
   base_url_config_key: "model.base_url"
   model_config_key: "model.default"
-  proxy_support: implicit  # via httpx (OpenAI SDK dep)
-  provider_options:
-    - hermesProvider
+  proxy_support: implicit # via httpx (OpenAI SDK dep)
+
+# ── Policy UX ───────────────────────────────────────────────────
+policy:
+  owned_presets:
+    - nous-web
+    - nous-image
+    - nous-audio
+    - nous-browser
+    - nous-code
+    - discord
+    - googlechat
+    - slack
+    - teams
+    - telegram
+    - wechat
+    - whatsapp
+  automatic_presets: []
+  baseline_exclusion_impacts:
+    nvidia: Direct NVIDIA API inference may stop working.
+    nous_research: Hermes public metadata lookup and agent updates may stop working.
+    pypi: Hermes skill or plugin dependency installation through pip may stop working.
 
 # ── MCP server support ───────────────────────────────────────────
 mcp:

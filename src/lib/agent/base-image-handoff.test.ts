@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -61,11 +63,17 @@ function fixture(options: { canonicalSource?: boolean } = {}) {
     label: "Hermes Agent sandbox base image",
     requireOpenshellSandboxAbi: process.platform === "linux",
     rootDir: ROOT,
+    inputPaths: [
+      agent.manifestPath,
+      path.join(agent.agentDir, "runtime/requirements.lock"),
+      path.join(agent.agentDir, "fabric/requirements.lock"),
+      path.join(agent.agentDir, "checks/image-probe.py"),
+    ],
     pinnedRemoteRef,
     requirePinnedRemoteRef: true,
     validateImage: () => true,
     validationDescription:
-      "the required MCP Streamable HTTP and ACP runtimes and the immutable security package inventory",
+      "the package-bound image probe and the immutable security package inventory",
   };
   const imageId = `sha256:${"a".repeat(64)}`;
   const canonicalRef = `nemoclaw-hermes-sandbox-base-local:image-${"a".repeat(64)}`;
@@ -131,8 +139,14 @@ describe("agent base-image local handoff authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dockerMocks.infoFormat.mockReturnValue("linux/amd64\n");
+    const probe = fs.readFileSync(
+      path.join(process.cwd(), "packages/nemoclaw-hermes/checks/image-probe.py"),
+    );
     const outputByEntrypoint = new Map([
-      ["/opt/hermes/.venv/bin/python", "nemoclaw-hermes-mcp-runtime-ok"],
+      [
+        "/usr/local/lib/nemoclaw/checks/image-probe.py",
+        `nemoclaw-image-probe-ok ${crypto.createHash("sha256").update(probe).digest("hex")}`,
+      ],
       ["/bin/sh", "nemoclaw-security-inventory-ok"],
     ]);
     dockerMocks.capture.mockImplementation(

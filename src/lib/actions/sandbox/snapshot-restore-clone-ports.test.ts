@@ -13,7 +13,6 @@ import {
 } from "../../hermes-dashboard";
 import { HERMES_API_PORT_ENV } from "../../onboard/hermes-api-port";
 import * as tempFiles from "../../onboard/temp-files";
-import { resolveRebuildHermesDashboardEnv } from "./rebuild-durable-config";
 import * as f from "./snapshot-restore-test-fixture";
 
 const OPENCLAW_PACKAGE = {
@@ -50,6 +49,10 @@ const hermesApiPortMocks = vi.hoisted(() => ({
   findAvailableHermesApiPort: vi.fn(() => 8643),
 }));
 
+const secondaryForwardMocks = vi.hoisted(() => ({
+  findAvailableSecondaryForwardPort: vi.fn(() => 8643),
+}));
+
 function parseEnvironmentCommand(args: readonly string[]): {
   readonly command: string | undefined;
   readonly environment: Record<string, string>;
@@ -74,6 +77,11 @@ vi.mock("../../onboard/dashboard-port", () => ({
 vi.mock("../../onboard/hermes-api-port", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../onboard/hermes-api-port")>()),
   findAvailableHermesApiPort: hermesApiPortMocks.findAvailableHermesApiPort,
+}));
+
+vi.mock("../../onboard/gateway-binding/secondary-forward", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../onboard/gateway-binding/secondary-forward")>()),
+  findAvailableSecondaryForwardPort: secondaryForwardMocks.findAvailableSecondaryForwardPort,
 }));
 
 beforeEach(f.resetSnapshotRestoreMocks);
@@ -440,7 +448,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
     expect(f.restoreSandboxStateMock).not.toHaveBeenCalled();
   });
 
-  it("gives a Hermes clone its own API port instead of the source's (#8543)", async () => {
+  it("allocates a receipt-backed clone's secondary forward from its package declaration", async () => {
     f.modelPendingCloneRegistry((name) =>
       name === "alpha"
         ? {
@@ -452,7 +460,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
             provider: "nvidia-nim",
             model: "nvidia/model-a",
             dashboardPort: 18790,
-            hermesApiPort: 8642,
+            secondaryForwardPort: 8642,
           }
         : null,
     );
@@ -466,17 +474,25 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
     f.getLatestBackupMock.mockReturnValue(packageSnapshot(HERMES_PACKAGE));
     const { runSandboxSnapshot } = await import("./snapshot");
     await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
-    expect(hermesApiPortMocks.findAvailableHermesApiPort).toHaveBeenCalledWith(
+    expect(secondaryForwardMocks.findAvailableSecondaryForwardPort).toHaveBeenCalledWith(
       "beta",
-      undefined,
+      expect.objectContaining({
+        environment_variable: HERMES_API_PORT_ENV,
+        preferred_port: 8642,
+        range_start: 8642,
+        range_end: 8652,
+      }),
       expect.any(String),
-      undefined,
-      expect.any(Map),
     );
+    expect(hermesApiPortMocks.findAvailableHermesApiPort).not.toHaveBeenCalled();
     const createArgs = f.streamSandboxCreateMock.mock.calls[0]?.[1] ?? [];
     expect(createArgs).toContain(`${HERMES_API_PORT_ENV}=8643`);
     expect(f.registerSandboxMock).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "beta", hermesApiPort: 8643 }),
+      expect.objectContaining({
+        name: "beta",
+        secondaryForwardPort: 8643,
+        hermesApiPort: null,
+      }),
       undefined,
       { pending: true, expectedCurrent: null },
     );
@@ -511,13 +527,17 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
     const createArgs = f.streamSandboxCreateMock.mock.calls[0]?.[1] ?? [];
     expect(createArgs.some((arg) => arg.startsWith(HERMES_API_PORT_ENV))).toBe(false);
     expect(f.registerSandboxMock).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "beta", hermesApiPort: null }),
+      expect.objectContaining({
+        name: "beta",
+        secondaryForwardPort: null,
+        hermesApiPort: null,
+      }),
       undefined,
       { pending: true, expectedCurrent: null },
     );
   });
 
-  it("keeps a Hermes clone rebuildable with its new public port and inherited internal port (#6746)", async () => {
+  it("keeps a receipt-backed Hermes clone rebuildable through neutral dashboard state", async () => {
     dashboardPortMocks.findAvailableDashboardPort.mockReturnValueOnce(18902);
     const cloneRegistry = f.modelPendingCloneRegistry((name) =>
       name === "alpha"
@@ -530,11 +550,13 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
             provider: "nvidia-nim",
             model: "nvidia/model-a",
             dashboardPort: 18790,
-            hermesApiPort: 8642,
-            hermesDashboardEnabled: true,
-            hermesDashboardPort: 18790,
-            hermesDashboardInternalPort: 18901,
-            hermesDashboardTui: true,
+            secondaryForwardPort: 8642,
+            dashboardUi: {
+              enabled: true,
+              publicPort: 18790,
+              internalPort: 18901,
+              tuiEnabled: true,
+            },
           }
         : null,
     );
@@ -555,15 +577,18 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
       18790,
       expect.any(String),
       undefined,
-      new Map([["18901", "alpha (Hermes dashboard internal)"]]),
+      new Map([["18901", "alpha (package dashboard internal)"]]),
     );
     expect(f.registerSandboxMock).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "beta",
         dashboardPort: 18902,
-        hermesDashboardPort: 18902,
-        hermesDashboardInternalPort: 18901,
-        hermesDashboardTui: true,
+        dashboardUi: {
+          enabled: true,
+          publicPort: 18902,
+          internalPort: 18901,
+          tuiEnabled: true,
+        },
       }),
       undefined,
       { pending: true, expectedCurrent: null },
@@ -581,21 +606,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
       [HERMES_DASHBOARD_TUI_ENV]: "1",
       [HERMES_API_PORT_ENV]: "8643",
     });
-    expect(
-      resolveRebuildHermesDashboardEnv(
-        "hermes",
-        cloneRegistry.getRegisteredClone() as never,
-        18902,
-      ),
-    ).toEqual({
-      ok: true,
-      env: {
-        [HERMES_DASHBOARD_ENABLE_ENV]: "1",
-        [HERMES_DASHBOARD_PORT_ENV]: "18902",
-        [HERMES_DASHBOARD_INTERNAL_PORT_ENV]: "18901",
-        [HERMES_DASHBOARD_TUI_ENV]: "1",
-      },
-    });
+    expect(cloneRegistry.getRegisteredClone()).not.toHaveProperty("hermesDashboardEnabled");
   });
 
   it("aborts before deleting a --force destination when no dashboard port is free (#6746)", async () => {
@@ -634,9 +645,9 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
     expect(f.registerSandboxMock).not.toHaveBeenCalled();
   });
 
-  it("aborts before deleting a --force destination when no Hermes API port is free (#8543)", async () => {
+  it("aborts before deleting a --force destination when no declared secondary port is free", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    hermesApiPortMocks.findAvailableHermesApiPort.mockImplementationOnce(() => {
+    secondaryForwardMocks.findAvailableSecondaryForwardPort.mockImplementationOnce(() => {
       throw new Error("All Hermes API ports in range 8642-8652 are occupied:");
     });
     f.getSandboxMock.mockImplementation((name) => ({
@@ -648,7 +659,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
       provider: "nvidia-nim",
       model: "nvidia/model-a",
       dashboardPort: 18790,
-      hermesApiPort: 8642,
+      secondaryForwardPort: 8642,
     }));
     f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha", "beta"]));
     f.captureOpenshellMock.mockImplementation((args) =>
@@ -664,7 +675,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
       runSandboxSnapshot("alpha", { kind: "restore", to: "beta", force: true, yes: true }),
     ).rejects.toMatchObject({ exitCode: 1 });
 
-    expect(hermesApiPortMocks.findAvailableHermesApiPort).toHaveBeenCalled();
+    expect(secondaryForwardMocks.findAvailableSecondaryForwardPort).toHaveBeenCalled();
     expect(consoleError.mock.calls.flat().join("\n")).toContain("are occupied");
     expect(f.lifecycleMock.events).not.toContain("delete");
     expect(f.streamSandboxCreateMock).not.toHaveBeenCalled();

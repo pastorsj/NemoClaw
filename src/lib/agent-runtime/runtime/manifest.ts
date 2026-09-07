@@ -6,14 +6,20 @@ import type {
   HarnessAgentCommandDeclaration,
   HarnessDevicePairingSettlementDeclaration,
   HarnessProcessLifecycleDeclaration,
+  HarnessPromptProtocol,
   HarnessPromptTransport,
+  HarnessSelectionQualificationDeclaration,
+  HarnessSemanticTurnDeclaration,
+  HarnessSessionQualificationDeclaration,
 } from "@nvidia/nemoclaw-harness-contract";
+import { isImmutableSandboxCommandPath } from "@nvidia/nemoclaw-harness-contract/manifest-validator";
 
 export type AgentRuntimeKind = "gateway" | "terminal";
 
 export type AgentCommandShell = "/bin/sh" | "/bin/bash";
 
 export type AgentPromptTransport = HarnessPromptTransport;
+export type AgentPromptProtocol = HarnessPromptProtocol;
 
 export interface LoginShellSmokeBoundary {
   kind: "login-shell";
@@ -29,9 +35,11 @@ export type AgentSmokeBoundary = LoginShellSmokeBoundary | ManagedLauncherSmokeB
 
 export interface AgentRuntime {
   kind: AgentRuntimeKind;
+  gateway_log_path?: string;
   interactive_command?: string;
   headless_command?: string;
   prompt_transport?: AgentPromptTransport;
+  prompt_protocol?: AgentPromptProtocol;
   command_shell?: AgentCommandShell;
   startup_environment?: Readonly<Record<string, string>>;
   headless_environment?: Readonly<Record<string, string>>;
@@ -40,6 +48,9 @@ export interface AgentRuntime {
   agent_command?: HarnessAgentCommandDeclaration;
   process_lifecycle?: HarnessProcessLifecycleDeclaration;
   device_pairing_settlement?: HarnessDevicePairingSettlementDeclaration;
+  selection_qualification?: HarnessSelectionQualificationDeclaration;
+  session_qualification?: HarnessSessionQualificationDeclaration;
+  semantic_turn?: HarnessSemanticTurnDeclaration;
 }
 
 type RuntimeRecord = { [key: string]: unknown };
@@ -131,6 +142,17 @@ function readPromptTransport(record: RuntimeRecord): AgentPromptTransport | unde
   return value;
 }
 
+function readPromptProtocol(record: RuntimeRecord): AgentPromptProtocol | undefined {
+  const value = record.prompt_protocol;
+  if (value === undefined) return undefined;
+  if (value !== "fabric-cli" && value !== "raw-stdin") {
+    throw new Error(
+      "Agent manifest field 'runtime.prompt_protocol' must be fabric-cli or raw-stdin",
+    );
+  }
+  return value;
+}
+
 const AGENT_COMMAND_OPTION = /^-{1,2}[a-zA-Z0-9][a-zA-Z0-9-]*$/u;
 
 function readAgentCommandStringArray(
@@ -192,6 +214,7 @@ function readAgentCommandDeclaration(
   const knownFields = new Set([
     "argv",
     "output_mode",
+    "output_interpretation",
     "selector_options",
     "selector_required",
     "value_options",
@@ -210,6 +233,15 @@ function readAgentCommandDeclaration(
   if (outputMode !== "direct" && outputMode !== "bounded-text") {
     throw new Error(
       "Agent manifest field 'runtime.agent_command.output_mode' must be direct or bounded-text",
+    );
+  }
+  const outputInterpretation = value.output_interpretation;
+  if (
+    outputInterpretation !== undefined &&
+    (outputInterpretation !== "structured-turn-envelope" || outputMode !== "bounded-text")
+  ) {
+    throw new Error(
+      "Agent manifest field 'runtime.agent_command.output_interpretation' must be structured-turn-envelope with bounded-text output",
     );
   }
   const selectorOptions = readAgentCommandStringArray(value, "selector_options", {
@@ -254,6 +286,7 @@ function readAgentCommandDeclaration(
   return Object.freeze({
     argv: argv!,
     output_mode: outputMode,
+    ...(outputInterpretation ? { output_interpretation: outputInterpretation } : {}),
     ...(selectorOptions ? { selector_options: selectorOptions } : {}),
     ...(selectorRequired !== undefined ? { selector_required: selectorRequired } : {}),
     ...(valueOptions ? { value_options: valueOptions } : {}),
@@ -265,7 +298,12 @@ function readAgentCommandDeclaration(
 
 function readFixedRuntimeCommand(
   record: RuntimeRecord,
-  field: "process_lifecycle" | "device_pairing_settlement",
+  field:
+    | "process_lifecycle"
+    | "device_pairing_settlement"
+    | "selection_qualification"
+    | "semantic_turn"
+    | "session_qualification",
 ): readonly string[] {
   const value = record.command;
   if (
@@ -286,6 +324,75 @@ function readFixedRuntimeCommand(
   }
   readCanonicalAbsolutePath(value[0], `runtime.${field}.command[0]`);
   return Object.freeze([...(value as string[])]);
+}
+
+function readSemanticTurnDeclaration(
+  runtime: RuntimeRecord,
+): HarnessSemanticTurnDeclaration | undefined {
+  const value = runtime.semantic_turn;
+  if (value === undefined) return undefined;
+  if (!isObjectRecord(value)) {
+    throw new Error("Agent manifest field 'runtime.semantic_turn' must be an object");
+  }
+  if (value.support === "managed") {
+    const unknownField = Object.keys(value).find(
+      (key) =>
+        key !== "command" && key !== "protocol" && key !== "support" && key !== "timeout_seconds",
+    );
+    if (unknownField) {
+      throw new Error(
+        `Agent manifest field 'runtime.semantic_turn.${unknownField}' is not supported`,
+      );
+    }
+    if (value.protocol !== "semantic-turn-ndjson") {
+      throw new Error(
+        "Agent manifest field 'runtime.semantic_turn.protocol' must be semantic-turn-ndjson",
+      );
+    }
+    const command = readFixedRuntimeCommand(value, "semantic_turn");
+    if (!isImmutableSandboxCommandPath(command[0] as string)) {
+      throw new Error(
+        "Agent manifest field 'runtime.semantic_turn.command[0]' must be an immutable image-owned executable path",
+      );
+    }
+    if (
+      !Number.isInteger(value.timeout_seconds) ||
+      (value.timeout_seconds as number) < 1 ||
+      (value.timeout_seconds as number) > 300
+    ) {
+      throw new Error(
+        "Agent manifest field 'runtime.semantic_turn.timeout_seconds' must be an integer from 1 through 300",
+      );
+    }
+    return Object.freeze({
+      support: "managed",
+      command,
+      timeout_seconds: value.timeout_seconds as number,
+      protocol: "semantic-turn-ndjson",
+    });
+  }
+  if (value.support === "unsupported") {
+    const unknownField = Object.keys(value).find((key) => key !== "reason" && key !== "support");
+    if (unknownField) {
+      throw new Error(
+        `Agent manifest field 'runtime.semantic_turn.${unknownField}' is not supported`,
+      );
+    }
+    if (
+      typeof value.reason !== "string" ||
+      value.reason.length === 0 ||
+      value.reason.length > 512 ||
+      /[\0\r\n]/u.test(value.reason)
+    ) {
+      throw new Error(
+        "Agent manifest field 'runtime.semantic_turn.reason' must be a non-empty single-line string of at most 512 characters",
+      );
+    }
+    return Object.freeze({ support: "unsupported", reason: value.reason });
+  }
+  throw new Error(
+    "Agent manifest field 'runtime.semantic_turn.support' must be managed or unsupported",
+  );
 }
 
 function readProcessLifecycleDeclaration(
@@ -313,9 +420,15 @@ function readProcessLifecycleDeclaration(
         "Agent manifest field 'runtime.process_lifecycle.revalidate_running_gateway' must be true when present",
       );
     }
+    const command = readFixedRuntimeCommand(value, "process_lifecycle");
+    if (!isImmutableSandboxCommandPath(command[0] as string)) {
+      throw new Error(
+        "Agent manifest field 'runtime.process_lifecycle.command[0]' must be an immutable image-owned executable path",
+      );
+    }
     return Object.freeze({
       support: "managed",
-      command: readFixedRuntimeCommand(value, "process_lifecycle"),
+      command,
       ...(value.revalidate_running_gateway === true
         ? { revalidate_running_gateway: true as const }
         : {}),
@@ -374,6 +487,64 @@ function readDevicePairingSettlementDeclaration(
   return Object.freeze({ command, timeout_seconds: value.timeout_seconds as number });
 }
 
+function readSessionQualificationDeclaration(
+  runtime: RuntimeRecord,
+): HarnessSessionQualificationDeclaration | undefined {
+  const value = runtime.session_qualification;
+  if (value === undefined) return undefined;
+  if (!isObjectRecord(value)) {
+    throw new Error("Agent manifest field 'runtime.session_qualification' must be an object");
+  }
+  const unknownField = Object.keys(value).find(
+    (key) => key !== "command" && key !== "timeout_seconds",
+  );
+  if (unknownField) {
+    throw new Error(
+      `Agent manifest field 'runtime.session_qualification.${unknownField}' is not supported`,
+    );
+  }
+  const command = readFixedRuntimeCommand({ command: value.command }, "session_qualification");
+  if (
+    !Number.isInteger(value.timeout_seconds) ||
+    (value.timeout_seconds as number) < 1 ||
+    (value.timeout_seconds as number) > 300
+  ) {
+    throw new Error(
+      "Agent manifest field 'runtime.session_qualification.timeout_seconds' must be an integer from 1 through 300",
+    );
+  }
+  return Object.freeze({ command, timeout_seconds: value.timeout_seconds as number });
+}
+
+function readSelectionQualificationDeclaration(
+  runtime: RuntimeRecord,
+): HarnessSelectionQualificationDeclaration | undefined {
+  const value = runtime.selection_qualification;
+  if (value === undefined) return undefined;
+  if (!isObjectRecord(value)) {
+    throw new Error("Agent manifest field 'runtime.selection_qualification' must be an object");
+  }
+  const unknownField = Object.keys(value).find(
+    (key) => key !== "command" && key !== "timeout_seconds",
+  );
+  if (unknownField) {
+    throw new Error(
+      `Agent manifest field 'runtime.selection_qualification.${unknownField}' is not supported`,
+    );
+  }
+  const command = readFixedRuntimeCommand({ command: value.command }, "selection_qualification");
+  if (
+    !Number.isInteger(value.timeout_seconds) ||
+    (value.timeout_seconds as number) < 1 ||
+    (value.timeout_seconds as number) > 300
+  ) {
+    throw new Error(
+      "Agent manifest field 'runtime.selection_qualification.timeout_seconds' must be an integer from 1 through 300",
+    );
+  }
+  return Object.freeze({ command, timeout_seconds: value.timeout_seconds as number });
+}
+
 function readCanonicalAbsolutePath(value: unknown, field: string): string {
   if (typeof value !== "string" || !value.startsWith("/")) {
     throw new Error(`Agent manifest field '${field}' must be a canonical absolute path`);
@@ -417,9 +588,14 @@ export function readAgentRuntime(record: RuntimeRecord): AgentRuntime {
   }
 
   const kind: AgentRuntimeKind = rawKind === "terminal" ? "terminal" : "gateway";
+  const gatewayLogPath =
+    runtime.gateway_log_path === undefined
+      ? undefined
+      : readCanonicalAbsolutePath(runtime.gateway_log_path, "runtime.gateway_log_path");
   const interactiveCommand = readString(runtime, "interactive_command")?.trim();
   const headlessCommand = readString(runtime, "headless_command")?.trim();
   const promptTransport = readPromptTransport(runtime);
+  const promptProtocol = readPromptProtocol(runtime);
   const commandShell = readCommandShell(runtime);
   const startupEnvironment = readPublicEnvironment(runtime, "startup_environment");
   const headlessEnvironment = readPublicEnvironment(runtime, "headless_environment");
@@ -428,10 +604,18 @@ export function readAgentRuntime(record: RuntimeRecord): AgentRuntime {
   const agentCommand = readAgentCommandDeclaration(runtime);
   const processLifecycle = readProcessLifecycleDeclaration(runtime);
   const devicePairingSettlement = readDevicePairingSettlementDeclaration(runtime);
+  const selectionQualification = readSelectionQualificationDeclaration(runtime);
+  const sessionQualification = readSessionQualificationDeclaration(runtime);
+  const semanticTurn = readSemanticTurnDeclaration(runtime);
 
   if (kind === "terminal" && !interactiveCommand && !headlessCommand) {
     throw new Error(
       "Agent manifest field 'runtime' must define interactive_command or headless_command for terminal agents",
+    );
+  }
+  if (kind === "terminal" && gatewayLogPath) {
+    throw new Error(
+      "Agent manifest field 'runtime.gateway_log_path' requires runtime.kind gateway",
     );
   }
   if (headlessEnvironment && !headlessCommand) {
@@ -444,6 +628,11 @@ export function readAgentRuntime(record: RuntimeRecord): AgentRuntime {
       "Agent manifest field 'runtime.prompt_transport' requires runtime.headless_command",
     );
   }
+  if (promptProtocol && promptTransport !== "stdin") {
+    throw new Error(
+      "Agent manifest field 'runtime.prompt_protocol' requires runtime.prompt_transport to be stdin",
+    );
+  }
   if (kind === "terminal" && processLifecycle?.support === "managed") {
     throw new Error(
       "Agent manifest field 'runtime.process_lifecycle' cannot be managed for a terminal runtime",
@@ -452,9 +641,11 @@ export function readAgentRuntime(record: RuntimeRecord): AgentRuntime {
 
   return {
     kind,
+    ...(gatewayLogPath ? { gateway_log_path: gatewayLogPath } : {}),
     ...(interactiveCommand ? { interactive_command: interactiveCommand } : {}),
     ...(headlessCommand ? { headless_command: headlessCommand } : {}),
     ...(promptTransport ? { prompt_transport: promptTransport } : {}),
+    ...(promptProtocol ? { prompt_protocol: promptProtocol } : {}),
     ...(commandShell ? { command_shell: commandShell } : {}),
     ...(startupEnvironment ? { startup_environment: startupEnvironment } : {}),
     ...(headlessEnvironment ? { headless_environment: headlessEnvironment } : {}),
@@ -463,6 +654,9 @@ export function readAgentRuntime(record: RuntimeRecord): AgentRuntime {
     ...(agentCommand ? { agent_command: agentCommand } : {}),
     ...(processLifecycle ? { process_lifecycle: processLifecycle } : {}),
     ...(devicePairingSettlement ? { device_pairing_settlement: devicePairingSettlement } : {}),
+    ...(selectionQualification ? { selection_qualification: selectionQualification } : {}),
+    ...(sessionQualification ? { session_qualification: sessionQualification } : {}),
+    ...(semanticTurn ? { semantic_turn: semanticTurn } : {}),
   };
 }
 

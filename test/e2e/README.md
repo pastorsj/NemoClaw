@@ -19,12 +19,15 @@ npx tsx tools/e2e/fabric-package.mts run \
   --package-artifact /path/to/nemoclaw-example
 ```
 
-The journey installs and onboards the artifact once. It derives a test-only package revision from
-the validated immutable object, installs that revision, verifies the existing sandbox receipt,
-rolls back, deactivates the package, and restarts the same pinned sandbox. The public package
-installer validates both artifact trees.
-Pass `--upgrade-package-artifact /path/to/nemoclaw-example-next` to test two release artifacts instead
-of the derived revision.
+The default `smoke` journey installs the package, onboards one sandbox, runs one public Fabric turn,
+destroys the sandbox, and removes the package. This is the per-package gate.
+
+Use `--journey lifecycle` for the slower shared control-plane proof. It derives a test-only package
+revision from the validated immutable object, verifies receipt pinning across two sandboxes,
+rolls back, deactivates the package, and restarts a pinned sandbox. Pass
+`--upgrade-package-artifact /path/to/nemoclaw-example-next` to test two release artifacts instead of
+the derived revision. Run this full journey once per release environment; deterministic contract
+tests cover the same lifecycle state machine for every package.
 
 - `.github/workflows/e2e.yaml` compares the commits before and after each push to `main`.
   It selects targets and jobs that own changed files, then publishes the `Relevant E2E` check.

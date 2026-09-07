@@ -8,6 +8,15 @@ import {
   retargetAgentHealthUrl,
 } from "./agent-dashboard-forward";
 
+const futureSecondaryForward = {
+  environment_variable: "FUTURE_RUNTIME_API_PORT",
+  preferred_port: 9310,
+  range_start: 9310,
+  range_end: 9312,
+  label: "future runtime API",
+  remedy: "Stop an existing listener and retry onboarding.",
+} as const;
+
 describe("sandbox agent health port", () => {
   it("uses the allocated dashboard port for a dashboard-backed gateway", () => {
     expect(
@@ -31,7 +40,10 @@ describe("sandbox agent health port", () => {
           name: "hermes",
           forwardPort: 18789,
           forward_ports: [18789, 8642],
-          healthProbe: { port: 8642 },
+          healthProbe: {
+            port: 8642,
+            port_resolution: "sandbox-secondary-forward",
+          },
         },
         { getSandbox: () => ({ dashboardPort: 18791, hermesApiPort: 8643 }) },
       ),
@@ -88,6 +100,7 @@ describe("ensureAgentDashboardForward", () => {
         },
         ensureDashboardForward,
         hermesApiPort: 8642,
+        receiptBackedPackage: false,
       }),
     ).toBe(18789);
 
@@ -114,6 +127,7 @@ describe("ensureAgentDashboardForward", () => {
         },
         ensureDashboardForward,
         hermesApiPort: 8643,
+        receiptBackedPackage: false,
       }),
     ).toBe(18789);
 
@@ -128,6 +142,84 @@ describe("ensureAgentDashboardForward", () => {
       "http://127.0.0.1:8642",
       expect.anything(),
     );
+  });
+
+  it("forwards an unknown package's neutral secondary allocation", async () => {
+    const ensureDashboardForward = vi.fn((_sandboxName, chatUiUrl = "") =>
+      Number(new URL(chatUiUrl).port),
+    );
+
+    await ensureAgentDashboardForward({
+      sandboxName: "future-box",
+      agent: {
+        forwardPort: 19000,
+        forward_ports: [19000, 9310],
+        healthProbe: {
+          port: 9310,
+          port_resolution: "sandbox-secondary-forward",
+          secondary_forward: futureSecondaryForward,
+        },
+      },
+      ensureDashboardForward,
+      secondaryForwardPort: 9312,
+      receiptBackedPackage: true,
+    });
+
+    expect(ensureDashboardForward).toHaveBeenNthCalledWith(
+      2,
+      "future-box",
+      "http://127.0.0.1:9312",
+      { allowPortReallocation: false },
+    );
+  });
+
+  it("does not substitute a legacy Hermes API port for a receipt secondary allocation", async () => {
+    const ensureDashboardForward = vi.fn((_sandboxName, chatUiUrl = "") =>
+      Number(new URL(chatUiUrl).port),
+    );
+
+    await expect(
+      ensureAgentDashboardForward({
+        sandboxName: "future-box",
+        agent: {
+          forwardPort: 19000,
+          forward_ports: [19000, 9310],
+          healthProbe: {
+            port: 9310,
+            port_resolution: "sandbox-secondary-forward",
+            secondary_forward: futureSecondaryForward,
+          },
+        },
+        ensureDashboardForward,
+        hermesApiPort: 8649,
+        receiptBackedPackage: true,
+      }),
+    ).rejects.toThrow(/Recorded future runtime API port is missing/u);
+    expect(ensureDashboardForward).not.toHaveBeenCalled();
+  });
+
+  it("keeps a receipt package's fixed API port even when it matches Hermes", async () => {
+    const ensureDashboardForward = vi.fn((_sandboxName, chatUiUrl = "") =>
+      Number(new URL(chatUiUrl).port),
+    );
+
+    expect(
+      await ensureAgentDashboardForward({
+        sandboxName: "future-box",
+        agent: {
+          dashboard: { kind: "api" },
+          forwardPort: 8642,
+          forward_ports: [8642],
+          healthProbe: { port: 8642 },
+        },
+        ensureDashboardForward,
+        hermesApiPort: 8649,
+        receiptBackedPackage: true,
+      }),
+    ).toBe(8642);
+    expect(ensureDashboardForward).toHaveBeenCalledWith("future-box", "http://127.0.0.1:8642", {
+      allowPortReallocation: false,
+    });
   });
 
   it("hands off a reserved port immediately before starting its host forward", async () => {
@@ -146,6 +238,7 @@ describe("ensureAgentDashboardForward", () => {
       },
       ensureDashboardForward,
       hermesApiPort: 8643,
+      receiptBackedPackage: false,
       beforeForwardPort: (port) => {
         events.push(`before:${port}`);
       },
@@ -169,6 +262,7 @@ describe("ensureAgentDashboardForward", () => {
         ensureDashboardForward,
         hermesApiPort: 8642,
         controlUiPort: 9120,
+        receiptBackedPackage: false,
       }),
     ).toBe(9120);
 
@@ -203,6 +297,7 @@ describe("ensureAgentDashboardForward", () => {
         hermesApiPort: 8642,
         chatUiUrl: "https://hermes.example.test:9120/ui",
         controlUiPort: 9120,
+        receiptBackedPackage: false,
       }),
     ).toBe(9120);
 
@@ -232,14 +327,13 @@ describe("ensureAgentDashboardForward", () => {
         hermesApiPort: 8647,
         chatUiUrl: "http://127.0.0.1:9120",
         controlUiPort: 9120,
+        receiptBackedPackage: false,
       }),
     ).toBe(8647);
 
-    expect(ensureDashboardForward).toHaveBeenCalledWith(
-      "api-agent",
-      "http://127.0.0.1:8647",
-      { allowPortReallocation: false },
-    );
+    expect(ensureDashboardForward).toHaveBeenCalledWith("api-agent", "http://127.0.0.1:8647", {
+      allowPortReallocation: false,
+    });
     expect(ensureDashboardForward).not.toHaveBeenCalledWith(
       "api-agent",
       "http://127.0.0.1:8642",
@@ -267,6 +361,7 @@ describe("ensureAgentDashboardForward", () => {
         hermesApiPort: 8642,
         chatUiUrl: process.env.CHAT_UI_URL,
         controlUiPort: 9120,
+        receiptBackedPackage: false,
       }),
     ).toBe(8642);
 

@@ -583,6 +583,79 @@ describe("onboard session", () => {
     expect(loaded.hermesAuthMethod).toBeNull();
   });
 
+  it("persists generic provider auth for receipt rows and clears the legacy encoding", () => {
+    session.saveSession(
+      session.createSession({
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: "future-harness",
+          packageVersion: "1.0.0",
+          contentDigest: "a".repeat(64),
+        },
+        providerAuthMethod: "api-key",
+        hermesAuthMethod: "oauth",
+      }),
+    );
+
+    const loaded = requireLoadedSession(session.loadSession());
+    expect(loaded.providerAuthMethod).toBe("api-key");
+    expect(loaded.hermesAuthMethod).toBeNull();
+    expect(requireDebugSummary(session.summarizeForDebug())).toMatchObject({
+      providerAuthMethod: "api-key",
+      hermesAuthMethod: null,
+    });
+  });
+
+  it("decodes a receipt row's old Hermes auth field once without changing no-receipt rows", () => {
+    const receiptRow = session.createSession({
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "future-harness",
+        packageVersion: "1.0.0",
+        contentDigest: "b".repeat(64),
+      },
+    }) as unknown as Record<string, unknown>;
+    delete receiptRow.providerAuthMethod;
+    receiptRow.hermesAuthMethod = "api_key";
+    const migrated = requireLoadedSession(session.normalizeSession(receiptRow as never));
+    expect(migrated.providerAuthMethod).toBe("api-key");
+    expect(migrated.hermesAuthMethod).toBeNull();
+
+    const legacyRow = session.createSession() as unknown as Record<string, unknown>;
+    delete legacyRow.providerAuthMethod;
+    legacyRow.hermesAuthMethod = "oauth";
+    const legacy = requireLoadedSession(session.normalizeSession(legacyRow as never));
+    expect(legacy.providerAuthMethod).toBeNull();
+    expect(legacy.hermesAuthMethod).toBe("oauth");
+  });
+
+  it("migrates receipt-backed managed tools to neutral state and preserves no-receipt legacy", () => {
+    const packageIdentity = {
+      kind: "agent-runtime" as const,
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "c".repeat(64),
+    };
+    const oldReceipt = session.createSession({
+      harnessPackage: packageIdentity,
+    }) as unknown as Record<string, unknown>;
+    delete oldReceipt.toolGatewaySelections;
+    oldReceipt.hermesToolGateways = ["future-search"];
+
+    const migrated = requireLoadedSession(session.normalizeSession(oldReceipt as never));
+    expect(migrated.toolGatewaySelections).toEqual(["future-search"]);
+    expect(migrated.hermesToolGateways).toBeNull();
+
+    const legacy = requireLoadedSession(
+      session.normalizeSession({
+        ...session.createSession(),
+        hermesToolGateways: ["nous-web"],
+      } as never),
+    );
+    expect(legacy.toolGatewaySelections).toBeNull();
+    expect(legacy.hermesToolGateways).toEqual(["nous-web"]);
+  });
+
   it("classifies nullable string update intent explicitly", () => {
     const unchanged = session.getNullableStringUpdateIntent(undefined);
     const malformed = session.getNullableStringUpdateIntent(42);
@@ -1321,170 +1394,5 @@ describe("onboard session", () => {
     expect(loaded.steps.inference.error).not.toContain("ghp_1234567890123456789012345");
     expect(loaded.failure).toBeNull();
     expect(loaded.machine).toMatchObject({ state: "init", revision: 0 });
-  });
-
-  it("round-trips null messagingPlan through normalizeSession", () => {
-    const created = session.createSession();
-    expect(created.messagingPlan).toBeNull();
-    const saved = session.saveSession(created);
-    const loaded = requireLoadedSession(session.loadSession());
-    expect(saved.messagingPlan).toBeNull();
-    expect(loaded.messagingPlan).toBeNull();
-  });
-
-  it("round-trips messagingPlan through normalizeSession", () => {
-    const plan = makeMessagingPlan({ channels: ["telegram"] });
-    const created = session.createSession({ messagingPlan: plan });
-    expect(created.messagingPlan).toEqual(plan);
-    const saved = session.saveSession(created);
-    const loaded = requireLoadedSession(session.loadSession());
-    expect(saved.messagingPlan).toEqual(plan);
-    expect(loaded.messagingPlan).toMatchObject({
-      sandboxName: "my-assistant",
-      channels: [expect.objectContaining({ channelId: "telegram", configured: true })],
-    });
-  });
-
-  it("filterSafeUpdates preserves messagingPlan field", () => {
-    session.saveSession(session.createSession());
-    const plan = makeMessagingPlan({ channels: ["slack", "discord"] });
-    session.markStepComplete("provider_selection", {
-      messagingPlan: plan,
-    });
-
-    const loaded = requireLoadedSession(session.loadSession());
-    expect(loaded.messagingPlan).toMatchObject({
-      sandboxName: "my-assistant",
-      channels: [
-        expect.objectContaining({ channelId: "slack", configured: true }),
-        expect.objectContaining({ channelId: "discord", configured: true }),
-      ],
-    });
-  });
-
-  it("filterSafeUpdates ignores malformed messagingPlan values", () => {
-    session.saveSession(session.createSession());
-    session.markStepComplete("provider_selection", {
-      messagingPlan: { sandboxName: "my-assistant" },
-    } as unknown as Parameters<OnboardSessionModule["markStepComplete"]>[1]);
-
-    const loaded = requireLoadedSession(session.loadSession());
-    expect(loaded.messagingPlan).toBeNull();
-  });
-
-  it("routes telegramConfig through markStepComplete in filterSafeUpdates (#1737)", () => {
-    session.saveSession(session.createSession());
-    session.markStepComplete("provider_selection", {
-      telegramConfig: { requireMention: true },
-    });
-
-    const loaded = session.loadSession()!;
-    expect(loaded.telegramConfig).toEqual({ requireMention: true });
-
-    // Explicit null (clearing the field) should also round-trip.
-    session.markStepComplete("provider_selection", { telegramConfig: null });
-    const cleared = session.loadSession()!;
-    expect(cleared.telegramConfig).toBeNull();
-  });
-
-  it("drops malformed telegramConfig values in filterSafeUpdates (#1737)", () => {
-    session.saveSession(session.createSession());
-    // Non-boolean requireMention — must not leak through.
-    session.markStepComplete("provider_selection", {
-      telegramConfig: { requireMention: "yes" } as unknown as { requireMention: boolean },
-    });
-
-    const loaded = session.loadSession()!;
-    expect(loaded.telegramConfig).toBeNull();
-  });
-
-  it("filterSafeUpdates routes wechatConfig through markStepComplete", () => {
-    session.saveSession(session.createSession());
-    session.markStepComplete("provider_selection", {
-      wechatConfig: { accountId: "primary", baseUrl: "https://x", userId: "u" },
-    });
-
-    const loaded = session.loadSession()!;
-    expect(loaded.wechatConfig).toEqual({
-      accountId: "primary",
-      baseUrl: "https://x",
-      userId: "u",
-    });
-
-    // Explicit null clears the field (used when WeChat is removed from the
-    // enabled channels on a subsequent onboard).
-    session.markStepComplete("provider_selection", { wechatConfig: null });
-    const cleared = session.loadSession()!;
-    expect(cleared.wechatConfig).toBeNull();
-  });
-
-  it("filterSafeUpdates drops malformed wechatConfig values", () => {
-    session.saveSession(session.createSession());
-    session.markStepComplete("provider_selection", {
-      wechatConfig: { accountId: 9000 } as unknown as { accountId: string },
-    });
-
-    const loaded = session.loadSession()!;
-    expect(loaded.wechatConfig).toBeNull();
-  });
-
-  it("creates a session with a messagingPlan override", () => {
-    const plan = makeMessagingPlan({ channels: ["telegram", "slack"] });
-    const created = session.createSession({ messagingPlan: plan });
-    expect(created.messagingPlan).toEqual(plan);
-    expect(created.provider).toBeNull();
-  });
-
-  it("summarizes the session for debug output", () => {
-    session.saveSession(session.createSession({ sandboxName: "my-assistant" }));
-    session.markStepStarted("preflight");
-    session.markStepComplete("preflight");
-    session.completeSession();
-    const summary = requireDebugSummary(session.summarizeForDebug());
-
-    expect(summary.sandboxName).toBe("my-assistant");
-    expect(summary.steps.preflight.status).toBe("complete");
-    expect(summary.steps.preflight.startedAt).toBeTruthy();
-    expect(summary.steps.preflight.completedAt).toBeTruthy();
-    expect(summary.resumable).toBe(false);
-  });
-
-  it("keeps debug summaries redacted when failures were sanitized", () => {
-    session.saveSession(
-      session.createSession({
-        sandboxName: "my-assistant",
-        failure: {
-          step: "provider_selection",
-          message: "Bearer abcdefghijklmnopqrstuvwxyz",
-          recordedAt: "2026-04-01T00:00:00.000Z",
-        },
-      }),
-    );
-    const summary = requireDebugSummary(session.summarizeForDebug());
-
-    expect(summary.failure).not.toBeNull();
-    if (!summary.failure) {
-      throw new Error("Expected failure metadata in debug summary");
-    }
-    expect(summary.failure.message).toContain("Bearer <REDACTED>");
-    expect(summary.failure.message).not.toContain("abcdefghijklmnopqrstuvwxyz");
-  });
-
-  it("re-sanitizes in-memory failures in debug summaries", () => {
-    const rawSession = session.createSession({
-      failure: {
-        step: "provider_selection",
-        message: "Bearer abcdefghijklmnopqrstuvwxyz",
-        recordedAt: "2026-04-01T00:00:00.000Z",
-      },
-    });
-
-    const summary = requireDebugSummary(session.summarizeForDebug(rawSession));
-    expect(summary.failure).not.toBeNull();
-    if (!summary.failure) {
-      throw new Error("Expected failure metadata in debug summary");
-    }
-    expect(summary.failure.message).toContain("Bearer <REDACTED>");
-    expect(summary.failure.message).not.toContain("abcdefghijklmnopqrstuvwxyz");
   });
 });

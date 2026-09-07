@@ -7,6 +7,10 @@ import type { HarnessScheduledWorkDeclaration } from "@nvidia/nemoclaw-harness-c
 import { hydrateCredentialEnv } from "../../onboard/credential-env";
 import { DCODE_AUTO_APPROVAL_FEATURE } from "../../onboard/dcode-auto-approval";
 import { managedSandboxFeatureIssue } from "../../onboard/managed-sandbox-feature";
+import {
+  packageSupportsSandboxStartupControl,
+  resolveSandboxApprovalMode,
+} from "../../onboard/managed-startup/startup-controls";
 import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import {
   type HermesCronRestorePlan,
@@ -252,33 +256,66 @@ export async function runRebuildPreflightPhase(
     );
   }
   const rebuildAgent = agentAuthority.recordedAgent;
-  const dcodeAutoApprovalIssue = managedSandboxFeatureIssue(DCODE_AUTO_APPROVAL_FEATURE, {
-    agent: rebuildAgent,
-    requested: requestedDcodeAutoApprovalMode,
-    registryValue: sandboxEntry.dcodeAutoApprovalMode,
-  });
+  const receiptBackedPackage = agentAuthority.harnessPackage !== null;
+  const legacyDcodeRebuild = !receiptBackedPackage && isDcodeRebuildAgent(rebuildAgent);
+  const packageApprovalModeSupported =
+    receiptBackedPackage &&
+    packageSupportsSandboxStartupControl(agentAuthority.definition, "approval-mode");
+  const packageObservabilitySupported =
+    receiptBackedPackage &&
+    packageSupportsSandboxStartupControl(agentAuthority.definition, "observability");
+  const dcodeAutoApprovalIssue = receiptBackedPackage
+    ? resolveSandboxApprovalMode({
+        supported: packageApprovalModeSupported,
+        requestedMode: requestedDcodeAutoApprovalMode,
+        recordedMode: sandboxEntry.approvalMode ?? sandboxEntry.dcodeAutoApprovalMode,
+      }).issue
+    : managedSandboxFeatureIssue(DCODE_AUTO_APPROVAL_FEATURE, {
+        agent: rebuildAgent,
+        requested: requestedDcodeAutoApprovalMode,
+        registryValue: sandboxEntry.dcodeAutoApprovalMode,
+      });
   if (dcodeAutoApprovalIssue === "unsupported-request") {
     printRebuildPreflightFailure(
-      "the DCode auto-approval override is supported only for managed LangChain Deep Agents Code sandboxes.",
-      "Remove --dcode-auto-approval or select a managed Deep Agents Code sandbox.",
-      "Unsupported rebuild DCode auto-approval override",
+      receiptBackedPackage
+        ? "the selected harness package does not declare the approval-mode startup control."
+        : "the DCode auto-approval override is supported only for managed LangChain Deep Agents Code sandboxes.",
+      receiptBackedPackage
+        ? "Remove the approval-mode override or select a package that declares the control."
+        : "Remove --dcode-auto-approval or select a managed Deep Agents Code sandbox.",
+      receiptBackedPackage
+        ? "Unsupported rebuild approval-mode override"
+        : "Unsupported rebuild DCode auto-approval override",
       bail,
     );
     return null;
   }
   if (dcodeAutoApprovalIssue === "recorded-state-on-unsupported-agent") {
     printRebuildPreflightFailure(
-      "recorded DCode auto-approval is enabled for a sandbox whose agent does not support it.",
-      "Pass --dcode-auto-approval disabled to clear the incompatible state during rebuild.",
-      "Recorded DCode auto-approval state is incompatible with the sandbox agent",
+      receiptBackedPackage
+        ? "recorded approval mode belongs to a package that does not declare the startup control."
+        : "recorded DCode auto-approval is enabled for a sandbox whose agent does not support it.",
+      receiptBackedPackage
+        ? "Select disabled explicitly to clear the incompatible state during rebuild."
+        : "Pass --dcode-auto-approval disabled to clear the incompatible state during rebuild.",
+      receiptBackedPackage
+        ? "Recorded approval-mode state is incompatible with the harness package"
+        : "Recorded DCode auto-approval state is incompatible with the sandbox agent",
       bail,
     );
     return null;
   }
-  if (requestedObservabilityEnabled !== undefined && !isDcodeRebuildAgent(rebuildAgent)) {
+  if (
+    requestedObservabilityEnabled !== undefined &&
+    !(receiptBackedPackage ? packageObservabilitySupported : legacyDcodeRebuild)
+  ) {
     printRebuildPreflightFailure(
-      "the observability override is supported only for managed LangChain Deep Agents Code sandboxes.",
-      "Remove --observability/--no-observability or select a managed Deep Agents Code sandbox.",
+      receiptBackedPackage
+        ? "the selected harness package does not declare the observability startup control."
+        : "the observability override is supported only for managed LangChain Deep Agents Code sandboxes.",
+      receiptBackedPackage
+        ? "Remove the observability override or select a package that declares the control."
+        : "Remove --observability/--no-observability or select a managed Deep Agents Code sandbox.",
       "Unsupported rebuild observability override",
       bail,
     );
@@ -291,7 +328,7 @@ export async function runRebuildPreflightPhase(
   const activeSessionCount = countActiveSandboxSessionsForRebuild(sandboxName);
   const versionCheck = await runRebuildGatewayIntentPreflight({
     checkGatewaySchema: () =>
-      isDcodeRebuildAgent(rebuildAgent) ||
+      legacyDcodeRebuild ||
       checkRebuildGatewaySchemaPreflight(sandboxName, sandboxEntry, bail, mcpRuntimeSelection),
     confirmIntent: () =>
       confirmRebuildIntent(
@@ -313,6 +350,7 @@ export async function runRebuildPreflightPhase(
     sandboxName,
     entry: expectedSandboxEntry,
     rebuildAgent,
+    legacyDcodeRebuild,
     managedWorkloadRebuild: expectedSandboxEntry.workload?.kind === "managed-image",
     log,
     bail,
@@ -377,7 +415,7 @@ export async function runRebuildPreflightPhase(
         },
       );
       if (!liveState) return null;
-      if (isDcodeRebuildAgent(rebuildAgent)) {
+      if (legacyDcodeRebuild) {
         const recoveryRecreate = liveState.staleRecovery || recoveryManifest !== null;
         const imageReady = await dcodePreflight.prepareImage(
           preparedTarget.targetConfig.resumeConfig,

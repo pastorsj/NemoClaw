@@ -2,9 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { clearAutoDetectedCompatibleContextWindow } from "../../../inference/compatible-endpoint-context";
-import { resolveAgentProviderInferenceApi } from "../../../inference/config";
+import {
+  resolveAgentProviderInferenceApi,
+  resolvePackageProviderInferenceApi,
+} from "../../../inference/config";
 import type { TrustedPrivateEndpointCapability } from "../../../inference/endpoint-ssrf-preflight";
-import type { HarnessPackageAuthority } from "../../../agent-runtime/package/identity";
+import type {
+  HarnessPackageAuthority,
+  HarnessPackageIdentity,
+} from "../../../agent-runtime/package/identity";
 import {
   type CurrentGatewayRouteCompatibilityCheck,
   type CurrentGatewayRouteDiscoveryPreflight,
@@ -12,11 +18,16 @@ import {
   isAdvisoryGatewayRouteConflict,
 } from "../../../inference/gateway-route-compatibility";
 import { withModelRouterPortLifecycleLock } from "../../../inference/gateway-route-mutation-lock";
-import { getOllamaContextWindowFloorForAgent } from "../../../inference/ollama-runtime-context";
+import {
+  getOllamaContextWindowFloorForAgent,
+  getPackageOllamaContextWindowFloor,
+} from "../../../inference/ollama-runtime-context";
 import type { InferenceEndpointSource } from "../../../inference/selection";
 import type { ServingProfileProvenance } from "../../../inference/serving/types";
 import type { WebSearchConfig } from "../../../inference/web-search";
 import type { HermesAuthMethod, Session, SessionUpdates } from "../../../state/onboard-session";
+import { formatHarnessToolGatewaySelections } from "../../../agent-runtime/tool-gateway";
+import type { HarnessToolGatewayCapability } from "@nvidia/nemoclaw-harness-contract";
 import { checkpointSandboxIdentityMatches } from "../../checkpoint-replay";
 import type { OnboardInferenceCapabilityCache } from "../../inference-capability-cache";
 import type { RepairLocalInferenceSystemdOverrideOptions } from "../../local-inference-topology";
@@ -45,6 +56,7 @@ import {
   type HostLocalInferenceStartupSelection,
   type HostLocalInferenceStartupSelectionResolver,
   hostLocalInferenceGatewayProvider,
+  hostLocalInferenceApplicationsEqual,
   hostLocalInferenceRequestModel,
   hostLocalInferenceRequestToolCalling,
   hostLocalInferenceSandboxProofAuthority,
@@ -90,6 +102,8 @@ interface ProviderInferenceSetupOptionsBase {
   hostLocalInference?: HostLocalInferenceStartupSelection;
   /** Proxy token prepared after configuration review; avoids repeating host mutations in setup. */
   preparedOllamaProxyToken?: string;
+  /** Receipt-backed package auth method selected by the package adapter. */
+  providerAuthMethod?: string | null;
 }
 
 /** Route ownership is either one complete Session/package tuple or entirely absent. */
@@ -112,6 +126,8 @@ export interface ProviderSelectionResult {
   endpointSource?: InferenceEndpointSource | null;
   credentialEnv: string | null;
   hermesAuthMethod: HermesAuthMethod | null;
+  providerAuthMethod?: string | null;
+  toolGatewaySelections?: string[];
   hermesToolGateways: string[];
   preferredInferenceApi: string | null;
   compatibleEndpointReasoning: string | null;
@@ -157,6 +173,8 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
     onboardEndpointUrl?: string | null;
     credentialEnv: string | null;
     hermesAuthMethod: HermesAuthMethod | null;
+    providerAuthMethod?: string | null;
+    toolGatewaySelections?: string[];
     hermesToolGateways: string[];
     preferredInferenceApi: string | null;
     compatibleEndpointReasoning: string | null;
@@ -198,6 +216,7 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
       canProbeRoute?: (provider: string) => boolean,
       recoverySessionId?: string | null,
       revalidateSandboxIdentity?: (route: ProviderInferenceProbeRoute, operation: string) => void,
+      harnessPackage?: HarnessPackageIdentity | null,
     ): Promise<ProviderSelectionResult>;
     setupInference(
       sandboxName: string | null,
@@ -287,6 +306,7 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
       hermesAuthMethod: string | null;
       webSearchConfig: WebSearchConfig | null;
       hermesToolGateways: string[];
+      managedToolsLabel?: string | null;
       enabledChannels: string[] | null;
       sandboxName: string;
       servingProfileProvenance?: ServingProfileProvenance | null;
@@ -310,6 +330,8 @@ export interface ProviderInferenceStateResult {
   onboardEndpointUrl: string | null;
   credentialEnv: string | null;
   hermesAuthMethod: HermesAuthMethod | null;
+  providerAuthMethod: string | null;
+  toolGatewaySelections: string[];
   hermesToolGateways: string[];
   preferredInferenceApi: string | null;
   compatibleEndpointReasoning: string | null;
@@ -351,6 +373,120 @@ function agentName(agent: unknown): string {
   return typeof name === "string" && name.length > 0 ? name : "openclaw";
 }
 
+function resolveOnboardProviderInferenceApi(
+  agent: unknown,
+  harnessPackage: HarnessPackageIdentity | null | undefined,
+  provider: string | null | undefined,
+  preferredInferenceApi: string | null,
+): string | null {
+  if (harnessPackage) {
+    return resolvePackageProviderInferenceApi(agent, provider, preferredInferenceApi);
+  }
+  // Explicit compatibility for sessions created before package receipts. New
+  // packages never enter the harness-ID-based resolver.
+  return resolveAgentProviderInferenceApi(agentName(agent), agent, provider, preferredInferenceApi);
+}
+
+type HarnessPackageRouteAuthorityDeps = Pick<
+  ProviderInferenceStateOptions<unknown, unknown, unknown>["deps"],
+  "revalidateHarnessPackageAuthority"
+>;
+
+/** Revalidate the package selected by the current onboarding session. */
+function revalidateCurrentHarnessPackage(
+  session: Session | null,
+  operation: string,
+  deps: HarnessPackageRouteAuthorityDeps,
+): HarnessPackageAuthority {
+  return session
+    ? deps.revalidateHarnessPackageAuthority(session, operation)
+    : { harnessPackage: null, harnessPackageMigration: null };
+}
+
+/** Bind a registry route reservation to its current Session/package owner. */
+function requireInferenceRouteReservationAuthority(
+  session: Session | null,
+  operation: string,
+  deps: HarnessPackageRouteAuthorityDeps,
+): HarnessPackageAuthority & { readonly reservationSessionId: string } {
+  if (!session?.sessionId) {
+    throw new Error(`Cannot ${operation}: onboarding session route owner is missing`);
+  }
+  return {
+    reservationSessionId: session.sessionId,
+    ...revalidateCurrentHarnessPackage(session, operation, deps),
+  };
+}
+
+/** Bind inference setup to the same Session/package owner as its route. */
+function requireInferenceSetupAuthority(
+  session: Session | null,
+  operation: string,
+  deps: HarnessPackageRouteAuthorityDeps,
+): {
+  readonly reservationSessionId: string;
+  readonly harnessPackageAuthority: HarnessPackageAuthority;
+} {
+  if (!session?.sessionId) {
+    throw new Error(`Cannot ${operation}: onboarding session route owner is missing`);
+  }
+  return {
+    reservationSessionId: session.sessionId,
+    harnessPackageAuthority: revalidateCurrentHarnessPackage(session, operation, deps),
+  };
+}
+
+interface InitialProviderAuthentication {
+  readonly hermesAuthMethod: HermesAuthMethod | null;
+  readonly providerAuthMethod: string | null;
+}
+
+/** Translate persisted legacy auth fields into the selected package's generic auth field. */
+function resolveInitialProviderAuthentication(input: {
+  readonly initialHermesAuthMethod: HermesAuthMethod | null;
+  readonly initialProviderAuthMethod: string | null | undefined;
+  readonly selectedHarnessPackage: HarnessPackageIdentity | null;
+  readonly provider: string | null;
+  readonly credentialEnv: string | null;
+  readonly constants: ProviderInferenceStateOptions<unknown, unknown, unknown>["constants"];
+  readonly deps: Pick<
+    ProviderInferenceStateOptions<unknown, unknown, unknown>["deps"],
+    "normalizeHermesAuthMethod"
+  >;
+}): InitialProviderAuthentication {
+  const legacyHermesAuthMethod =
+    input.deps.normalizeHermesAuthMethod(input.initialHermesAuthMethod) ||
+    (input.provider === input.constants.hermesProviderName &&
+    input.credentialEnv === input.constants.hermesApiKeyCredentialEnv
+      ? input.constants.hermesApiKeyAuthMethod
+      : null);
+  if (!input.selectedHarnessPackage) {
+    return {
+      hermesAuthMethod: legacyHermesAuthMethod,
+      providerAuthMethod: input.initialProviderAuthMethod ?? null,
+    };
+  }
+  const migratedProviderAuthMethod =
+    input.initialHermesAuthMethod === "api_key"
+      ? "api-key"
+      : input.initialHermesAuthMethod === "oauth"
+        ? "oauth"
+        : null;
+  return {
+    hermesAuthMethod: null,
+    providerAuthMethod: input.initialProviderAuthMethod ?? migratedProviderAuthMethod,
+  };
+}
+
+function resolveOnboardOllamaContextWindowFloor(
+  agent: unknown,
+  harnessPackage: HarnessPackageIdentity | null | undefined,
+): number {
+  if (harnessPackage) return getPackageOllamaContextWindowFloor(agent);
+  // Exact agent-name behavior belongs only to explicit no-receipt compatibility.
+  return getOllamaContextWindowFloorForAgent(agentName(agent));
+}
+
 function selectedHostLocalOllamaAcceleration(
   gpu: unknown,
   gpuPassthrough: boolean,
@@ -385,6 +521,7 @@ function isCanonicalHostLocalResume(input: {
 export function createCachedHostLocalInferenceSetupResolver(input: {
   resolver: HostLocalInferenceStartupSelectionResolver;
   application: string;
+  harnessPackage?: HarnessPackageIdentity | null;
   provider: string;
   model: string;
   acceleration: HostLocalOllamaAccelerationAuthority;
@@ -404,6 +541,7 @@ export function createCachedHostLocalInferenceSetupResolver(input: {
     if (cached === null) {
       cached = hostLocalInferenceSetupOptions(input.resolver, {
         application: input.application,
+        harnessPackage: input.harnessPackage,
         sandboxName,
         provider: input.provider,
         model: input.model,
@@ -518,6 +656,7 @@ function hostLocalInferenceSetupOptions(
   resolver: HostLocalInferenceStartupSelectionResolver,
   input: {
     application: string;
+    harnessPackage?: HarnessPackageIdentity | null;
     sandboxName: string;
     provider: string;
     model: string;
@@ -528,10 +667,18 @@ function hostLocalInferenceSetupOptions(
     recover: boolean;
   },
 ): { hostLocalInference?: HostLocalInferenceStartupSelection } {
-  const application = HOST_LOCAL_INFERENCE_APPLICATIONS.find(
-    (candidate): candidate is HostLocalInferenceApplication => candidate === input.application,
-  );
-  if (!application) {
+  let application: HostLocalInferenceApplication | undefined;
+  if (input.harnessPackage) {
+    if (input.harnessPackage.id !== input.application) {
+      throw new Error("Host-local inference application drifted from its package receipt.");
+    }
+    application = input.harnessPackage;
+  } else {
+    application = HOST_LOCAL_INFERENCE_APPLICATIONS.find(
+      (candidate) => candidate === input.application,
+    );
+  }
+  if (application === undefined) {
     if (!isHostLocalInferenceProvider(input.provider)) return {};
     throw new Error(`Unsupported host-local inference application '${input.application}'.`);
   }
@@ -546,7 +693,7 @@ function hostLocalInferenceSetupOptions(
     recover: input.recover,
   });
   if (selected) {
-    if (selected.request.application !== application) {
+    if (!hostLocalInferenceApplicationsEqual(selected.request.application, application)) {
       throw new Error(
         "Host-local inference startup selection drifted from the accepted application.",
       );
@@ -639,6 +786,7 @@ function resolveEarlyManagedHostLocalLifecycleSelection(input: {
   readonly model: string | null;
   readonly sandboxName: string | null;
   readonly application: string;
+  readonly harnessPackage?: HarnessPackageIdentity | null;
   readonly acceleration: HostLocalOllamaAccelerationAuthority;
   readonly effectiveResume: boolean;
   readonly endpointUrl: string | null;
@@ -657,6 +805,7 @@ function resolveEarlyManagedHostLocalLifecycleSelection(input: {
     sandboxName: input.sandboxName,
     setupOptions: hostLocalInferenceSetupOptions(input.resolver, {
       application: input.application,
+      harnessPackage: input.harnessPackage,
       sandboxName: input.sandboxName,
       provider: input.provider,
       model: input.model,
@@ -729,6 +878,7 @@ function resolveInitialHostLocalPolicyRoute(input: {
   provider: string | null;
   model: string | null;
   application: string;
+  harnessPackage?: HarnessPackageIdentity | null;
   acceleration: HostLocalOllamaAccelerationAuthority;
   effectiveResume: boolean;
   endpointUrl: string | null;
@@ -762,6 +912,7 @@ function resolveInitialHostLocalPolicyRoute(input: {
   }
   const setupOptions = hostLocalInferenceSetupOptions(input.resolver, {
     application: input.application,
+    harnessPackage: input.harnessPackage,
     sandboxName: input.sandboxName,
     provider: input.provider,
     model: input.model,
@@ -971,12 +1122,13 @@ async function repairResumedLocalInference(
   provider: string,
   model: string,
   agent: unknown,
+  harnessPackage: HarnessPackageIdentity | null | undefined,
   deps: LocalInferenceRepairDeps,
 ): Promise<void> {
   const options = {
     provider,
     model,
-    contextWindowFloor: getOllamaContextWindowFloorForAgent(agentName(agent)),
+    contextWindowFloor: resolveOnboardOllamaContextWindowFloor(agent, harnessPackage),
     isNonInteractive: () => false,
   };
   if (provider !== "ollama-local") {
@@ -1015,6 +1167,7 @@ async function repairOrRecoverResumedHostLocalInference(
   provider: string,
   model: string,
   agent: unknown,
+  harnessPackage: HarnessPackageIdentity | null | undefined,
   forceInferenceSetup: boolean,
   deps: ResumedHostLocalInferenceRepairDeps,
 ): Promise<boolean> {
@@ -1023,7 +1176,7 @@ async function repairOrRecoverResumedHostLocalInference(
     deps.log("  [resume] Recovering managed Ollama through its receipt-bound runtime.");
     return true;
   }
-  await repairResumedLocalInference(provider, model, agent, {
+  await repairResumedLocalInference(provider, model, agent, harnessPackage, {
     ...deps,
     repairLocalInferenceSystemdOverrideOrExit: (options) =>
       deps.repairLocalInferenceSystemdOverrideOrExit({
@@ -1057,9 +1210,29 @@ interface ConfigurationReviewInput<Agent> {
   hermesAuthMethod: HermesAuthMethod | null;
   webSearchConfig: WebSearchConfig | null;
   hermesToolGateways: string[];
+  managedToolsLabel?: string | null;
   selectedMessagingChannels: string[];
   session: Session | null;
   buildEstimateNote: string | null;
+}
+
+function toolGatewaySessionUpdates(
+  receiptBacked: boolean,
+  toolGatewaySelections: readonly string[],
+  hermesToolGateways: readonly string[],
+): Pick<SessionUpdates, "toolGatewaySelections" | "hermesToolGateways"> {
+  return receiptBacked
+    ? { toolGatewaySelections: [...toolGatewaySelections], hermesToolGateways: null }
+    : { toolGatewaySelections: null, hermesToolGateways: [...hermesToolGateways] };
+}
+
+function managedToolGatewaySummary<Agent>(agent: Agent, selections: readonly string[]): string {
+  const capability = (agent as { toolGatewayCapability?: HarnessToolGatewayCapability } | null)
+    ?.toolGatewayCapability;
+  return formatHarnessToolGatewaySelections(
+    capability?.support === "managed" ? capability : null,
+    selections,
+  );
 }
 
 async function reviewProviderConfiguration<Agent>(
@@ -1080,6 +1253,7 @@ async function reviewProviderConfiguration<Agent>(
         hermesAuthMethod: input.hermesAuthMethod,
         webSearchConfig: input.webSearchConfig,
         hermesToolGateways: input.hermesToolGateways,
+        managedToolsLabel: input.managedToolsLabel,
         enabledChannels:
           input.selectedMessagingChannels.length > 0 ? input.selectedMessagingChannels : null,
         sandboxName,
@@ -1146,20 +1320,31 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   let provider = initial.provider;
   let endpointUrl = initial.endpointUrl;
   let credentialEnv = initial.credentialEnv;
-  let hermesAuthMethod =
-    deps.normalizeHermesAuthMethod(initial.hermesAuthMethod) ||
-    (provider === constants.hermesProviderName &&
-    credentialEnv === constants.hermesApiKeyCredentialEnv
-      ? constants.hermesApiKeyAuthMethod
-      : null);
+  let toolGatewaySelections = initial.toolGatewaySelections ?? [];
   let hermesToolGateways = initial.hermesToolGateways;
+  const selectedHarnessPackage = revalidateCurrentHarnessPackage(
+    session,
+    "select an inference provider",
+    deps,
+  ).harnessPackage;
+  const initialAuthentication = resolveInitialProviderAuthentication({
+    initialHermesAuthMethod: initial.hermesAuthMethod,
+    initialProviderAuthMethod: initial.providerAuthMethod,
+    selectedHarnessPackage,
+    provider,
+    credentialEnv,
+    constants,
+    deps,
+  });
+  let hermesAuthMethod = initialAuthentication.hermesAuthMethod;
+  let providerAuthMethod = initialAuthentication.providerAuthMethod;
   // Sessions persisted before #6294/#6289 can carry an API family that the
   // selected agent cannot safely use. Normalize the seed before the resume
   // shortcut so the gateway provider is revalidated and, when necessary,
   // re-registered on the matching protocol surface before sandbox creation.
-  let preferredInferenceApi = resolveAgentProviderInferenceApi(
-    agentName(agent),
+  let preferredInferenceApi = resolveOnboardProviderInferenceApi(
     agent,
+    selectedHarnessPackage,
     provider,
     initial.preferredInferenceApi,
   );
@@ -1219,6 +1404,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
     }
     const setupOptions = hostLocalInferenceSetupOptions(resolveHostLocalInferenceStartupSelection, {
       application: agentName(agent),
+      harnessPackage: selectedHarnessPackage,
       sandboxName,
       provider: routeProvider,
       model: routeModel,
@@ -1265,6 +1451,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
     provider,
     model,
     application: agentName(agent),
+    harnessPackage: selectedHarnessPackage,
     acceleration: selectedHostLocalOllamaAcceleration(gpu, gpuPassthrough),
     effectiveResume,
     endpointUrl,
@@ -1279,33 +1466,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   const stateResults: OnboardStateTransitionResult[] = [];
   const retryStateResults: OnboardStateTransitionResult[] = [];
 
-  const revalidateHarnessPackage = (operation: string): HarnessPackageAuthority =>
-    session
-      ? deps.revalidateHarnessPackageAuthority(session, operation)
-      : ({ harnessPackage: null, harnessPackageMigration: null } as const);
-  const requireSessionRouteAuthority = (
-    operation: string,
-  ): HarnessPackageAuthority & { readonly reservationSessionId: string } => {
-    if (!session?.sessionId) {
-      throw new Error(`Cannot ${operation}: onboarding session route owner is missing`);
-    }
-    return {
-      reservationSessionId: session.sessionId,
-      ...revalidateHarnessPackage(operation),
-    };
-  };
-  const setupInferenceRouteAuthority = (operation: string) => {
-    if (!session?.sessionId) {
-      throw new Error(`Cannot ${operation}: onboarding session route owner is missing`);
-    }
-    const harnessPackageAuthority = revalidateHarnessPackage(operation);
-    return {
-      reservationSessionId: session.sessionId,
-      harnessPackageAuthority,
-    };
-  };
-
-  revalidateHarnessPackage("select an inference provider");
   while (true) {
     // Drop a context window auto-detected by a prior compatible-endpoint pass
     // before every provider-selection path — fresh, resume, and repair — so a
@@ -1343,6 +1503,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       model,
       sandboxName,
       application: agentName(agent),
+      harnessPackage: selectedHarnessPackage,
       acceleration: selectedHostLocalOllamaAcceleration(gpu, gpuPassthrough),
       effectiveResume,
       endpointUrl,
@@ -1452,6 +1613,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         resumedSelection.provider,
         resumedSelection.model,
         agent,
+        selectedHarnessPackage,
         forceInferenceSetup,
         deps,
       );
@@ -1489,6 +1651,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             },
             providerRecovery.sessionId,
             (route) => resolveProspectiveHostLocalPolicyRoute(route),
+            ...(selectedHarnessPackage ? ([selectedHarnessPackage] as const) : []),
           ),
       );
       model = selection.model;
@@ -1506,6 +1669,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       endpointUrl = selection.endpointUrl;
       credentialEnv = selection.credentialEnv;
       hermesAuthMethod = selection.hermesAuthMethod;
+      providerAuthMethod = selection.providerAuthMethod ?? null;
+      toolGatewaySelections = selection.toolGatewaySelections ?? [];
       hermesToolGateways = selection.hermesToolGateways;
       preferredInferenceApi = selection.preferredInferenceApi;
       compatibleEndpointReasoning = selection.compatibleEndpointReasoning;
@@ -1552,9 +1717,9 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
     const selectedModel = selected.model;
     provider = selectedProvider;
     model = selectedModel;
-    preferredInferenceApi = resolveAgentProviderInferenceApi(
-      agentName(agent),
+    preferredInferenceApi = resolveOnboardProviderInferenceApi(
       agent,
+      selectedHarnessPackage,
       provider,
       preferredInferenceApi,
     );
@@ -1584,7 +1749,12 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           endpointUrl,
           credentialEnv,
           hermesAuthMethod,
-          hermesToolGateways,
+          providerAuthMethod,
+          ...toolGatewaySessionUpdates(
+            selectedHarnessPackage !== null,
+            toolGatewaySelections,
+            hermesToolGateways,
+          ),
           preferredInferenceApi: healAdjustedInferenceApi
             ? initial.preferredInferenceApi
             : preferredInferenceApi,
@@ -1617,6 +1787,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       {
         resolver: resolveHostLocalInferenceStartupSelection,
         application: agentName(agent),
+        harnessPackage: selectedHarnessPackage,
         provider: selectedProvider,
         model: selectedModel,
         acceleration: selectedHostLocalOllamaAcceleration(gpu, gpuPassthrough),
@@ -1670,7 +1841,10 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       routeReady: () => deps.isInferenceRouteReady(gatewayName, selectedProvider, selectedModel),
     });
     if (resumeInference) {
-      if (provider === constants.hermesProviderName) {
+      if (
+        providerAuthMethod !== null ||
+        (!selectedHarnessPackage && provider === constants.hermesProviderName)
+      ) {
         let inferenceResult: ProviderInferenceRetry;
         try {
           if (!sandboxName) sandboxName = await deps.promptValidatedSandboxName(agent);
@@ -1678,6 +1852,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           const inferenceOptions = {
             gatewayName,
             allowToolsIncompatible,
+            providerAuthMethod,
             ...(skipHostInferenceSmoke ? { skipHostInferenceSmoke } : {}),
             ...(reuseGatewayCredentialWithoutLocalKey
               ? { reuseGatewayCredentialWithoutLocalKey }
@@ -1688,8 +1863,10 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             ...(endpointSource === "onboard" && onboardEndpointUrl ? { onboardEndpointUrl } : {}),
             ...(endpointTrustedPrivateCapability ? { endpointTrustedPrivateCapability } : {}),
             ...(inferenceCapabilityCache ? { inferenceCapabilityCache } : {}),
-            ...setupInferenceRouteAuthority(
+            ...requireInferenceSetupAuthority(
+              session,
               "bind the resumed inference route to its harness package",
+              deps,
             ),
             ...resolveCachedHostLocalInferenceSetupOptions(confirmedSandboxName),
           };
@@ -1707,7 +1884,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
                 endpointUrl,
                 credentialEnv,
                 hermesAuthMethod,
-                hermesToolGateways,
+                selectedHarnessPackage ? toolGatewaySelections : hermesToolGateways,
                 inferenceOptions,
               ),
           );
@@ -1729,10 +1906,15 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             provider,
             model,
             hermesAuthMethod,
+            providerAuthMethod,
             compatibleEndpointReasoning,
             compatibleEndpointReasoningEffort,
             nimContainer,
-            hermesToolGateways,
+            ...toolGatewaySessionUpdates(
+              selectedHarnessPackage !== null,
+              toolGatewaySelections,
+              hermesToolGateways,
+            ),
           }),
         );
         break;
@@ -1777,8 +1959,10 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
               credentialEnv,
             );
             if (reupserted.ok && resumeReservationName) {
-              const routeAuthority = requireSessionRouteAuthority(
+              const routeAuthority = requireInferenceRouteReservationAuthority(
+                session,
                 `reserve routed inference route for sandbox ${JSON.stringify(resumeReservationName)}`,
+                deps,
               );
               const reservationEndpointSource = endpointSourceForCurrentUrl(
                 endpointSource,
@@ -1829,8 +2013,10 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             credentialEnv,
             preferredInferenceApi,
           });
-          const routeAuthority = requireSessionRouteAuthority(
+          const routeAuthority = requireInferenceRouteReservationAuthority(
+            session,
             `reserve inference route for sandbox ${JSON.stringify(resumeReservationName)}`,
+            deps,
           );
           return deps.reserveSandboxInferenceRoute(resumeReservationName, {
             provider: selectedProvider,
@@ -1861,10 +2047,15 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           provider,
           model,
           hermesAuthMethod,
+          providerAuthMethod,
           compatibleEndpointReasoning,
           compatibleEndpointReasoningEffort,
           nimContainer,
-          hermesToolGateways,
+          ...toolGatewaySessionUpdates(
+            selectedHarnessPackage !== null,
+            toolGatewaySelections,
+            hermesToolGateways,
+          ),
         }),
       );
       break;
@@ -1889,6 +2080,9 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           hermesAuthMethod,
           webSearchConfig,
           hermesToolGateways,
+          managedToolsLabel: selectedHarnessPackage
+            ? managedToolGatewaySummary(agent, toolGatewaySelections)
+            : null,
           selectedMessagingChannels,
           session,
           buildEstimateNote,
@@ -1931,7 +2125,12 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             endpointUrl,
             credentialEnv,
             hermesAuthMethod,
-            hermesToolGateways,
+            providerAuthMethod,
+            ...toolGatewaySessionUpdates(
+              selectedHarnessPackage !== null,
+              toolGatewaySelections,
+              hermesToolGateways,
+            ),
             preferredInferenceApi,
             compatibleEndpointReasoning,
             compatibleEndpointReasoningEffort,
@@ -1952,6 +2151,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       const inferenceOptions = {
         gatewayName,
         allowToolsIncompatible,
+        providerAuthMethod,
         ...(preparedOllamaProxyToken ? { preparedOllamaProxyToken } : {}),
         ...(skipHostInferenceSmoke ? { skipHostInferenceSmoke } : {}),
         ...(reuseGatewayCredentialWithoutLocalKey ? { reuseGatewayCredentialWithoutLocalKey } : {}),
@@ -1961,7 +2161,11 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         ...(endpointSource === "onboard" && onboardEndpointUrl ? { onboardEndpointUrl } : {}),
         ...(endpointTrustedPrivateCapability ? { endpointTrustedPrivateCapability } : {}),
         ...(inferenceCapabilityCache ? { inferenceCapabilityCache } : {}),
-        ...setupInferenceRouteAuthority("bind the inference route to its harness package"),
+        ...requireInferenceSetupAuthority(
+          session,
+          "bind the inference route to its harness package",
+          deps,
+        ),
         ...providerRecovery.setupOptions(
           recoveredRecordedProvider,
           confirmedSandboxName,
@@ -1983,7 +2187,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             endpointUrl,
             credentialEnv,
             hermesAuthMethod,
-            hermesToolGateways,
+            selectedHarnessPackage ? toolGatewaySelections : hermesToolGateways,
             inferenceOptions,
           ),
       );
@@ -2021,7 +2225,12 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           endpointUrl,
           credentialEnv,
           hermesAuthMethod,
-          hermesToolGateways,
+          providerAuthMethod,
+          ...toolGatewaySessionUpdates(
+            selectedHarnessPackage !== null,
+            toolGatewaySelections,
+            hermesToolGateways,
+          ),
           preferredInferenceApi: healAdjustedInferenceApi
             ? initial.preferredInferenceApi
             : preferredInferenceApi,
@@ -2038,10 +2247,15 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         provider,
         model,
         hermesAuthMethod,
+        providerAuthMethod,
         compatibleEndpointReasoning,
         compatibleEndpointReasoningEffort,
         nimContainer,
-        hermesToolGateways,
+        ...toolGatewaySessionUpdates(
+          selectedHarnessPackage !== null,
+          toolGatewaySelections,
+          hermesToolGateways,
+        ),
         ...hostLocalInferenceSessionRoute(hostLocalInferenceRouteOnly, endpointUrl, endpointSource),
         // The forced #6294/#6289 heal succeeded: the gateway registration now
         // matches the adjusted route, so the stale session seed can be replaced.
@@ -2065,6 +2279,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
     onboardEndpointUrl,
     credentialEnv,
     hermesAuthMethod,
+    providerAuthMethod,
+    toolGatewaySelections,
     hermesToolGateways,
     preferredInferenceApi,
     compatibleEndpointReasoning,

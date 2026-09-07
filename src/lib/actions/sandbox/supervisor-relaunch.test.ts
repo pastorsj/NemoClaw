@@ -30,6 +30,28 @@ function patchResult(): DockerGpuPatchResult {
   };
 }
 
+const futureDashboardUi = {
+  label: "Future dashboard",
+  path: "/console",
+  port: 20400,
+  enableEnv: "FUTURE_DASHBOARD_ENABLED",
+  portEnv: "FUTURE_DASHBOARD_PORT",
+  internalPort: 20401,
+  internalPortEnv: "FUTURE_DASHBOARD_INTERNAL_PORT",
+  tuiEnv: "FUTURE_DASHBOARD_TUI",
+} as const;
+
+const hermesDashboardUi = {
+  label: "Hermes dashboard",
+  path: "/",
+  port: 9119,
+  enableEnv: "NEMOCLAW_HERMES_DASHBOARD",
+  portEnv: "NEMOCLAW_HERMES_DASHBOARD_PORT",
+  internalPort: 19119,
+  internalPortEnv: "NEMOCLAW_HERMES_DASHBOARD_INTERNAL_PORT",
+  tuiEnv: "NEMOCLAW_HERMES_DASHBOARD_TUI",
+} as const;
+
 function baseDeps(overrides: ManagedSupervisorRelaunchDeps = {}) {
   const harnessPackage = {
     kind: "agent-runtime" as const,
@@ -174,9 +196,12 @@ describe("relaunchManagedSupervisorSession", () => {
         agent: "future-gateway",
         harnessPackage,
         dashboardPort: 20400,
-        hermesDashboardEnabled: true,
-        hermesDashboardPort: 20400,
-        hermesDashboardInternalPort: 20401,
+        dashboardUi: {
+          enabled: true,
+          publicPort: 20400,
+          internalPort: 20401,
+          tuiEnabled: false,
+        },
         openshellDriver: "docker",
       })),
       resolveSandboxAgent: vi.fn(() => ({
@@ -188,6 +213,7 @@ describe("relaunchManagedSupervisorSession", () => {
           forwardPort: 20400,
           packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
           runtime: { kind: "gateway" },
+          dashboardUi: futureDashboardUi,
         },
         harnessPackage,
         harnessPackageMigration: null,
@@ -503,14 +529,24 @@ describe("relaunchManagedSupervisorSession", () => {
   it("retains the managed Hermes browser URL during supervisor recovery", () => {
     vi.stubEnv("NEMOCLAW_EXTRA_PLACEHOLDER_KEYS", "HERMES_RECOVERY_CREDENTIAL");
     vi.stubEnv("HERMES_RECOVERY_CREDENTIAL", "recovery-secret");
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "1.2.3",
+      contentDigest: "b".repeat(64),
+    };
     const deps = baseDeps({
       getSandbox: vi.fn(() => ({
         name: "alpha",
         agent: "hermes",
+        harnessPackage,
         dashboardPort: 19189,
-        hermesDashboardEnabled: true,
-        hermesDashboardPort: 19189,
-        hermesDashboardInternalPort: 8643,
+        dashboardUi: {
+          enabled: true,
+          publicPort: 19189,
+          internalPort: 8643,
+          tuiEnabled: false,
+        },
         openshellDriver: "docker",
       })),
       resolveSandboxAgent: vi.fn(() => ({
@@ -521,13 +557,9 @@ describe("relaunchManagedSupervisorSession", () => {
           displayName: "Hermes",
           forwardPort: 19189,
           packageRoot: `/state/harnesses/objects/${"b".repeat(64)}`,
+          dashboardUi: hermesDashboardUi,
         },
-        harnessPackage: {
-          kind: "agent-runtime",
-          id: "hermes",
-          packageVersion: "1.2.3",
-          contentDigest: "b".repeat(64),
-        },
+        harnessPackage,
         harnessPackageMigration: null,
       })) as never,
       resolveDashboardPort: vi.fn(() => 19189),
@@ -547,7 +579,10 @@ describe("relaunchManagedSupervisorSession", () => {
 
     expect(relaunchManagedSupervisorSession("alpha", { quiet: true, deps })).not.toBeNull();
     expect(deps.readManagedWorkloadAuthority).toHaveBeenCalledWith(
-      expect.objectContaining({ agent: "hermes", hermesDashboardEnabled: true }),
+      expect.objectContaining({
+        agent: "hermes",
+        dashboardUi: expect.objectContaining({ enabled: true, publicPort: 19189 }),
+      }),
     );
     const command = vi.mocked(deps.recreate).mock.calls[0]?.[0].openshellSandboxCommand ?? [];
     expect(command).toContain("CHAT_UI_URL=https://hermes.example.test:19189");
@@ -557,14 +592,24 @@ describe("relaunchManagedSupervisorSession", () => {
   });
 
   it("refuses Hermes supervisor recovery without a recorded browser URL", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "1.2.3",
+      contentDigest: "b".repeat(64),
+    };
     const deps = baseDeps({
       getSandbox: vi.fn(() => ({
         name: "alpha",
         agent: "hermes",
+        harnessPackage,
         dashboardPort: 19189,
-        hermesDashboardEnabled: true,
-        hermesDashboardPort: 19189,
-        hermesDashboardInternalPort: 8643,
+        dashboardUi: {
+          enabled: true,
+          publicPort: 19189,
+          internalPort: 8643,
+          tuiEnabled: false,
+        },
         openshellDriver: "docker",
       })),
       resolveSandboxAgent: vi.fn(() => ({
@@ -575,13 +620,9 @@ describe("relaunchManagedSupervisorSession", () => {
           displayName: "Hermes",
           forwardPort: 19189,
           packageRoot: `/state/harnesses/objects/${"b".repeat(64)}`,
+          dashboardUi: hermesDashboardUi,
         },
-        harnessPackage: {
-          kind: "agent-runtime",
-          id: "hermes",
-          packageVersion: "1.2.3",
-          contentDigest: "b".repeat(64),
-        },
+        harnessPackage,
         harnessPackageMigration: null,
       })) as never,
       resolveDashboardPort: vi.fn(() => 19189),

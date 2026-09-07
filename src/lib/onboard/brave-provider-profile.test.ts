@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
+import path from "node:path";
 
 import { REPOSITORY_ROOT } from "../core/repository-root";
 import {
@@ -91,6 +92,14 @@ const MATCHING_TAVILY_EXPORT = {
       "/usr/bin/curl",
     ],
     inference_capable: false,
+  }),
+};
+
+const MATCHING_OPENCLAW_TAVILY_EXPORT = {
+  ...MATCHING_TAVILY_EXPORT,
+  stdout: JSON.stringify({
+    ...JSON.parse(MATCHING_TAVILY_EXPORT.stdout),
+    binaries: ["/usr/local/bin/node", "/usr/bin/node", "/usr/local/bin/curl", "/usr/bin/curl"],
   }),
 };
 
@@ -225,6 +234,35 @@ describe("ensureWebSearchProviderProfiles", () => {
     expect(runOpenshell).toHaveBeenNthCalledWith(
       3,
       ["provider", "profile", "export", BRAVE_PROVIDER_PROFILE_ID, "--output", "json"],
+      expect.objectContaining({ ignoreError: true, suppressOutput: true }),
+    );
+  });
+
+  it("registers the exact package-owned profile path selected from a receipt", () => {
+    const packageProfilePath = path.join(
+      REPOSITORY_ROOT,
+      "packages/nemoclaw-openclaw/provider-profiles/tavily.yaml",
+    );
+    const runOpenshell = vi
+      .fn()
+      .mockReturnValueOnce({ status: 1, stderr: "provider profile not found", stdout: "" })
+      .mockReturnValueOnce({ status: 0, stderr: "", stdout: "" })
+      .mockReturnValueOnce(MATCHING_OPENCLAW_TAVILY_EXPORT);
+
+    ensureWebSearchProviderProfiles(
+      [
+        {
+          providerType: TAVILY_PROVIDER_PROFILE_ID,
+          providerProfilePath: packageProfilePath,
+          token: "tvly-test",
+        },
+      ],
+      makeDeps(runOpenshell),
+    );
+
+    expect(runOpenshell).toHaveBeenNthCalledWith(
+      2,
+      ["provider", "profile", "import", "--file", packageProfilePath],
       expect.objectContaining({ ignoreError: true, suppressOutput: true }),
     );
   });

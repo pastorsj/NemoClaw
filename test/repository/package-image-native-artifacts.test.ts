@@ -20,11 +20,11 @@ describe("publishable package image native artifacts", () => {
       const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-package-"));
       try {
         materializeHarnessRuntime({ artifact, destination: target, workingDirectory: packageRoot });
-        for (const packageName of ["nemoclaw-hermes", "nemoclaw-openclaw"]) {
+        ["nemoclaw-hermes", "nemoclaw-openclaw"].forEach((packageName) => {
           expect(fs.readFileSync(path.join(packageRoot, target))).toEqual(
             fs.readFileSync(path.join("packages", packageName, target)),
           );
-        }
+        });
       } finally {
         fs.rmSync(packageRoot, { force: true, recursive: true });
       }

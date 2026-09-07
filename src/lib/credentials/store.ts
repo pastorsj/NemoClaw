@@ -20,12 +20,13 @@ import { listMessagingCredentialMetadata } from "../messaging/channels";
 import { rejectSymlinksOnPath } from "../state/config-io";
 import { nemoclawStateRoot } from "../state/state-root";
 import { getScopedCredentialOverride } from "./scoped-overrides";
+import { normalizeCredentialValue, type CredentialInput } from "./value";
 
 export { withCredentialOverrides } from "./scoped-overrides";
+export { normalizeCredentialValue } from "./value";
 
 const UNSAFE_HOME_PATHS = new Set(["/tmp", "/var/tmp", "/dev/shm", "/"]);
 
-type CredentialInput = string | null | undefined;
 export type CredentialPromptIntent =
   | { kind: "credential"; value: string }
   | { kind: "back" }
@@ -147,12 +148,6 @@ export function getCredsFile(): string {
   const dir = getCredsDir();
   if (!_legacyCredsFile) _legacyCredsFile = path.join(dir, "credentials.json");
   return _legacyCredsFile;
-}
-
-/** Trim whitespace and strip CR characters that shells often append on paste. */
-export function normalizeCredentialValue(value: CredentialInput): string {
-  if (typeof value !== "string") return "";
-  return value.replace(/\r/g, "").trim();
 }
 
 export function getCredentialPromptIntent(value: CredentialInput): CredentialPromptIntent {

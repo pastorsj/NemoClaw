@@ -170,6 +170,7 @@ describe("sandbox build context staging", () => {
       0o600,
     );
     writeFixture(path.join("packages", "nemoclaw-openclaw", "config", "agent-config.mts"));
+    writeFixture(path.join("packages", "nemoclaw-openclaw", "config", "tool-disclosure.ts"));
     writeFixture(path.join("packages", "nemoclaw-openclaw", "host", "mcp-adapter.cts"));
     writeFixture(path.join("packages", "nemoclaw-openclaw", "compat", "mcp-npx.mts"));
     writeFixture(path.join("packages", "nemoclaw-openclaw", "checks", "tool-search.mts"));
@@ -279,7 +280,6 @@ describe("sandbox build context staging", () => {
     writeFixture(
       path.join("src", "lib", "messaging", "channels", "fixture", "hooks", "example.ts"),
     );
-    writeFixture(path.join("src", "lib", "tool-disclosure.ts"));
     for (const relativePath of [
       path.join("core", "json-types.ts"),
       path.join("core", "ports.ts"),
@@ -316,7 +316,10 @@ describe("sandbox build context staging", () => {
       fs.chmodSync(path.join(sourceRoot, relativePath), 0o775);
     }
     fs.chmodSync(path.join(sourceRoot, "scripts", "patch-bundled-npm-tar.mts"), 0o775);
-    fs.chmodSync(path.join(sourceRoot, "src", "lib", "tool-disclosure.ts"), 0o664);
+    fs.chmodSync(
+      path.join(sourceRoot, "packages", "nemoclaw-openclaw", "config", "tool-disclosure.ts"),
+      0o664,
+    );
   }
 
   function expectStagedOpenClawPackageModes(buildCtx: string) {
@@ -550,7 +553,11 @@ describe("sandbox build context staging", () => {
   }
 
   function expectStagedToolDisclosureContract(buildCtx: string) {
-    expect(fs.existsSync(path.join(buildCtx, "src", "lib", "tool-disclosure.ts"))).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(buildCtx, "packages", "nemoclaw-openclaw", "config", "tool-disclosure.ts"),
+      ),
+    ).toBe(true);
   }
 
   function expectStagedManagedStartupRuntimeSources(buildCtx: string, sourceRoot: string) {
@@ -594,9 +601,11 @@ describe("sandbox build context staging", () => {
       ).toString(8),
     ).toBe("755");
     expect(
-      (fs.statSync(path.join(buildCtx, "src", "lib", "tool-disclosure.ts")).mode & 0o777).toString(
-        8,
-      ),
+      (
+        fs.statSync(
+          path.join(buildCtx, "packages", "nemoclaw-openclaw", "config", "tool-disclosure.ts"),
+        ).mode & 0o777
+      ).toString(8),
     ).toBe("644");
   }
 

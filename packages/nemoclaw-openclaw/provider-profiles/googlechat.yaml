@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+id: google-chat-bridge
+display_name: Google Chat Bridge
+description: Gateway-minted Google Chat bot token for outbound Chat API requests
+category: agent
+credentials:
+  - name: access_token
+    description: Google Chat bot OAuth access token
+    env_vars:
+      - GOOGLE_CHAT_ACCESS_TOKEN
+    required: true
+    auth_style: bearer
+    header_name: Authorization
+    query_param: ''
+    refresh:
+      strategy: google-service-account-jwt
+      scopes:
+        - https://www.googleapis.com/auth/chat.bot
+      material:
+        - name: client_email
+          description: Service-account client email
+          required: true
+        - name: private_key
+          description: Service-account RSA private key
+          required: true
+          secret: true
+        - name: scope
+          description: OAuth scopes used to mint the token
+endpoints:
+  - host: chat.googleapis.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+binaries:
+  - /usr/local/bin/node
+  - /usr/bin/node
+inference_capable: false

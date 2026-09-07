@@ -294,28 +294,6 @@ const STOCK_DOCKER_ARGS = {
   pi: readPackageDockerArgs("nemoclaw-pi"),
 } satisfies Record<ManagedStartupAgent, Set<string>>;
 
-const RUNTIME_INPUT_SOURCE_FILES = [
-  "src/lib/onboard/sandbox-create-launch.ts",
-  "src/lib/onboard/openclaw-runtime-env.ts",
-  "src/lib/onboard/extra-placeholder-keys.ts",
-  "src/lib/onboard/host-proxy-env.ts",
-  "src/lib/onboard/hermes-dashboard.ts",
-  "src/lib/hermes-dashboard.ts",
-] as const;
-const QUOTED_RUNTIME_INPUT_RE =
-  /["']((?:(?:NEMOCLAW|OPENCLAW)_[A-Z0-9_]+)|CHAT_UI_URL|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|http_proxy|https_proxy|no_proxy)["']/gu;
-const STOCK_RUNTIME_INPUTS = new Set(
-  RUNTIME_INPUT_SOURCE_FILES.flatMap((relativePath) => [
-    ...readFileSync(path.join(process.cwd(), relativePath), "utf8").matchAll(
-      QUOTED_RUNTIME_INPUT_RE,
-    ),
-  ]).map((match) => match[1] as string),
-);
-const OPENCLAW_AUTO_PAIR_CONSUMER_INPUTS = new Set(
-  readFileSync(path.join(process.cwd(), "packages/nemoclaw-openclaw/start.sh"), "utf8").match(
-    /\bNEMOCLAW_AUTO_PAIR_[A-Z0-9_]+\b/gu,
-  ) ?? [],
-);
 const STOCK_RUNTIME_INPUT_AGENTS = {
   CHAT_UI_URL: ["openclaw", "hermes"],
   HTTPS_PROXY: MANAGED_STARTUP_AGENTS,

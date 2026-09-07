@@ -58,12 +58,10 @@ let rebuildMock: MockInstance;
 const tempDirs: string[] = [];
 
 function declareFixtureMessaging(packageRoot: string, channelId: string): void {
-  const manifestPath = path.join(packageRoot, "packages/nemoclaw-hermes/manifest.yaml");
+  const manifestPath = path.join(packageRoot, "manifest.yaml");
   const manifest = fs.readFileSync(manifestPath, "utf8");
   const disabledMessaging = "messaging:\n  support: disabled\n";
-  if (!manifest.includes(disabledMessaging)) {
-    throw new Error("Synthetic harness package is missing its disabled messaging declaration");
-  }
+  expect(manifest).toContain(disabledMessaging);
   fs.writeFileSync(
     manifestPath,
     manifest.replace(
@@ -71,7 +69,7 @@ function declareFixtureMessaging(packageRoot: string, channelId: string): void {
       `messaging:\n  support: channels\n  channels:\n    - ${channelId}\n`,
     ),
   );
-  const adapterPath = path.join(packageRoot, "packages/nemoclaw-hermes/host/messaging-adapter.cts");
+  const adapterPath = path.join(packageRoot, "host/messaging-adapter.cts");
   fs.mkdirSync(path.dirname(adapterPath), { recursive: true, mode: 0o700 });
   fs.writeFileSync(
     adapterPath,
@@ -88,14 +86,14 @@ function declareFixtureMessaging(packageRoot: string, channelId: string): void {
 };\n`,
     { mode: 0o600 },
   );
-  const profilePath = path.join(packageRoot, "packages/nemoclaw-hermes/messaging/profile.json");
+  const profilePath = path.join(packageRoot, "messaging/profile.json");
   fs.mkdirSync(path.dirname(profilePath), { recursive: true, mode: 0o700 });
   fs.writeFileSync(
     profilePath,
     `${JSON.stringify([
       {
         channelId,
-        config: { renders: [] },
+        config: { renders: [], visibility: [] },
         policy: [],
         lifecycle: { hookIds: [] },
       },
@@ -160,8 +158,8 @@ describe("receipt-backed messaging profile", () => {
       storeRoot,
     });
     const selectedRoot = selectedFixture.packageRoots.get("hermes");
-    if (!selectedRoot) throw new Error("Hermes fixture is unavailable");
-    declareFixtureMessaging(selectedRoot, "discord");
+    expect(selectedRoot, "Hermes fixture is unavailable").toBeDefined();
+    declareFixtureMessaging(selectedRoot!, "discord");
     const selected = selectedFixture.install("hermes");
 
     const ambientFixture = createHarnessPackageFixture({
@@ -169,9 +167,9 @@ describe("receipt-backed messaging profile", () => {
       storeRoot,
     });
     const ambientRoot = ambientFixture.packageRoots.get("hermes");
-    if (!ambientRoot) throw new Error("Hermes fixture is unavailable");
-    declareFixtureMessaging(ambientRoot, "telegram");
-    const ambientDeclarationPath = path.join(ambientRoot, "nemoclaw-package.json");
+    expect(ambientRoot, "Hermes fixture is unavailable").toBeDefined();
+    declareFixtureMessaging(ambientRoot!, "telegram");
+    const ambientDeclarationPath = path.join(ambientRoot!, "nemoclaw-package.json");
     const ambientDeclaration = JSON.parse(
       fs.readFileSync(ambientDeclarationPath, "utf8"),
     ) as Record<string, unknown>;

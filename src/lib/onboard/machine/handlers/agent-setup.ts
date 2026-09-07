@@ -16,6 +16,8 @@ export interface AgentSetupStateOptions<Agent> {
   session: Session | null;
   hermesAuthMethod: string | null;
   hermesToolGateways: string[];
+  toolGatewaySelections?: readonly string[];
+  receiptBackedPackage?: boolean;
   revalidateSandboxIdentity?: (operation: string) => void;
   deps: {
     handleAgentSetup(
@@ -75,6 +77,8 @@ export async function handleAgentSetupState<Agent>({
   session,
   hermesAuthMethod,
   hermesToolGateways,
+  toolGatewaySelections = [],
+  receiptBackedPackage = false,
   revalidateSandboxIdentity,
   deps,
 }: AgentSetupStateOptions<Agent>): Promise<AgentSetupStateResult> {
@@ -116,7 +120,15 @@ export async function handleAgentSetupState<Agent>({
     await deps.recordStateSkipped("openclaw", { reason: "resume", sandboxName });
     await deps.recordStepComplete(
       "openclaw",
-      deps.toSessionUpdates({ sandboxName, provider, model, hermesAuthMethod, hermesToolGateways }),
+      deps.toSessionUpdates({
+        sandboxName,
+        provider,
+        model,
+        hermesAuthMethod,
+        ...(receiptBackedPackage
+          ? { toolGatewaySelections, hermesToolGateways: [] }
+          : { hermesToolGateways }),
+      }),
     );
   } else {
     await deps.startRecordedStep("openclaw", { sandboxName, provider, model });
@@ -131,7 +143,15 @@ export async function handleAgentSetupState<Agent>({
     revalidateSandboxIdentity?.(`complete OpenClaw setup for sandbox '${sandboxName}'`);
     await deps.recordStepComplete(
       "openclaw",
-      deps.toSessionUpdates({ sandboxName, provider, model, hermesAuthMethod, hermesToolGateways }),
+      deps.toSessionUpdates({
+        sandboxName,
+        provider,
+        model,
+        hermesAuthMethod,
+        ...(receiptBackedPackage
+          ? { toolGatewaySelections, hermesToolGateways: [] }
+          : { hermesToolGateways }),
+      }),
     );
   }
   const dashboardPort = await deps.ensureAgentDashboardForward(sandboxName, null);

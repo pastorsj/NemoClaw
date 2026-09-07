@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from nemoclaw_fabric import supervisor
+from nemoclaw_fabric.config import FABRIC_CONFIG_MAX_BYTES
 
 
 class FabricRunSupervisorTests(unittest.TestCase):
@@ -108,6 +109,24 @@ class FabricRunSupervisorTests(unittest.TestCase):
 
         self.assertEqual(exit_code, supervisor.EXIT_UNAVAILABLE)
         popen.assert_not_called()
+
+    def test_unsafe_config_files_fail_before_worker_creation(self) -> None:
+        target = self.base_dir / "target.json"
+        target.write_text(self.config_path.read_text(encoding="utf-8"), encoding="utf-8")
+        cases = {
+            "symlink": lambda: self.config_path.symlink_to(target),
+            "oversized": lambda: self.config_path.write_bytes(
+                b" " * (FABRIC_CONFIG_MAX_BYTES + 1)
+            ),
+        }
+        for case, arrange in cases.items():
+            with self.subTest(case=case):
+                self.config_path.unlink(missing_ok=True)
+                arrange()
+                with patch.object(supervisor.subprocess, "Popen") as popen:
+                    exit_code = supervisor.run_supervised(self.supervisor_arguments())
+                self.assertEqual(exit_code, supervisor.EXIT_USAGE)
+                popen.assert_not_called()
 
     def test_linux_proc_scan_failure_is_not_treated_as_no_children(self) -> None:
         with (

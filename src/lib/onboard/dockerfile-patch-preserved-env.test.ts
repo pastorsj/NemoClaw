@@ -109,7 +109,7 @@ it("adds preserved Hermes home channels at the Dockerfile patch boundary (#7803)
     agentRender: Array<{ renderId?: string; lines?: string[] }>;
   };
   expect(patchedPlan.agentRender[0]).toMatchObject({
-    renderId: "hermes-preserved-home-channels",
+    renderId: "preserved-environment-1",
     lines: ["SLACK_HOME_CHANNEL=C0123", "SLACK_HOME_CHANNEL_THREAD_ID="],
   });
 });

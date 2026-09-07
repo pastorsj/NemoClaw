@@ -21,6 +21,7 @@ import {
 } from "../inference/web-search";
 import { ROOT } from "../runner";
 import { classifyValidationFailure } from "../validation";
+import { packageSupportsWebSearchProvider } from "../agent-runtime/web-search";
 import { getTransportRecoveryMessage } from "../validation-recovery";
 import {
   BACK_TO_SELECTION,
@@ -101,11 +102,13 @@ export interface WebSearchFlowHelpers {
     agent?: AgentDefinition | null,
     dockerfilePathOverride?: string | null,
     packageRootOverride?: string,
+    receiptBackedPackage?: boolean,
   ): Promise<WebSearchConfig | null>;
   verifyWebSearchInsideSandbox(
     sandboxName: string,
     agent: AgentDefinition | null | undefined,
     provider: WebSearchProvider,
+    receiptBackedPackage?: boolean,
   ): boolean;
 }
 
@@ -375,8 +378,11 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
     agent: AgentDefinition | null,
     dockerfilePathOverride: string | null,
     packageRoot: string,
+    receiptBackedPackage: boolean,
   ): boolean {
-    return agentSupportsWebSearchProvider(agent, provider, dockerfilePathOverride, packageRoot);
+    return receiptBackedPackage
+      ? packageSupportsWebSearchProvider(agent, provider)
+      : agentSupportsWebSearchProvider(agent, provider, dockerfilePathOverride, packageRoot);
   }
 
   function providerSupported(
@@ -384,8 +390,19 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
     agent: AgentDefinition | null,
     dockerfilePathOverride: string | null,
     packageRoot: string,
+    receiptBackedPackage: boolean,
   ): boolean {
-    if (providerIsSupported(provider, agent, dockerfilePathOverride, packageRoot)) return true;
+    if (
+      providerIsSupported(
+        provider,
+        agent,
+        dockerfilePathOverride,
+        packageRoot,
+        receiptBackedPackage,
+      )
+    ) {
+      return true;
+    }
     deps.note(
       `  ${providerSpec(provider).label} is not supported by ${agent?.displayName ?? "this sandbox image"}. Skipping.`,
     );
@@ -397,6 +414,7 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
     agent: AgentDefinition | null,
     dockerfilePathOverride: string | null,
     packageRoot: string,
+    receiptBackedPackage: boolean,
   ): Promise<WebSearchConfig | null> {
     const explicit = parseExplicitWebSearchProvider(env[WEB_SEARCH_PROVIDER_ENV]);
     if (explicit.specified && !explicit.provider) return null;
@@ -415,11 +433,21 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
         (["brave", "tavily"] as const).find(
           (candidate) =>
             Boolean(configuredCredential(candidate)) &&
-            providerIsSupported(candidate, agent, dockerfilePathOverride, packageRoot),
+            providerIsSupported(
+              candidate,
+              agent,
+              dockerfilePathOverride,
+              packageRoot,
+              receiptBackedPackage,
+            ),
         ) ?? provider;
     }
     if (!provider) return null;
-    if (!providerSupported(provider, agent, dockerfilePathOverride, packageRoot)) return null;
+    if (
+      !providerSupported(provider, agent, dockerfilePathOverride, packageRoot, receiptBackedPackage)
+    ) {
+      return null;
+    }
 
     const spec = providerSpec(provider);
     const apiKey = configuredCredential(provider);
@@ -450,6 +478,7 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
     agent: AgentDefinition | null = null,
     dockerfilePathOverride: string | null = null,
     packageRootOverride?: string,
+    receiptBackedPackage = false,
   ): Promise<WebSearchConfig | null> {
     const packageRoot = packageRootOverride ?? agent?.packageRoot ?? ROOT;
     if (!agentSupportsWebSearch(agent, dockerfilePathOverride, packageRoot)) {
@@ -467,13 +496,20 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
         agent,
         dockerfilePathOverride,
         packageRoot,
+        receiptBackedPackage,
       );
     }
 
     if (existingConfig) return normalizeWebSearchConfig(existingConfig);
 
     const supportedProviders = WEB_SEARCH_PROVIDERS.filter((provider) =>
-      providerIsSupported(provider, agent, dockerfilePathOverride, packageRoot),
+      providerIsSupported(
+        provider,
+        agent,
+        dockerfilePathOverride,
+        packageRoot,
+        receiptBackedPackage,
+      ),
     );
     while (true) {
       const provider = await promptWebSearchProvider(supportedProviders);
@@ -493,13 +529,20 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
     sandboxName: string,
     agent: AgentDefinition | null | undefined,
     provider: WebSearchProvider,
+    receiptBackedPackage = false,
   ): boolean {
-    return verifyWebSearchInsideSandboxWithDeps(sandboxName, agent, provider, {
-      runCaptureOpenshell: deps.runCaptureOpenshell,
-      cliName: deps.cliName,
-      webSearchEnvFor,
-      webSearchLabelFor,
-    });
+    return verifyWebSearchInsideSandboxWithDeps(
+      sandboxName,
+      agent,
+      provider,
+      {
+        runCaptureOpenshell: deps.runCaptureOpenshell,
+        cliName: deps.cliName,
+        webSearchEnvFor,
+        webSearchLabelFor,
+      },
+      receiptBackedPackage,
+    );
   }
 
   return {

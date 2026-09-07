@@ -7,12 +7,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from nemoclaw_fabric.config import FabricConfigLoadError
+from nemoclaw_fabric.config import FABRIC_CONFIG_MAX_BYTES
 from nemoclaw_fabric.config import SUPERVISOR_CONFIG_SHA256_ENV
 from nemoclaw_fabric.config import load_fabric_config
 from nemoclaw_fabric.config import require_supervisor_config_identity
@@ -55,6 +59,68 @@ class FabricConfigLoadingTests(unittest.TestCase):
             loaded.content_sha256,
             hashlib.sha256(self.config_path.read_bytes()).hexdigest(),
         )
+
+    def test_rejects_a_symlinked_or_multiply_linked_config(self) -> None:
+        target = self.base_dir / "target.json"
+        target.write_text("{}", encoding="utf-8")
+
+        self.config_path.symlink_to(target)
+        with self.assertRaisesRegex(FabricConfigLoadError, "regular file"):
+            load_fabric_config(self.config_path)
+
+        self.config_path.unlink()
+        os.link(target, self.config_path)
+        with self.assertRaisesRegex(FabricConfigLoadError, "one regular file"):
+            load_fabric_config(self.config_path)
+
+    def test_rejects_an_oversized_config_before_parsing(self) -> None:
+        self.config_path.write_bytes(b" " * (FABRIC_CONFIG_MAX_BYTES + 1))
+
+        with (
+            patch("nemoclaw_fabric.config.FabricConfig.from_mapping") as parse_config,
+            self.assertRaisesRegex(FabricConfigLoadError, "exceeds"),
+        ):
+            load_fabric_config(self.config_path)
+
+        parse_config.assert_not_called()
+
+    def test_accepts_a_valid_config_at_the_size_limit(self) -> None:
+        payload = json.dumps(
+            {
+                "metadata": {"name": "size-boundary"},
+                "harness": {"adapter_id": "third.party.harness"},
+                "runtime": {"timeout_seconds": 30},
+            }
+        ).encode("utf-8")
+        self.config_path.write_bytes(
+            payload + (b" " * (FABRIC_CONFIG_MAX_BYTES - len(payload)))
+        )
+
+        loaded = load_fabric_config(self.config_path)
+
+        self.assertEqual(loaded.config.harness.adapter_id, "third.party.harness")
+        self.assertEqual(self.config_path.stat().st_size, FABRIC_CONFIG_MAX_BYTES)
+
+    def test_rejects_a_fifo_promptly(self) -> None:
+        os.mkfifo(self.config_path)
+        script = """
+from nemoclaw_fabric.config import FabricConfigLoadError, load_fabric_config
+import sys
+try:
+    load_fabric_config(sys.argv[1])
+except FabricConfigLoadError:
+    raise SystemExit(0)
+raise SystemExit(1)
+"""
+
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(self.config_path)],
+            check=False,
+            capture_output=True,
+            timeout=2,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
 
     def test_supervisor_identity_rejects_a_config_changed_before_worker_load(self) -> None:
         config_path = self.write_config(

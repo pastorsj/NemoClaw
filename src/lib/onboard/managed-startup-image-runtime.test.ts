@@ -76,6 +76,7 @@ import {
   applyManagedStartupImageProfile,
   applyManagedStartupRootRequest,
   buildManagedStartupImageActionPlan,
+  MANAGED_STARTUP_MESSAGING_RUNTIME,
   MANAGED_STARTUP_PROFILE_ENV,
   type ManagedStartupImageActionPlanInput,
   main as mainManagedStartupImageRuntime,
@@ -87,6 +88,10 @@ import {
   type ManagedStartupAgent,
   type ManagedStartupProfile,
 } from "./managed-startup/profile";
+import type {
+  ManagedStartupAdapterContext,
+  ManagedStartupAgentAdapter,
+} from "./managed-startup/coordinator";
 import { createManagedStartupRootApplyRequest } from "./managed-startup/root-apply";
 import * as sharedStateTransaction from "./managed-startup/shared-state-transaction";
 
@@ -153,9 +158,11 @@ describe("buildManagedStartupImageActionPlan", () => {
         { action: "seal-config", runAs: agent === "openclaw" ? "sandbox" : "root" },
       ]);
       expect(plan[0]?.argv).toContain("runtime-setup");
+      expect(plan[0]?.argv[2]).toBe(MANAGED_STARTUP_MESSAGING_RUNTIME);
       expect(plan[0]?.argv).toContain("apply");
       expect(plan[0]?.argv).not.toContain("--managed-startup-runtime");
       expect(plan[2]?.argv).toContain("post-agent-install");
+      expect(plan[2]?.argv[2]).toBe(MANAGED_STARTUP_MESSAGING_RUNTIME);
       expect(plan[2]?.argv).toContain("apply");
       expect(plan[2]?.argv).toContain("--managed-startup-runtime");
       expect(plan[3]?.argv).toEqual(["/usr/local/lib/nemoclaw/seal-config"]);
@@ -338,6 +345,31 @@ describe("buildManagedStartupImageActionPlan", () => {
       },
     ]);
   });
+
+  it("uses the invariant package-owned messaging runtime for an unknown package identity", () => {
+    const plan = buildManagedStartupImageActionPlan({
+      agent: "future-harness",
+      actions: [
+        {
+          kind: "apply-messaging",
+          mode: "apply",
+          phase: "runtime-setup",
+          runAs: "root",
+        },
+        { kind: "generate-config", runAs: "sandbox" },
+        {
+          kind: "apply-messaging",
+          mode: "apply",
+          phase: "post-agent-install",
+          runAs: "sandbox",
+        },
+      ],
+    });
+
+    expect(
+      plan.filter(({ action }) => action.startsWith("messaging-")).map(({ argv }) => argv[2]),
+    ).toEqual([MANAGED_STARTUP_MESSAGING_RUNTIME, MANAGED_STARTUP_MESSAGING_RUNTIME]);
+  });
 });
 
 describe("managed startup image runtime", () => {
@@ -458,6 +490,37 @@ describe("managed startup image runtime", () => {
       ).rejects.toThrow(message);
       expect(lstat).not.toHaveBeenCalled();
       expect(coordinatorMock.coordinateManagedStartupApplication).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["openclaw", "hermes"] as const)(
+    "requires the package-owned messaging runtime in the %s image before executing its adapter",
+    async (agent) => {
+      const profile = managedStartupE2eProfile(agent);
+      const fingerprint = fingerprintManagedStartupProfile(profile);
+      mockRootReplayFilesystem([]);
+      coordinatorMock.coordinateManagedStartupApplication.mockImplementation(
+        async (_input: unknown, adapter: ManagedStartupAgentAdapter) => {
+          const context: ManagedStartupAdapterContext = {
+            agent,
+            profile,
+            fingerprint,
+            generationDirectory: `/var/lib/nemoclaw/managed-startup/generation-${fingerprint}`,
+            profilePath: `/var/lib/nemoclaw/managed-startup/generation-${fingerprint}/profile.json`,
+            corporateCaPath: null,
+          };
+          await adapter.apply(context);
+          throw new Error("adapter unexpectedly completed");
+        },
+      );
+
+      await expect(
+        applyManagedStartupImageProfile(agent, {
+          NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION: "1",
+          [MANAGED_STARTUP_PROFILE_ENV]: encodeManagedStartupProfile(profile),
+        }),
+      ).rejects.toThrow(`a trusted ${MANAGED_STARTUP_MESSAGING_RUNTIME} runtime is required`);
+      expect(childProcessMock.spawnSync).not.toHaveBeenCalled();
     },
   );
 

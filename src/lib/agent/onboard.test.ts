@@ -10,7 +10,9 @@ const getSandboxMock = vi.hoisted(() =>
     (): {
       agent?: string | null;
       dashboardPort?: number | null;
+      secondaryForwardPort?: number | null;
       hermesApiPort?: number | null;
+      harnessPackage?: unknown;
     } | null => null,
   ),
 );
@@ -39,6 +41,15 @@ import {
   verifyAgentBinaryAvailable,
 } from "./onboard";
 
+const hermesSecondaryForward = {
+  environment_variable: "NEMOCLAW_HERMES_API_PORT",
+  preferred_port: 8642,
+  range_start: 8642,
+  range_end: 8652,
+  label: "Hermes API",
+  remedy: "Stop an existing listener and retry onboarding.",
+} as const;
+
 function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
   return {
     name: "agent",
@@ -62,12 +73,17 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
       support: "disabled",
       reason: "test fixture",
     },
+    agentRosterCapability: null,
+    policyCapability: { owned_presets: [], automatic_presets: [], baseline_exclusion_impacts: {} },
     skillCapability: { support: "disabled", reason: "test fixture" },
     stateLifecycle: {
       backup_quiescence: { kind: "not-required" },
       snapshot_restore: [],
       rebuild: {
-        image_plugin_provenance: "not-required",
+        managed_extensions: {
+          support: "disabled",
+          reason: "Test package has no managed extensions.",
+        },
         scheduled_work: {
           support: "disabled",
           reason: "This package does not run scheduled work.",
@@ -119,6 +135,8 @@ const apiAgent = makeAgent({
     path: "/",
     enableEnv: "NEMOCLAW_HERMES_DASHBOARD",
     portEnv: "NEMOCLAW_HERMES_DASHBOARD_PORT",
+    internalPort: 19_119,
+    internalPortEnv: "NEMOCLAW_HERMES_DASHBOARD_INTERNAL_PORT",
     tuiEnv: "NEMOCLAW_HERMES_DASHBOARD_TUI",
   },
 });
@@ -248,7 +266,13 @@ describe("printDashboardUi with port 8642 outside the chat UI (#2078)", () => {
       displayName: "Hermes Agent",
       forwardPort: 18789,
       forward_ports: [18789, 8642],
-      healthProbe: { url: "http://localhost:8642/health", port: 8642, timeout_seconds: 90 },
+      healthProbe: {
+        url: "http://localhost:8642/health",
+        port: 8642,
+        port_resolution: "sandbox-secondary-forward",
+        secondary_forward: hermesSecondaryForward,
+        timeout_seconds: 90,
+      },
       dashboard: {
         kind: "ui",
         label: "Dashboard",
@@ -409,6 +433,26 @@ describe("agent setup session boundaries", () => {
     expect(options.input).toContain('"provider": "vllm-local"');
     expect(options.input).toContain('"model": "meta-llama"');
     expect(options.input).toContain('"agent": "hermes"');
+  });
+
+  it("does not apply legacy OpenClaw config permissions for a package receipt", async () => {
+    const runCaptureOpenshell = vi.fn(() => "NEMOCLAW_AGENT_BINARY_CHECK:ok");
+    const { context } = createAgentSetupContext(runCaptureOpenshell);
+    const agent = makeAgent({ healthProbe: { url: "", port: 0, timeout_seconds: 0 } });
+
+    await handleAgentSetup(
+      "sandbox-x",
+      "meta-llama",
+      "vllm-local",
+      agent,
+      false,
+      { harnessPackage: { id: agent.name } },
+      context,
+    );
+
+    const [, options] = mocks.run.mock.calls[0]!;
+    expect(options.input).toContain('"agent": "agent"');
+    expect(options.input).not.toContain("/sandbox/.openclaw");
   });
 
   it("retries a configured gateway probe through the supplied scheduler", async () => {
@@ -609,7 +653,13 @@ describe("agent setup session boundaries", () => {
   const hermesProbeAgent = makeAgent({
     name: "hermes",
     displayName: "Hermes Agent",
-    healthProbe: { url: "http://localhost:8642/health", port: 8642, timeout_seconds: 1 },
+    healthProbe: {
+      url: "http://localhost:8642/health",
+      port: 8642,
+      port_resolution: "sandbox-secondary-forward",
+      secondary_forward: hermesSecondaryForward,
+      timeout_seconds: 1,
+    },
     forwardPort: 18789,
     forward_ports: [18789, 8642],
   });
@@ -992,7 +1042,13 @@ describe("printDashboardUi announces per-sandbox Hermes API ports (#8543)", () =
     displayName: "Hermes Agent",
     forwardPort: 18789,
     forward_ports: [18789, 8642],
-    healthProbe: { url: "http://localhost:8642/health", port: 8642, timeout_seconds: 90 },
+    healthProbe: {
+      url: "http://localhost:8642/health",
+      port: 8642,
+      port_resolution: "sandbox-secondary-forward",
+      secondary_forward: hermesSecondaryForward,
+      timeout_seconds: 90,
+    },
     dashboard: {
       kind: "ui",
       label: "Dashboard",
@@ -1033,7 +1089,13 @@ describe("printDashboardUi announces per-sandbox Hermes API ports (#8543)", () =
       displayName: "Hermes Agent",
       forwardPort: 18789,
       forward_ports: [18789, 8642],
-      healthProbe: { url: "http://localhost:8642/health", port: 8642, timeout_seconds: 90 },
+      healthProbe: {
+        url: "http://localhost:8642/health",
+        port: 8642,
+        port_resolution: "sandbox-secondary-forward",
+        secondary_forward: hermesSecondaryForward,
+        timeout_seconds: 90,
+      },
       dashboard: {
         kind: "api",
         label: "OpenAI-compatible API",

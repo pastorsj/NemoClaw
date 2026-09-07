@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { directDockerfileCopySources } from "../../../scripts/lib/dockerfile-copy-sources.mts";
+import { directDockerfileContextSources } from "../../../scripts/lib/dockerfile-copy-sources.mts";
 import {
   catalogueTarget,
   catalogueTargetsForChangedFiles,
@@ -58,7 +58,7 @@ describe("Pi qualification event oracle", () => {
       ".dockerignore",
       ...["packages/nemoclaw-pi/Dockerfile", "packages/nemoclaw-pi/Dockerfile.base"].flatMap(
         (dockerfile) =>
-          directDockerfileCopySources(path.join(REPO_ROOT, dockerfile), dockerfile).map(
+          directDockerfileContextSources(path.join(REPO_ROOT, dockerfile), dockerfile).map(
             ({ source }) => {
               const normalized = source.replace(/\/+$/u, "");
               return normalized.startsWith("packages/nemoclaw-pi/")

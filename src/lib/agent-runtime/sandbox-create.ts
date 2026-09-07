@@ -3,7 +3,9 @@
 
 import type {
   HarnessSandboxCreateDeclaration,
+  HarnessSandboxDockerUlimitDeclaration,
   HarnessSandboxDriver,
+  HarnessSandboxStartupControl,
   HarnessSandboxTmpfsMountDeclaration,
 } from "@nvidia/nemoclaw-harness-contract";
 
@@ -11,6 +13,12 @@ import { isObjectRecord } from "../core/json-types";
 import type { ManifestRecord } from "./manifest-types";
 
 const SANDBOX_DRIVERS = new Set<HarnessSandboxDriver>(["docker", "podman"]);
+const SANDBOX_STARTUP_CONTROLS = new Set<HarnessSandboxStartupControl>([
+  "approval-mode",
+  "observability",
+]);
+const DOCKER_ULIMIT_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/u;
+const DOCKER_ULIMIT_MAX_VALUE = 1_000_000_000;
 
 function readSandboxDriverMount(
   value: unknown,
@@ -67,6 +75,61 @@ function readSandboxDriverMount(
   });
 }
 
+function readSandboxStartupControls(
+  value: unknown,
+): readonly HarnessSandboxStartupControl[] | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > SANDBOX_STARTUP_CONTROLS.size ||
+    new Set(value).size !== value.length ||
+    value.some((control) => !SANDBOX_STARTUP_CONTROLS.has(control as HarnessSandboxStartupControl))
+  ) {
+    throw new Error(
+      "Agent manifest field 'sandbox_create.startup_controls' must contain unique approval-mode or observability entries",
+    );
+  }
+  return Object.freeze([...(value as HarnessSandboxStartupControl[])]);
+}
+
+function readSandboxDockerUlimit(
+  value: unknown,
+  index: number,
+): HarnessSandboxDockerUlimitDeclaration {
+  const field = `sandbox_create.docker_ulimits[${String(index)}]`;
+  if (!isObjectRecord(value)) {
+    throw new Error(`Agent manifest field '${field}' must be an object`);
+  }
+  const knownFields = new Set(["hard", "name", "soft"]);
+  const unknownField = Object.keys(value).find((key) => !knownFields.has(key));
+  if (unknownField || Object.keys(value).length !== knownFields.size) {
+    throw new Error(`Agent manifest field '${field}' must contain only name, soft, and hard`);
+  }
+  if (typeof value.name !== "string" || !DOCKER_ULIMIT_NAME_RE.test(value.name)) {
+    throw new Error(`Agent manifest field '${field}.name' is invalid`);
+  }
+  if (
+    !Number.isSafeInteger(value.soft) ||
+    (value.soft as number) < 0 ||
+    (value.soft as number) > DOCKER_ULIMIT_MAX_VALUE
+  ) {
+    throw new Error(`Agent manifest field '${field}.soft' is outside its allowed range`);
+  }
+  if (
+    !Number.isSafeInteger(value.hard) ||
+    (value.hard as number) < (value.soft as number) ||
+    (value.hard as number) > DOCKER_ULIMIT_MAX_VALUE
+  ) {
+    throw new Error(`Agent manifest field '${field}.hard' is outside its allowed range`);
+  }
+  return Object.freeze({
+    name: value.name,
+    soft: value.soft as number,
+    hard: value.hard as number,
+  });
+}
+
 /** Read package-declared contributions to the sandbox-create operation. */
 export function readSandboxCreateDeclaration(
   manifest: ManifestRecord,
@@ -76,7 +139,12 @@ export function readSandboxCreateDeclaration(
   if (!isObjectRecord(value)) {
     throw new Error("Agent manifest field 'sandbox_create' must be an object");
   }
-  const knownFields = new Set(["driver_mounts", "generated_image_build"]);
+  const knownFields = new Set([
+    "docker_ulimits",
+    "driver_mounts",
+    "generated_image_build",
+    "startup_controls",
+  ]);
   const unknownField = Object.keys(value).find((key) => !knownFields.has(key));
   if (unknownField) {
     throw new Error(`Agent manifest field 'sandbox_create.${unknownField}' is not supported`);
@@ -102,11 +170,32 @@ export function readSandboxCreateDeclaration(
     }
     driverMounts = Object.freeze(value.driver_mounts.map(readSandboxDriverMount));
   }
+  const startupControls = readSandboxStartupControls(value.startup_controls);
+  let dockerUlimits: readonly HarnessSandboxDockerUlimitDeclaration[] | undefined;
+  if (value.docker_ulimits !== undefined) {
+    if (
+      !Array.isArray(value.docker_ulimits) ||
+      value.docker_ulimits.length === 0 ||
+      value.docker_ulimits.length > 16
+    ) {
+      throw new Error(
+        "Agent manifest field 'sandbox_create.docker_ulimits' must contain 1 through 16 limits",
+      );
+    }
+    dockerUlimits = Object.freeze(value.docker_ulimits.map(readSandboxDockerUlimit));
+    if (new Set(dockerUlimits.map(({ name }) => name)).size !== dockerUlimits.length) {
+      throw new Error(
+        "Agent manifest field 'sandbox_create.docker_ulimits' must not contain duplicate limit names",
+      );
+    }
+  }
   return Object.freeze({
     ...(value.generated_image_build === "local-buildkit-required"
       ? { generated_image_build: value.generated_image_build }
       : {}),
     ...(driverMounts ? { driver_mounts: driverMounts } : {}),
+    ...(startupControls ? { startup_controls: startupControls } : {}),
+    ...(dockerUlimits ? { docker_ulimits: dockerUlimits } : {}),
   });
 }
 
@@ -126,4 +215,19 @@ export function sandboxCreateDriverMounts(
     drivers: [...mount.drivers],
     ...(mount.options ? { options: [...mount.options] } : {}),
   }));
+}
+
+/** Return whether one package declares an operator control for managed startup. */
+export function supportsSandboxStartupControl(
+  agent: { sandbox_create?: HarnessSandboxCreateDeclaration } | null | undefined,
+  control: HarnessSandboxStartupControl,
+): boolean {
+  return agent?.sandbox_create?.startup_controls?.includes(control) === true;
+}
+
+/** Return detached Docker limits declared by one package's managed image. */
+export function sandboxCreateDockerUlimits(
+  agent: { sandbox_create?: HarnessSandboxCreateDeclaration } | null | undefined,
+): HarnessSandboxDockerUlimitDeclaration[] {
+  return (agent?.sandbox_create?.docker_ulimits ?? []).map((limit) => ({ ...limit }));
 }

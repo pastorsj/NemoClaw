@@ -27,6 +27,25 @@ const OPENCLAW_PACKAGE = {
   contentDigest: "a".repeat(64),
 };
 
+const FUTURE_PACKAGE = {
+  ...OPENCLAW_PACKAGE,
+  id: "future-harness",
+};
+
+const MANAGED_EXTENSIONS = {
+  support: "managed" as const,
+  controller: { command: ["/usr/local/bin/extension-state"], timeout_seconds: 10 },
+  state_directory: "extensions",
+  preserved_directories: [],
+  allowed_symlinks: [],
+};
+
+const LEGACY_OPENCLAW_EXTENSION = {
+  id: "weather",
+  installPath: "/sandbox/.openclaw/extensions/weather",
+  loadPaths: ["/sandbox/.openclaw/extensions/weather/index.js"],
+};
+
 function manifest(backupPath: string): RebuildManifest {
   return {
     version: 2,
@@ -51,6 +70,140 @@ afterEach(() => {
 });
 
 describe("rebuild manifest publication", () => {
+  it("selects snapshot extensions from a future package lifecycle declaration", () => {
+    const stateLifecycle = {
+      backup_quiescence: { kind: "not-required" as const },
+      snapshot_restore: [],
+      rebuild: {
+        managed_extensions: {
+          support: "managed" as const,
+          controller: { command: ["/usr/local/bin/future-state"], timeout_seconds: 10 },
+          state_directory: "addons",
+          preserved_directories: ["builtin"],
+          allowed_symlinks: [],
+        },
+        preserved_environment: {
+          files: [
+            {
+              path: "routing.env",
+              patterns: ["FUTURE_*_ROUTE"],
+              render_target: "~/.future/routes.env",
+            },
+          ],
+        },
+        scheduled_work: {
+          support: "disabled" as const,
+          reason: "Test package has no scheduled work.",
+        },
+        post_restore: { kind: "not-required" as const },
+      },
+    };
+
+    expect(__test.resolveAgentSnapshotFeatures("future-harness", true, stateLifecycle)).toEqual({
+      legacyImagePluginProvenanceRequired: false,
+      managedExtensions: stateLifecycle.rebuild.managed_extensions,
+      preservedEnvironmentInventory: [
+        {
+          path: "routing.env",
+          patterns: ["FUTURE_*_ROUTE"],
+          render_target: "~/.future/routes.env",
+        },
+      ],
+    });
+    expect(
+      __test.resolveAgentSnapshotFeatures("openclaw", true, {
+        ...stateLifecycle,
+        rebuild: {
+          ...stateLifecycle.rebuild,
+          managed_extensions: {
+            support: "disabled",
+            reason: "Test package has no managed extensions.",
+          },
+          preserved_environment: undefined,
+        },
+      }),
+    ).toEqual({
+      legacyImagePluginProvenanceRequired: false,
+      managedExtensions: null,
+      preservedEnvironmentInventory: [],
+    });
+    expect(
+      __test.shouldDiscoverFreshManagedImageExtensions({
+        targetAgentType: "future-harness",
+        agentDefinition: { stateLifecycle } as never,
+      }),
+    ).toBe(true);
+    expect(
+      __test.shouldDiscoverFreshManagedImageExtensions({
+        targetAgentType: "openclaw",
+        agentDefinition: {
+          stateLifecycle: {
+            ...stateLifecycle,
+            rebuild: {
+              ...stateLifecycle.rebuild,
+              managed_extensions: {
+                support: "disabled",
+                reason: "Test package has no managed extensions.",
+              },
+            },
+          },
+        } as never,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects retired OpenClaw extension state for a fresh same-ID package receipt", () => {
+    expect(
+      __test.resolveManagedExtensionBackupMetadata(
+        MANAGED_EXTENSIONS,
+        {
+          name: "alpha",
+          agent: "openclaw",
+          harnessPackage: OPENCLAW_PACKAGE,
+          fromDockerfile: "/tmp/Dockerfile.custom",
+          openclawImagePluginInstalls: [LEGACY_OPENCLAW_EXTENSION],
+        },
+        "/sandbox/.openclaw",
+      ),
+    ).toEqual({
+      reconcileManagedImageExtensions: true,
+      error: "registered managed image extension provenance is missing or invalid",
+    });
+  });
+
+  it("migrates retired OpenClaw extension state only with recorded package migration", () => {
+    expect(
+      __test.resolveManagedExtensionBackupMetadata(
+        MANAGED_EXTENSIONS,
+        {
+          name: "alpha",
+          agent: "openclaw",
+          harnessPackage: OPENCLAW_PACKAGE,
+          harnessPackageMigration: {
+            schemaVersion: 1,
+            source: "legacy-current-bundle",
+            // A null legacy agent is the canonical persisted identity for the
+            // historical default OpenClaw row.
+            legacyAgent: null,
+            migratedAt: "2026-09-06T12:00:00.000Z",
+          },
+          fromDockerfile: "/tmp/Dockerfile.custom",
+          openclawImagePluginInstalls: [LEGACY_OPENCLAW_EXTENSION],
+        },
+        "/sandbox/.openclaw",
+      ),
+    ).toEqual({
+      reconcileManagedImageExtensions: true,
+      extensions: [
+        {
+          id: "weather",
+          directory: "weather",
+          configPaths: ["/sandbox/.openclaw/extensions/weather/index.js"],
+        },
+      ],
+    });
+  });
+
   it("publishes a complete private manifest with no visible temporary file", () => {
     const backupPath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-manifest-"));
     tempDirs.push(backupPath);
@@ -157,6 +310,105 @@ describe("rebuild manifest publication", () => {
     __test.writeManifest(backupPath, value as unknown as RebuildManifest);
 
     expect(__test.readManifest(backupPath)).toBeNull();
+  });
+
+  it("accepts package-authoritative extension state without recognizing the harness id", () => {
+    const backupPath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-manifest-package-"));
+    tempDirs.push(backupPath);
+    __test.writeManifest(backupPath, {
+      ...manifest(backupPath),
+      agentType: FUTURE_PACKAGE.id,
+      harnessPackage: FUTURE_PACKAGE,
+      managedImageExtensions: [
+        { id: "future-weather", directory: "future-weather", configPaths: [] },
+      ],
+      reconcileManagedImageExtensions: true,
+      preservedEnv: [],
+    });
+
+    expect(
+      __test.readManifest(backupPath, {
+        resolvePackageStateLifecycle: () => ({
+          backup_quiescence: { kind: "not-required" },
+          snapshot_restore: [],
+          rebuild: {
+            managed_extensions: {
+              support: "managed",
+              controller: { command: ["/usr/local/bin/future-state"], timeout_seconds: 10 },
+              state_directory: "addons",
+              preserved_directories: [],
+              allowed_symlinks: [],
+            },
+            preserved_environment: {
+              files: [
+                {
+                  path: ".env",
+                  patterns: ["*_HOME_CHANNEL"],
+                  render_target: "~/.future/routes.env",
+                },
+              ],
+            },
+            scheduled_work: { support: "disabled", reason: "Test package has no scheduled work." },
+            post_restore: { kind: "not-required" },
+          },
+        }),
+      }),
+    ).toMatchObject({
+      agentType: FUTURE_PACKAGE.id,
+      harnessPackage: FUTURE_PACKAGE,
+      reconcileManagedImageExtensions: true,
+      managedImageExtensions: [
+        { id: "future-weather", directory: "future-weather", configPaths: [] },
+      ],
+      preservedEnv: [],
+    });
+  });
+
+  it("rejects the same extension state from an unreceipted unknown harness", () => {
+    const backupPath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-manifest-legacy-"));
+    tempDirs.push(backupPath);
+    const value = {
+      ...manifest(backupPath),
+      version: 1,
+      agentType: FUTURE_PACKAGE.id,
+      managedImageExtensions: [],
+      reconcileManagedImageExtensions: true,
+      preservedEnv: [],
+    } as Record<string, unknown>;
+    delete value.harnessPackage;
+    __test.writeManifest(backupPath, value as unknown as RebuildManifest);
+
+    expect(__test.readManifest(backupPath)).toBeNull();
+  });
+
+  it("rejects receipt-backed extension state that its package did not declare", () => {
+    const backupPath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-manifest-package-"));
+    tempDirs.push(backupPath);
+    __test.writeManifest(backupPath, {
+      ...manifest(backupPath),
+      agentType: FUTURE_PACKAGE.id,
+      harnessPackage: FUTURE_PACKAGE,
+      managedImageExtensions: [],
+      reconcileManagedImageExtensions: true,
+      preservedEnv: [],
+    });
+
+    expect(
+      __test.readManifest(backupPath, {
+        resolvePackageStateLifecycle: () => ({
+          backup_quiescence: { kind: "not-required" },
+          snapshot_restore: [],
+          rebuild: {
+            managed_extensions: {
+              support: "disabled",
+              reason: "Test package has no managed extensions.",
+            },
+            scheduled_work: { support: "disabled", reason: "Test package has no scheduled work." },
+            post_restore: { kind: "not-required" },
+          },
+        }),
+      }),
+    ).toBeNull();
   });
 
   it("removes the unpublished temporary manifest when rename fails", () => {

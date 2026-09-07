@@ -104,6 +104,7 @@ import {
   ensureLegacyHermesToolBroker,
   isHermesPortableDisposition,
   prepareLegacyHermesLightSkin,
+  settleConnectPackagePairing,
 } from "./connect/compatibility";
 import {
   createProbeTimingRecorder,
@@ -342,6 +343,15 @@ async function settlePortablePairingOrExit(sandboxName: string): Promise<boolean
   return result.kind === "settled";
 }
 
+async function settlePackagePairingOrExit(sandboxName: string): Promise<boolean> {
+  const result = await settleConnectPackagePairing(sandboxName);
+  if (result.kind === "incomplete") {
+    console.error(`  ${result.message}`);
+    process.exit(1);
+  }
+  return result.kind !== "not-package";
+}
+
 async function runSandboxConnectProbe(
   sandboxName: string,
   {
@@ -468,7 +478,10 @@ async function runSandboxConnectProbe(
     // Defense-in-depth scope-upgrade approval on the probe-only / `recover`
     // path (#4504): the gateway is up, so deterministically clear any pending
     // allowlisted CLI/webchat scope upgrade. Best-effort; never throws.
-    if (!(await measureAsync("pairing", () => settlePortablePairingOrExit(sandboxName)))) {
+    if (
+      !(await measureAsync("pairing", () => settlePackagePairingOrExit(sandboxName))) &&
+      !(await measureAsync("pairing", () => settlePortablePairingOrExit(sandboxName)))
+    ) {
       measure("pairing", () => runConnectAutoPairApprovalPass(sandboxName));
     }
     if (processCheck.forwardRecovered) {
@@ -483,7 +496,10 @@ async function runSandboxConnectProbe(
   if (processCheck.recovered) {
     await measureAsync("inference", () => ensureSandboxInferenceRouteOrExit(sandboxName, agent));
     // Same defense-in-depth approval after a recovery (#4504); best-effort.
-    if (!(await measureAsync("pairing", () => settlePortablePairingOrExit(sandboxName)))) {
+    if (
+      !(await measureAsync("pairing", () => settlePackagePairingOrExit(sandboxName))) &&
+      !(await measureAsync("pairing", () => settlePortablePairingOrExit(sandboxName)))
+    ) {
       measure("pairing", () => runConnectAutoPairApprovalPass(sandboxName));
     }
     const managedControlCompletion =

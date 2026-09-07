@@ -8,10 +8,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { buildAvailabilityProbeEnv } from "../../test/e2e/fixtures/availability-env.ts";
 import {
   fabricPackageE2eEnvironment,
   type FabricHarnessE2eContract,
   type FabricPackageE2eTarget,
+  type FabricPackageJourney,
   hasFabricPackageE2eTarget,
   readFabricPackageE2eTarget,
   validateFabricHarnessE2eContract,
@@ -21,12 +23,60 @@ import {
 } from "./fabric-contract.mts";
 
 export { fabricPackageE2eEnvironment, hasFabricPackageE2eTarget, readFabricPackageE2eTarget };
-export type { FabricPackageE2eTarget };
+export type { FabricPackageE2eTarget, FabricPackageJourney };
 
 const CONTRACT_FIXTURE_MAX_BYTES = 16 * 1024;
+const DEFAULT_FABRIC_PACKAGE_MODEL = "nvidia/nvidia/nemotron-3-super-v3";
 
-export const FABRIC_PACKAGE_LIVE_TEST_PATH = "test/e2e/live/fabric-package.test.ts";
-export const FABRIC_PACKAGE_LIVE_SELECTOR = "^fabric-package$";
+export type ProviderSmokeSelection = "anthropic" | "fabric" | "openai";
+
+export interface HostedFabricCommandEnvironment {
+  readonly env: NodeJS.ProcessEnv;
+  readonly gatewayName: string;
+}
+
+export function providerSmokeSelected(
+  provider: ProviderSmokeSelection,
+  requestedValue: string | undefined = process.env.NEMOCLAW_INFERENCE_ROUTING_PROVIDER_SMOKE,
+): boolean {
+  const requested = requestedValue?.trim().toLowerCase();
+  return requested === "1" || requested === "true" || requested === "all" || requested === provider;
+}
+
+/** Require an isolated gateway before a hosted Fabric source qualification mutates state. */
+export function buildHostedFabricCommandEnvironment(
+  base: NodeJS.ProcessEnv = process.env,
+): HostedFabricCommandEnvironment {
+  if (base.NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD?.trim() !== "1") {
+    throw new Error(
+      "Hosted Fabric source qualification requires NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD=1",
+    );
+  }
+  const gatewayPort = base.NEMOCLAW_GATEWAY_PORT?.trim() ?? "";
+  const parsedGatewayPort = Number(gatewayPort);
+  if (
+    !/^[0-9]+$/u.test(gatewayPort) ||
+    !Number.isSafeInteger(parsedGatewayPort) ||
+    parsedGatewayPort < 1 ||
+    parsedGatewayPort > 65_535 ||
+    parsedGatewayPort === 8080
+  ) {
+    throw new Error(
+      "Hosted Fabric source qualification requires an isolated non-default NEMOCLAW_GATEWAY_PORT",
+    );
+  }
+  const gatewayName = `nemoclaw-${gatewayPort}`;
+  return {
+    env: {
+      ...buildAvailabilityProbeEnv(base),
+      NEMOCLAW_GATEWAY_PORT: gatewayPort,
+      NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1",
+      OPENSHELL_GATEWAY: gatewayName,
+    },
+    gatewayName,
+  };
+}
+
 export const FABRIC_PACKAGE_REPOSITORY_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
@@ -84,11 +134,12 @@ export function defaultFabricPackageSandboxName(packageId: string): string {
 export function loadFabricPackageTarget(
   fixturePath: string,
   options: {
-    readonly packageArtifact?: string;
+    readonly journey?: FabricPackageJourney;
+    readonly packageArtifact: string;
     readonly sandboxName?: string;
     readonly upgradePackageArtifact?: string;
     readonly workingDirectory?: string;
-  } = {},
+  },
 ): FabricPackageE2eTarget {
   const workingDirectory = options.workingDirectory ?? process.cwd();
   const contract = readFabricHarnessE2eFixture(fixturePath, workingDirectory);
@@ -107,13 +158,20 @@ export function loadFabricPackageTarget(
     return artifact;
   };
   const packageArtifact = resolveArtifact(options.packageArtifact);
+  if (!packageArtifact)
+    throw new Error("Fabric package journey requires an exact package artifact");
   const upgradePackageArtifact = resolveArtifact(options.upgradePackageArtifact);
+  const journey = options.journey ?? "smoke";
+  if (journey === "smoke" && upgradePackageArtifact) {
+    throw new Error("Fabric package upgrade artifacts require the lifecycle journey");
+  }
   if (packageArtifact && upgradePackageArtifact && packageArtifact === upgradePackageArtifact) {
     throw new Error("Fabric package lifecycle artifacts must use different directories");
   }
   return Object.freeze({
     contract,
-    ...(packageArtifact ? { packageArtifact } : {}),
+    journey,
+    packageArtifact,
     ...(upgradePackageArtifact ? { upgradePackageArtifact } : {}),
     sandboxName: validateFabricPackageSandboxName(
       options.sandboxName ?? defaultFabricPackageSandboxName(contract.packageId),
@@ -124,10 +182,11 @@ export function loadFabricPackageTarget(
 /** Derive a non-default gateway binding so a package proof does not mutate the user's gateway. */
 export function fabricPackageGatewayEnvironment(
   packageId: string,
+  runIdentity = String(process.pid),
 ): Readonly<Record<"NEMOCLAW_GATEWAY_PORT" | "OPENSHELL_GATEWAY", string>> {
   validateFabricPackageId(packageId);
-  const digest = createHash("sha256").update(packageId).digest();
-  const port = 20_000 + (digest.readUInt16BE(0) % 20_000);
+  const digest = createHash("sha256").update(`${packageId}:${runIdentity}`).digest();
+  const port = 20_000 + (digest.readUInt32BE(0) % 40_000);
   return Object.freeze({
     NEMOCLAW_GATEWAY_PORT: String(port),
     OPENSHELL_GATEWAY: `nemoclaw-${String(port)}`,
@@ -140,11 +199,13 @@ export function fabricPackageJourneyEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
 ): Readonly<Record<string, string>> {
   const model =
-    environment.NEMOCLAW_MODEL ??
-    environment.NEMOCLAW_COMPAT_MODEL ??
-    "nvidia/nvidia/nemotron-3-ultra";
+    environment.NEMOCLAW_MODEL ?? environment.NEMOCLAW_COMPAT_MODEL ?? DEFAULT_FABRIC_PACKAGE_MODEL;
+  const gatewayEnvironment = fabricPackageGatewayEnvironment(
+    target.contract.packageId,
+    `${target.journey}:${target.sandboxName}:${String(process.pid)}`,
+  );
   return Object.freeze({
-    ...fabricPackageGatewayEnvironment(target.contract.packageId),
+    ...gatewayEnvironment,
     ...fabricPackageE2eEnvironment(target),
     E2E_TARGET_ID: environment.E2E_TARGET_ID ?? `${target.contract.packageId}-fabric`,
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",

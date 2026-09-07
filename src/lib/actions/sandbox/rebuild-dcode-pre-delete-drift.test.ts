@@ -4,14 +4,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   configureDcodeSession,
+  createLegacyDcodeRebuildHarness,
   expectNoDcodeMutation,
   makeDcodeSandboxEntry,
 } from "../../../../test/helpers/rebuild-dcode-flow-helpers";
 import { expectNoSandboxDelete } from "../../../../test/helpers/rebuild-delete-assertions";
-import {
-  createRebuildFlowHarness,
-  installRebuildFlowTestHooks,
-} from "../../../../test/helpers/rebuild-flow-generic-harness";
+import { installRebuildFlowTestHooks } from "../../../../test/helpers/rebuild-flow-generic-harness";
 import { registry } from "../../../../test/helpers/rebuild-flow-harness";
 import { revalidateDcodeReplacementAtMutationEdge } from "./rebuild-dcode-preflight";
 import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
@@ -128,8 +126,7 @@ describe("rebuildSandbox DCode flow: pre-delete drift", () => {
   it("rejects registry drift during the final DCode preflight before backup (#6195)", async () => {
     const originalEntry = makeDcodeSandboxEntry();
     const driftedEntry = { ...originalEntry, model: "nvidia/changed-during-preflight" };
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: originalEntry,
       sandboxEntryReads: [
         originalEntry, // Initial rebuild target.
@@ -154,8 +151,7 @@ describe("rebuildSandbox DCode flow: pre-delete drift", () => {
     expectNoDcodeMutation(harness);
   });
   it("disposes the prepared DCode image when the final route recheck fails (#6195)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
       dcodeRouteResults: [
         { ok: true },
@@ -179,8 +175,7 @@ describe("rebuildSandbox DCode flow: pre-delete drift", () => {
     const originalEntry = makeDcodeSandboxEntry();
     const driftedEntry = { ...originalEntry, model: "nvidia/changed-at-delete-edge" };
     let backupCompleted = false;
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: originalEntry,
       beforeBackup: () => {
         backupCompleted = true;
@@ -207,8 +202,7 @@ describe("rebuildSandbox DCode flow: pre-delete drift", () => {
     );
   });
   it("preserves the live DCode sandbox when its credential route drifts after backup (#6195)", async () => {
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
+    const harness = createLegacyDcodeRebuildHarness({
       sandboxEntry: makeDcodeSandboxEntry(),
       dcodeRouteResults: [
         { ok: true },

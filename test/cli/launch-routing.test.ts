@@ -13,8 +13,9 @@ import {
 import { run, runWithEnv, testTimeoutOptions, writeSandboxRegistry } from "./helpers";
 
 const CALL_SEPARATOR = "--- openshell call ---";
-const RUNTIME_ENV_EXEC_SCRIPT =
-  'if [ -r "/tmp/nemoclaw-proxy-env.sh" ]; then builtin source "/tmp/nemoclaw-proxy-env.sh" || exit $?; fi; builtin unset OPENCLAW_GATEWAY_TOKEN; builtin exec -- "$@"';
+const GATEWAY_CREDENTIAL_SCRUB =
+  'while IFS= read -r _nemoclaw_runtime_env_name; do case "$_nemoclaw_runtime_env_name" in GATEWAY_TOKEN|GATEWAY_PASSWORD|GATEWAY_SECRET|GATEWAY_CREDENTIAL|*_GATEWAY_TOKEN|*_GATEWAY_PASSWORD|*_GATEWAY_SECRET|*_GATEWAY_CREDENTIAL) builtin unset "$_nemoclaw_runtime_env_name" ;; esac; done < <(builtin compgen -e); builtin unset _nemoclaw_runtime_env_name';
+const RUNTIME_ENV_EXEC_SCRIPT = `if [ -r "/tmp/nemoclaw-proxy-env.sh" ]; then builtin source "/tmp/nemoclaw-proxy-env.sh" || exit $?; fi; ${GATEWAY_CREDENTIAL_SCRUB}; builtin exec -- "$@"`;
 const harnessRoots: string[] = [];
 
 afterAll(() => {
@@ -118,7 +119,7 @@ function createLaunchHarness(prefix: string, agent: string): LaunchHarness {
     ].join("\n"),
     { mode: 0o755 },
   );
-  // The exec path's post-command OpenClaw permission cleanup shells out to
+  // The exec path's post-command configuration permission cleanup shells out to
   // Docker; a stub keeps the outcome identical whether or not the host runs a
   // Docker daemon.
   fs.writeFileSync(
@@ -285,7 +286,7 @@ describe("CLI launch routing process contracts (#6006)", () => {
   );
 
   it(
-    "reports the OpenClaw permission cleanup failure after a successful agent exec",
+    "reports the configuration permission cleanup failure after a successful agent exec",
     testTimeoutOptions(90_000),
     () => {
       const harness = createLaunchHarness("nemoclaw-cli-launch-openclaw-cleanup-", "openclaw");
@@ -293,7 +294,9 @@ describe("CLI launch routing process contracts (#6006)", () => {
       const result = harness.runLaunch("launch alpha");
 
       expect(result.code).toBe(1);
-      expect(result.out).toContain("OpenClaw permission cleanup failed (command exit 0");
+      expect(result.out).toContain(
+        "Sandbox configuration permission cleanup failed (command exit 0",
+      );
     },
   );
 });

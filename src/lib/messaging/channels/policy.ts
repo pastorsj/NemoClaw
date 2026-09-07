@@ -10,6 +10,7 @@ import { isValidName } from "../../sandbox-name-contract";
 import { ROOT } from "../../state/paths";
 import type { MessagingAgentId } from "../manifest";
 import { listMessagingPolicyPresetMetadata } from "./metadata";
+import { resolveLegacyMessagingPolicyFile } from "./legacy/policy-files";
 import { isWechatIlinkIdcHost, normalizeWechatIlinkBaseUrl } from "./wechat/ilink-base-url";
 
 type PolicyPresetLocator = {
@@ -29,11 +30,6 @@ export type MessagingChannelPolicyLoadOptions = {
   readonly messagingConfig?: Readonly<Record<string, string | undefined>> | null;
 };
 
-const CHANNELS_ROOT = path.join(ROOT, "src", "lib", "messaging", "channels");
-const POLICY_FILE_BY_AGENT: Readonly<Record<MessagingAgentId, string>> = {
-  openclaw: "openclaw.yaml",
-  hermes: "hermes.yaml",
-};
 const WECHAT_BASE_URL_ENV_KEY = "WECHAT_BASE_URL";
 const WECHAT_POLICY_KEY = "wechat_bridge";
 const WECHAT_TEMPLATE_HOST = "ilinkai.wechat.com";
@@ -78,9 +74,7 @@ export function materializeMessagingPolicySandboxName(
 function normalizeAgent(
   agent: MessagingAgentId | string | null | undefined,
 ): MessagingAgentId | null {
-  if (agent == null) return "openclaw";
-  if (agent === "openclaw" || agent === "hermes") return agent;
-  return null;
+  return resolveLegacyMessagingPolicyFile("placeholder", agent)?.agent ?? null;
 }
 
 function isSafeId(value: string): boolean {
@@ -89,7 +83,7 @@ function isSafeId(value: string): boolean {
 
 function channelPolicyPath(channelId: string, agent: MessagingAgentId): string | null {
   if (!isSafeId(channelId)) return null;
-  return path.join(CHANNELS_ROOT, channelId, "policy", POLICY_FILE_BY_AGENT[agent]);
+  return resolveLegacyMessagingPolicyFile(channelId, agent)?.file ?? null;
 }
 
 function readPresetHeader(content: string): { name: string; description: string } | null {
@@ -212,6 +206,19 @@ function materializeWechatIlinkEndpoint(
   return YAML.stringify(parsed);
 }
 
+/** Apply core-owned channel substitutions to content loaded from any trusted policy source. */
+export function materializeMessagingChannelPolicyContent(
+  content: string,
+  channelId: string,
+  options: Pick<MessagingChannelPolicyLoadOptions, "sandboxName" | "messagingConfig"> = {},
+): string | null {
+  const materialized = materializeMessagingPolicySandboxName(content, options.sandboxName);
+  if (materialized === null) return null;
+  return channelId === "wechat"
+    ? materializeWechatIlinkEndpoint(materialized, options.messagingConfig)
+    : materialized;
+}
+
 function readChannelPolicyInfo(
   channelId: string,
   expectedPresetName: string,
@@ -263,11 +270,7 @@ export function createMessagingChannelPolicyResolver(
     const content = deps.readFileSync(file, "utf-8");
     const header = readPresetHeader(content);
     if (header?.name !== presetName) return null;
-    const materialized = materializeMessagingPolicySandboxName(content, options.sandboxName);
-    if (materialized === null) return null;
-    return metadata?.channelId === "wechat"
-      ? materializeWechatIlinkEndpoint(materialized, options.messagingConfig)
-      : materialized;
+    return materializeMessagingChannelPolicyContent(content, metadata?.channelId ?? "", options);
   }
 
   function listMessagingChannelPolicyPresets(

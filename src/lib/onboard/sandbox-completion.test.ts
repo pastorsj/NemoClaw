@@ -134,6 +134,116 @@ describe("created OpenClaw sandbox finalization", () => {
     expect(register).toHaveBeenCalledWith(pluginInstalls);
   });
 
+  it("discovers and restores a synthetic package through the managed-extension contract", () => {
+    const managedExtensionDeclaration = {
+      support: "managed" as const,
+      controller: { command: ["/opt/future/state-controller"], timeout_seconds: 10 },
+      state_directory: "addons",
+      preserved_directories: [],
+      allowed_symlinks: [],
+    };
+    const managedExtensions = [
+      { id: "future-weather", directory: "weather", configPaths: ["/opt/future/weather"] },
+    ];
+    const restoreRecreatedSandboxState = vi.fn(() => ({
+      success: true,
+      restoredDirs: ["addons"],
+      failedDirs: [],
+      restoredFiles: [],
+      failedFiles: [],
+    }));
+    const register = vi.fn();
+
+    finalizeCreatedSandbox(
+      {
+        sandboxName: "future-sandbox",
+        restoreBackupPath: "/tmp/future-backup",
+        preUpgradeBackup: false,
+        targetAgentType: "future-harness",
+        agentDefinition: {
+          stateLifecycle: { rebuild: { managed_extensions: managedExtensionDeclaration } },
+        } as never,
+        discoverManagedImageExtensions: true,
+        managedExtensionDeclaration,
+        validateManagedDcode: false,
+        provider: "compatible-endpoint",
+        model: "demo",
+        preferredInferenceApi: "openai-completions",
+      },
+      {
+        ...preparedRestoreAuthority("future-sandbox"),
+        discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+        discoverFreshManagedImageExtensions: () => ({ ok: true, extensions: managedExtensions }),
+        restoreRecreatedSandboxState,
+        getDcodeSelectionDrift: vi.fn(),
+        register,
+        note: vi.fn(),
+        error: vi.fn(),
+        exitProcess: (code): never => {
+          throw new Error(`exit ${code}`);
+        },
+      },
+    );
+
+    expect(restoreRecreatedSandboxState).toHaveBeenCalledWith(
+      "future-sandbox",
+      "/tmp/future-backup",
+      expect.objectContaining({
+        targetAgentType: "future-harness",
+        freshManagedImageExtensions: managedExtensions,
+      }),
+      expect.any(Function),
+    );
+    expect(register).toHaveBeenCalledWith(undefined, expect.anything(), managedExtensions);
+  });
+
+  it("does not restore or register when a synthetic package controller fails", () => {
+    const managedExtensionDeclaration = {
+      support: "managed" as const,
+      controller: { command: ["/opt/future/state-controller"], timeout_seconds: 10 },
+      state_directory: "addons",
+      preserved_directories: [],
+      allowed_symlinks: [],
+    };
+    const restoreRecreatedSandboxState = vi.fn();
+    const register = vi.fn();
+
+    expect(() =>
+      finalizeCreatedSandbox(
+        {
+          sandboxName: "future-sandbox",
+          restoreBackupPath: "/tmp/future-backup",
+          preUpgradeBackup: false,
+          targetAgentType: "future-harness",
+          discoverManagedImageExtensions: true,
+          managedExtensionDeclaration,
+          validateManagedDcode: false,
+          provider: "compatible-endpoint",
+          model: "demo",
+          preferredInferenceApi: "openai-completions",
+        },
+        {
+          ...preparedRestoreAuthority("future-sandbox"),
+          discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+          discoverFreshManagedImageExtensions: () => ({
+            ok: false,
+            error: "managed-extension inspection response is invalid",
+          }),
+          restoreRecreatedSandboxState,
+          getDcodeSelectionDrift: vi.fn(),
+          register,
+          note: vi.fn(),
+          error: vi.fn(),
+          exitProcess: (code): never => {
+            throw new Error(`exit ${code}`);
+          },
+        },
+      ),
+    ).toThrow("exit 1");
+    expect(restoreRecreatedSandboxState).not.toHaveBeenCalled();
+    expect(register).not.toHaveBeenCalled();
+  });
+
   it("preserves the fresh image plugin baseline across recreation before registration", () => {
     const order: string[] = [];
     const register = vi.fn(() => {
@@ -577,8 +687,9 @@ describe("created sandbox completion actions", () => {
           workload: {
             runtime: {
               runtimeProvider: null,
+              receiptAgentDefinition: null,
               ensurePreparedWorkload: vi.fn(),
-              ensurePreparedProfile: vi.fn(),
+              ensurePreparedProfile: vi.fn(() => null),
             },
             workload: {
               source: {

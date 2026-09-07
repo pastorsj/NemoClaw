@@ -12,8 +12,17 @@ import {
 } from "../hermes-dashboard";
 import type { SandboxEntry } from "../state/registry";
 import { reservedHermesDashboardPortMessage } from "./preflight-ports";
+import type { DashboardUiOnboardState } from "./dashboard/package-dashboard";
 
-export interface HermesDashboardOnboardState {
+export {
+  appendPackageDashboardEnvArgs,
+  createPackageDashboardOnboardForwarding,
+  hasPackageDashboardDrift,
+  packageDashboardStateFromRegistry,
+  rebindPackageDashboardPort,
+} from "./dashboard/package-dashboard";
+
+export interface HermesDashboardOnboardState extends DashboardUiOnboardState {
   config: HermesDashboardConfig | null;
   enabled: boolean;
 }

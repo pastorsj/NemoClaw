@@ -55,6 +55,99 @@ function execCommand(runOpenshell: ReturnType<typeof vi.fn>): { argv: string[]; 
 }
 
 describe("wipeSandboxState (#5449)", () => {
+  it("uses same-ID receipt state declarations instead of the source catalogue", () => {
+    const receipt = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    } as const;
+    const loadAgent = vi.fn(() => ({
+      name: "openclaw",
+      configPaths: { dir: "/sandbox/.source-openclaw" },
+      stateDirs: ["source-only"],
+      stateDirPrefixes: [],
+      stateFiles: [],
+    }));
+    const { deps, runOpenshell } = buildDeps({
+      getSandbox: vi.fn(() => ({ agent: "openclaw", harnessPackage: receipt }) as never),
+      loadAgent,
+      resolveRecordedAgent: vi.fn(() => ({
+        effectiveAgentId: "openclaw",
+        harnessPackage: receipt,
+        definition: {
+          name: "openclaw",
+          configPaths: { dir: "/sandbox/.receipt-openclaw" },
+          stateDirs: ["receipt-only"],
+          stateDirPrefixes: ["receipt-worker-"],
+          stateFiles: [{ path: "receipt-state.json" }],
+        },
+      })),
+    });
+
+    destroy.wipeSandboxState("test-sb", deps as never);
+
+    const { script } = execCommand(runOpenshell);
+    expect(script).toContain("/sandbox/.receipt-openclaw");
+    expect(script).toContain("'receipt-only'");
+    expect(script).toContain("'receipt-worker-'*");
+    expect(script).toContain("'receipt-state.json'");
+    expect(script).not.toContain("source-only");
+    expect(loadAgent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "unavailable",
+      resolveRecordedAgent: () => {
+        throw new Error("receipt bytes unavailable");
+      },
+    },
+    {
+      label: "mismatched",
+      resolveRecordedAgent: () => ({
+        effectiveAgentId: "other-agent",
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: "openclaw",
+          packageVersion: "1.0.0",
+          contentDigest: "a".repeat(64),
+        },
+        definition: {
+          name: "other-agent",
+          configPaths: { dir: "/sandbox/.other-agent" },
+          stateDirs: ["workspace"],
+          stateDirPrefixes: [],
+          stateFiles: [],
+        },
+      }),
+    },
+  ])(
+    "refuses destructive fallback when receipt authority is $label",
+    ({ resolveRecordedAgent }) => {
+      const receipt = {
+        kind: "agent-runtime",
+        id: "openclaw",
+        packageVersion: "1.0.0",
+        contentDigest: "a".repeat(64),
+      } as const;
+      const warnings: string[] = [];
+      const loadAgent = vi.fn();
+      const { deps, runOpenshell } = buildDeps({
+        getSandbox: vi.fn(() => ({ agent: "openclaw", harnessPackage: receipt }) as never),
+        loadAgent,
+        resolveRecordedAgent: vi.fn(resolveRecordedAgent),
+        warn: (message: string) => warnings.push(message),
+      });
+
+      destroy.wipeSandboxState("test-sb", deps as never);
+
+      expect(runOpenshell).not.toHaveBeenCalled();
+      expect(loadAgent).not.toHaveBeenCalled();
+      expect(warnings.join("\n")).toContain("Could not resolve agent 'openclaw'");
+    },
+  );
+
   it("wipes the workspace dir (where USER.md lives) via a live exec", () => {
     const { deps, runOpenshell } = buildDeps();
 

@@ -6,18 +6,27 @@ import type { Server } from "node:http";
 
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  assertVoiceGatewayEnabled,
-  runVoiceGatewayServe,
-  validateOpenClawGatewayUrl,
-} from "./serve";
+import { assertVoiceGatewayEnabled, runVoiceGatewayServe } from "./serve";
 
 const OPTIONS = {
-  gatewayUrl: "ws://127.0.0.1:18789/ws",
-  runtimeIdentity: "voiceclaw-local",
-  runtimeProfile: "voiceclaw-pinned",
+  runtimeIdentity: "voice-runtime-local",
+  runtimeProfile: "voice-runtime-pinned",
   sandbox: "demo-sandbox",
+  sandboxAuthority: {
+    sandboxName: "demo-sandbox",
+    packageIdentity: {
+      kind: "agent-runtime" as const,
+      id: "openclaw",
+      packageVersion: "1.2.3",
+      contentDigest: "a".repeat(64),
+    },
+    gatewayName: "nemoclaw",
+    gatewayPort: 8080,
+    lifecycleGeneration: "generation-one",
+    lifecycleLiveIdentityFingerprint: "b".repeat(64),
+  },
   agent: "main",
+  turnTimeoutMs: 120_000,
 };
 
 describe("experimental voice gateway service gate", () => {
@@ -30,7 +39,7 @@ describe("experimental voice gateway service gate", () => {
   });
 
   it("checks the exact feature gate before reading either credential (#8378)", async () => {
-    const readBearerDescriptors = vi.fn();
+    const readBearerDescriptor = vi.fn();
     const createServer = vi.fn();
 
     await expect(
@@ -39,30 +48,12 @@ describe("experimental voice gateway service gate", () => {
           NEMOCLAW_EXPERIMENTAL_OTHER_CAPABILITY: "1",
           NEMOCLAW_EXPERIMENTAL_VOICE_GATEWAY: "0",
         },
-        readBearerDescriptors,
+        readBearerDescriptor,
         createServer,
       }),
     ).rejects.toThrow("disabled");
-    expect(readBearerDescriptors).not.toHaveBeenCalled();
+    expect(readBearerDescriptor).not.toHaveBeenCalled();
     expect(createServer).not.toHaveBeenCalled();
-  });
-});
-
-describe("voice gateway destination validation", () => {
-  it("accepts only a fixed credential-free loopback WebSocket URL", () => {
-    expect(validateOpenClawGatewayUrl("ws://127.0.0.1:18789/ws")).toBe("ws://127.0.0.1:18789/ws");
-  });
-
-  it.each([
-    "wss://127.0.0.1:18789/ws",
-    "ws://localhost:18789/ws",
-    "ws://10.0.0.2:18789/ws",
-    "ws://user:secret@127.0.0.1:18789/ws",
-    "ws://127.0.0.1:18789/other",
-    "ws://127.0.0.1:18789/ws?target=other",
-    "ws://127.0.0.1/ws",
-  ])("rejects untrusted or ambiguous destination %s (#8378)", (value) => {
-    expect(() => validateOpenClawGatewayUrl(value)).toThrow("must be");
   });
 });
 
@@ -90,22 +81,19 @@ describe("voice gateway listener lifetime", () => {
     const server = new FakeServer();
     const processEvents = new EventEmitter();
     const log = vi.fn();
-    const readBearerDescriptors = vi.fn(() => ({
-      deploymentCredential: "deployment-secret",
-      openClawCredential: "openclaw-secret",
-    }));
+    const readBearerDescriptor = vi.fn(() => "deployment-secret");
     const createServer = vi.fn(() => server as unknown as Server);
 
     const running = runVoiceGatewayServe(OPTIONS, {
       env: { NEMOCLAW_EXPERIMENTAL_VOICE_GATEWAY: "1" },
-      readBearerDescriptors,
+      readBearerDescriptor,
       createServer,
       processEvents,
       log,
     });
     await vi.waitFor(() => expect(log).toHaveBeenCalledTimes(1));
 
-    expect(readBearerDescriptors).toHaveBeenCalledWith({ deployment: 3, openClaw: 4 });
+    expect(readBearerDescriptor).toHaveBeenCalledWith(3);
     expect(server.listenArgs).toEqual([18800, "127.0.0.1"]);
     expect(createServer).toHaveBeenCalledWith({
       deploymentCredential: "deployment-secret",
@@ -114,8 +102,8 @@ describe("voice gateway listener lifetime", () => {
     expect(log).toHaveBeenCalledWith({
       event: "voice_gateway",
       state: "listening",
-      runtimeIdentity: "voiceclaw-local",
-      runtimeProfile: "voiceclaw-pinned",
+      runtimeIdentity: "voice-runtime-local",
+      runtimeProfile: "voice-runtime-pinned",
       sandbox: "demo-sandbox",
       agent: "main",
     });

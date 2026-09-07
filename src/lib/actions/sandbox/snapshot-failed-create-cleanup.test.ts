@@ -11,6 +11,12 @@ const fixture = vi.hoisted(() => ({
     packageVersion: "1.0.0-test",
     contentDigest: "a".repeat(64),
   },
+  agentDefinition: {
+    name: "openclaw",
+    stateLifecycle: {
+      backup_quiescence: { kind: "not-required" as const },
+    },
+  },
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -25,6 +31,10 @@ vi.mock("../../adapters/openshell/runtime", async (importOriginal) => ({
   captureOpenshell: mocks.captureOpenshell,
   getOpenshellBinary: vi.fn(() => "openshell"),
   runOpenshell: vi.fn(),
+}));
+
+vi.mock("../../agent/runtime", () => ({
+  getSessionAgent: vi.fn(() => fixture.agentDefinition),
 }));
 
 vi.mock("../../runtime-recovery", () => ({

@@ -375,6 +375,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
         credentialEnv: "NVIDIA_INFERENCE_API_KEY",
       },
       buildMessagingRebuildPlan: () => plan,
+      receiptMessagingChannelIds: ["discord"],
       hydrateCredentialEnv: () => "saved-provider-key",
       runOpenshell: providerRuntime(["nvidia-prod"]),
     });
@@ -518,14 +519,14 @@ describe("rebuildSandbox flow: credential preflight", () => {
         provider: "hermes-provider",
         model: MODEL,
         credentialEnv: "OPENAI_API_KEY",
-        hermesAuthMethod: "oauth",
+        providerAuthMethod: "oauth",
       },
       hermesCredentialKeys: ["OPENAI_API_KEY"],
       hermesProviderExists: true,
       hydrateCredentialEnv: () => null,
     });
     configureSession(harness, "hermes-provider", "OPENAI_API_KEY", {
-      hermesAuthMethod: "oauth",
+      providerAuthMethod: "oauth",
     });
 
     await expect(
@@ -582,6 +583,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
 
     try {
       const harness = createRebuildFlowHarness({
+        legacyNoReceiptAgentAuthority: true,
         sandboxEntry: {
           agent: "hermes",
           provider: "hermes-provider",
@@ -623,29 +625,29 @@ describe("rebuildSandbox flow: credential preflight", () => {
     }
   });
 
-  it("rejects missing Hermes OAuth state before backup", async () => {
+  it("rejects a missing receipt-backed Hermes OAuth provider before backup", async () => {
     const harness = createRebuildFlowHarness({
       sandboxEntry: {
         agent: "hermes",
         provider: "hermes-provider",
         model: MODEL,
         credentialEnv: "OPENAI_API_KEY",
-        hermesAuthMethod: "oauth",
+        providerAuthMethod: "oauth",
       },
       hermesProviderExists: false,
       hydrateCredentialEnv: () => null,
     });
     configureSession(harness, "hermes-provider", "OPENAI_API_KEY", {
-      hermesAuthMethod: "oauth",
+      providerAuthMethod: "oauth",
     });
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("Missing Hermes Provider credentials");
+    ).rejects.toThrow("Invalid package provider credentials");
 
     const output = diagnostics(harness);
-    expect(output).toContain("Hermes Provider is not registered in OpenShell");
-    expect(output).toContain("credentials must be stored in OpenShell");
+    expect(output).toContain("receipt-backed provider authentication state is invalid");
+    expect(output).toContain("OAuth credential cannot be recreated non-interactively");
     expect(output).not.toContain("Missing credential: OPENAI_API_KEY");
     expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
   });

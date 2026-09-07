@@ -23,11 +23,45 @@ function expectPinnedOpenClawOptions() {
   });
 }
 
+const FUTURE_PROVIDER_AUTH = {
+  packageId: "future-harness",
+  capability: {
+    support: "managed",
+    adapter: "provider-auth",
+    operation: "resolve-auth-method",
+    request_environment: ["FUTURE_AUTH_METHOD"],
+    default_method: "service-key",
+    selection: {
+      key: "futureProvider",
+      aliases: ["future-provider"],
+      label: "Future Provider",
+      provider_name: "future-provider",
+      provider_type: "openai",
+      endpoint_url: "https://inference.future.example.com/v1",
+      help_url: "https://future.example.com/help",
+      default_model: "future/model",
+      models: ["future/model"],
+      preferred_inference_api: "openai-completions",
+    },
+    methods: [
+      {
+        id: "service-key",
+        label: "Future service key",
+        kind: "api-key",
+        credential_env: "FUTURE_API_KEY",
+        source_env: "FUTURE_API_KEY",
+        prompt_label: "Future service key",
+      },
+    ],
+  },
+} as const;
+
 describe("rebuildSandbox flow: target credentials", () => {
   installRebuildFlowTestHooks();
   it("aborts before backup/delete when durable Brave credential validation fails", async () => {
     const harness = createRebuildFlowHarness({
-      sandboxEntry: { webSearchEnabled: true },
+      sandboxEntry: { webSearchEnabled: true, webSearchProvider: "brave" },
+      receiptWebSearchProviders: ["brave"],
       sessionSandboxName: "some-other-sandbox",
       ensureValidatedBraveSearchCredential: async () => {
         throw new Error("invalid Brave credential");
@@ -44,7 +78,11 @@ describe("rebuildSandbox flow: target credentials", () => {
 
   it("rejects recorded web search when the target agent does not support it", async () => {
     const harness = createRebuildFlowHarness({
-      sandboxEntry: { agent: "hermes", webSearchEnabled: true },
+      sandboxEntry: {
+        agent: "hermes",
+        webSearchEnabled: true,
+        webSearchProvider: "brave",
+      },
     });
 
     await expect(
@@ -72,6 +110,7 @@ describe("rebuildSandbox flow: target credentials", () => {
           },
         },
       },
+      receiptWebSearchProviders: ["tavily"],
     });
 
     await expect(
@@ -90,6 +129,7 @@ describe("rebuildSandbox flow: target credentials", () => {
       const harness = createRebuildFlowHarness({
         applyPreset: () => true,
         sandboxEntry: { webSearchEnabled: true, webSearchProvider: "tavily" },
+        receiptWebSearchProviders: ["tavily"],
         ensureValidatedWebSearchCredential: async () => {
           process.env.TAVILY_API_KEY = "validated-tavily-key";
           return "validated-tavily-key";
@@ -105,19 +145,23 @@ describe("rebuildSandbox flow: target credentials", () => {
     }
   });
 
-  it("recreates unrelated-session targets from durable web, image, and Hermes auth state", async () => {
+  it("recreates unrelated-session targets from durable web, image, and provider state", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-rebuild-from-"));
     const dockerfile = path.join(tempDir, "Dockerfile.custom");
     fs.writeFileSync(dockerfile, "FROM scratch\nARG NEMOCLAW_WEB_SEARCH_ENABLED=0\n");
     const harness = createRebuildFlowHarness({
       applyPreset: () => true,
       sessionSandboxName: "some-other-sandbox",
+      receiptWebSearchProviders: ["brave"],
       sandboxEntry: {
+        agent: "hermes",
         provider: "hermes-provider",
         model: "hermes-model",
         webSearchEnabled: true,
+        webSearchProvider: "brave",
         fromDockerfile: dockerfile,
-        hermesAuthMethod: "api_key",
+        credentialEnv: "NOUS_API_KEY",
+        providerAuthMethod: "api-key",
       },
       hermesCredentialKeys: ["NOUS_API_KEY"],
     });
@@ -138,7 +182,7 @@ describe("rebuildSandbox flow: target credentials", () => {
         fetchEnabled: true,
         provider: "brave",
       });
-      expect(harness.session.hermesAuthMethod).toBe("api_key");
+      expect(harness.session.hermesAuthMethod).toBeNull();
       expect(harness.session.credentialEnv).toBe("NOUS_API_KEY");
       expect(harness.session.metadata).toMatchObject({ fromDockerfile: dockerfile });
       expect(harness.onboardSpy).toHaveBeenCalledWith(
@@ -149,38 +193,77 @@ describe("rebuildSandbox flow: target credentials", () => {
     }
   });
 
-  it("keeps the Hermes OAuth credential binding with durable OAuth auth", async () => {
+  it("keeps a receipt-backed Hermes OAuth credential binding without legacy auth state", async () => {
     const harness = createRebuildFlowHarness({
       applyPreset: () => true,
       sandboxEntry: {
         agent: "hermes",
         provider: "hermes-provider",
         model: "hermes-model",
-        hermesAuthMethod: "oauth",
+        credentialEnv: "OPENAI_API_KEY",
+        providerAuthMethod: "oauth",
       },
+    });
+    harness.session.providerAuthMethod = "oauth";
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+    ).resolves.toBeUndefined();
+
+    expect(harness.session.hermesAuthMethod).toBeNull();
+    expect(harness.session.providerAuthMethod).toBe("oauth");
+    expect(harness.session.credentialEnv).toBe("OPENAI_API_KEY");
+  });
+
+  it("rebuilds a future package through its typed provider-auth receipt", async () => {
+    const providerOutput = [
+      "Name: future-provider",
+      "Type: openai",
+      "Credential keys: FUTURE_API_KEY",
+      "Config keys: OPENAI_BASE_URL",
+    ].join("\n");
+    const harness = createRebuildFlowHarness({
+      agentName: "future-harness",
+      applyPreset: () => true,
+      receiptProviderAuth: FUTURE_PROVIDER_AUTH,
+      sandboxEntry: {
+        agent: "future-harness",
+        provider: "future-provider",
+        model: "future/model",
+        credentialEnv: "FUTURE_API_KEY",
+        providerAuthMethod: "service-key",
+      },
+      runOpenshell: (args) =>
+        args.join(" ") === "provider get future-provider"
+          ? { status: 0, output: providerOutput, stdout: providerOutput, stderr: "" }
+          : undefined,
     });
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
     ).resolves.toBeUndefined();
 
-    expect(harness.session.hermesAuthMethod).toBe("oauth");
-    expect(harness.session.credentialEnv).toBe("OPENAI_API_KEY");
+    expect(harness.session.agent).toBe("future-harness");
+    expect(harness.session.provider).toBe("future-provider");
+    expect(harness.session.providerAuthMethod).toBe("service-key");
+    expect(harness.session.hermesAuthMethod).toBeNull();
   });
 
   it("rejects a shared Hermes Provider whose credential binding changed", async () => {
     const harness = createRebuildFlowHarness({
       sandboxEntry: {
+        agent: "hermes",
         provider: "hermes-provider",
         model: "hermes-model",
-        hermesAuthMethod: "api_key",
+        credentialEnv: "NOUS_API_KEY",
+        providerAuthMethod: "api-key",
       },
       hermesCredentialKeys: ["OPENAI_API_KEY"],
     });
 
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("Missing Hermes Provider credentials");
+    ).rejects.toThrow("Invalid package provider credentials");
     expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
   });
 
@@ -191,15 +274,17 @@ describe("rebuildSandbox flow: target credentials", () => {
     try {
       const harness = createRebuildFlowHarness({
         sandboxEntry: {
+          agent: "hermes",
           provider: "hermes-provider",
           model: "hermes-model",
-          hermesAuthMethod: "api_key",
+          credentialEnv: "NOUS_API_KEY",
+          providerAuthMethod: "api-key",
         },
         hermesProviderExists: false,
       });
       await expect(
         harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-      ).rejects.toThrow("Missing Hermes Provider credentials");
+      ).rejects.toThrow("Invalid package provider credentials");
       expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
     } finally {
       restoreEnv();
@@ -219,6 +304,7 @@ describe("rebuildSandbox flow: target credentials", () => {
 
   it("fails closed when a legacy matching session recovers Hermes without auth state", async () => {
     const harness = createRebuildFlowHarness({
+      legacyNoReceiptAgentAuthority: true,
       sandboxEntry: { provider: null, model: null, hermesAuthMethod: undefined },
     });
     harness.session.provider = "hermes-provider";

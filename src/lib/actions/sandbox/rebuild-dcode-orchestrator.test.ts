@@ -40,6 +40,7 @@ describe("DCode rebuild orchestrator", () => {
       sandboxName: "alpha",
       entry: {} as RebuildSandboxEntry,
       rebuildAgent: "hermes",
+      legacyDcodeRebuild: false,
       log: vi.fn(),
       bail,
       deps: {
@@ -83,6 +84,7 @@ describe("DCode rebuild orchestrator", () => {
       sandboxName: "alpha",
       entry,
       rebuildAgent: DCODE_AGENT_NAME,
+      legacyDcodeRebuild: true,
       log: vi.fn(),
       bail,
       deps: {
@@ -132,6 +134,7 @@ describe("DCode rebuild orchestrator", () => {
       sandboxName: "alpha",
       entry,
       rebuildAgent: DCODE_AGENT_NAME,
+      legacyDcodeRebuild: true,
       managedWorkloadRebuild: true,
       log: vi.fn(),
       bail,
@@ -177,5 +180,39 @@ describe("DCode rebuild orchestrator", () => {
     await expect(
       orchestrator.checkAtDeleteEdge(resumeConfig, "progressive", "thread-opt-in", false, 19_080),
     ).resolves.toEqual({ ok: false, message: "managed authority changed", code: 74 });
+  });
+
+  it("does not activate exact DCode preflight for a receipt-backed DCode package", async () => {
+    const ensureAgentBaseImage = vi.fn(() => true);
+    const orchestrator = createDcodeRebuildOrchestrator({
+      sandboxName: "alpha",
+      entry: {} as RebuildSandboxEntry,
+      rebuildAgent: DCODE_AGENT_NAME,
+      legacyDcodeRebuild: false,
+      managedWorkloadRebuild: true,
+      log: vi.fn(),
+      bail: (message): never => {
+        throw new Error(message);
+      },
+      deps: {
+        checkGatewaySchema: vi.fn(() => true),
+        preflightCredentials: vi.fn(() => true),
+        ensureAgentBaseImage,
+      },
+    });
+
+    await expect(
+      orchestrator.prepareImage(
+        {} as RebuildResumeConfig,
+        null,
+        "progressive",
+        "thread-opt-in",
+        false,
+        19_080,
+      ),
+    ).resolves.toBe(true);
+    expect(ensureAgentBaseImage).toHaveBeenCalledOnce();
+    expect(prepareDcodeReplacementBeforeMutation).not.toHaveBeenCalled();
+    expect(revalidateManagedDcodeWorkloadAtMutationEdge).not.toHaveBeenCalled();
   });
 });

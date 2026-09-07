@@ -10,6 +10,25 @@ import { clearAgentScopedResumeState } from "./agent-resume-state";
 import { checkpointSandboxIdentityMatches } from "./checkpoint-replay";
 
 describe("clearAgentScopedResumeState", () => {
+  it("uses the legacy OpenClaw sentinel only when no package authority exists", () => {
+    const legacy = createSession({ agent: "hermes" });
+    const receiptBacked = createSession({
+      agent: "hermes",
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "openclaw",
+        packageVersion: "1.0.0",
+        contentDigest: "a".repeat(64),
+      },
+    });
+
+    clearAgentScopedResumeState(legacy, "openclaw");
+    clearAgentScopedResumeState(receiptBacked, "openclaw");
+
+    expect(legacy.agent).toBeNull();
+    expect(receiptBacked.agent).toBe("openclaw");
+  });
+
   it("invalidates agent-scoped checkpoint decisions and effect receipts", () => {
     const session = createSession({
       agent: null,

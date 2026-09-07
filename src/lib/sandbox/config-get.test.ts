@@ -185,10 +185,18 @@ describe("configGet output redaction and gateway omission (#config-get)", () => 
 describe("configGet parsing for manifest-declared formats (#6548)", () => {
   const registryPath = require.resolve("../state/registry");
   const agentDefsPath = require.resolve("../agent/defs");
-  const registry = require(registryPath) as { getSandbox: (name: string) => unknown };
-  const agentDefs = require(agentDefsPath) as { loadAgent: (name: string) => unknown };
-  const realGetSandbox = registry.getSandbox;
-  const realLoadAgent = agentDefs.loadAgent;
+  const realRegistryExports = require(registryPath) as Record<string, unknown>;
+  const realAgentDefsExports = require(agentDefsPath) as Record<string, unknown>;
+  const registryModule = require.cache[registryPath];
+  const agentDefsModule = require.cache[agentDefsPath];
+  expect(registryModule).toBeDefined();
+  expect(agentDefsModule).toBeDefined();
+  let selectedAgent = "langchain-deepagents-code";
+  let selectedConfigPaths = {
+    dir: "/sandbox/.deepagents",
+    configFile: "config.toml",
+    format: "toml",
+  };
 
   // A dcode config.toml as generate-config.ts writes it: a `# ...` comment
   // header (the byte that broke JSON.parse in #6548) plus nested tables and an
@@ -218,14 +226,22 @@ describe("configGet parsing for manifest-declared formats (#6548)", () => {
   beforeEach(() => {
     // Make the sandbox resolve to the dcode agent, whose manifest declares
     // `format: toml`, so parseConfig takes the TOML branch.
-    registry.getSandbox = () => ({ agent: "langchain-deepagents-code" });
-    agentDefs.loadAgent = () => ({
-      configPaths: {
-        dir: "/sandbox/.deepagents",
-        configFile: "config.toml",
-        format: "toml",
-      },
-    });
+    selectedAgent = "langchain-deepagents-code";
+    selectedConfigPaths = {
+      dir: "/sandbox/.deepagents",
+      configFile: "config.toml",
+      format: "toml",
+    };
+    // The registry facade deliberately exposes a read-only re-export. Replace
+    // this test's CommonJS cache entry instead of mutating that public API.
+    registryModule!.exports = {
+      ...realRegistryExports,
+      getSandbox: () => ({ agent: selectedAgent }),
+    };
+    agentDefsModule!.exports = {
+      ...realAgentDefsExports,
+      loadAgent: () => ({ configPaths: selectedConfigPaths }),
+    };
     // The sandbox `cat` returns the raw TOML text.
     client.captureOpenshellCommand = () => ({
       status: 0,
@@ -237,8 +253,8 @@ describe("configGet parsing for manifest-declared formats (#6548)", () => {
   });
 
   afterEach(() => {
-    registry.getSandbox = realGetSandbox;
-    agentDefs.loadAgent = realLoadAgent;
+    registryModule!.exports = realRegistryExports;
+    agentDefsModule!.exports = realAgentDefsExports;
     client.captureOpenshellCommand = realCapture;
     delete require.cache[configModulePath];
   });
@@ -315,14 +331,12 @@ describe("configGet parsing for manifest-declared formats (#6548)", () => {
   });
 
   it("does not echo credential-bearing source lines from malformed YAML", () => {
-    registry.getSandbox = () => ({ agent: "hermes" });
-    agentDefs.loadAgent = () => ({
-      configPaths: {
-        dir: "/sandbox/.hermes",
-        configFile: "config.yaml",
-        format: "yaml",
-      },
-    });
+    selectedAgent = "hermes";
+    selectedConfigPaths = {
+      dir: "/sandbox/.hermes",
+      configFile: "config.yaml",
+      format: "yaml",
+    };
     const secret = "nvapi-yamlabcdefghijklmnopqrstuvwxyz0123456789";
     const sourceLine = `api_key: "${secret}" trailing-text`;
     stubSandboxRawRead(sourceLine);

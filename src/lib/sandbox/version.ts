@@ -19,6 +19,7 @@ import { openshellSandboxSshHost } from "../adapters/openshell/sandbox-ssh-host.
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
 import { loadAgent, type AgentDefinition } from "../agent/defs.js";
 import { resolveSandboxGatewayName } from "../onboard/gateway-binding.js";
+import { resolveRecordedSandboxAgentAuthority } from "../onboard/package/package-authority.js";
 import * as registry from "../state/registry.js";
 import { createTempSshConfig } from "./temp-ssh-config.js";
 import { evaluateStaleness } from "./version-scheme.js";
@@ -88,6 +89,9 @@ function resolveAgentForSandbox(
   if (agentDefinition) return agentDefinition;
   const sb = registry.getSandbox(sandboxName);
   const agentName = sb?.agent || "openclaw";
+  if (sb && (sb.harnessPackage != null || sb.harnessPackageMigration != null)) {
+    return resolveRecordedSandboxAgentAuthority(sb).definition;
+  }
   return loadAgent(agentName);
 }
 
@@ -169,11 +173,7 @@ function probePinnedAgentVersion(
  * Returns the parsed version string or null on failure.
  */
 export function probeAgentVersion(sandboxName: string, gatewayName?: string): string | null {
-  return probePinnedAgentVersion(
-    sandboxName,
-    resolveAgentForSandbox(sandboxName),
-    gatewayName,
-  );
+  return probePinnedAgentVersion(sandboxName, resolveAgentForSandbox(sandboxName), gatewayName);
 }
 
 /**

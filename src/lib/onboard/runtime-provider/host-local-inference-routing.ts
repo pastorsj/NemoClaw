@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { RuntimeProviderBundle } from "./contract";
+import {
+  harnessPackageIdentitiesEqual,
+  parseHarnessPackageIdentity,
+  type HarnessPackageIdentity,
+} from "../../agent-runtime/package/identity";
 import type { ManagedLlamaCppLifecycleAdapter } from "../../inference/llama-cpp/managed-lifecycle-adapter";
 import {
   HOST_LOCAL_INFERENCE_SANDBOX_HOST,
@@ -23,13 +28,16 @@ import { assertHermesPortableInferenceStartupRequest } from "./hermes-portable-i
 
 export const HOST_LOCAL_INFERENCE_APPLICATION_BASE_URL = "https://inference.local/v1" as const;
 
+/** Exact application IDs accepted only when no package receipt is available. */
 export const HOST_LOCAL_INFERENCE_APPLICATIONS = [
   "openclaw",
   "hermes",
   "langchain-deepagents-code",
 ] as const;
 
-export type HostLocalInferenceApplication = (typeof HOST_LOCAL_INFERENCE_APPLICATIONS)[number];
+export type HostLocalInferenceApplication =
+  | (typeof HOST_LOCAL_INFERENCE_APPLICATIONS)[number]
+  | HarnessPackageIdentity;
 
 export function hostLocalInferenceOperationEnvironment(
   service: "ollama" | "nim" | "vllm" | "llama-cpp",
@@ -214,18 +222,32 @@ export interface HostLocalInferenceStartupRoute {
   readonly gatewayProvider: "ollama-local" | "vllm-local" | "llama-cpp-local";
   /** Provider registration target visible inside the OpenShell gateway. */
   readonly gatewayProviderBaseUrl: string;
-  /** Stable inference route shared by OpenClaw, Hermes, and Deep Agents Code. */
+  /** Stable inference route shared by every authorized harness package. */
   readonly applicationBaseUrl: typeof HOST_LOCAL_INFERENCE_APPLICATION_BASE_URL;
 }
 
 function requireApplication(application: unknown): HostLocalInferenceApplication {
-  if (
-    typeof application !== "string" ||
-    !HOST_LOCAL_INFERENCE_APPLICATIONS.includes(application as HostLocalInferenceApplication)
-  ) {
-    throw new Error(`Unsupported host-local inference application '${String(application)}'.`);
+  if (typeof application === "string") {
+    const legacyApplication = HOST_LOCAL_INFERENCE_APPLICATIONS.find(
+      (candidate) => candidate === application,
+    );
+    if (legacyApplication) return legacyApplication;
+    throw new Error(`Unsupported host-local inference application '${application}'.`);
   }
-  return application as HostLocalInferenceApplication;
+  try {
+    return parseHarnessPackageIdentity(application);
+  } catch {
+    throw new Error("Host-local inference application package authority is invalid.");
+  }
+}
+
+/** Compare either exact legacy application IDs or complete package receipt identities. */
+export function hostLocalInferenceApplicationsEqual(
+  left: HostLocalInferenceApplication,
+  right: HostLocalInferenceApplication,
+): boolean {
+  if (typeof left === "string" || typeof right === "string") return left === right;
+  return harnessPackageIdentitiesEqual(left, right);
 }
 
 function normalizeStartupReceipt(
@@ -493,8 +515,7 @@ export function prepareHermesPortablePublishedHostLocalInferenceStartup(
   operation: HostLocalInferenceOperation,
   request: HostLocalInferenceStartupRequest,
 ): HostLocalInferenceStartupRoute {
-  const hasResumeReceipt =
-    "resumeReceipt" in request && request.resumeReceipt !== undefined;
+  const hasResumeReceipt = "resumeReceipt" in request && request.resumeReceipt !== undefined;
   const recover = "recover" in request && request.recover === true;
   assertHermesPortableInferenceStartupRequest({
     application: request.application,

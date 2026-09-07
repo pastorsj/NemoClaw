@@ -8,6 +8,14 @@ export const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
 export const DISPLAY_CONTROL_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
 export const SAFE_PATH_SEGMENT_PATTERN = /^[A-Za-z0-9._-]+$/u;
 
+const IMMUTABLE_SANDBOX_COMMAND_ROOTS = [
+  "/bin/",
+  "/opt/",
+  "/usr/bin/",
+  "/usr/local/bin/",
+  "/usr/local/lib/nemoclaw/",
+] as const;
+
 /** A package manifest failed the public, data-only harness contract. */
 export class HarnessManifestValidationError extends Error {
   override readonly name = "HarnessManifestValidationError";
@@ -83,6 +91,37 @@ export function isCanonicalRelativePath(value: string): boolean {
     value.length > 0 &&
     !value.startsWith("/") &&
     value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")
+  );
+}
+
+/** A canonical absolute path owned by the sandbox user-visible filesystem. */
+export function isCanonicalSandboxPath(value: string): boolean {
+  return (
+    value.startsWith("/sandbox/") &&
+    isCanonicalAbsolutePath(value) &&
+    !CONTROL_CHARACTER_PATTERN.test(value) &&
+    !value.includes("\\")
+  );
+}
+
+/** A canonical executable path stored in the sandbox image rather than mutable user state. */
+export function isImmutableSandboxCommandPath(value: string): boolean {
+  return (
+    isCanonicalAbsolutePath(value) &&
+    !CONTROL_CHARACTER_PATTERN.test(value) &&
+    !value.includes("\\") &&
+    IMMUTABLE_SANDBOX_COMMAND_ROOTS.some(
+      (root) => value.startsWith(root) && value.length > root.length,
+    )
+  );
+}
+
+/** A canonical relative file path that cannot escape its declared owner directory. */
+export function isCanonicalRelativeFilePath(value: string): boolean {
+  return (
+    isCanonicalRelativePath(value) &&
+    !CONTROL_CHARACTER_PATTERN.test(value) &&
+    !value.includes("\\")
   );
 }
 

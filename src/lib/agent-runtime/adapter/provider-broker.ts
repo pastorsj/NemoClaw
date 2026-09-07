@@ -21,7 +21,13 @@ const planRequestSchema: AnySchemaObject = Object.freeze({
   required: ["operation", "sandboxName"],
   properties: {
     operation: {
-      enum: ["describe-provider", "register-refresh-provider", "ensure-broker"],
+      enum: [
+        "describe-provider",
+        "register-refresh-provider",
+        "ensure-broker",
+        "inspect-broker",
+        "teardown-broker",
+      ],
     },
     sandboxName: {
       type: "string",
@@ -72,11 +78,17 @@ const manifestSchema: AnySchemaObject = Object.freeze({
         adapter: { const: "provider-broker" },
         operations: {
           type: "array",
-          minItems: 3,
-          maxItems: 3,
+          minItems: 5,
+          maxItems: 5,
           uniqueItems: true,
           items: {
-            enum: ["describe-provider", "register-refresh-provider", "ensure-broker"],
+            enum: [
+              "describe-provider",
+              "register-refresh-provider",
+              "ensure-broker",
+              "inspect-broker",
+              "teardown-broker",
+            ],
           },
         },
         support: { const: "managed" },

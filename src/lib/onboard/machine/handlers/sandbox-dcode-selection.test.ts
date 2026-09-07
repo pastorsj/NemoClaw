@@ -4,8 +4,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createSession, type Session } from "../../../state/onboard-session";
+import type { HarnessPackageIdentity } from "../../../agent-runtime/package/identity";
 import type { SandboxEntry } from "../../../state/registry";
 import { handleSandboxState } from "./sandbox";
+import { resolveSignals } from "./sandbox-dcode-resume";
 import {
   baseOptions,
   bindJournaledRecreate,
@@ -57,9 +59,138 @@ function dcodeOptions(
   };
 }
 
+const PACKAGE_IDENTITY: HarnessPackageIdentity = {
+  kind: "agent-runtime",
+  id: "future-harness",
+  packageVersion: "1.2.3",
+  contentDigest: "a".repeat(64),
+};
+
+function receiptSession(packageId = PACKAGE_IDENTITY.id): Session {
+  const harnessPackage = { ...PACKAGE_IDENTITY, id: packageId };
+  const session = createSession({ sandboxName: "saved", harnessPackage });
+  session.steps.sandbox.status = "complete";
+  return session;
+}
+
 describe("handleSandboxState live DCode selection", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it.each(["future-harness", "langchain-deepagents-code"])(
+    "uses the receipt package qualifier for %s without exact DCode dispatch",
+    (packageId) => {
+      const session = receiptSession(packageId);
+      const identity = session.harnessPackage!;
+      const getDcodeSelectionDrift = vi.fn(() => ({ changed: true, unknown: true }));
+      const getPackageSelectionQualification = vi.fn(() => ({
+        changed: false,
+        unknown: false,
+        providerChanged: false,
+        modelChanged: false,
+        existingProvider: "provider",
+        existingModel: "model",
+      }));
+      const signal = resolveSignals(
+        {
+          resume: true,
+          agent: {
+            name: packageId,
+            runtime: {
+              selection_qualification: {
+                command: ["/usr/local/bin/selection-qualify"],
+                timeout_seconds: 30,
+              },
+            },
+          },
+          fromDockerfile: null,
+          provider: "provider",
+          model: "model",
+          preferredInferenceApi: "openai-completions",
+          endpointUrl: null,
+        },
+        { session, sandboxName: "saved" },
+        "ready",
+        { ...dcodeRegistryEntry("saved"), agent: packageId, harnessPackage: identity },
+        {
+          getDcodeSelectionDrift,
+          getPackageSelectionQualification,
+          revalidateHarnessPackageAuthority: () => ({
+            harnessPackage: identity,
+            harnessPackageMigration: null,
+          }),
+          error: vi.fn(),
+          exitProcess: (code): never => {
+            throw new Error(`exit ${String(code)}`);
+          },
+        },
+      );
+
+      expect(signal).toEqual({ inferenceSelectionChanged: false });
+      expect(getPackageSelectionQualification).toHaveBeenCalledWith(
+        "saved",
+        packageId,
+        expect.objectContaining({ command: ["/usr/local/bin/selection-qualify"] }),
+        "provider",
+        "model",
+        "openai-completions",
+        null,
+        expect.any(Function),
+      );
+      expect(getDcodeSelectionDrift).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails closed when a receipt package qualifier cannot prove the live selection", () => {
+    const session = receiptSession();
+    expect(
+      resolveSignals(
+        {
+          resume: true,
+          agent: {
+            name: "future-harness",
+            runtime: {
+              selection_qualification: {
+                command: ["/usr/local/bin/selection-qualify"],
+                timeout_seconds: 30,
+              },
+            },
+          },
+          fromDockerfile: null,
+          provider: "provider",
+          model: "model",
+          preferredInferenceApi: "openai-completions",
+          endpointUrl: null,
+        },
+        { session, sandboxName: "saved" },
+        "ready",
+        {
+          ...dcodeRegistryEntry("saved"),
+          agent: "future-harness",
+          harnessPackage: session.harnessPackage!,
+        },
+        {
+          getDcodeSelectionDrift: vi.fn(() => ({ changed: false, unknown: false })),
+          getPackageSelectionQualification: () => ({
+            changed: true,
+            unknown: true,
+            providerChanged: false,
+            modelChanged: false,
+            existingProvider: null,
+            existingModel: null,
+          }),
+          revalidateHarnessPackageAuthority: () => ({
+            harnessPackage: session.harnessPackage,
+            harnessPackageMigration: null,
+          }),
+          error: vi.fn(),
+          exitProcess: (code): never => {
+            throw new Error(`exit ${String(code)}`);
+          },
+        },
+      ),
+    ).toEqual({ inferenceSelectionChanged: true });
   });
 
   it("keeps observability in the create intent when the verified-create callback is absent (#10964)", async () => {

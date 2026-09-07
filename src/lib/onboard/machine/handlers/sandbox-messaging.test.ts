@@ -6,8 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentDefinition } from "../../../agent/defs";
 import { MessagingSetupApplier } from "../../../messaging/applier/setup-applier";
 import { MESSAGING_SETUP_APPLIER_ENV_KEY } from "../../../messaging/applier/types";
-import { wechatManifest } from "../../../messaging/channels/built-ins";
+import { discordManifest, wechatManifest } from "../../../messaging/channels/built-ins";
 import type {
+  ChannelManifest,
   MessagingAgentId,
   MessagingChannelId,
   SandboxMessagingCredentialBindingPlan,
@@ -31,6 +32,17 @@ import {
 } from "./sandbox-messaging";
 
 const mixedChannelIds: MessagingChannelId[] = ["telegram", "unsupported"];
+
+const missingPackageIdentity = {
+  kind: "agent-runtime" as const,
+  id: "future-harness",
+  packageVersion: "1.0.0",
+  contentDigest: "f".repeat(64),
+};
+
+function exactDiscordManifest(agent: string): ChannelManifest {
+  return { ...discordManifest, supportedAgents: [agent] };
+}
 
 function channelIdsFrom<T extends { readonly channelId: string }>(entries: readonly T[]): string[] {
   return entries.map(({ channelId }) => channelId);
@@ -584,6 +596,90 @@ describe("reconcileReusedSandboxMessaging", () => {
 });
 
 describe("reconcileSandboxMessaging plan authority", () => {
+  it("retains an unknown receipt-backed package plan through its exact manifests", async () => {
+    const plan = discordPlan(hashCredential("future-discord-token") ?? "", "future-harness");
+    const deps = registryDeps(plan);
+    vi.stubEnv("DISCORD_BOT_TOKEN", "future-discord-token");
+
+    const result = await reconcileSandboxMessaging({
+      resume: false,
+      session: createSession({
+        agent: "future-harness",
+        harnessPackage: missingPackageIdentity,
+      }),
+      sandboxName: "alpha",
+      agent: { name: "future-harness" },
+      messagingManifests: [exactDiscordManifest("future-harness")],
+      deps,
+    });
+
+    expect(result).toEqual({ plan, selectedChannels: ["discord"] });
+    expect(deps.setupMessagingChannels).not.toHaveBeenCalled();
+  });
+
+  it("rejects a same-id receipt plan whose channel is absent from the exact declaration", async () => {
+    const plan = telegramPlan(hashCredential("telegram-token") ?? "");
+    const deps = registryDeps(plan);
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-token");
+
+    await expect(
+      reconcileSandboxMessaging({
+        resume: false,
+        session: createSession({
+          agent: "openclaw",
+          harnessPackage: { ...missingPackageIdentity, id: "openclaw" },
+        }),
+        sandboxName: "alpha",
+        agent: { name: "openclaw" },
+        messagingManifests: [exactDiscordManifest("openclaw")],
+        deps,
+      }),
+    ).rejects.toThrow("Messaging plan channel is missing from package receipt authority");
+    expect(deps.setupMessagingChannels).not.toHaveBeenCalled();
+    expect(deps.writePlanToEnv).not.toHaveBeenCalled();
+    expect(deps.clearPlanEnv).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a receipt-backed messaging package is unavailable", async () => {
+    const deps = registryDeps(
+      discordPlan(hashCredential("future-discord-token") ?? "", "future-harness"),
+    );
+    vi.stubEnv("HOME", `/tmp/nemoclaw-missing-onboard-authority-${process.pid}`);
+
+    await expect(
+      reconcileSandboxMessaging({
+        resume: false,
+        session: createSession({
+          agent: "future-harness",
+          harnessPackage: missingPackageIdentity,
+        }),
+        sandboxName: "alpha",
+        agent: { name: "future-harness" },
+        deps,
+      }),
+    ).rejects.toThrow();
+    expect(deps.getRegistrySandboxMessagingAuthority).not.toHaveBeenCalled();
+    expect(deps.setupMessagingChannels).not.toHaveBeenCalled();
+    expect(deps.writePlanToEnv).not.toHaveBeenCalled();
+    expect(deps.clearPlanEnv).not.toHaveBeenCalled();
+  });
+
+  it("retains built-in channel compatibility for an explicit no-receipt row", async () => {
+    const plan = telegramPlan(hashCredential("legacy-telegram-token") ?? "");
+    const deps = registryDeps(plan);
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "legacy-telegram-token");
+
+    const result = await reconcileSandboxMessaging({
+      resume: false,
+      session: null,
+      sandboxName: "alpha",
+      agent: { name: "openclaw" },
+      deps,
+    });
+
+    expect(result).toEqual({ plan, selectedChannels: ["telegram"] });
+  });
+
   it("validates a changed lifecycle credential before persisting its hash", async () => {
     const previousToken = "previous-telegram-token";
     const plan = {
@@ -1398,105 +1494,5 @@ describe("reconcileSandboxMessaging completed checkpoint credentials", () => {
     );
     expect(deps.setupMessagingChannels).not.toHaveBeenCalled();
     expect(result).toEqual({ plan: persistedPlan, selectedChannels: ["telegram"] });
-  });
-
-  it("reuses a missing Hermes Discord credential with the exact static provider binding", async () => {
-    const persistedPlan = discordPlan(hashCredential("previous-discord-token") ?? "", "hermes");
-    const deps = reconcileDeps([null, persistedPlan]);
-    deps.providerMatchesGatewayCredential.mockReturnValue(true);
-    vi.stubEnv("DISCORD_BOT_TOKEN", "");
-
-    const result = await reconcileSandboxMessaging({
-      resume: true,
-      session: completedCheckpointSession(persistedPlan, ["alpha-discord-bridge"]),
-      sandboxName: "alpha",
-      agent: {},
-      deps,
-    });
-
-    expect(deps.providerMatchesGatewayCredential).toHaveBeenCalledWith(
-      "alpha-discord-bridge",
-      "discord-hermes-static-v1",
-      "DISCORD_BOT_TOKEN",
-    );
-    expect(deps.setupMessagingChannels).not.toHaveBeenCalled();
-    expect(result).toEqual({ plan: persistedPlan, selectedChannels: ["discord"] });
-  });
-
-  it("revalidates a missing Hermes Discord credential without the exact static binding", async () => {
-    const persistedPlan = discordPlan(hashCredential("previous-discord-token") ?? "", "hermes");
-    const deps = reconcileDeps([null, persistedPlan]);
-    deps.providerMatchesGatewayCredential.mockReturnValue(false);
-    deps.setupMessagingChannels.mockResolvedValue(["discord"]);
-    vi.stubEnv("DISCORD_BOT_TOKEN", "");
-
-    await reconcileSandboxMessaging({
-      resume: true,
-      session: completedCheckpointSession(persistedPlan, ["alpha-discord-bridge"]),
-      sandboxName: "alpha",
-      agent: {},
-      deps,
-    });
-
-    expect(deps.providerMatchesGatewayCredential).toHaveBeenCalledWith(
-      "alpha-discord-bridge",
-      "discord-hermes-static-v1",
-      "DISCORD_BOT_TOKEN",
-    );
-    expect(deps.setupMessagingChannels).toHaveBeenCalledWith({}, ["discord"], "alpha", {
-      selectionCompleted: true,
-    });
-  });
-
-  it("does not reconcile when the checkpointed channel selection matches the durable plan (#7022)", async () => {
-    const persistedPlan = telegramPlan(hashCredential("123456:previous-token") ?? "");
-    const deps = reconcileDeps([null]);
-    deps.providerMatchesGatewayCredential.mockReturnValueOnce(true);
-    const session = withMessagingCheckpoint(
-      completedCheckpointSession(persistedPlan, ["alpha-telegram-bridge"]),
-      ["telegram"],
-    );
-
-    const result = await reconcileSandboxMessaging({
-      resume: true,
-      session,
-      sandboxName: "alpha",
-      agent: { name: "openclaw" },
-      deps,
-    });
-
-    expect(deps.setupMessagingChannels).not.toHaveBeenCalled();
-    expect(deps.note).not.toHaveBeenCalledWith(
-      expect.stringContaining("Reconciling messaging selection"),
-    );
-    expect(result).toEqual({ plan: persistedPlan, selectedChannels: ["telegram"] });
-  });
-
-  it("reconciles the messaging selection with the checkpoint when the durable plan disagrees (#7022)", async () => {
-    const persistedPlan = telegramPlan(hashCredential("123456:previous-token") ?? "");
-    const deps = reconcileDeps([null]);
-    deps.setupMessagingChannels.mockImplementationOnce(
-      async (_agent: unknown, existing: string[] | null) => existing ?? [],
-    );
-    const session = withMessagingCheckpoint(completedCheckpointSession(persistedPlan), ["discord"]);
-
-    const result = await reconcileSandboxMessaging({
-      resume: true,
-      session,
-      sandboxName: "alpha",
-      agent: { name: "openclaw" },
-      deps,
-    });
-
-    expect(deps.note).toHaveBeenCalledWith(
-      expect.stringContaining("Reconciling messaging selection"),
-    );
-    expect(deps.setupMessagingChannels).toHaveBeenCalledWith(
-      { name: "openclaw" },
-      ["discord"],
-      "alpha",
-      { selectionCompleted: true },
-    );
-    expect(result.selectedChannels).toEqual(["discord"]);
   });
 });

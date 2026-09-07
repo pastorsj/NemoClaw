@@ -203,7 +203,7 @@ describe("installed MCP capability probe", () => {
     dependencies.recoverAgentGateway.mockReturnValue({
       status: 1,
       stdout: "",
-      stderr: "HERMES_CONFIG_HASH_MISMATCH",
+      stderr: "GATEWAY_CONFIG_HASH_MISMATCH",
     });
 
     expect(() =>
@@ -224,7 +224,7 @@ describe("installed MCP capability probe", () => {
         runtimeSelection,
         dependencies,
       ),
-    ).toThrow("HERMES_CONFIG_HASH_MISMATCH");
+    ).toThrow("GATEWAY_CONFIG_HASH_MISMATCH");
     expect(dependencies.executeShellCommand).toHaveBeenCalledTimes(1);
   });
 });

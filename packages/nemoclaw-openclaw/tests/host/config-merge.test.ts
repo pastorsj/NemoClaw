@@ -5,10 +5,16 @@ import { describe, expect, it } from "vitest";
 
 import { loadPackageHostModule } from "../helpers/host-module";
 
-interface ImagePluginInstall {
+interface ManagedExtension {
   readonly id: string;
-  readonly installPath?: string;
-  readonly loadPaths?: readonly string[];
+  readonly directory?: string | null;
+  readonly configPaths?: readonly string[];
+}
+
+interface CompleteManagedExtension {
+  readonly id: string;
+  readonly directory: string | null;
+  readonly configPaths: readonly string[];
 }
 
 interface RestoreAdapterModule {
@@ -16,8 +22,8 @@ interface RestoreAdapterModule {
     backedUpConfig: unknown,
     currentConfig: unknown,
     options?: {
-      readonly previousImagePluginInstalls?: readonly ImagePluginInstall[];
-      readonly freshImagePluginInstalls?: readonly ImagePluginInstall[];
+      readonly previousManagedExtensions?: readonly ManagedExtension[];
+      readonly freshManagedExtensions?: readonly ManagedExtension[];
     },
     managedChannelNames?: readonly string[],
   ): unknown;
@@ -25,8 +31,8 @@ interface RestoreAdapterModule {
     readonly backupContent: string;
     readonly currentContent: string | null;
     readonly managedChannelNames: readonly string[];
-    readonly previousImagePluginInstalls: readonly ImagePluginInstall[] | null;
-    readonly freshImagePluginInstalls: readonly ImagePluginInstall[] | null;
+    readonly previousManagedExtensions: readonly CompleteManagedExtension[] | null;
+    readonly freshManagedExtensions: readonly CompleteManagedExtension[] | null;
   }):
     | {
         readonly kind: "merged";
@@ -54,8 +60,8 @@ function mergeOpenClawRestoredConfig(
   backedUpConfig: unknown,
   currentConfig: unknown,
   options?: {
-    readonly previousImagePluginInstalls?: readonly ImagePluginInstall[];
-    readonly freshImagePluginInstalls?: readonly ImagePluginInstall[];
+    readonly previousManagedExtensions?: readonly ManagedExtension[];
+    readonly freshManagedExtensions?: readonly ManagedExtension[];
   },
 ): unknown {
   return restoreAdapter.mergeOpenClawRestoredConfig(
@@ -78,8 +84,8 @@ function pluginConfig(
   return { plugins: { entries, installs, load: { paths } } };
 }
 
-function imageInstall(id: string, installPath: string, loadPaths: string[] = []) {
-  return { id, installPath, loadPaths };
+function managedExtension(id: string, directory: string, configPaths: string[] = []) {
+  return { id, directory, configPaths };
 }
 
 describe("mergeOpenClawRestoredConfig", () => {
@@ -91,8 +97,8 @@ describe("mergeOpenClawRestoredConfig", () => {
       }),
       currentContent: JSON.stringify({ channels: { discord: { token: "fresh" } } }),
       managedChannelNames: MANAGED_CHANNEL_NAMES,
-      previousImagePluginInstalls: null,
-      freshImagePluginInstalls: null,
+      previousManagedExtensions: null,
+      freshManagedExtensions: null,
     });
 
     expect(result.kind).toBe("merged");
@@ -104,6 +110,31 @@ describe("mergeOpenClawRestoredConfig", () => {
       expect(JSON.parse(result.content)).toMatchObject({
         channels: { discord: { token: "fresh" } },
         mcpServers: { docs: { command: "npx" } },
+      });
+    }
+  });
+
+  it("maps the generic managed-extension contract into OpenClaw plugin ownership", () => {
+    const result = restoreAdapter.mergeConfigState({
+      backupContent: JSON.stringify(
+        pluginConfig({ weather: { enabled: true }, "user-plugin": { enabled: true } }, {}, [
+          WEATHER_V1_PATH,
+          USER_PLUGIN_PATH,
+        ]),
+      ),
+      currentContent: JSON.stringify(pluginConfig({}, {}, [])),
+      managedChannelNames: MANAGED_CHANNEL_NAMES,
+      previousManagedExtensions: [
+        { id: "weather", directory: "weather", configPaths: [WEATHER_V1_PATH] },
+      ],
+      freshManagedExtensions: [],
+    });
+
+    expect(result.kind).toBe("merged");
+    if (result.kind === "merged") {
+      expect(JSON.parse(result.content).plugins).toEqual({
+        entries: { "user-plugin": { enabled: true } },
+        load: { paths: [USER_PLUGIN_PATH] },
       });
     }
   });
@@ -609,8 +640,10 @@ describe("mergeOpenClawRestoredConfig", () => {
       },
       { channels: {}, plugins: { allow: [], deny: [], entries: {}, load: { paths: [] } } },
       {
-        freshImagePluginInstalls: [],
-        previousImagePluginInstalls: [imageInstall("weather", WEATHER_V1_PATH, [WEATHER_V1_PATH])],
+        freshManagedExtensions: [],
+        previousManagedExtensions: [
+          managedExtension("weather", WEATHER_V1_PATH, [WEATHER_V1_PATH]),
+        ],
       },
     );
 
@@ -641,8 +674,12 @@ describe("mergeOpenClawRestoredConfig", () => {
         [WEATHER_V2_PATH],
       ),
       {
-        freshImagePluginInstalls: [imageInstall("weather-v2", WEATHER_V2_PATH, [WEATHER_V2_PATH])],
-        previousImagePluginInstalls: [imageInstall("weather", WEATHER_V1_PATH, [WEATHER_V1_PATH])],
+        freshManagedExtensions: [
+          managedExtension("weather-v2", WEATHER_V2_PATH, [WEATHER_V2_PATH]),
+        ],
+        previousManagedExtensions: [
+          managedExtension("weather", WEATHER_V1_PATH, [WEATHER_V1_PATH]),
+        ],
       },
     ) as { plugins: Record<string, unknown> };
 
@@ -667,8 +704,10 @@ describe("mergeOpenClawRestoredConfig", () => {
       ),
       pluginConfig({}, {}, []),
       {
-        freshImagePluginInstalls: [],
-        previousImagePluginInstalls: [imageInstall("weather", WEATHER_V1_PATH, [WEATHER_V1_PATH])],
+        freshManagedExtensions: [],
+        previousManagedExtensions: [
+          managedExtension("weather", WEATHER_V1_PATH, [WEATHER_V1_PATH]),
+        ],
       },
     ) as { plugins: Record<string, unknown> };
 
@@ -685,8 +724,8 @@ describe("mergeOpenClawRestoredConfig", () => {
       ]),
       pluginConfig({}, {}, []),
       {
-        freshImagePluginInstalls: [],
-        previousImagePluginInstalls: [imageInstall("weather", WEATHER_V1_PATH)],
+        freshManagedExtensions: [],
+        previousManagedExtensions: [managedExtension("weather", WEATHER_V1_PATH)],
       },
     ) as { plugins: Record<string, unknown> };
 
@@ -706,8 +745,8 @@ describe("mergeOpenClawRestoredConfig", () => {
       },
       { channels: {}, plugins: { entries: { weather: { enabled: true } } } },
       {
-        freshImagePluginInstalls: [imageInstall("weather", WEATHER_V2_PATH)],
-        previousImagePluginInstalls: [imageInstall("weather", WEATHER_V1_PATH)],
+        freshManagedExtensions: [managedExtension("weather", WEATHER_V2_PATH)],
+        previousManagedExtensions: [managedExtension("weather", WEATHER_V1_PATH)],
       },
     ) as { channels: Record<string, unknown>; plugins: Record<string, unknown> };
 
@@ -725,8 +764,8 @@ describe("mergeOpenClawRestoredConfig", () => {
       { plugins: { allow: ["weather", "user-plugin"], entries: {} } },
       { plugins: { allow: ["weather"], entries: { weather: { enabled: true } } } },
       {
-        freshImagePluginInstalls: [imageInstall("weather", WEATHER_V2_PATH)],
-        previousImagePluginInstalls: [imageInstall("weather", WEATHER_V1_PATH)],
+        freshManagedExtensions: [managedExtension("weather", WEATHER_V2_PATH)],
+        previousManagedExtensions: [managedExtension("weather", WEATHER_V1_PATH)],
       },
     ) as { plugins: Record<string, unknown> };
 
@@ -738,8 +777,8 @@ describe("mergeOpenClawRestoredConfig", () => {
       { plugins: { deny: ["weather", "user-denied"], entries: {} } },
       { plugins: { allow: ["weather"], entries: { weather: { enabled: true } } } },
       {
-        freshImagePluginInstalls: [imageInstall("weather", WEATHER_V2_PATH)],
-        previousImagePluginInstalls: [imageInstall("weather", WEATHER_V1_PATH)],
+        freshManagedExtensions: [managedExtension("weather", WEATHER_V2_PATH)],
+        previousManagedExtensions: [managedExtension("weather", WEATHER_V1_PATH)],
       },
     ) as { plugins: Record<string, unknown> };
 
@@ -752,8 +791,8 @@ describe("mergeOpenClawRestoredConfig", () => {
       { plugins: { allow: ["weather", "user-plugin"], entries: {} } },
       { plugins: { deny: ["weather"], entries: { weather: { enabled: true } } } },
       {
-        freshImagePluginInstalls: [imageInstall("weather", WEATHER_V2_PATH)],
-        previousImagePluginInstalls: [imageInstall("weather", WEATHER_V1_PATH)],
+        freshManagedExtensions: [managedExtension("weather", WEATHER_V2_PATH)],
+        previousManagedExtensions: [managedExtension("weather", WEATHER_V1_PATH)],
       },
     ) as { plugins: Record<string, unknown> };
 
@@ -766,8 +805,8 @@ describe("mergeOpenClawRestoredConfig", () => {
       { plugins: { deny: ["weather", "user-denied"], entries: {} } },
       { plugins: { deny: [], entries: { weather: { enabled: true } } } },
       {
-        freshImagePluginInstalls: [imageInstall("weather", WEATHER_V2_PATH)],
-        previousImagePluginInstalls: [imageInstall("weather", WEATHER_V1_PATH)],
+        freshManagedExtensions: [managedExtension("weather", WEATHER_V2_PATH)],
+        previousManagedExtensions: [managedExtension("weather", WEATHER_V1_PATH)],
       },
     ) as { plugins: Record<string, unknown> };
 
@@ -785,8 +824,8 @@ describe("mergeOpenClawRestoredConfig", () => {
         plugins: { entries: { weather: { enabled: true } } },
       },
       {
-        freshImagePluginInstalls: [imageInstall("weather", WEATHER_V2_PATH)],
-        previousImagePluginInstalls: [imageInstall("weather", WEATHER_V1_PATH)],
+        freshManagedExtensions: [managedExtension("weather", WEATHER_V2_PATH)],
+        previousManagedExtensions: [managedExtension("weather", WEATHER_V1_PATH)],
       },
     ) as { channels: Record<string, unknown> };
 
@@ -811,23 +850,23 @@ describe("mergeOpenClawRestoredConfig", () => {
   it("fails closed when reconciliation receives incomplete or one-sided provenance", () => {
     expect(() =>
       mergeOpenClawRestoredConfig(pluginConfig({}, {}, []), pluginConfig({}, {}, []), {
-        previousImagePluginInstalls: [
-          { id: "weather", installPath: WEATHER_V1_PATH, loadPaths: undefined },
+        previousManagedExtensions: [
+          { id: "weather", directory: WEATHER_V1_PATH, configPaths: undefined },
         ],
       }),
-    ).toThrow("Complete previous and fresh OpenClaw image plugin provenance is required");
+    ).toThrow("Complete previous and fresh OpenClaw managed extensions are required");
     expect(() =>
       mergeOpenClawRestoredConfig(pluginConfig({}, {}, []), pluginConfig({}, {}, []), {
-        freshImagePluginInstalls: [],
+        freshManagedExtensions: [],
       }),
-    ).toThrow("Complete previous and fresh OpenClaw image plugin provenance is required");
+    ).toThrow("Complete previous and fresh OpenClaw managed extensions are required");
     expect(() =>
       mergeOpenClawRestoredConfig(pluginConfig({}, {}, []), pluginConfig({}, {}, []), {
-        freshImagePluginInstalls: [],
-        previousImagePluginInstalls: [
-          { id: "weather", installPath: WEATHER_V1_PATH, loadPaths: undefined },
+        freshManagedExtensions: [],
+        previousManagedExtensions: [
+          { id: "weather", directory: WEATHER_V1_PATH, configPaths: undefined },
         ],
       }),
-    ).toThrow("missing explicit load paths");
+    ).toThrow("missing explicit configuration paths");
   });
 });

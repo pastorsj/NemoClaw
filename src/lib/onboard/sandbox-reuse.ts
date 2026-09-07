@@ -8,6 +8,10 @@ import {
   getHermesDashboardRegistryFields,
   type HermesDashboardOnboardState,
 } from "./hermes-dashboard";
+import {
+  getPackageDashboardRegistryFields,
+  type DashboardUiOnboardState,
+} from "./dashboard/package-dashboard";
 import type { SandboxGpuConfig } from "./sandbox-gpu-mode";
 import {
   isExplicitMissingSandboxGatewayOutput,
@@ -79,9 +83,9 @@ function isCleanFailedProbe(probe: SandboxCaptureResult): boolean {
 }
 
 export interface ReusedSandboxDashboardForwarding {
-  resolveStateForPort(effectivePort: number): HermesDashboardOnboardState;
+  resolveStateForPort(effectivePort: number): DashboardUiOnboardState;
   ensureForState(
-    state: HermesDashboardOnboardState,
+    state: DashboardUiOnboardState,
     sandboxName: string,
     rollback?: boolean,
     revalidateSandboxIdentity?: (operation: string) => void,
@@ -141,9 +145,7 @@ export function applyReusedSandboxDashboardState(
       `Sandbox '${input.sandboxName}' was created without remote dashboard exposure. Re-run onboarding with NEMOCLAW_DASHBOARD_BIND=0.0.0.0 and --recreate-sandbox before opening a remote bind.`,
     );
   }
-  input.revalidateSandboxIdentity?.(
-    `restore dashboard state for sandbox '${input.sandboxName}'`,
-  );
+  input.revalidateSandboxIdentity?.(`restore dashboard state for sandbox '${input.sandboxName}'`);
   const dashboardPort = manageDashboard
     ? input.revalidateSandboxIdentity
       ? input.ensureDashboardForward(input.sandboxName, input.chatUiUrl, {
@@ -185,7 +187,9 @@ export function applyReusedSandboxDashboardState(
     `record reused dashboard state for sandbox '${input.sandboxName}'`,
   );
   (input.updateSandbox ?? registry.updateSandbox)(input.sandboxName, {
-    ...getHermesDashboardRegistryFields(hermesDashboardState),
+    ...(hermesDashboardState.packageOwned === true
+      ? getPackageDashboardRegistryFields(hermesDashboardState)
+      : getHermesDashboardRegistryFields(hermesDashboardState)),
     gatewayName: input.gatewayName,
     gatewayPort: input.gatewayPort,
   });

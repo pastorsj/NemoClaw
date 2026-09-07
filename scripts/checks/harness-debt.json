@@ -21,6 +21,8 @@
     ["src/lib/actions/sandbox/snapshot/legacy-providers.ts","applicationBindings","equality","hermes",2],
     ["src/lib/actions/sandbox/snapshot/legacy-providers.ts","applicationBindings","equality","openclaw",1],
     ["src/lib/actions/sandbox/snapshot/legacy-providers.ts","destinationOwnedBindings","equality","hermes",1],
+    ["src/lib/actions/sandbox/supervisor-relaunch.ts","<module>","membership","hermes",1],
+    ["src/lib/actions/sandbox/supervisor-relaunch.ts","<module>","membership","openclaw",1],
     ["src/lib/actions/uninstall/hermes-portable-uninstall.ts","requireSandboxRow","equality","hermes",1],
     ["src/lib/actions/uninstall/hermes-portable-uninstall.ts","schema5SandboxNames","equality","hermes",1],
     ["src/lib/actions/uninstall/portable-runtime-cleanup.ts","requireReceiptRegistryOwnership","equality","openclaw",1],

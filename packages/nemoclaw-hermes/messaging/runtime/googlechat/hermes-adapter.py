@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Google Chat connect-time shim for Hermes inside a NemoClaw sandbox.
 
-Channel-owned runtime asset (`src/lib/messaging/AGENTS.md`), beside OpenClaw's
-`googlechat-*.ts` preloads. The sandbox forces two deltas on the bundled
-adapter, and everything else runs unchanged through a subclass:
+The Hermes package owns the canonical source for this runtime asset. The sandbox
+forces two deltas on the bundled adapter, and everything else runs unchanged
+through a subclass:
 
 * Inbound — the OpenShell L7 protocol set has no gRPC, so StreamingPull cannot
   be inspected; pull the same subscription over the Pub/Sub REST API.

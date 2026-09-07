@@ -2,6 +2,28 @@
   {
     "channelId": "telegram",
     "config": {
+      "visibility": [
+        {
+          "inputId": "allowedIds",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "telegram", "accounts", "default", "allowFrom"]
+        },
+        {
+          "inputId": "groupPolicy",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "telegram", "accounts", "default", "groupPolicy"]
+        },
+        {
+          "key": "groupRequireMention",
+          "inputId": "requireMention",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "telegram", "groups"],
+          "whenInput": { "inputId": "groupPolicy", "equals": "open", "defaultValue": "open" }
+        }
+      ],
       "renders": [
         {
           "id": "telegram-openclaw-channel",
@@ -60,17 +82,76 @@
         "telegram-token-paste",
         "telegram-allowlist-aliases",
         "telegram-config-prompt",
-        "telegram-openclaw-config-prompt",
         "telegram-get-me-reachability",
         "telegram-openclaw-bridge-health",
         "telegram-gateway-conflict-status",
         "telegram-status-health"
+      ],
+      "hookOperations": [
+        {
+          "hookId": "telegram-config-prompt",
+          "kind": "config-prompt",
+          "outputIds": ["requireMention", "allowedIds", "groupPolicy"]
+        },
+        {
+          "hookId": "telegram-openclaw-bridge-health",
+          "kind": "sandbox-command",
+          "command": {
+            "argv": [
+              "node",
+              "--experimental-strip-types",
+              "--no-warnings",
+              "/usr/local/lib/nemoclaw/messaging-probe.mts",
+              "bridge-health",
+              "telegram"
+            ]
+          },
+          "output": "bridge-health"
+        },
+        {
+          "hookId": "telegram-status-health",
+          "kind": "sandbox-command",
+          "command": {
+            "argv": [
+              "node",
+              "--experimental-strip-types",
+              "--no-warnings",
+              "/usr/local/lib/nemoclaw/messaging-probe.mts",
+              "telegram-status"
+            ]
+          },
+          "output": "channel-health",
+          "context": "channel-health"
+        }
       ]
     }
   },
   {
     "channelId": "discord",
     "config": {
+      "visibility": [
+        {
+          "key": "guildIds",
+          "inputId": "serverId",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "discord", "guilds"]
+        },
+        {
+          "key": "guildRequireMention",
+          "inputId": "requireMention",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "discord", "guilds"]
+        },
+        {
+          "key": "guildUsers",
+          "inputId": "userId",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "discord", "guilds"]
+        }
+      ],
       "renders": [
         {
           "id": "discord-openclaw-channel",
@@ -127,7 +208,7 @@
         {
           "id": "openclawPluginPackage",
           "manager": "node-package",
-          "spec": "npm:@openclaw/discord@{{openclaw.version}}",
+          "spec": "npm:@openclaw/discord@{{package.version}}",
           "pin": true,
           "integrityByVersion": {
             "2026.7.1": "sha512-tZfdC1YA8oVLvc2BK1w0F6rUljS5ugCOp2uWe0vPsbG1fbzVVIO4V32RoqZznGHe5u2R9u4n1aV5Z/qa1m2oFg=="
@@ -138,12 +219,52 @@
           "required": true
         }
       ],
-      "hookIds": ["discord-openclaw-bridge-health", "discord-token-paste", "discord-config-prompt"]
+      "hookIds": ["discord-openclaw-bridge-health", "discord-token-paste", "discord-config-prompt"],
+      "hookOperations": [
+        {
+          "hookId": "discord-openclaw-bridge-health",
+          "kind": "sandbox-command",
+          "command": {
+            "argv": [
+              "node",
+              "--experimental-strip-types",
+              "--no-warnings",
+              "/usr/local/lib/nemoclaw/messaging-probe.mts",
+              "bridge-health",
+              "discord"
+            ]
+          },
+          "output": "bridge-health"
+        }
+      ]
     }
   },
   {
     "channelId": "wechat",
     "config": {
+      "visibility": [
+        {
+          "key": "accountIds",
+          "inputId": "accountId",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "openclaw-weixin", "accounts"]
+        },
+        {
+          "inputId": "baseUrl",
+          "target": "~/.openclaw/openclaw-weixin/accounts/{{input}}.json",
+          "targetInputId": "accountId",
+          "kind": "structured",
+          "path": ["baseUrl"]
+        },
+        {
+          "inputId": "userId",
+          "target": "~/.openclaw/openclaw-weixin/accounts/{{input}}.json",
+          "targetInputId": "accountId",
+          "kind": "structured",
+          "path": ["userId"]
+        }
+      ],
       "renders": [
         {
           "id": "wechat-openclaw-plugin",
@@ -208,12 +329,83 @@
         "wechat-config-prompt",
         "wechat-seed-openclaw-account",
         "wechat-health-check"
+      ],
+      "hookOperations": [
+        {
+          "hookId": "wechat-seed-openclaw-account",
+          "kind": "build-files",
+          "inputIds": [
+            "wechatConfig.accountId",
+            "wechatConfig.baseUrl",
+            "wechatConfig.userId",
+            "credential.wechatBotToken.placeholder"
+          ],
+          "outputs": [
+            {
+              "id": "openclawWeixinAccountsIndex",
+              "pathTemplate": "openclaw-weixin/accounts.json",
+              "mode": "0600",
+              "content": [{ "$input": "wechatConfig.accountId" }]
+            },
+            {
+              "id": "openclawWeixinAccountFile",
+              "pathTemplate": "openclaw-weixin/accounts/{{input:wechatConfig.accountId}}.json",
+              "mode": "0600",
+              "content": {
+                "token": { "$input": "credential.wechatBotToken.placeholder" },
+                "savedAt": { "$generated": "iso-timestamp" },
+                "baseUrl": { "$input": "wechatConfig.baseUrl", "optional": true },
+                "userId": { "$input": "wechatConfig.userId", "optional": true }
+              }
+            },
+            {
+              "id": "openclawConfigPatch",
+              "pathTemplate": "openclaw.json",
+              "merge": {
+                "plugins": {
+                  "installs": {
+                    "openclaw-weixin": {
+                      "source": "npm",
+                      "spec": "@tencent-weixin/openclaw-weixin@2.4.3",
+                      "installPath": "/sandbox/.openclaw/extensions/openclaw-weixin"
+                    }
+                  },
+                  "entries": { "openclaw-weixin": { "enabled": true } }
+                },
+                "channels": {
+                  "openclaw-weixin": {
+                    "enabled": true,
+                    "channelConfigUpdatedAt": { "$generated": "iso-timestamp" },
+                    "accounts": {
+                      "{{input:wechatConfig.accountId}}": { "enabled": true }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
       ]
     }
   },
   {
     "channelId": "slack",
     "config": {
+      "visibility": [
+        {
+          "inputId": "allowedUsers",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "slack", "accounts", "default", "allowFrom"]
+        },
+        {
+          "key": "allowedChannelIds",
+          "inputId": "allowedChannels",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "slack", "accounts", "default", "channels"]
+        }
+      ],
       "renders": [
         {
           "id": "slack-openclaw-channel",
@@ -270,7 +462,7 @@
         {
           "id": "openclawPluginPackage",
           "manager": "node-package",
-          "spec": "npm:@openclaw/slack@{{openclaw.version}}",
+          "spec": "npm:@openclaw/slack@{{package.version}}",
           "pin": true,
           "integrityByVersion": {
             "2026.7.1": "sha512-dwVGEVCmoTQrOIeZaSCIOPg8pT7hB883QQEXdp9EZUDzTGuvSc+KxH2iERSOV/59hROQctYdcobGn/vdB1H4XA=="
@@ -289,12 +481,45 @@
         "slack-token-paste",
         "slack-config-prompt",
         "slack-credential-validation"
+      ],
+      "hookOperations": [
+        {
+          "hookId": "slack-openclaw-bridge-health",
+          "kind": "sandbox-command",
+          "command": {
+            "argv": [
+              "node",
+              "--experimental-strip-types",
+              "--no-warnings",
+              "/usr/local/lib/nemoclaw/messaging-probe.mts",
+              "bridge-health",
+              "slack"
+            ]
+          },
+          "output": "bridge-health"
+        },
+        {
+          "hookId": "slack-status-health",
+          "kind": "sandbox-command",
+          "command": {
+            "argv": [
+              "node",
+              "--experimental-strip-types",
+              "--no-warnings",
+              "/usr/local/lib/nemoclaw/messaging-probe.mts",
+              "slack-status"
+            ]
+          },
+          "output": "channel-health",
+          "context": "channel-health"
+        }
       ]
     }
   },
   {
     "channelId": "whatsapp",
     "config": {
+      "visibility": [],
       "renders": [
         {
           "id": "whatsapp-openclaw-channel",
@@ -333,7 +558,7 @@
         {
           "id": "openclawPluginPackage",
           "manager": "node-package",
-          "spec": "npm:@openclaw/whatsapp@{{openclaw.version}}",
+          "spec": "npm:@openclaw/whatsapp@{{package.version}}",
           "pin": true,
           "integrityByVersion": {
             "2026.7.1": "sha512-wLY/Omc5fleRpl2lKGN8sxt/8hYfHGwLRezmWsk8oCbea5pRKUPE6ZX+wJO1O52NOJkAGCuiXvS7x0qIeKxXbQ=="
@@ -344,12 +569,54 @@
           "required": true
         }
       ],
+      "statusProbe": {
+        "kind": "channel-status-json",
+        "command": {
+          "argv": ["openclaw", "channels", "status", "--channel", "whatsapp", "--json"]
+        },
+        "timeoutOption": "--timeout",
+        "pairingCommand": {
+          "argv": ["openclaw", "channels", "login", "--channel", "whatsapp"]
+        }
+      },
       "hookIds": ["whatsapp-status-health"]
     }
   },
   {
     "channelId": "teams",
     "config": {
+      "visibility": [
+        {
+          "inputId": "appId",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "msteams", "appId"]
+        },
+        {
+          "inputId": "tenantId",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "msteams", "tenantId"]
+        },
+        {
+          "inputId": "allowedUsers",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "msteams", "allowFrom"]
+        },
+        {
+          "inputId": "webhookPort",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "msteams", "webhook", "port"]
+        },
+        {
+          "inputId": "requireMention",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "msteams", "requireMention"]
+        }
+      ],
       "renders": [
         {
           "id": "teams-openclaw-channel",
@@ -397,7 +664,7 @@
         {
           "id": "openclawPluginPackage",
           "manager": "node-package",
-          "spec": "npm:@openclaw/msteams@{{openclaw.version}}",
+          "spec": "npm:@openclaw/msteams@{{package.version}}",
           "pin": true,
           "integrityByVersion": {
             "2026.7.1": "sha512-gG/Yk6HZAguHwrmKjsqdONbFz5WNy126PEAXQWNW/TulO1kIifQ6tktM16BQPNLnkmWqLbj+TrrO55Cjas1aFg=="
@@ -418,7 +685,44 @@
   },
   {
     "channelId": "googlechat",
+    "credentialProvider": {
+      "profilePath": "provider-profiles/googlechat.yaml",
+      "profileId": "google-chat-bridge",
+      "credentialEnv": "GOOGLE_CHAT_ACCESS_TOKEN",
+      "sourceInputId": "serviceAccount",
+      "refresh": {
+        "strategy": "google-service-account-jwt",
+        "scopes": ["https://www.googleapis.com/auth/chat.bot"],
+        "secretMaterialKeys": ["private_key"]
+      }
+    },
     "config": {
+      "visibility": [
+        {
+          "inputId": "audienceType",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "googlechat", "audienceType"]
+        },
+        {
+          "inputId": "audience",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "googlechat", "audience"]
+        },
+        {
+          "inputId": "appPrincipal",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "googlechat", "appPrincipal"]
+        },
+        {
+          "inputId": "allowFrom",
+          "target": "openclaw.json",
+          "kind": "structured",
+          "path": ["channels", "googlechat", "dm", "allowFrom"]
+        }
+      ],
       "renders": [
         {
           "id": "googlechat-openclaw-channel",
@@ -489,7 +793,7 @@
         {
           "id": "openclawPluginPackage",
           "manager": "node-package",
-          "spec": "npm:@openclaw/googlechat@{{openclaw.version}}",
+          "spec": "npm:@openclaw/googlechat@{{package.version}}",
           "pin": true,
           "integrityByVersion": {
             "2026.7.1": "sha512-Dv0xOmcxAThEr6hoK+ioofHNu18hfbIceQrEHX3AHZPpOUiTJvToVpA5eX87NQINewwfSJf0gVhE6kSbSk2Aew=="
@@ -503,8 +807,14 @@
       "hookIds": [
         "googlechat-tunnel-audience-gate",
         "googlechat-service-account",
-        "googlechat-config-prompt",
-        "googlechat-openclaw-config-prompt"
+        "googlechat-config-prompt"
+      ],
+      "hookOperations": [
+        {
+          "hookId": "googlechat-config-prompt",
+          "kind": "config-prompt",
+          "outputIds": ["allowFrom", "appPrincipal"]
+        }
       ]
     }
   }

@@ -4,7 +4,6 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { DASHBOARD_PORT } from "../core/ports";
 import { type AgentDashboardUi, readDashboardUi } from "./dashboard-ui";
 import type {
   AgentConfigPaths,
@@ -17,6 +16,10 @@ import type {
   AgentStateDirectory,
   AgentStateFile,
   AgentVersionScheme,
+  HarnessProviderAuthCapability,
+  HarnessStateLifecycleDeclaration,
+  HarnessToolGatewayCapability,
+  HarnessAgentRosterCapability,
   ManifestRecord,
 } from "./manifest-types";
 import {
@@ -36,6 +39,7 @@ import {
 } from "./manifest-readers";
 import { readAgentRuntime } from "./runtime/manifest";
 import { readManagedImageDeclaration } from "./managed-image";
+import { readPolicyCapability } from "./policy";
 import { readSandboxCreateDeclaration } from "./sandbox-create";
 import { readSkillCapability } from "./skill-capability";
 import { readStateLifecycle } from "./state/lifecycle";
@@ -51,11 +55,39 @@ export interface BuildAgentDefinitionInput {
   readonly manifest: ManifestRecord;
   readonly manifestPath: string;
   readonly packageRoot: string;
+  /** Package manifests are strict by default; only repository-owned legacy manifests may omit newer declarations. */
+  readonly manifestSource?: "harness-package" | "legacy-repository";
 }
 
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\)/u;
 const AGENT_SELECTOR_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const AGENT_ALIAS_LIMIT = 64;
+
+const LEGACY_REPOSITORY_STATE_LIFECYCLE: HarnessStateLifecycleDeclaration = Object.freeze({
+  backup_quiescence: Object.freeze({ kind: "not-required" }),
+  snapshot_restore: Object.freeze([]),
+  rebuild: Object.freeze({
+    managed_extensions: Object.freeze({
+      support: "disabled",
+      reason: "The legacy repository manifest does not declare managed extensions.",
+    }),
+    scheduled_work: Object.freeze({
+      support: "disabled",
+      reason: "The legacy repository manifest does not declare scheduled work.",
+    }),
+    post_restore: Object.freeze({ kind: "not-required" }),
+  }),
+});
+
+function readDefinitionStateLifecycle(
+  manifest: ManifestRecord,
+  source: BuildAgentDefinitionInput["manifestSource"],
+): HarnessStateLifecycleDeclaration {
+  if (source === "legacy-repository" && manifest.state_lifecycle === undefined) {
+    return LEGACY_REPOSITORY_STATE_LIFECYCLE;
+  }
+  return readStateLifecycle(manifest);
+}
 
 function readAgentAliases(raw: ManifestRecord, agentName: string): readonly string[] {
   const value = raw.aliases;
@@ -80,6 +112,29 @@ function readAgentAliases(raw: ManifestRecord, agentName: string): readonly stri
     throw new Error("Agent manifest field 'aliases' must not contain duplicates");
   }
   return Object.freeze(aliases);
+}
+
+function freezeToolGatewayCapability(
+  capability: HarnessToolGatewayCapability | null,
+): HarnessToolGatewayCapability | null {
+  if (!capability) return null;
+  if (capability.support === "disabled") {
+    return Object.freeze({ ...capability });
+  }
+  return Object.freeze({
+    ...capability,
+    request_environment: Object.freeze([...capability.request_environment]),
+    gateways: Object.freeze(
+      capability.gateways.map((gateway) =>
+        Object.freeze({
+          ...gateway,
+          aliases: Object.freeze([...gateway.aliases]),
+          authentication_methods: Object.freeze([...gateway.authentication_methods]),
+          policy_presets: Object.freeze([...gateway.policy_presets]),
+        }),
+      ),
+    ),
+  });
 }
 
 function readOnboardingDefaults(raw: ManifestRecord): {
@@ -253,10 +308,18 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
   const config = readObject(raw, "config");
   const inference = readInference(raw);
   const mcp = readMcpCapability(raw);
+  const agentRosterCapability = (readObject(raw, "agent_roster") ??
+    null) as HarnessAgentRosterCapability | null;
   const webSearch = readWebSearchCapability(raw);
   const skills = readSkillCapability(raw);
-  const stateLifecycle = readStateLifecycle(raw);
+  const stateLifecycle = readDefinitionStateLifecycle(raw, input.manifestSource);
   const managedImage = readManagedImageDeclaration(raw);
+  const policyCapability = readPolicyCapability(raw);
+  const providerAuthCapability = (readObject(raw, "provider_auth") ??
+    null) as HarnessProviderAuthCapability | null;
+  const toolGatewayCapability = freezeToolGatewayCapability(
+    (readObject(raw, "tool_gateways") ?? null) as HarnessToolGatewayCapability | null,
+  );
   if (raw.runtime_auth_state_dirs !== undefined) {
     throw new Error(
       "Agent manifest field 'runtime_auth_state_dirs' was replaced by state_dirs entries with backup: false",
@@ -327,10 +390,14 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
     config,
     inference,
     mcp,
+    agent_roster: agentRosterCapability ?? undefined,
     web_search: webSearch,
     skills,
     state_lifecycle: stateLifecycle,
     managed_image: managedImage ?? undefined,
+    policy: policyCapability,
+    provider_auth: providerAuthCapability ?? undefined,
+    tool_gateways: toolGatewayCapability ?? undefined,
     state_files: stateFiles,
     user_managed_files: userManagedFiles,
     _legacy_paths: legacyPathConfig,
@@ -359,19 +426,11 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
     },
 
     get healthProbe(): AgentHealthProbe | null {
-      if (runtime.kind === "terminal" && !healthProbe) return null;
-      return (
-        healthProbe ?? {
-          url: `http://localhost:${String(DASHBOARD_PORT)}/`,
-          port: DASHBOARD_PORT,
-          timeout_seconds: 30,
-        }
-      );
+      return healthProbe ?? null;
     },
 
     get forwardPort(): number {
-      if (runtime.kind === "terminal" && !forwardPorts?.[0]) return 0;
-      return forwardPorts?.[0] ?? DASHBOARD_PORT;
+      return forwardPorts?.[0] ?? 0;
     },
 
     get dashboard(): AgentDashboard {
@@ -401,6 +460,10 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
 
     get mcpCapability(): AgentMcpCapability {
       return mcp;
+    },
+
+    get agentRosterCapability(): HarnessAgentRosterCapability | null {
+      return agentRosterCapability;
     },
 
     get skillCapability(): HarnessSkillCapability {
@@ -494,6 +557,18 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
       return legacyPolicy
         ? readOptionalOrdinaryAsset(packageRoot, legacyPolicy, "Agent legacy baseline policy")
         : null;
+    },
+
+    get policyCapability() {
+      return policyCapability;
+    },
+
+    get providerAuthCapability() {
+      return providerAuthCapability;
+    },
+
+    get toolGatewayCapability() {
+      return toolGatewayCapability;
     },
 
     get pluginDir(): string | null {

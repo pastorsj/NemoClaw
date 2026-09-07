@@ -15,21 +15,13 @@ import { checkOpenAiInferenceProviderProfile } from "./adapters/openshell/provid
 import { runHarnessProviderBrokerController } from "./agent-runtime/provider-broker";
 import type { HarnessPackageIdentity } from "./agent-runtime/package/types";
 import { HERMES_PROVIDER_NAME } from "./onboard/inference-providers/hermes-provider-identity";
+import {
+  providerExistsInGateway,
+  upsertProvider,
+} from "./onboard/inference-providers/provider-upsert";
 import * as oauth from "./oauth-device-code";
 
 export { HERMES_PROVIDER_NAME };
-
-const onboardProviders = require("./onboard/providers") as {
-  providerExistsInGateway: (name: string, runOpenshell: RunOpenshell) => boolean;
-  upsertProvider: (
-    name: string,
-    type: string,
-    credentialEnv: string,
-    baseUrl: string | null,
-    env: NodeJS.ProcessEnv,
-    runOpenshell: RunOpenshell,
-  ) => { ok: boolean; status?: number; message?: string };
-};
 
 type HermesToolGatewayBroker = {
   registerHermesToolGatewayRefreshProvider: (
@@ -90,7 +82,7 @@ function agentKeyExpiresAt(minted: oauth.AgentKeyResponse): string | null {
 }
 
 export function isHermesProviderRegistered(runOpenshell: RunOpenshell): boolean {
-  return onboardProviders.providerExistsInGateway(HERMES_PROVIDER_NAME, runOpenshell);
+  return providerExistsInGateway(HERMES_PROVIDER_NAME, runOpenshell);
 }
 
 export type HermesProviderBinding = {
@@ -132,7 +124,7 @@ export function registerHermesInferenceProvider(
   if (!profile.ok) {
     throw new Error(profile.messages.join("\n"));
   }
-  const result = onboardProviders.upsertProvider(
+  const result = upsertProvider(
     HERMES_PROVIDER_NAME,
     "openai",
     credentialEnv,
@@ -196,7 +188,7 @@ export async function ensureHermesProviderOAuthCredentials(
       if (!registration.ok || !registration.credentialEnv || !registration.credentialValue) {
         throw new Error("Harness provider-broker registration did not return a credential binding");
       }
-      const providerResult = onboardProviders.upsertProvider(
+      const providerResult = upsertProvider(
         registration.providerName,
         "generic",
         registration.credentialEnv,

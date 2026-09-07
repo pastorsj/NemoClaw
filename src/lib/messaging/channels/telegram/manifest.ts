@@ -248,6 +248,7 @@ export const telegramManifest = {
       phase: "enroll",
       handler: "common.configPrompt",
       agents: ["openclaw"],
+      packageOperationRequired: true,
       outputs: [
         {
           id: "groupPolicy",
@@ -267,6 +268,7 @@ export const telegramManifest = {
       phase: "health-check",
       handler: "telegram.openclawBridgeHealth",
       agents: ["openclaw"],
+      packageOperationRequired: true,
       onFailure: "abort",
     },
     {
@@ -285,6 +287,7 @@ export const telegramManifest = {
       phase: "status",
       handler: "telegram.statusHealth",
       agents: ["openclaw"],
+      packageOperationRequired: true,
       outputs: [
         {
           id: "channelHealth",

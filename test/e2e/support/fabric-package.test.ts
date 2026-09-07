@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,15 +10,15 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { validateHarnessPackageTree } from "../../../src/lib/agent-runtime/package/tree.ts";
 import {
+  requireFabricPackageArtifactE2eBinding,
   requireInstalledFabricE2eBinding,
   type FabricHarnessE2eContract,
   type InstalledFabricPackageReference,
   validateFabricHarnessE2eContract,
 } from "../../../tools/e2e/fabric-contract.mts";
+import { prepareFabricJourneyArtifacts } from "../../../tools/e2e/fabric-journey.mts";
 import {
   defaultFabricPackageSandboxName,
-  FABRIC_PACKAGE_LIVE_SELECTOR,
-  FABRIC_PACKAGE_LIVE_TEST_PATH,
   fabricPackageE2eEnvironment,
   fabricPackageGatewayEnvironment,
   fabricPackageJourneyEnvironment,
@@ -27,24 +28,6 @@ import {
   readFabricHarnessE2eFixture,
   readFabricPackageE2eTarget,
 } from "../../../tools/e2e/fabric-package.mts";
-import { catalogueTarget } from "../../../tools/e2e/target-catalogue.mts";
-
-const PACKAGE_CASES = [
-  {
-    id: "deepseek-harness",
-    adapterId: "nvidia.nemoclaw.deepseek-harness",
-    fixture: "packages/nemoclaw-deepseek-harness/tests/fixtures/live-contract.json",
-    runnerModule: "nemoclaw_deepseek_fabric.adapter",
-    sandboxName: "e2e-deepseek",
-  },
-  {
-    id: "haystack-agent",
-    adapterId: "nvidia.nemoclaw.haystack-agent",
-    fixture: "packages/nemoclaw-haystack-agent/tests/fixtures/live-contract.json",
-    runnerModule: "nemoclaw_haystack_fabric.adapter",
-    sandboxName: "e2e-haystack",
-  },
-] as const;
 
 function discoverBundledFabricFixtures(): readonly {
   readonly id: string;
@@ -63,6 +46,8 @@ function discoverBundledFabricFixtures(): readonly {
 }
 
 const BUNDLED_PACKAGE_CASES = discoverBundledFabricFixtures();
+const SYNTHETIC_FIXTURE_PATH = "/tmp/future-harness-live-contract.json";
+const SYNTHETIC_ARTIFACT_PATH = "/tmp/future-harness-package";
 
 const temporaryDirectories: string[] = [];
 const FABRIC_BINDING_TEST_ROOT = path.join(
@@ -70,6 +55,22 @@ const FABRIC_BINDING_TEST_ROOT = path.join(
   "node_modules/.cache/nemoclaw-fabric-binding-tests",
 );
 fs.mkdirSync(FABRIC_BINDING_TEST_ROOT, { recursive: true, mode: 0o700 });
+
+function writeFutureContractFixture(): string {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-contract-"));
+  temporaryDirectories.push(directory);
+  const fixture = path.join(directory, "live-contract.json");
+  fs.writeFileSync(fixture, `${JSON.stringify(futureFabricContract(), null, 2)}\n`, "utf8");
+  return fixture;
+}
+
+function createEmptyPackageArtifact(label = "package-artifact"): string {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-artifact-"));
+  temporaryDirectories.push(directory);
+  const artifact = path.join(directory, label);
+  fs.mkdirSync(artifact);
+  return artifact;
+}
 
 interface InstalledPackageFixtureOptions {
   readonly descriptorAdapterId?: string;
@@ -144,12 +145,18 @@ function writeInstalledPackageFixture(
       "    reason: This synthetic package has fixed inference configuration.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This synthetic package does not run scheduled work.",
@@ -159,36 +166,39 @@ function writeInstalledPackageFixture(
     ].join("\n"),
     "utf8",
   );
+  fs.writeFileSync(path.join(packageDirectory, "Dockerfile"), "FROM scratch\n", "utf8");
 
-  let descriptorPath: string | undefined;
-  if (options.packageOwnsDescriptor !== false) {
-    const fabricDirectory = path.join(packageDirectory, "fabric");
-    fs.mkdirSync(fabricDirectory);
-    descriptorPath = path.join(
-      fabricDirectory,
-      options.descriptorFileName ?? path.posix.basename(contract.descriptorGlob),
-    );
-    fs.writeFileSync(
-      descriptorPath,
-      `${JSON.stringify({
-        contract_version: "fabric.adapter/v1alpha2",
-        adapter_id: options.descriptorAdapterId ?? contract.adapterId,
-        adapter_kind: "python",
-        runner: { module: options.descriptorRunnerModule ?? contract.descriptorRunnerModule },
-      })}\n`,
-      "utf8",
-    );
-  }
+  const descriptorPath =
+    options.packageOwnsDescriptor === false
+      ? undefined
+      : (() => {
+          const fabricDirectory = path.join(packageDirectory, "fabric");
+          fs.mkdirSync(fabricDirectory);
+          const file = path.join(
+            fabricDirectory,
+            options.descriptorFileName ?? path.posix.basename(contract.descriptorGlob),
+          );
+          fs.writeFileSync(
+            file,
+            `${JSON.stringify({
+              contract_version: "fabric.adapter/v1alpha2",
+              adapter_id: options.descriptorAdapterId ?? contract.adapterId,
+              adapter_kind: "python",
+              runner: { module: options.descriptorRunnerModule ?? contract.descriptorRunnerModule },
+            })}\n`,
+            "utf8",
+          );
+          return file;
+        })();
   const contentDigest = validateHarnessPackageTree(sourceRoot, {
     sourceTrust: "mutable",
   }).contentDigest;
   packageRoot = path.join(temporaryRoot, contentDigest);
   fs.renameSync(sourceRoot, packageRoot);
-  if (descriptorPath) {
-    descriptorPath = path.join(packageRoot, path.relative(sourceRoot, descriptorPath));
-  }
   return {
-    descriptorPath,
+    descriptorPath: descriptorPath
+      ? path.join(packageRoot, path.relative(sourceRoot, descriptorPath))
+      : undefined,
     reference: {
       identity: {
         kind: "agent-runtime",
@@ -219,6 +229,49 @@ describe("generic Fabric package E2E", () => {
       packageId: contract.packageId,
       runnerModule: contract.descriptorRunnerModule,
     });
+  });
+
+  it("binds a trusted-local input directory to its exact pre-install identity", () => {
+    const contract = futureFabricContract();
+    const fixture = writeInstalledPackageFixture(contract);
+    const artifactRoot = path.join(path.dirname(fixture.reference.packageRoot), "exact-artifact");
+    fs.renameSync(fixture.reference.packageRoot, artifactRoot);
+
+    const bound = requireFabricPackageArtifactE2eBinding(contract, artifactRoot);
+
+    expect(bound.binding).toMatchObject({
+      adapterId: contract.adapterId,
+      packageId: contract.packageId,
+    });
+    expect(bound.reference).toMatchObject({
+      identity: fixture.reference.identity,
+      packageRoot: artifactRoot,
+    });
+  });
+
+  it("keeps the supplied lifecycle source exact while generating only its upgrade", () => {
+    const contract = futureFabricContract();
+    const fixture = writeInstalledPackageFixture(contract);
+    const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-runtime-"));
+    temporaryDirectories.push(runtimeHome);
+    const before = requireFabricPackageArtifactE2eBinding(contract, fixture.reference.packageRoot);
+
+    const selected = prepareFabricJourneyArtifacts(
+      {
+        contract,
+        journey: "lifecycle",
+        packageArtifact: fixture.reference.packageRoot,
+        sandboxName: "e2e-future",
+      },
+      runtimeHome,
+    );
+
+    expect(selected.packageArtifact).toBe(fixture.reference.packageRoot);
+    expect(selected.upgradePackageArtifact).not.toBe(fixture.reference.packageRoot);
+    expect(selected.preparedUpgrade?.packageRoot).toBe(selected.upgradePackageArtifact);
+    expect(
+      requireFabricPackageArtifactE2eBinding(contract, selected.packageArtifact).reference.identity,
+    ).toEqual(before.reference.identity);
   });
 
   it("accepts a package without a local descriptor only through the upstream Fabric namespace", () => {
@@ -336,24 +389,37 @@ describe("generic Fabric package E2E", () => {
     },
   );
 
-  it.each(PACKAGE_CASES)("builds the $id catalogue row from package-owned data", (fixture) => {
-    const target = catalogueTarget(`${fixture.id}-fabric`);
-    const decoded = readFabricPackageE2eTarget(target.environment);
+  it("loads an ordinary tsx real target through the hosted-credential gate", () => {
+    const bundled = BUNDLED_PACKAGE_CASES[0];
+    expect(bundled).toBeDefined();
+    const credentialFreeEnvironment = { ...process.env };
+    delete credentialFreeEnvironment.NVIDIA_INFERENCE_API_KEY;
+    const packageDirectory = path.resolve(path.dirname(bundled!.fixture), "../..");
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        path.resolve("tools/e2e/fabric-package.mts"),
+        "run",
+        "--contract",
+        path.resolve(bundled!.fixture),
+        "--package-artifact",
+        packageDirectory,
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: credentialFreeEnvironment,
+        shell: false,
+        timeout: 10_000,
+      },
+    );
 
-    expect(target).toMatchObject({
-      agentRuntime: fixture.id,
-      profile: "nvidia-inference",
-      testFile: FABRIC_PACKAGE_LIVE_TEST_PATH,
-      selector: FABRIC_PACKAGE_LIVE_SELECTOR,
-    });
-    expect(target.owningPaths).toContain(fixture.fixture);
-    expect(decoded).toEqual({
-      contract: readFabricHarnessE2eFixture(fixture.fixture),
-      sandboxName: fixture.sandboxName,
-    });
-    expect(target.environment.NEMOCLAW_GATEWAY_PORT).not.toBe("8080");
-    expect(target.environment.OPENSHELL_GATEWAY).toBe(
-      `nemoclaw-${target.environment.NEMOCLAW_GATEWAY_PORT}`,
+    expect(result.status).toBe(1);
+    expect(result.signal).toBeNull();
+    expect(result.stderr).toBe(
+      "Fabric package qualification failed; inspect the redacted E2E artifacts for details.\n",
     );
   });
 
@@ -368,44 +434,56 @@ describe("generic Fabric package E2E", () => {
       descriptorRunnerModule: "future_harness_fabric.adapter",
       processMarkers: ["future_harness"],
     });
-    const target = { contract, sandboxName: "e2e-future-harness" };
+    const target = {
+      contract,
+      journey: "smoke" as const,
+      packageArtifact: createEmptyPackageArtifact(),
+      sandboxName: "e2e-future-harness",
+    };
 
     expect(readFabricPackageE2eTarget(fabricPackageE2eEnvironment(target))).toEqual(target);
   });
 
-  it("loads the direct command target from only a fixture path and optional sandbox name", () => {
+  it("loads the direct command target from an exact artifact, fixture, and optional sandbox name", () => {
+    const fixturePath = writeFutureContractFixture();
+    const packageArtifact = createEmptyPackageArtifact();
     const options = parseFabricPackageCliOptions([
       "run",
       "--contract",
-      PACKAGE_CASES[1].fixture,
+      fixturePath,
+      "--package-artifact",
+      packageArtifact,
       "--sandbox-name",
-      "external-haystack",
+      "external-future",
     ]);
 
     expect(options).toEqual({
-      fixturePath: PACKAGE_CASES[1].fixture,
-      packageArtifact: undefined,
-      sandboxName: "external-haystack",
+      fixturePath,
+      journey: "smoke",
+      packageArtifact,
+      sandboxName: "external-future",
       upgradePackageArtifact: undefined,
     });
     expect(loadFabricPackageTarget(options.fixturePath, options)).toMatchObject({
-      contract: { packageId: "haystack-agent" },
-      sandboxName: "external-haystack",
+      contract: { packageId: "future-harness" },
+      journey: "smoke",
+      packageArtifact,
+      sandboxName: "external-future",
     });
   });
 
   it("resolves an independently built package directory before entering the core checkout", () => {
     const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-package-"));
     temporaryDirectories.push(workingDirectory);
-    const artifactDirectory = path.join(workingDirectory, "dist", "nemoclaw-haystack-agent");
+    const artifactDirectory = path.join(workingDirectory, "dist", "nemoclaw-future-harness");
     fs.mkdirSync(artifactDirectory, { recursive: true });
-    const fixturePath = path.resolve(PACKAGE_CASES[1].fixture);
+    const fixturePath = writeFutureContractFixture();
     const options = parseFabricPackageCliOptions([
       "run",
       "--contract",
       fixturePath,
       "--package-artifact",
-      "dist/nemoclaw-haystack-agent",
+      "dist/nemoclaw-future-harness",
     ]);
 
     const target = loadFabricPackageTarget(options.fixturePath, {
@@ -414,7 +492,8 @@ describe("generic Fabric package E2E", () => {
     });
 
     expect(target).toMatchObject({
-      contract: { packageId: "haystack-agent" },
+      contract: { packageId: "future-harness" },
+      journey: "smoke",
       packageArtifact: artifactDirectory,
     });
     expect(readFabricPackageE2eTarget(fabricPackageE2eEnvironment(target))).toEqual(target);
@@ -430,17 +509,35 @@ describe("generic Fabric package E2E", () => {
     const options = parseFabricPackageCliOptions([
       "run",
       "--contract",
-      path.resolve(PACKAGE_CASES[0].fixture),
+      writeFutureContractFixture(),
       "--package-artifact",
       packageArtifact,
       "--upgrade-package-artifact",
       upgradePackageArtifact,
+      "--journey",
+      "lifecycle",
     ]);
 
     const target = loadFabricPackageTarget(options.fixturePath, options);
 
     expect(target).toMatchObject({ packageArtifact, upgradePackageArtifact });
     expect(readFabricPackageE2eTarget(fabricPackageE2eEnvironment(target))).toEqual(target);
+  });
+
+  it("selects the full lifecycle journey explicitly", () => {
+    const packageArtifact = createEmptyPackageArtifact();
+    const options = parseFabricPackageCliOptions([
+      "run",
+      "--contract",
+      writeFutureContractFixture(),
+      "--package-artifact",
+      packageArtifact,
+      "--journey",
+      "lifecycle",
+    ]);
+
+    expect(options.journey).toBe("lifecycle");
+    expect(loadFabricPackageTarget(options.fixturePath, options).journey).toBe("lifecycle");
   });
 
   it("rejects one directory as both lifecycle revisions before starting the journey", () => {
@@ -450,7 +547,8 @@ describe("generic Fabric package E2E", () => {
     fs.mkdirSync(packageArtifact);
 
     expect(() =>
-      loadFabricPackageTarget(path.resolve(PACKAGE_CASES[0].fixture), {
+      loadFabricPackageTarget(writeFutureContractFixture(), {
+        journey: "lifecycle",
         packageArtifact,
         upgradePackageArtifact: packageArtifact,
       }),
@@ -463,29 +561,42 @@ describe("generic Fabric package E2E", () => {
       const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-package-"));
       temporaryDirectories.push(workingDirectory);
       const artifactPath = path.join(workingDirectory, "package-artifact");
+      const packageArtifact =
+        field === "package" ? artifactPath : createEmptyPackageArtifact("initial-package");
 
       expect(() =>
-        loadFabricPackageTarget(path.resolve(PACKAGE_CASES[0].fixture), {
-          ...(field === "package"
-            ? { packageArtifact: artifactPath }
-            : { upgradePackageArtifact: artifactPath }),
+        loadFabricPackageTarget(writeFutureContractFixture(), {
+          packageArtifact,
+          ...(field === "upgrade"
+            ? { journey: "lifecycle" as const, upgradePackageArtifact: artifactPath }
+            : {}),
           workingDirectory,
         }),
       ).toThrow(/Fabric package artifact/u);
     },
   );
 
-  it.each(["file", "symlink"] as const)(
-    "rejects a %s local package artifact before starting the live journey",
-    (kind) => {
+  it.each([
+    {
+      kind: "file",
+      prepare: (artifactPath: string, _workingDirectory: string) =>
+        fs.writeFileSync(artifactPath, "not a directory\n", "utf8"),
+    },
+    {
+      kind: "symlink",
+      prepare: (artifactPath: string, workingDirectory: string) =>
+        fs.symlinkSync(workingDirectory, artifactPath, "dir"),
+    },
+  ] as const)(
+    "rejects a $kind local package artifact before starting the live journey",
+    ({ prepare }) => {
       const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-package-"));
       temporaryDirectories.push(workingDirectory);
       const artifactPath = path.join(workingDirectory, "package-artifact");
-      if (kind === "file") fs.writeFileSync(artifactPath, "not a directory\n", "utf8");
-      if (kind === "symlink") fs.symlinkSync(workingDirectory, artifactPath, "dir");
+      prepare(artifactPath, workingDirectory);
 
       expect(() =>
-        loadFabricPackageTarget(path.resolve(PACKAGE_CASES[0].fixture), {
+        loadFabricPackageTarget(writeFutureContractFixture(), {
           packageArtifact: artifactPath,
           workingDirectory,
         }),
@@ -501,9 +612,31 @@ describe("generic Fabric package E2E", () => {
       arguments_: [
         "run",
         "--contract",
-        PACKAGE_CASES[0].fixture,
+        SYNTHETIC_FIXTURE_PATH,
+        "--package-artifact",
+        SYNTHETIC_ARTIFACT_PATH,
+        "--journey",
+        "complete",
+      ],
+    },
+    {
+      arguments_: [
+        "run",
         "--contract",
-        PACKAGE_CASES[1].fixture,
+        SYNTHETIC_FIXTURE_PATH,
+        "--package-artifact",
+        SYNTHETIC_ARTIFACT_PATH,
+        "--upgrade-package-artifact",
+        "/tmp/example-upgrade",
+      ],
+    },
+    {
+      arguments_: [
+        "run",
+        "--contract",
+        SYNTHETIC_FIXTURE_PATH,
+        "--contract",
+        "/tmp/another-future-live-contract.json",
       ],
     },
   ])("rejects an incomplete or ambiguous direct command", ({ arguments_ }) => {
@@ -511,24 +644,47 @@ describe("generic Fabric package E2E", () => {
   });
 
   it("builds one isolated direct-run environment while preserving caller inference choices", () => {
-    const contract = readFabricHarnessE2eFixture(PACKAGE_CASES[0].fixture);
-    const target = { contract, sandboxName: "e2e-deepseek" };
+    const contract = futureFabricContract();
+    const target = {
+      contract,
+      journey: "smoke" as const,
+      packageArtifact: SYNTHETIC_ARTIFACT_PATH,
+      sandboxName: "e2e-future",
+    };
     const environment = fabricPackageJourneyEnvironment(target, {
-      E2E_TARGET_ID: "external-deepseek-proof",
+      E2E_TARGET_ID: "external-future-proof",
       NEMOCLAW_ENDPOINT_URL: "https://example.test/v1",
       NEMOCLAW_MODEL: "example/model",
     });
 
     expect(environment).toMatchObject({
-      E2E_TARGET_ID: "external-deepseek-proof",
-      NEMOCLAW_AGENT: "deepseek-harness",
+      E2E_TARGET_ID: "external-future-proof",
+      E2E_FABRIC_PACKAGE_JOURNEY: "smoke",
+      NEMOCLAW_AGENT: "future-harness",
       NEMOCLAW_COMPAT_MODEL: "example/model",
       NEMOCLAW_ENDPOINT_URL: "https://example.test/v1",
       NEMOCLAW_MODEL: "example/model",
       NEMOCLAW_RUN_LIVE_E2E: "1",
-      NEMOCLAW_SANDBOX_NAME: "e2e-deepseek",
+      NEMOCLAW_SANDBOX_NAME: "e2e-future",
     });
+    expect(environment).not.toHaveProperty("NEMOCLAW_CANDIDATE_AGENTS");
+    expect(environment).not.toHaveProperty("NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT");
     expect(environment.OPENSHELL_GATEWAY).toBe(`nemoclaw-${environment.NEMOCLAW_GATEWAY_PORT}`);
+  });
+
+  it("defaults direct runs to a Fabric-compatible hosted model", () => {
+    const contract = futureFabricContract();
+    const target = {
+      contract,
+      journey: "smoke" as const,
+      packageArtifact: SYNTHETIC_ARTIFACT_PATH,
+      sandboxName: "e2e-future",
+    };
+
+    expect(fabricPackageJourneyEnvironment(target, {})).toMatchObject({
+      NEMOCLAW_COMPAT_MODEL: "nvidia/nvidia/nemotron-3-super-v3",
+      NEMOCLAW_MODEL: "nvidia/nvidia/nemotron-3-super-v3",
+    });
   });
 
   it("derives stable bounded sandbox and gateway identities for any canonical package id", () => {
@@ -541,7 +697,7 @@ describe("generic Fabric package E2E", () => {
     expect(sandboxName.length).toBeLessThanOrEqual(19);
     expect(firstGateway).toEqual(secondGateway);
     expect(Number(firstGateway.NEMOCLAW_GATEWAY_PORT)).toBeGreaterThanOrEqual(20_000);
-    expect(Number(firstGateway.NEMOCLAW_GATEWAY_PORT)).toBeLessThan(40_000);
+    expect(Number(firstGateway.NEMOCLAW_GATEWAY_PORT)).toBeLessThan(60_000);
   });
 
   it.each([
@@ -551,9 +707,20 @@ describe("generic Fabric package E2E", () => {
     { processMarkers: ["invalid\nmarker"] },
     { unexpected: true },
   ])("rejects malformed package-owned contract fields", (override) => {
-    const valid = readFabricHarnessE2eFixture(PACKAGE_CASES[0].fixture);
+    const valid = futureFabricContract();
     expect(() => validateFabricHarnessE2eContract({ ...valid, ...override })).toThrow(
       /Fabric package/u,
     );
+  });
+
+  it("rejects a descriptor glob that only shares the descriptor-root text prefix", () => {
+    const valid = futureFabricContract();
+
+    expect(() =>
+      validateFabricHarnessE2eContract({
+        ...valid,
+        descriptorGlob: `${valid.descriptorPathPrefix}-outside/adapter.fabric-adapter.json`,
+      }),
+    ).toThrow(/Fabric package/u);
   });
 });

@@ -195,6 +195,42 @@ describe("CLI layer import boundaries (#6245)", () => {
     }
   });
 
+  it("keeps static and literal dynamic production imports inside their package", () => {
+    const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-source-packages-"));
+    const packageRoot = path.join(packagesRoot, "future-runtime");
+    fs.mkdirSync(path.join(packageRoot, "src"), { recursive: true });
+    fs.mkdirSync(path.join(packageRoot, "tests"), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, "Dockerfile"), "FROM scratch\n");
+    fs.writeFileSync(path.join(packagesRoot, "shared.ts"), "export const shared = true;\n");
+    fs.writeFileSync(path.join(packageRoot, "src", "static.ts"), 'import "../../shared.ts";\n');
+    fs.writeFileSync(
+      path.join(packageRoot, "src", "dynamic.mts"),
+      'export const shared = import("../../shared.ts");\n',
+    );
+    fs.writeFileSync(path.join(packageRoot, "tests", "fixture.ts"), 'import "../../shared.ts";\n');
+
+    try {
+      const violations = findPackageImageBoundaryViolations(packagesRoot);
+      expect(violations).toHaveLength(2);
+      expect(violations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            file: expect.stringContaining("future-runtime/src/static.ts"),
+            rule: "package-source-locality",
+            detail: expect.stringContaining("../../shared.ts"),
+          }),
+          expect.objectContaining({
+            file: expect.stringContaining("future-runtime/src/dynamic.mts"),
+            rule: "package-source-locality",
+            detail: expect.stringContaining("../../shared.ts"),
+          }),
+        ]),
+      );
+    } finally {
+      fs.rmSync(packagesRoot, { force: true, recursive: true });
+    }
+  });
+
   it("requires shared package runtimes to use the published contract materializer", () => {
     const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-packages-"));
     const packageRoot = path.join(packagesRoot, "future-runtime");
@@ -249,7 +285,7 @@ describe("CLI layer import boundaries (#6245)", () => {
 
   it("rejects another installed package ID from a managed gateway profile", () => {
     const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-profile-packages-"));
-    for (const packageId of ["first-agent", "future-agent"]) {
+    ["first-agent", "future-agent"].forEach((packageId) => {
       const packageRoot = path.join(packagesRoot, packageId);
       fs.mkdirSync(path.join(packageRoot, "runtime"), { recursive: true });
       fs.writeFileSync(
@@ -261,7 +297,7 @@ describe("CLI layer import boundaries (#6245)", () => {
       );
       fs.writeFileSync(path.join(packageRoot, "manifest.yaml"), `name: ${packageId}\n`);
       fs.writeFileSync(path.join(packageRoot, "Dockerfile"), "FROM scratch\n");
-    }
+    });
     fs.writeFileSync(
       path.join(packagesRoot, "first-agent/runtime/managed-gateway-profile.py"),
       'OTHER_PACKAGE = "future-agent"\n',
@@ -357,6 +393,20 @@ describe("CLI layer import boundaries (#6245)", () => {
   it("keeps generic harness contract modules free of discovered package IDs", () => {
     const violations = scanFixture(
       fixturePath("src/lib/agent-runtime/adapter", "package-id"),
+      'export const packageId = "pi";\n',
+    );
+
+    expect(violations).toEqual([
+      expect.objectContaining({
+        rule: "harness-contract-neutrality",
+        detail: "generic harness contract code must not encode package ID 'pi'",
+      }),
+    ]);
+  });
+
+  it("keeps the semantic-turn gateway free of discovered package IDs", () => {
+    const violations = scanFixture(
+      fixturePath("src/lib/voice-gateway", "package-id"),
       'export const packageId = "pi";\n',
     );
 
@@ -498,6 +548,30 @@ describe("CLI layer import boundaries (#6245)", () => {
     ]);
   });
 
+  it("blocks ambient harness selectors in receipt-backed callback modules", () => {
+    const fixture = fixturePath("src/lib", "receipt-ambient-agent-consumer");
+    const repoPath = path.relative(REPO_ROOT, fixture).split(path.sep).join("/");
+    const violations = scanFixture(
+      fixture,
+      "export function decide() {\n" +
+        '  const agentName = (process.env.NEMOCLAW_AGENT || "").trim().toLowerCase();\n' +
+        '  return agentName === "langchain-deepagents-code";\n' +
+        "}\n",
+      undefined,
+      { receiptBackedCallbackModules: new Set([repoPath]) },
+    );
+
+    expect(violations).toEqual([
+      expect.objectContaining({
+        file: repoPath,
+        rule: "receipt-backed-harness-neutrality",
+        detail: expect.stringContaining(
+          "package ID 'langchain-deepagents-code' (equality decision in 'decide')",
+        ),
+      }),
+    ]);
+  });
+
   it("allows comments and diagnostics through transitive package-authority imports", () => {
     const authorityBridge = fixturePath("src/lib", "receipt-diagnostic-bridge");
     const consumer = fixturePath("src/lib", "receipt-indirect-diagnostic");
@@ -599,6 +673,44 @@ describe("CLI layer import boundaries (#6245)", () => {
     ]);
   });
 
+  it("blocks harness lookup tables after package authority is resolved", () => {
+    const fixture = fixturePath("src/lib", "receipt-harness-lookup");
+    const authority = path
+      .relative(path.dirname(fixture), path.join(REPO_ROOT, "src/lib/sandbox/command-agent"))
+      .split(path.sep)
+      .join("/");
+    const specifier = authority.startsWith(".") ? authority : `./${authority}`;
+    const violations = scanFixture(
+      fixture,
+      `import { resolveSandboxCommandAgent } from ${JSON.stringify(specifier)};\n` +
+        `const handlers = { openclaw: () => true, "hermes": () => true };\n` +
+        `const supported = new Set(["pi"]);\n` +
+        `const labels = new Map([["langchain-deepagents-code", "DCode"]]);\n` +
+        `export function decide(entry: Parameters<typeof resolveSandboxCommandAgent>[0]) {\n` +
+        `  const id = resolveSandboxCommandAgent(entry).name;\n` +
+        `  return handlers[id] ?? handlers["openclaw"] ?? supported.has("pi") ?? labels.get("langchain-deepagents-code");\n` +
+        `}\n`,
+    );
+
+    expect(violations).toHaveLength(5);
+    expect(violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rule: "receipt-backed-harness-neutrality",
+          detail: expect.stringContaining("package ID 'openclaw' (lookup"),
+        }),
+        expect.objectContaining({
+          rule: "receipt-backed-harness-neutrality",
+          detail: expect.stringContaining("package ID 'pi' (membership"),
+        }),
+        expect.objectContaining({
+          rule: "receipt-backed-harness-neutrality",
+          detail: expect.stringContaining("package ID 'langchain-deepagents-code' (lookup"),
+        }),
+      ]),
+    );
+  });
+
   it("allows package IDs in catalogue code that does not consume package authority", () => {
     expect(
       scanFixture(
@@ -613,6 +725,25 @@ describe("CLI layer import boundaries (#6245)", () => {
       scanFixture(
         fixturePath("src/lib/state", "legacy-harness-decision"),
         'export function decodeLegacyAgent(agent: string) {\n  return agent === "openclaw";\n}\n',
+      ),
+    ).toEqual([]);
+  });
+
+  it("excludes plural test-fixtures modules from receipt-backed production decisions", () => {
+    const fixture = fixturePath("src/lib/actions", "receipt-test-fixtures");
+    const authority = path
+      .relative(path.dirname(fixture), path.join(REPO_ROOT, "src/lib/sandbox/command-agent"))
+      .split(path.sep)
+      .join("/");
+    const specifier = authority.startsWith(".") ? authority : `./${authority}`;
+
+    expect(
+      scanFixture(
+        fixture,
+        `import { resolveSandboxCommandAgent } from ${JSON.stringify(specifier)};\n` +
+          `export function makeFixture(entry: Parameters<typeof resolveSandboxCommandAgent>[0]) {\n` +
+          `  return resolveSandboxCommandAgent(entry).name === "openclaw";\n` +
+          `}\n`,
       ),
     ).toEqual([]);
   });

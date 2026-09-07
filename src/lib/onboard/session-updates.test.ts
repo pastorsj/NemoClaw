@@ -53,4 +53,16 @@ describe("toSessionUpdates", () => {
     expect("compatibleEndpointReasoningEffort" in updates).toBe(false);
     expect(filterSafeUpdates(updates)).toEqual({ provider: "compatible-endpoint" });
   });
+
+  it("accepts only a canonical secret-free package provider auth method", () => {
+    expect(toSessionUpdates({ providerAuthMethod: "browser-login" })).toEqual({
+      providerAuthMethod: "browser-login",
+    });
+    expect(toSessionUpdates({ providerAuthMethod: "Browser Login" })).toEqual({
+      providerAuthMethod: null,
+    });
+    expect(filterSafeUpdates({ providerAuthMethod: "browser-login" })).toEqual({
+      providerAuthMethod: "browser-login",
+    });
+  });
 });

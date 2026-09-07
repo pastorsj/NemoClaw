@@ -4,17 +4,12 @@
 import type { ConfigObject, ConfigValue } from "../../security/credential-filter";
 
 export const NEMOCLAW_HERMES_LIGHT_SKIN_NAME = "nemoclaw-light";
-export const NEMOCLAW_HERMES_LIGHT_SKIN_REVIEWED_HERMES_VERSIONS = [
-  "v2026.6.19",
-  "v2026.7.1",
-  "v2026.8.27",
-] as const;
 
 // Compatibility boundary: remove this NemoClaw-managed light skin once the
 // pinned Hermes version in packages/nemoclaw-hermes/Dockerfile.base includes upstream
 // readable light-terminal defaults for assistant response and startup list text.
-// The paired unit test intentionally fails on a Hermes version bump so this
-// compatibility shim is re-reviewed instead of silently aging forward.
+// The package-owned compatibility check intentionally fails on a Hermes
+// version bump so this shim is re-reviewed instead of silently aging forward.
 export const NEMOCLAW_HERMES_LIGHT_SKIN_YAML = `name: ${NEMOCLAW_HERMES_LIGHT_SKIN_NAME}
 description: NemoClaw-managed Hermes light terminal compatibility skin
 colors:

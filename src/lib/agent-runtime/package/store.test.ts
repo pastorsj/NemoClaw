@@ -8,9 +8,18 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../../../../test/helpers/adapter-fixtures";
+import {
+  HarnessAdapterQualificationError,
+  qualifyHarnessPackageAdapterInitialization,
+} from "../adapter/qualification";
+import { activateHarnessPackage } from "./activation";
 import { copyVerifiedPackageTree } from "./copy";
 import {
-  activateHarnessPackage,
   deactivateHarnessPackage,
   getHarnessPackageStoreRoot,
   HarnessPackageStoreIntegrityError,
@@ -97,6 +106,15 @@ function writePackageAt(root: string, packageVersion: string, payload: string): 
       "description: Reviewed runtime adapter",
       "runtime:",
       "  kind: gateway",
+      "  interactive_command: openclaw",
+      "  process_lifecycle:",
+      "    support: unsupported",
+      "    reason: This fixture does not manage a gateway process.",
+      "gateway_command: openclaw gateway run",
+      "health_probe:",
+      "  url: http://127.0.0.1:18789/health",
+      "  port: 18789",
+      "  timeout_seconds: 30",
       "config:",
       "  dir: /sandbox/.openclaw",
       "  config_file: openclaw.json",
@@ -107,12 +125,18 @@ function writePackageAt(root: string, packageVersion: string, payload: string): 
       "    reason: This synthetic package has fixed inference configuration.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "state_lifecycle:",
       "  backup_quiescence:",
       "    kind: not-required",
       "  snapshot_restore: []",
       "  rebuild:",
-      "    image_plugin_provenance: not-required",
+      "    managed_extensions:",
+      "      support: disabled",
+      "      reason: Test package has no managed extensions.",
       "    scheduled_work:",
       "      support: disabled",
       "      reason: This package does not run scheduled work.",
@@ -120,6 +144,17 @@ function writePackageAt(root: string, packageVersion: string, payload: string): 
       "      kind: not-required",
       "",
     ].join("\n"),
+  );
+  writeFile(root, "packages/nemoclaw-openclaw/host/config-adapter.cts", TEST_CONFIG_ADAPTER_SOURCE);
+  writeFile(
+    root,
+    "packages/nemoclaw-openclaw/host/messaging-adapter.cts",
+    TEST_MESSAGING_ADAPTER_SOURCE,
+  );
+  writeFile(
+    root,
+    "packages/nemoclaw-openclaw/host/startup-adapter.cts",
+    TEST_STARTUP_ADAPTER_SOURCE,
   );
   writeFile(root, "runtime/payload.txt", payload);
 }
@@ -143,6 +178,12 @@ function publicationInput(
       contentDigest: validatedTree.contentDigest,
     },
     sourceIdentity: SOURCE_IDENTITY,
+    qualifyAdapterInitialization: (installed) =>
+      qualifyHarnessPackageAdapterInitialization(
+        installed.identity,
+        installed.packageManifest.manifest,
+        { storeRoot },
+      ),
     storeRoot,
     ...(dependencies === undefined ? {} : { dependencies }),
   };
@@ -477,6 +518,30 @@ describe("harness package store", () => {
     expect(fs.lstatSync(immutableReceipt, { bigint: true }).mtimeNs).toBe(receiptStat.mtimeNs);
     expect(fs.lstatSync(immutableObject, { bigint: true }).ino).toBe(objectStat.ino);
     expect(fs.lstatSync(immutableObject, { bigint: true }).mtimeNs).toBe(objectStat.mtimeNs);
+  });
+
+  it("retains qualified-candidate history and the old pointer when qualification fails", () => {
+    const first = publish();
+    writePackage("1.1.0", "candidate payload\n");
+    const candidate = publicationInput();
+    let qualificationObservedRetainedState = false;
+
+    expect(() =>
+      publishHarnessPackage({
+        ...candidate,
+        qualifyAdapterInitialization: (installed) => {
+          qualificationObservedRetainedState =
+            fs.existsSync(objectPath(installed)) && fs.existsSync(receiptPath(installed));
+          throw new HarnessAdapterQualificationError("synthetic qualification failure");
+        },
+      }),
+    ).toThrow("synthetic qualification failure");
+
+    expect(qualificationObservedRetainedState).toBe(true);
+    expect(requiredActive().identity).toEqual(first.identity);
+    expect(resolvePinnedHarnessPackage(candidate.expectedIdentity, { storeRoot }).identity).toEqual(
+      candidate.expectedIdentity,
+    );
   });
 
   it("refuses pointer publication after its captured active directory is replaced", () => {

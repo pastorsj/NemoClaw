@@ -417,6 +417,19 @@ describe("deleteProviderWithRecovery", () => {
     expect(result.recoveryFailures).toEqual([]);
   });
 
+  it("treats an exact provider-not-found result as converged", () => {
+    const runOpenshell = vi.fn(() => ({
+      status: 1,
+      stdout: "",
+      stderr: "Error: provider 'already-gone' not found",
+    }));
+
+    const result = deleteProviderWithRecovery("already-gone", { runOpenshell });
+
+    expect(result.ok).toBe(true);
+    expect(runOpenshell).toHaveBeenCalledOnce();
+  });
+
   it("retries delete after force-detaching a sandbox from a wrapped diagnostic", () => {
     let attempt = 0;
     const calls: string[][] = [];

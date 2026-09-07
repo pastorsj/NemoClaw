@@ -6,18 +6,25 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { loadAgent } from "../../../../src/lib/agent/defs.ts";
-import {
-  createSnapshotBackupAuthorityFixture,
-  createSnapshotHarnessPackageFixture,
-  createSnapshotRestoreAuthorityFixture,
-} from "../../../../test/helpers/snapshot-authority.ts";
+import { buildAgentDefinition } from "../../../../src/lib/agent-runtime/manifest-loader";
+import { REGISTRY_FILE } from "../../../../src/lib/state/registry/persistence";
+import { createSnapshotRestoreAuthorityFixture } from "../../../../test/helpers/snapshot-authority.ts";
+import { installHermesPackage } from "../helpers/package-store";
 
-const originalHome = process.env.HOME;
-const snapshotHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-snapshot-home-"));
-process.env.HOME = snapshotHome;
+const snapshotHome = process.env.HOME;
+if (!snapshotHome || !path.isAbsolute(snapshotHome)) {
+  throw new Error("Hermes state snapshot tests require an isolated absolute HOME");
+}
+const HERMES_INSTALLED_PACKAGE = installHermesPackage(snapshotHome);
+const HERMES_PACKAGE_IDENTITY = HERMES_INSTALLED_PACKAGE.identity;
+const HERMES_AGENT_DEFINITION = buildAgentDefinition({
+  manifest: HERMES_INSTALLED_PACKAGE.packageManifest.manifest,
+  manifestPath: HERMES_INSTALLED_PACKAGE.packageManifest.manifestPath,
+  packageRoot: HERMES_INSTALLED_PACKAGE.packageRoot,
+});
 const sandboxState = await import("../../../../src/lib/state/sandbox.ts");
 const { buildStateFileBackupCommand, buildStateFileRestoreCommand } = sandboxState;
 
@@ -29,13 +36,6 @@ afterEach(() => {
   for (const fixture of fixtures.splice(0)) {
     fs.rmSync(fixture, { recursive: true, force: true });
   }
-});
-
-afterAll(() => {
-  originalHome === undefined
-    ? Reflect.deleteProperty(process.env, "HOME")
-    : Reflect.set(process.env, "HOME", originalHome);
-  fs.rmSync(snapshotHome, { recursive: true, force: true });
 });
 
 function tempFixture(): string {
@@ -224,7 +224,11 @@ const ledger = [
   "runtime/cron-executions.db",
   "gateway/discord_message_recovery.db",
 ].find((candidate) => cmd.includes(candidate));
-if (cmd.includes("[ -d ")) process.exit(0);
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) process.exit(0);
 if (cmd.includes("nemoclaw-sqlite-backup")) {
   if (cmd.includes("kanban.db")) process.exit(2);
   process.stdout.write(fs.readFileSync(path.join(hermesHome, ledger)));
@@ -251,9 +255,9 @@ for (const name of ["SOUL.md", ".hermes_history"]) {
 `,
         { mode: 0o755 },
       );
-      fs.mkdirSync(path.join(snapshotHome, ".nemoclaw"), { recursive: true });
+      fs.mkdirSync(path.dirname(REGISTRY_FILE), { recursive: true });
       fs.writeFileSync(
-        path.join(snapshotHome, ".nemoclaw", "sandboxes.json"),
+        REGISTRY_FILE,
         JSON.stringify({
           defaultSandbox: "hermes",
           sandboxes: {
@@ -263,7 +267,7 @@ for (const name of ["SOUL.md", ".hermes_history"]) {
               provider: "p",
               gpuEnabled: false,
               agent: "hermes",
-              harnessPackage: createSnapshotHarnessPackageFixture("hermes"),
+              harnessPackage: HERMES_PACKAGE_IDENTITY,
             },
           },
         }),
@@ -272,10 +276,11 @@ for (const name of ["SOUL.md", ".hermes_history"]) {
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
       const backup = sandboxState.backupSandboxState("hermes", {
-        ...createSnapshotBackupAuthorityFixture("hermes"),
+        agentDefinition: HERMES_AGENT_DEFINITION,
+        harnessPackage: HERMES_PACKAGE_IDENTITY,
         name: "hermes-state",
       });
-      expect(backup.success).toBe(true);
+      expect(backup.success, backup.error).toBe(true);
       const backupPath = backup.manifest!.backupPath;
       expect(backup.backedUpFiles).toEqual([
         "SOUL.md",
@@ -293,11 +298,10 @@ for (const name of ["SOUL.md", ".hermes_history"]) {
 
       const replacementEnv = `API_SERVER_KEY=${"b".repeat(64)}\n`;
       fs.writeFileSync(envPath, replacementEnv);
-      const restore = sandboxState.restoreSandboxState(
-        "hermes",
-        backupPath,
-        createSnapshotRestoreAuthorityFixture(sandboxState, "hermes", "hermes", backupPath),
-      );
+      const restore = sandboxState.restoreSandboxState("hermes", backupPath, {
+        ...createSnapshotRestoreAuthorityFixture(sandboxState, "hermes", "hermes", backupPath),
+        agentDefinition: HERMES_AGENT_DEFINITION,
+      });
       expect(restore.success).toBe(true);
       expect(restore.restoredFiles).toEqual(backup.backedUpFiles);
       expect(
@@ -314,6 +318,100 @@ for (const name of ["SOUL.md", ".hermes_history"]) {
         ? Reflect.deleteProperty(process.env, "NEMOCLAW_OPENSHELL_BIN")
         : Reflect.set(process.env, "NEMOCLAW_OPENSHELL_BIN", oldOpenshell);
       process.env.PATH = oldPath;
+    }
+  });
+
+  it("clears a Hermes directory declared absent by the snapshot (#7428)", () => {
+    const fixture = tempFixture();
+    const oldPath = process.env.PATH;
+    const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
+    const binDir = path.join(fixture, "bin");
+    const workspaceMarker = path.join(fixture, "workspace-content");
+    try {
+      fs.mkdirSync(binDir, { recursive: true });
+      fs.writeFileSync(workspaceMarker, "stale");
+
+      const openshell = path.join(binDir, "openshell");
+      fs.writeFileSync(
+        openshell,
+        `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "sandbox" && args[1] === "ssh-config") {
+  process.stdout.write("Host openshell-hermes\\n  HostName 127.0.0.1\\n  User sandbox\\n");
+}
+`,
+        { mode: 0o755 },
+      );
+      fs.writeFileSync(
+        path.join(binDir, "ssh"),
+        `#!/usr/bin/env node
+const fs = require("node:fs");
+const cmd = process.argv[process.argv.length - 1] || "";
+if (
+  (cmd.startsWith("{ [ -d ") ||
+    cmd.startsWith("{ for d ") ||
+    cmd.startsWith("[ -d ")) &&
+  cmd.includes("printf")
+) process.exit(0);
+if (
+  cmd.includes("/sandbox/.hermes/SOUL.md") ||
+  cmd.includes("/sandbox/.hermes/.hermes_history") ||
+  cmd.includes("/sandbox/.hermes/runtime/state.db") ||
+  cmd.includes("/sandbox/.hermes/runtime/cron-executions.db") ||
+  cmd.includes("/sandbox/.hermes/gateway/discord_message_recovery.db") ||
+  cmd.includes("/sandbox/.hermes/kanban.db")
+) process.exit(2);
+if (cmd.includes("d='/sandbox/.hermes/workspace'")) {
+  fs.rmSync(${JSON.stringify(workspaceMarker)}, { force: true });
+}
+process.exit(0);
+`,
+        { mode: 0o755 },
+      );
+
+      fs.mkdirSync(path.dirname(REGISTRY_FILE), { recursive: true });
+      fs.writeFileSync(
+        REGISTRY_FILE,
+        JSON.stringify({
+          defaultSandbox: "hermes",
+          sandboxes: {
+            hermes: {
+              name: "hermes",
+              model: "m",
+              provider: "p",
+              gpuEnabled: false,
+              agent: "hermes",
+              harnessPackage: HERMES_PACKAGE_IDENTITY,
+            },
+          },
+        }),
+      );
+      process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
+      process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
+
+      const backup = sandboxState.backupSandboxState("hermes", {
+        agentDefinition: HERMES_AGENT_DEFINITION,
+        harnessPackage: HERMES_PACKAGE_IDENTITY,
+      });
+      expect(backup.success, backup.error).toBe(true);
+      expect(backup.manifest?.stateDirs).toContain("workspace");
+      expect(backup.manifest?.backedUpDirs).not.toContain("workspace");
+      expect(backup.manifest?.failedBackupDirs).not.toContain("workspace");
+
+      const backupPath = backup.manifest!.backupPath;
+      const restore = sandboxState.restoreSandboxState("hermes", backupPath, {
+        ...createSnapshotRestoreAuthorityFixture(sandboxState, "hermes", "hermes", backupPath),
+        agentDefinition: HERMES_AGENT_DEFINITION,
+      });
+      expect(restore.success, restore.error).toBe(true);
+      expect(fs.existsSync(workspaceMarker)).toBe(false);
+    } finally {
+      oldOpenshell === undefined
+        ? Reflect.deleteProperty(process.env, "NEMOCLAW_OPENSHELL_BIN")
+        : Reflect.set(process.env, "NEMOCLAW_OPENSHELL_BIN", oldOpenshell);
+      oldPath === undefined
+        ? Reflect.deleteProperty(process.env, "PATH")
+        : Reflect.set(process.env, "PATH", oldPath);
     }
   });
 });

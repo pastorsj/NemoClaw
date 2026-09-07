@@ -41,7 +41,17 @@ export interface LaunchReadinessOpenClawSessionQualification {
   requiredScopes: ["operator.pairing", "operator.read", "operator.write"];
 }
 
-export type LaunchReadinessSessionQualification = LaunchReadinessOpenClawSessionQualification;
+/** Receipt-backed, package-neutral session state recorded without native credentials. */
+export interface LaunchReadinessPackageSessionQualification {
+  schemaVersion: 1;
+  kind: "package-session";
+  packageId: string;
+  stateSha256: string;
+}
+
+export type LaunchReadinessSessionQualification =
+  | LaunchReadinessOpenClawSessionQualification
+  | LaunchReadinessPackageSessionQualification;
 
 export interface LaunchReadinessLease {
   schemaVersion: 3;
@@ -213,6 +223,16 @@ function isExactStringArray(value: unknown, expected: readonly string[]): boolea
 
 function isSessionQualification(value: unknown): value is LaunchReadinessSessionQualification {
   if (!isPlainRecord(value)) return false;
+  if (value.kind === "package-session") {
+    return (
+      hasExactKeys(value, ["schemaVersion", "kind", "packageId", "stateSha256"]) &&
+      value.schemaVersion === 1 &&
+      typeof value.packageId === "string" &&
+      /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(value.packageId) &&
+      typeof value.stateSha256 === "string" &&
+      SHA256_RE.test(value.stateSha256)
+    );
+  }
   if (
     !hasExactKeys(value, [
       "schemaVersion",

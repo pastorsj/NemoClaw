@@ -12,6 +12,8 @@ export {
   type ManagedStartupOnboardProfileInput,
 } from "./onboard-profile";
 export { buildManagedStartupInferenceCandidates } from "./package-input";
+export { buildInstalledStartupPlan } from "./agent-environment";
+export { isManagedStartupPackageProfile } from "./profile";
 export {
   type BuiltManagedStartupPackageProfile,
   type LoadHarnessStartupProfileAdapter,

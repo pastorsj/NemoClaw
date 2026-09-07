@@ -22,7 +22,11 @@ const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 fs.appendFileSync(${JSON.stringify(sshLog)}, JSON.stringify({ cmd }) + "\\n");
-if (cmd.includes("[ -d ")) {
+if (
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) {
   if (fs.existsSync(${JSON.stringify(unsafeDiscoveryMarker)})) {
     process.stdout.write("workspace-research\\nidentity\\n");
     process.exit(0);

@@ -24,7 +24,11 @@ export type SetupInferenceResult = { ok: true; retry?: undefined } | { retry: "s
 
 export type RunOpenshell = (
   args: string[],
-  options?: { ignoreError?: boolean; suppressOutput?: boolean; timeout?: number },
+  options?: Record<string, unknown> & {
+    ignoreError?: boolean;
+    suppressOutput?: boolean;
+    timeout?: number;
+  },
 ) => { status: number | null; stdout?: unknown; stderr?: unknown };
 
 export type RunResult = {
@@ -46,6 +50,11 @@ export type UpsertProvider = (
   credentialEnv: any,
   baseUrl: any,
   env?: NodeJS.ProcessEnv,
+  options?: {
+    knownExists?: boolean;
+    requireExactBinding?: boolean;
+    revalidateSandboxIdentity?: (operation: string) => void;
+  },
 ) => UpsertProviderResult;
 
 export type RemoteProviderConfigEntry = {
@@ -85,6 +94,7 @@ export type ClassifyApplyFailure = (message: string) => any;
 
 export type Registry = {
   updateSandbox: typeof import("../../state/registry").updateSandbox;
+  getSandbox?: typeof import("../../state/registry").getSandbox;
 };
 
 export type CommonDeps = {

@@ -7,7 +7,6 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
 import { GATEWAY_STOP_SCRIPT } from "../../../src/lib/tunnel/gateway-stop-script.ts";
-import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-target.mts";
 import { execTimeout, testTimeout } from "../../helpers/timeouts.ts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
@@ -53,10 +52,8 @@ import {
 import { readFullE2eColdWorkloadEvidence } from "./full-e2e-workload-evidence.ts";
 import { runOpenClawLaunchReadinessLeaseTurns } from "./launch-agent-turn.ts";
 import { bindApprovedPrBaseForBaseImageComparison } from "./pr-base-comparison.ts";
-import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-full";
-const OPENCLAW_FABRIC_CONTRACT = readBundledFabricHarnessE2eFixture("openclaw");
 const FULL_E2E_TARGET_ID = process.env.E2E_TARGET_ID ?? "full-e2e";
 const SETUP_MODE = process.env.NEMOCLAW_E2E_SETUP_MODE ?? "source-install";
 const USE_PREINSTALLED_LAUNCHABLE = SETUP_MODE === "preinstalled-launchable";
@@ -131,7 +128,6 @@ async function waitForSandboxStatus(host: HostCliClient): Promise<ShellProbeResu
 }
 
 async function runOpenClawLaunchTurnAfterRecovery(input: {
-  artifacts: ArtifactSink;
   host: HostCliClient;
   redactionValues: string[];
   sandbox: SandboxClient;
@@ -157,18 +153,6 @@ async function runOpenClawLaunchTurnAfterRecovery(input: {
     120_000,
   );
   expect(recovery.exitCode, resultText(recovery)).toBe(0);
-
-  await runPublicFabricTurn({
-    artifacts: input.artifacts,
-    contract: OPENCLAW_FABRIC_CONTRACT,
-    env: env(),
-    host: input.host,
-    lifecyclePhase: "after-gateway-restart",
-    redactionValues: input.redactionValues,
-    sandbox: input.sandbox,
-    sandboxName: SANDBOX_NAME,
-    scanPrivateState: false,
-  });
 
   await runOpenClawLaunchReadinessLeaseTurns({
     artifactName: "phase-4-openclaw-launch-turn",
@@ -441,10 +425,8 @@ test(
         "nemoclaw and openshell are installed and usable",
         "sandbox appears in list/status and has policy/inference configuration",
         "direct hosted inference and sandbox inference.local both respond",
-        "the public agent command completes through the pinned Fabric runner without leaving a child process",
         ...(process.platform === "linux"
           ? [
-              "the public Fabric command succeeds again after supported gateway recovery",
               "each of two PTY launches records two ordered structured turns and restores the mutable config permission contract",
             ]
           : []),
@@ -619,20 +601,8 @@ test(
     expect(finalInferenceAttempt.result.exitCode, sandboxInferenceDiagnostic).toBe(0);
     expect(sandboxInference.outcome, sandboxInferenceDiagnostic).toBe("passed");
 
-    await runPublicFabricTurn({
-      artifacts,
-      contract: OPENCLAW_FABRIC_CONTRACT,
-      env: env(),
-      host,
-      lifecyclePhase: "before-gateway-restart",
-      redactionValues,
-      sandbox,
-      sandboxName: SANDBOX_NAME,
-      scanPrivateState: false,
-    });
-
     await (process.platform === "linux"
-      ? runOpenClawLaunchTurnAfterRecovery({ artifacts, host, redactionValues, sandbox })
+      ? runOpenClawLaunchTurnAfterRecovery({ host, redactionValues, sandbox })
       : Promise.resolve());
 
     progress.phase("inspect runtime logs and security posture");

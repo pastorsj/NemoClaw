@@ -78,8 +78,7 @@ export function getInteractiveAgentCommand(
   const manifestPlan = agent ? planAgentInteractiveCommand(agent) : null;
   if (manifestPlan?.kind === "command") return manifestPlan.command;
   const name = agentName || "openclaw";
-  if (name === "openclaw") return "openclaw tui";
-  if (agent?.name) return agent.name;
+  if (!agent && name === "openclaw") return "openclaw tui";
   throw new Error(
     `Cannot resolve an interactive command for unsupported agent ${JSON.stringify(name)}.`,
   );
@@ -112,9 +111,9 @@ function selfSafeGatewayProcessPattern(command: string): string {
 }
 
 /**
- * Build the legacy SSH recovery shell for custom gateway agents. OpenClaw and
- * Hermes are deliberately excluded: their topology-specific controllers own
- * lifecycle control and must never be raced by a second regex-based launcher.
+ * Build the legacy SSH recovery shell for gateway agents without a
+ * package-managed lifecycle. Managed controllers must never be raced by a
+ * second regex-based launcher.
  */
 export function buildRecoveryScript(
   agent: AgentDefinition & { runtime: { kind: "terminal" } },
@@ -127,7 +126,7 @@ export function buildRecoveryScript(
 ): AgentRecoveryScript {
   if (!agent) return null;
   if (isTerminalAgent(agent)) return TERMINAL_AGENT_RECOVERY_SCRIPT;
-  if (agent.name === "openclaw" || agent.name === "hermes") return null;
+  if (agent.runtime?.process_lifecycle?.support === "managed") return null;
 
   const probeUrl = getRecoveryHealthProbeUrl(agent, port);
   const binaryPath = agent.binary_path || "/usr/local/bin/openclaw";

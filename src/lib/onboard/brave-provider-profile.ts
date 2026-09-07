@@ -49,7 +49,11 @@ export type BraveProviderProfileDeps = {
   exit?: (code?: number) => never;
 };
 
-type TokenDefShape = { providerType?: string; token: string | null };
+type TokenDefShape = {
+  providerType?: string;
+  providerProfilePath?: string;
+  token: string | null;
+};
 
 export function braveProviderProfilePath(root: string): string {
   return webSearchProviderProfilePath(root, "brave");
@@ -67,25 +71,32 @@ export function ensureWebSearchProviderProfiles(
   tokenDefs: readonly TokenDefShape[],
   deps: BraveProviderProfileDeps,
 ): void {
-  const neededProviders = new Set<WebSearchProviderProfileId>();
-  for (const { providerType, token } of tokenDefs) {
+  const neededProfiles = new Map<string, string>();
+  for (const { providerType, providerProfilePath, token } of tokenDefs) {
     if (!token) continue;
-    if (
-      typeof providerType === "string" &&
-      (WEB_SEARCH_PROVIDER_PROFILE_IDS as readonly string[]).includes(providerType)
-    ) {
-      neededProviders.add(providerType as WebSearchProviderProfileId);
+    if (typeof providerType !== "string") continue;
+    const legacyProfile = (WEB_SEARCH_PROVIDER_PROFILE_IDS as readonly string[]).includes(
+      providerType,
+    )
+      ? webSearchProviderProfilePath(deps.root, providerType as WebSearchProviderProfileId)
+      : null;
+    const profilePath = providerProfilePath ?? legacyProfile;
+    if (!profilePath) continue;
+    const existing = neededProfiles.get(providerType);
+    if (existing && existing !== profilePath) {
+      throw new Error(`Web-search provider profile '${providerType}' resolved to multiple files.`);
     }
+    neededProfiles.set(providerType, profilePath);
   }
-  if (neededProviders.size === 0) return;
+  if (neededProfiles.size === 0) return;
 
   const errorLog = deps.log ?? console.error;
   const exit = deps.exit ?? ((code?: number) => process.exit(code));
 
-  for (const provider of neededProviders) {
+  for (const [provider, profilePath] of neededProfiles) {
     let failureStatus = 1;
     const result = registerCheckedInProviderProfile({
-      profilePath: webSearchProviderProfilePath(deps.root, provider),
+      profilePath,
       runOpenshell: (args, options) => {
         const command = deps.runOpenshell(args, options);
         failureStatus =

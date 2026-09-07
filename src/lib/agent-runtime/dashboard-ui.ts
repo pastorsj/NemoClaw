@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isTruthyEnv } from "../hermes-dashboard";
 import type { AgentDefinition } from "../agent/defs";
 
 type ManifestRecordLike = Record<string, unknown>;
@@ -12,6 +11,8 @@ export interface AgentDashboardUi {
   path: string;
   enableEnv: string;
   portEnv: string;
+  internalPort: number;
+  internalPortEnv: string;
   tuiEnv: string | null;
 }
 
@@ -32,6 +33,10 @@ function isValidNonPrivilegedPort(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1024 && value <= 65535;
 }
 
+function isEnabledEnvironmentFlag(value: string | undefined): boolean {
+  return ["1", "true", "yes", "on"].includes(value?.trim().toLowerCase() ?? "");
+}
+
 export function readDashboardUi(record: ManifestRecordLike): AgentDashboardUi | null {
   const dashboardUi = readObject(record, "dashboard_ui");
   if (!dashboardUi) return null;
@@ -47,12 +52,25 @@ export function readDashboardUi(record: ManifestRecordLike): AgentDashboardUi | 
   const rawPath = readString(dashboardUi, "path")?.trim() || "/";
   const enableEnv = readString(dashboardUi, "enable_env")?.trim();
   const portEnv = readString(dashboardUi, "port_env")?.trim();
+  const internalPort = dashboardUi.internal_port;
+  const internalPortEnv = readString(dashboardUi, "internal_port_env")?.trim();
   const tuiEnv = readString(dashboardUi, "tui_env")?.trim() || null;
   if (!enableEnv) {
     throw new Error("Agent manifest field 'dashboard_ui.enable_env' is required");
   }
   if (!portEnv) {
     throw new Error("Agent manifest field 'dashboard_ui.port_env' is required");
+  }
+  if (!isValidNonPrivilegedPort(internalPort)) {
+    throw new Error(
+      "Agent manifest field 'dashboard_ui.internal_port' must be an integer TCP port between 1024 and 65535",
+    );
+  }
+  if (internalPort === port) {
+    throw new Error("Agent manifest field 'dashboard_ui.internal_port' must differ from its port");
+  }
+  if (!internalPortEnv) {
+    throw new Error("Agent manifest field 'dashboard_ui.internal_port_env' is required");
   }
 
   return {
@@ -61,13 +79,15 @@ export function readDashboardUi(record: ManifestRecordLike): AgentDashboardUi | 
     path: rawPath.startsWith("/") ? rawPath : `/${rawPath}`,
     enableEnv,
     portEnv,
+    internalPort,
+    internalPortEnv,
     tuiEnv,
   };
 }
 
 function dashboardUiEnabled(agent: AgentDefinition, env: NodeJS.ProcessEnv): boolean {
   const dashboardUi = agent.dashboardUi;
-  return !!dashboardUi && isTruthyEnv(env[dashboardUi.enableEnv]);
+  return !!dashboardUi && isEnabledEnvironmentFlag(env[dashboardUi.enableEnv]);
 }
 
 function dashboardUiPort(

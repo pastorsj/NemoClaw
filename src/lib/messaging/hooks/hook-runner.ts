@@ -65,6 +65,7 @@ function buildHandlerContext(hook: ChannelHookSpec, context: MessagingHookRunCon
     ...(typeof context.isInteractive === "boolean" ? { isInteractive: context.isInteractive } : {}),
     inputs: context.inputs,
     outputDeclarations: hook.outputs,
+    packageOperation: hook.packageOperation,
   };
 }
 

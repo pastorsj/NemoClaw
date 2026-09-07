@@ -61,7 +61,8 @@ export function buildExportConfig(
           agents: [
             {
               name: "primary",
-              type: "openclaw",
+              type: source.harnessPackage?.id ?? "openclaw",
+              ...(source.harnessPackage ? { package: source.harnessPackage } : {}),
               inference: {
                 routes: [
                   {

@@ -5,3 +5,4 @@
 export { isHermesPortableDisposition } from "../hermes-portable-launch";
 export { ensureLegacyHermesToolBroker } from "../legacy-broker";
 export { prepareLegacyHermesLightSkin } from "../legacy-skin";
+export { settleConnectPackagePairing } from "./package-pairing";

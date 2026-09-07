@@ -3,12 +3,13 @@
 
 import { describe, expect, it } from "vitest";
 
+import { BUILT_IN_CHANNEL_MANIFESTS } from "../../messaging/channels/built-ins";
 import type { ChannelManifest } from "../../messaging/manifest";
 import { listManagedChannelNames } from "./managed-channels";
 
 describe("managed configuration channel names", () => {
   it("derives built-in channel names from the selected agent runtime", () => {
-    expect(listManagedChannelNames("hermes")).toEqual([
+    expect(listManagedChannelNames("hermes", BUILT_IN_CHANNEL_MANIFESTS)).toEqual([
       "telegram",
       "discord",
       "wechat",
@@ -30,5 +31,17 @@ describe("managed configuration channel names", () => {
 
     expect(listManagedChannelNames("future-agent", manifests)).toEqual(["matrix-runtime"]);
     expect(listManagedChannelNames("another-agent", manifests)).toEqual([]);
+  });
+
+  it("does not add ambient channel names for a same-id package profile", () => {
+    const exactPackageManifests = [
+      {
+        id: "matrix",
+        supportedAgents: ["openclaw"],
+        runtime: { openclaw: { channelName: "receipt-matrix" } },
+      },
+    ] as unknown as readonly ChannelManifest[];
+
+    expect(listManagedChannelNames("openclaw", exactPackageManifests)).toEqual(["receipt-matrix"]);
   });
 });

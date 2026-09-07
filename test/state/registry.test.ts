@@ -77,6 +77,199 @@ describe("registry", () => {
     });
   });
 
+  it("stores generic auth on receipt rows and keeps Hermes auth only for legacy rows", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "e".repeat(64),
+    };
+    registry.registerSandbox({
+      name: "receipt",
+      harnessPackage,
+      providerAuthMethod: "api-key",
+      hermesAuthMethod: "oauth",
+    });
+    registry.registerSandbox({
+      name: "migrated-receipt",
+      harnessPackage,
+      hermesAuthMethod: "api_key",
+    });
+    registry.registerSandbox({
+      name: "legacy",
+      providerAuthMethod: "api-key",
+      hermesAuthMethod: "oauth",
+    });
+
+    expect(registry.getSandbox("receipt")).toMatchObject({ providerAuthMethod: "api-key" });
+    expect(registry.getSandbox("receipt").hermesAuthMethod).toBeUndefined();
+    expect(registry.getSandbox("migrated-receipt")).toMatchObject({
+      providerAuthMethod: "api-key",
+    });
+    expect(registry.getSandbox("migrated-receipt").hermesAuthMethod).toBeUndefined();
+    expect(registry.getSandbox("legacy")).toMatchObject({ hermesAuthMethod: "oauth" });
+    expect(registry.getSandbox("legacy").providerAuthMethod).toBeUndefined();
+  });
+
+  it("migrates receipt-backed managed tools without changing no-receipt legacy rows", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: "d".repeat(64),
+    };
+    registry.registerSandbox({
+      name: "receipt",
+      harnessPackage,
+      hermesToolGateways: ["future-search"],
+    });
+    registry.registerSandbox({
+      name: "legacy",
+      hermesToolGateways: ["nous-web"],
+    });
+
+    expect(registry.getSandbox("receipt")).toMatchObject({
+      toolGatewaySelections: ["future-search"],
+    });
+    expect(registry.getSandbox("receipt").hermesToolGateways).toBeUndefined();
+    expect(registry.getSandbox("legacy").toolGatewaySelections).toBeUndefined();
+    expect(registry.getSandbox("legacy").hermesToolGateways).toEqual(["nous-web"]);
+  });
+
+  it("normalizes receipt-backed approval state into the package-neutral field", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "future-harness",
+      packageVersion: "1.0.0-test",
+      contentDigest: "f".repeat(64),
+    };
+    registry.registerSandbox({
+      name: "future",
+      harnessPackage,
+      approvalMode: "thread-opt-in",
+    });
+    registry.registerSandbox({
+      name: "early-poc",
+      harnessPackage,
+      dcodeAutoApprovalMode: "thread-opt-in",
+    });
+
+    expect(registry.getSandbox("future")).toMatchObject({
+      approvalMode: "thread-opt-in",
+    });
+    expect(registry.getSandbox("future")).not.toHaveProperty("dcodeAutoApprovalMode");
+    expect(registry.getSandbox("early-poc")).toMatchObject({
+      approvalMode: "thread-opt-in",
+    });
+    expect(registry.getSandbox("early-poc")).not.toHaveProperty("dcodeAutoApprovalMode");
+  });
+
+  it("preserves the package-specific approval field only for no-receipt legacy rows", () => {
+    registry.registerSandbox({
+      name: "legacy-dcode",
+      dcodeAutoApprovalMode: "thread-opt-in",
+    });
+
+    expect(registry.getSandbox("legacy-dcode")).toMatchObject({
+      dcodeAutoApprovalMode: "thread-opt-in",
+    });
+    expect(registry.getSandbox("legacy-dcode")).not.toHaveProperty("approvalMode");
+  });
+
+  it("round-trips the neutral secondary-forward port", () => {
+    registry.registerSandbox({ name: "future-box", secondaryForwardPort: 9310 });
+
+    expect(registry.getSandbox("future-box").secondaryForwardPort).toBe(9310);
+    const data = JSON.parse(fs.readFileSync(regFile, "utf-8"));
+    expect(data.sandboxes["future-box"].secondaryForwardPort).toBe(9310);
+  });
+
+  it("round-trips receipt-backed dashboard state without a package-specific field", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "future-harness",
+      packageVersion: "1.0.0-test",
+      contentDigest: "f".repeat(64),
+    };
+    const dashboardUi = {
+      enabled: true,
+      publicPort: 9120,
+      internalPort: 19120,
+      tuiEnabled: true,
+    };
+
+    registry.registerSandbox({ name: "future-dashboard", harnessPackage, dashboardUi });
+
+    expect(registry.getSandbox("future-dashboard").dashboardUi).toEqual(dashboardUi);
+    const data = JSON.parse(fs.readFileSync(regFile, "utf-8")).sandboxes["future-dashboard"];
+    expect(data.dashboardUi).toEqual(dashboardUi);
+    expect(JSON.stringify(data)).not.toContain("hermesDashboard");
+  });
+
+  it("fails closed when no-receipt state claims a package dashboard", () => {
+    expect(() =>
+      registry.registerSandbox({
+        name: "legacy-dashboard",
+        dashboardUi: { enabled: false },
+      }),
+    ).toThrow(/no-receipt sandbox with package dashboard state/u);
+  });
+
+  it("migrates an earlier receipt-backed dashboard row without matching its package ID", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "future-harness",
+      packageVersion: "1.0.0-test",
+      contentDigest: "f".repeat(64),
+    };
+
+    registry.registerSandbox({
+      name: "earlier-dashboard",
+      harnessPackage,
+      hermesDashboardEnabled: true,
+      hermesDashboardPort: 9120,
+      hermesDashboardInternalPort: 19120,
+      hermesDashboardTui: true,
+    });
+
+    expect(registry.getSandbox("earlier-dashboard")).toMatchObject({
+      dashboardUi: {
+        enabled: true,
+        publicPort: 9120,
+        internalPort: 19120,
+        tuiEnabled: true,
+      },
+    });
+    expect(registry.getSandbox("earlier-dashboard")).not.toHaveProperty("hermesDashboardEnabled");
+  });
+
+  it("migrates the prior receipt-backed secondary-port field without a harness id branch", () => {
+    fs.mkdirSync(path.dirname(regFile), { recursive: true });
+    fs.writeFileSync(
+      regFile,
+      JSON.stringify({
+        defaultSandbox: "future-box",
+        sandboxes: {
+          "future-box": {
+            name: "future-box",
+            harnessPackage: {
+              kind: "agent-runtime",
+              id: "future-runtime",
+              packageVersion: "1.0.0",
+              contentDigest: "a".repeat(64),
+            },
+            hermesApiPort: 9311,
+          },
+        },
+      }),
+    );
+
+    expect(registry.getSandbox("future-box")).toMatchObject({
+      hermesApiPort: 9311,
+      secondaryForwardPort: 9311,
+    });
+  });
+
   it("round-trips absent, known-empty, populated, and cloned image-plugin provenance", () => {
     const weatherInstall = {
       id: "weather",
@@ -116,6 +309,29 @@ describe("registry", () => {
     expect(data["known-empty-clone"].openclawImagePluginInstalls).toEqual([]);
     expect(data.populated.openclawImagePluginInstalls).toEqual([weatherInstall]);
     expect(data["populated-clone"].openclawImagePluginInstalls).toEqual([weatherInstall]);
+  });
+
+  it("round-trips receipt-backed managed extensions without sharing mutable arrays", () => {
+    const extension = {
+      id: "future-weather",
+      directory: "weather",
+      configPaths: ["/opt/future/weather"],
+    };
+    registry.registerSandbox({ name: "known-empty", managedImageExtensions: [] });
+    registry.registerSandbox({ name: "populated", managedImageExtensions: [extension] });
+    registry.registerSandbox({ ...registry.getSandbox("populated"), name: "clone" });
+
+    expect(registry.getSandbox("known-empty").managedImageExtensions).toEqual([]);
+    expect(registry.getSandbox("populated").managedImageExtensions).toEqual([extension]);
+    expect(registry.getSandbox("clone").managedImageExtensions).toEqual([extension]);
+    expect(registry.getSandbox("populated").managedImageExtensions).not.toBe(
+      registry.getSandbox("clone").managedImageExtensions,
+    );
+    expect(registry.getSandbox("populated").managedImageExtensions[0].configPaths).not.toBe(
+      extension.configPaths,
+    );
+    const data = JSON.parse(fs.readFileSync(regFile, "utf-8")).sandboxes;
+    expect(data.populated.managedImageExtensions).toEqual([extension]);
   });
 
   it("does not invent observability intent for legacy registry rows", () => {

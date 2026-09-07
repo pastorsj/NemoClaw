@@ -11,6 +11,9 @@ import {
 } from "./shared.js";
 
 const SANDBOX_DRIVERS = new Set(["docker", "podman"]);
+const SANDBOX_STARTUP_CONTROLS = new Set(["approval-mode", "observability"]);
+const DOCKER_ULIMIT_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/u;
+const DOCKER_ULIMIT_MAX_VALUE = 1_000_000_000;
 
 function validateDriverMount(value: unknown, index: number): void {
   const field = `sandbox_create.driver_mounts[${String(index)}]`;
@@ -66,13 +69,54 @@ function validateDriverMount(value: unknown, index: number): void {
   }
 }
 
+function validateStartupControls(value: unknown): void {
+  const field = "sandbox_create.startup_controls";
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > SANDBOX_STARTUP_CONTROLS.size ||
+    new Set(value).size !== value.length ||
+    value.some((control) => !SANDBOX_STARTUP_CONTROLS.has(control as string))
+  ) {
+    fail(field, "must contain unique approval-mode or observability entries");
+  }
+}
+
+function validateDockerUlimit(value: unknown, index: number): void {
+  const field = `sandbox_create.docker_ulimits[${String(index)}]`;
+  const limit = requireRecord(value, field);
+  requireKnownFields(
+    limit,
+    new Set(["hard", "name", "soft"]),
+    new Set(["hard", "name", "soft"]),
+    field,
+  );
+  if (typeof limit.name !== "string" || !DOCKER_ULIMIT_NAME_PATTERN.test(limit.name)) {
+    fail(`${field}.name`, "must be a bounded lowercase Docker ulimit name");
+  }
+  if (
+    !Number.isSafeInteger(limit.soft) ||
+    (limit.soft as number) < 0 ||
+    (limit.soft as number) > DOCKER_ULIMIT_MAX_VALUE
+  ) {
+    fail(`${field}.soft`, "must be an integer from 0 through 1000000000");
+  }
+  if (
+    !Number.isSafeInteger(limit.hard) ||
+    (limit.hard as number) < (limit.soft as number) ||
+    (limit.hard as number) > DOCKER_ULIMIT_MAX_VALUE
+  ) {
+    fail(`${field}.hard`, "must be an integer from soft through 1000000000");
+  }
+}
+
 /** Validate finite package contributions to the sandbox-create operation. */
 export function validateHarnessSandboxCreate(manifest: ManifestRecord): void {
   if (manifest.sandbox_create === undefined) return;
   const declaration = requireRecord(manifest.sandbox_create, "sandbox_create");
   requireKnownFields(
     declaration,
-    new Set(["driver_mounts", "generated_image_build"]),
+    new Set(["docker_ulimits", "driver_mounts", "generated_image_build", "startup_controls"]),
     new Set(),
     "sandbox_create",
   );
@@ -82,13 +126,33 @@ export function validateHarnessSandboxCreate(manifest: ManifestRecord): void {
   ) {
     fail("sandbox_create.generated_image_build", "must be local-buildkit-required when present");
   }
-  if (declaration.driver_mounts === undefined) return;
-  if (
-    !Array.isArray(declaration.driver_mounts) ||
-    declaration.driver_mounts.length === 0 ||
-    declaration.driver_mounts.length > 16
-  ) {
-    fail("sandbox_create.driver_mounts", "must contain 1 through 16 mounts");
+  if (declaration.startup_controls !== undefined) {
+    validateStartupControls(declaration.startup_controls);
   }
-  declaration.driver_mounts.forEach(validateDriverMount);
+  if (declaration.driver_mounts !== undefined) {
+    if (
+      !Array.isArray(declaration.driver_mounts) ||
+      declaration.driver_mounts.length === 0 ||
+      declaration.driver_mounts.length > 16
+    ) {
+      fail("sandbox_create.driver_mounts", "must contain 1 through 16 mounts");
+    }
+    declaration.driver_mounts.forEach(validateDriverMount);
+  }
+  if (declaration.docker_ulimits !== undefined) {
+    if (
+      !Array.isArray(declaration.docker_ulimits) ||
+      declaration.docker_ulimits.length === 0 ||
+      declaration.docker_ulimits.length > 16
+    ) {
+      fail("sandbox_create.docker_ulimits", "must contain 1 through 16 limits");
+    }
+    declaration.docker_ulimits.forEach(validateDockerUlimit);
+    const names = declaration.docker_ulimits.map((entry) =>
+      typeof entry === "object" && entry !== null ? (entry as { name?: unknown }).name : undefined,
+    );
+    if (new Set(names).size !== names.length) {
+      fail("sandbox_create.docker_ulimits", "must not contain duplicate limit names");
+    }
+  }
 }

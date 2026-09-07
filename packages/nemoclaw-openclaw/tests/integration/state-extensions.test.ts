@@ -231,7 +231,12 @@ if (cmd.includes("tar --no-same-owner -xf -")) {
   if (result.stderr) fs.writeSync(2, result.stderr);
   process.exit(result.status || 0);
 }
-if (cmd.includes("chown") || cmd.includes("[ -d ")) process.exit(0);
+if (
+  cmd.includes("chown") ||
+  cmd.startsWith("{ [ -d ") ||
+  cmd.startsWith("{ for d ") ||
+  cmd.startsWith("[ -d ")
+) process.exit(0);
 process.exit(0);
 `,
         );

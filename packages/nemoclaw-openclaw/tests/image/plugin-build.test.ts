@@ -166,7 +166,7 @@ it.each([
 
     expect(result.status, result.stderr).toBe(0);
     expect(calls.trim().split("\n")).toEqual([
-      `node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent openclaw --phase ${expectedPhase}`,
+      `node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --profile /usr/local/share/nemoclaw/messaging/runtime-profile.json --agent openclaw --phase ${expectedPhase}`,
     ]);
   } finally {
     fs.rmSync(temporaryDirectory, { recursive: true, force: true });

@@ -231,7 +231,7 @@ function requireCommandSuccess(result: ShellProbeResult, operation: "install" | 
 
 /** Re-list one installed package through the public machine-output boundary. */
 export async function readInstalledHarnessPackage(
-  host: HostCliClient,
+  host: Pick<HostCliClient, "nemoclaw">,
   selectedId: HarnessPackageId,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<HarnessInventoryEvidence> {
@@ -250,7 +250,7 @@ export async function readInstalledHarnessPackage(
 
 /** Install one canonical package, then prove its receipt-backed inventory identity. */
 export async function installHarnessPackage(
-  host: HostCliClient,
+  host: Pick<HostCliClient, "nemoclaw">,
   selectedId: HarnessPackageId,
   environment: NodeJS.ProcessEnv = process.env,
   options: { readonly packageArtifact?: string } = {},

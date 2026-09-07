@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Keep historical OpenClaw protocol selection outside receipt-backed package
- * dispatch. A future package cannot opt into these native protocols through a
- * generic manifest boolean.
+ * Select the historical OpenClaw protocol only for a no-receipt compatibility
+ * row. Receipt-backed packages use runtime.session_qualification instead.
  */
 export function usesOpenClawPairingProtocol(
   recordedAgent: string | null | undefined,

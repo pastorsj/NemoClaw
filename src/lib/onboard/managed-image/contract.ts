@@ -7,6 +7,9 @@ import type {
 } from "@nvidia/nemoclaw-harness-contract";
 import { parseHarnessPackageIdentity } from "../../agent-runtime/package/identity-validation";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
+import { MANAGED_IMAGE_REPOSITORIES } from "./qualified-images";
+
+export { MANAGED_IMAGE_REPOSITORIES } from "./qualified-images";
 
 export const MANAGED_IMAGE_CONTRACT_VERSION = 1 as const;
 export const MANAGED_IMAGE_PLATFORMS = ["linux/amd64", "linux/arm64"] as const;
@@ -55,13 +58,6 @@ export const MANAGED_IMAGE_RUNTIME_IDENTITIES = Object.freeze({
 export function managedImageRuntimeIdentity(agent: ManagedImageAgent): ManagedImageRuntimeIdentity {
   return MANAGED_IMAGE_RUNTIME_IDENTITIES[agent];
 }
-
-export const MANAGED_IMAGE_REPOSITORIES = {
-  openclaw: "ghcr.io/nvidia/nemoclaw/openclaw-sandbox",
-  hermes: "ghcr.io/nvidia/nemoclaw/hermes-sandbox",
-  "langchain-deepagents-code": "ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox",
-  pi: "ghcr.io/nvidia/nemoclaw/pi-sandbox",
-} as const satisfies Record<ManagedImageAgent, string>;
 
 const MANAGED_IMAGE_WORKSPACES = {
   openclaw: { owner: "runtime", mode: "0755" },

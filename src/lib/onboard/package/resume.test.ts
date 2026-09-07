@@ -80,7 +80,11 @@ describe("package-managed onboarding resume", () => {
         routerPort: 4000,
         note: vi.fn(),
       },
-      { clearAgentScopedResumeState, updateSession },
+      {
+        clearAgentScopedResumeState,
+        updateSession,
+        getRegisteredAgent: () => authority.effectiveDefinition,
+      },
     );
 
     expect(authority.effectiveDefinition?.packageRoot).toBe(pinned.packageRoot);

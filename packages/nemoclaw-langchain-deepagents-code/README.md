@@ -7,6 +7,9 @@ This package is the NemoClaw integration layer for the LangChain Deep Agents Cod
 The root files declare the package and image contract. The responsibility directories contain the
 code that implements each stage of that contract.
 
+The typed package boundary described here is a local proof of concept. It does not change the
+existing Deep Agents Code product scope or establish an external package compatibility promise.
+
 ## Package workflow
 
 1. `package.json` and `manifest.yaml` identify Deep Agents Code and declare its data-only capabilities.
@@ -28,7 +31,7 @@ code that implements each stage of that contract.
 | `config/` | Translates NemoClaw inference selections into native Deep Agents Code configuration. |
 | `fabric/` | Selects the released Deep Agents adapter and pins its Fabric dependency graph. |
 | `runtime/` | Contains the sandbox launch chain, runtime guards, installed features, and dependency locks. |
-| `host/` | Contains typed immutable-configuration and MCP adapters plus package identity and image-qualification helpers. |
+| `host/` | Contains typed configuration, MCP, messaging, session, and startup adapters plus package identity and image-qualification helpers. |
 | `compat/` | Records and applies changes tied to the pinned upstream Deep Agents Code version. |
 | `plugin/` | Registers NemoClaw-managed model-profile aliases through the upstream plugin entry point. |
 | `checks/` | Validates the installed plugin, patched runtime, and managed runtime features while the image builds. |
@@ -40,11 +43,19 @@ definitions, startup, and network policy additions.
 
 | Capability | Package file | Current behavior |
 | --- | --- | --- |
-| Runtime configuration | `host/config-adapter.cts` | Returns `immutable`; re-onboarding must materialize a changed configuration. |
-| MCP | `host/mcp-adapter.cts` | Implements the seven fixed MCP operations, including legacy native state rules. |
-| Configuration restore | None | Core retains the current key-allowlist restore behavior. |
+| Command and Fabric | `manifest.runtime` and `fabric/` | Declares interactive, headless, smoke, and selection-qualification commands; Fabric translates headless requests to Deep Agents Code. |
+| Configuration | `host/config-adapter.cts` | Returns `immutable`; re-onboarding must materialize a changed configuration. |
+| Roster | Not declared | Core returns the typed unsupported result for receipt-backed sandboxes. |
+| MCP | `host/mcp-adapter.cts` | Implements all eight fixed MCP operations and the package-native state rules. |
+| Messaging | `host/messaging-adapter.cts` | Returns the typed disabled integration. |
+| Sessions | `host/session-adapter.cts` | Returns the declared empty operation set. |
+| Startup | `host/startup-adapter.cts` | Builds and reconciles the managed-image startup profile. |
+| State and restore | `manifest.state_lifecycle` and `state_files` | Declares backup quiescence and a core-owned key-allowlist restore. No package restore adapter is needed. |
+| Policy and provider profiles | `manifest.policy` and package policy assets | Owns the observability preset and baseline exclusion effects. It declares no provider profiles. |
+| Provider auth, broker, and managed tools | The broker is disabled | Provider authentication and managed tools are not declared. |
+| Dashboard and secondary forward | Not declared | Core does not allocate a package UI or secondary endpoint. |
 
-Only the configuration and MCP files use the generic typed loader.
+The configuration, MCP, messaging, session, and startup files use the generic typed loader.
 `host/managed-identity.cts` and `host/base-qualification.cts` have separate package consumers and
 are not current typed contract operations.
 
@@ -127,3 +138,9 @@ rehearsal builds an exact temporary NemoClaw revision, overlays only this packag
 package command, and verifies
 `nemoclaw harness install langchain-deepagents-code`, the human inventory, and the receipt-verified
 digest from `nemoclaw harness list --json`.
+
+`test:package` is package-only. It proves package adapters, runtime code, checks, and artifacts
+without importing NemoClaw source. The revision-pinned `composed` rehearsal supplies the host
+operating system, runtime provider, hardware, and image-selection behavior from the selected
+NemoClaw commit. Image qualification and focused live tests prove combinations that need real
+OpenShell or external services.

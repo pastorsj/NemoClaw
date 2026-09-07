@@ -4,6 +4,7 @@
 import path from "node:path";
 
 import type { AgentDefinition } from "../agent/defs";
+import { sandboxCreateDockerUlimits } from "../agent-runtime/sandbox-create";
 import type { DockerUlimit } from "./docker-gpu-patch-types";
 import { isPortableExperimentalProfile } from "./experimental/portable-profile";
 
@@ -43,7 +44,17 @@ export function resolveDockerStartupCommandPatch(
     return { persistStartupCommand: false, requiredUlimits: null };
   }
   const agentName = agent?.name ?? "openclaw";
-  const requiredUlimits = agentName === DCODE_AGENT_NAME ? DCODE_DOCKER_ULIMITS : null;
+  const packageOwned = isPackageOwnedAgentDefinition(agent);
+  const packageUlimits = packageOwned ? sandboxCreateDockerUlimits(agent) : [];
+  // The exact DCode branch is a no-receipt compatibility path. Package-backed
+  // definitions declare the same limits in sandbox_create.docker_ulimits.
+  const requiredUlimits = packageOwned
+    ? packageUlimits.length > 0
+      ? packageUlimits
+      : null
+    : agentName === DCODE_AGENT_NAME
+      ? DCODE_DOCKER_ULIMITS
+      : null;
   // The restart-safe recreation discovers the sandbox with docker-driver
   // labels (openshell.ai/managed-by), but the portable profile registers the
   // gateway with the podman driver, whose containers never carry that label —
@@ -54,7 +65,7 @@ export function resolveDockerStartupCommandPatch(
   }
   return {
     persistStartupCommand:
-      isPackageOwnedAgentDefinition(agent) ||
+      packageOwned ||
       agentName === "openclaw" ||
       agentName === "hermes" ||
       agentName === DCODE_AGENT_NAME,

@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type Session, updateSession } from "../state/onboard-session";
-import { inspectHarnessPackageState } from "../agent-runtime/package/identity";
+import { inspectHarnessPackageState } from "../agent-runtime/package/identity-read";
+import { supportsSandboxStartupControl } from "../agent-runtime/sandbox-create";
+import type { AgentDefinition } from "../agent-runtime/manifest-types";
 import { clearAgentScopedResumeState } from "./agent-resume-state";
 import { isDcodeAutoApprovalMode } from "./dcode-auto-approval";
 import { managedSandboxFeatureIssue } from "./managed-sandbox-feature";
 import { stopTrackedModelRouterForAgentChange } from "./model-router-process";
 import { DCODE_OBSERVABILITY_FEATURE } from "./observability-policy-presets";
+import { sandboxObservabilityFeature } from "./managed-startup/startup-controls";
+import { resolvePackageBackedSandboxAgent } from "./package/package-authority";
 import { formatSandboxAgentName, normalizeSandboxAgentName } from "./sandbox-agent/naming";
 import { applyOnboardToolDisclosureRequest } from "./tool-disclosure-flow";
 import type { OnboardOptions } from "./types";
@@ -21,6 +25,9 @@ export {
 export interface RuntimeControlAgentDeps {
   error(message: string): void;
   exitProcess(code: number): never;
+  getRegisteredAgent?: (
+    source: Pick<Session, "agent" | "harnessPackage" | "harnessPackageMigration">,
+  ) => AgentDefinition | null;
 }
 
 export interface SelectedAgentTransitionDeps extends RuntimeControlAgentDeps {
@@ -28,6 +35,18 @@ export interface SelectedAgentTransitionDeps extends RuntimeControlAgentDeps {
   stopTrackedModelRouterForAgentChange(session: Session, routerPort: number): Promise<void>;
   clearAgentScopedResumeState(session: Session, selectedAgentName: string): Session;
   updateSession(mutator: (session: Session) => Session | void): Session;
+}
+
+function sessionPackageAuthorityEntry(
+  session: Pick<Session, "agent" | "harnessPackage" | "harnessPackageMigration">,
+) {
+  return {
+    agent: session.agent,
+    ...(session.harnessPackage == null ? {} : { harnessPackage: session.harnessPackage }),
+    ...(session.harnessPackageMigration == null
+      ? {}
+      : { harnessPackageMigration: session.harnessPackageMigration }),
+  };
 }
 
 type SelectedAgentTransitionOverrides = Partial<Omit<SelectedAgentTransitionDeps, "note">>;
@@ -68,13 +87,42 @@ export function updateSessionAgent(
 }
 
 export function validateSessionAgentObservability(
-  session: Pick<Session, "observabilityEnabled"> | null,
+  session: Pick<
+    Session,
+    "agent" | "harnessPackage" | "harnessPackageMigration" | "observabilityEnabled"
+  > | null,
   agentName: string | null | undefined,
   deps: RuntimeControlAgentDeps = {
     error: console.error,
     exitProcess: (code) => process.exit(code),
   },
 ): void {
+  if (session && (session.harnessPackage != null || session.harnessPackageMigration != null)) {
+    let agent: AgentDefinition | null;
+    try {
+      agent = deps.getRegisteredAgent
+        ? deps.getRegisteredAgent(session)
+        : resolvePackageBackedSandboxAgent(sessionPackageAuthorityEntry(session)).definition;
+    } catch {
+      throw new Error("Session harness package authority is malformed");
+    }
+    const feature = sandboxObservabilityFeature(
+      supportsSandboxStartupControl(agent, "observability"),
+    );
+    if (
+      managedSandboxFeatureIssue(feature, {
+        agent: agentName,
+        sessionValue: session?.observabilityEnabled,
+      }) === "recorded-state-on-unsupported-agent"
+    ) {
+      deps.error(
+        "  Recorded observability belongs to a harness package that declares the observability startup control. Pass --no-observability explicitly before changing packages.",
+      );
+      deps.exitProcess(1);
+    }
+    return;
+  }
+  // Exact DCode recognition is limited to the explicit no-receipt compatibility lane.
   if (
     managedSandboxFeatureIssue(DCODE_OBSERVABILITY_FEATURE, {
       agent: agentName,

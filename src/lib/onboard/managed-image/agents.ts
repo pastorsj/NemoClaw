@@ -9,6 +9,7 @@ export {
   MANAGED_IMAGE_AGENTS,
   MANAGED_IMAGE_RUNTIME_IDENTITIES,
   managedImageRuntimeIdentity,
+  qualifiedManagedImageDeclaration,
   SHIPPED_MANAGED_IMAGE_AGENTS,
   type CandidateManagedImageAgent,
   type ManagedImageAgent,
