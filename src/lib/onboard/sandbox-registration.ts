@@ -25,6 +25,7 @@ import { type WebSearchConfig, webSearchProviderForConfig } from "../inference/w
 import * as onboardSession from "../state/onboard-session";
 import type { OpenClawImagePluginInstall } from "../state/openclaw-plugin-restore";
 import type { SandboxEntry, SandboxMcpState, SandboxMessagingState } from "../state/registry";
+import type { SandboxProviderOwnershipReceipt } from "../state/registry/types";
 import * as registry from "../state/registry";
 import {
   cloneSandboxHostLocalInferenceProvenance,
@@ -141,6 +142,50 @@ function registrationAuthorityError(detail: string): Error {
   return new Error(`Cannot publish sandbox registration: ${detail}`);
 }
 
+function selectedPackageWebSearchBinding(
+  agent: AgentDefinition | null | undefined,
+  provider: "brave" | "tavily",
+) {
+  return agent?.web_search?.support === "providers"
+    ? (agent.web_search.providers.find((binding) => binding.provider === provider) ?? null)
+    : null;
+}
+
+function buildWebSearchProviderOwnership(
+  input: CreatedSandboxRegistryEntryInput,
+  session: onboardSession.Session | null,
+): SandboxProviderOwnershipReceipt | undefined {
+  if (!session?.harnessPackage || input.webSearchEnabled !== true) return undefined;
+  const provider = input.webSearchProvider ?? "brave";
+  const expectedName = `${input.sandboxName}-${provider}-search`;
+  const binding = selectedPackageWebSearchBinding(input.agent, provider);
+  const receipt = session.stagedCredentialProviderReceipts?.find(
+    (candidate) => candidate.providerName === expectedName,
+  );
+  if (
+    session.sandboxName !== input.sandboxName ||
+    session.harnessPackage.id !== input.agent?.name ||
+    !binding ||
+    !receipt
+  ) {
+    throw new RuntimeProviderSelectionError(
+      "Sandbox web-search provider is missing exact package and stable identity authority.",
+    );
+  }
+  return Object.freeze({
+    schemaVersion: 1,
+    purpose: "web-search",
+    providerName: expectedName,
+    providerId: receipt.providerId,
+    providerType: binding.profile_type,
+    credentialEnv: binding.credential_env,
+    createdByNemoClaw: receipt.createdByNemoClaw,
+    // A final created-sandbox row is published only after OpenShell created
+    // this sandbox with the selected provider attachment.
+    attachmentAddedByNemoClaw: true,
+  });
+}
+
 function requireMatchingPackageIdentity(
   detail: string,
   expected: HarnessPackageIdentity,
@@ -160,6 +205,44 @@ function requireAbsentPackageAuthority(
     Object.prototype.hasOwnProperty.call(value, "harnessPackageMigration")
   ) {
     throw registrationAuthorityError(detail);
+  }
+}
+
+function assertFinalWebSearchProviderOwnership(
+  requestedEntry: SandboxEntry,
+  session: onboardSession.Session,
+  installed: harnessPackageStore.InstalledHarnessPackage,
+  agent: AgentDefinition | null | undefined,
+): void {
+  const receipt = registry.normalizeWebSearchProviderOwnership(requestedEntry);
+  if (requestedEntry.webSearchEnabled !== true) {
+    if (receipt !== undefined || requestedEntry.webSearchProviderOwnership !== undefined) {
+      throw registrationAuthorityError("web-search provider ownership is orphaned");
+    }
+    return;
+  }
+  const provider = requestedEntry.webSearchProvider;
+  if ((provider !== "brave" && provider !== "tavily") || !receipt) {
+    throw registrationAuthorityError("enabled web search has no stable provider ownership");
+  }
+  const binding = selectedPackageWebSearchBinding(agent, provider);
+  const staged = session.stagedCredentialProviderReceipts?.find(
+    (candidate) => candidate.providerName === receipt.providerName,
+  );
+  if (
+    !binding ||
+    !isDeepStrictEqual(installed.packageManifest.manifest.web_search, agent?.web_search) ||
+    receipt.providerName !== `${requestedEntry.name}-${provider}-search` ||
+    receipt.providerType !== binding.profile_type ||
+    receipt.credentialEnv !== binding.credential_env ||
+    receipt.attachmentAddedByNemoClaw !== true ||
+    !staged ||
+    staged.providerId !== receipt.providerId ||
+    staged.createdByNemoClaw !== receipt.createdByNemoClaw
+  ) {
+    throw registrationAuthorityError(
+      "web-search provider ownership changed from its pinned package binding",
+    );
   }
 }
 
@@ -208,6 +291,9 @@ function assertFinalHarnessPackageAuthority(
       Object.prototype.hasOwnProperty.call(verifiedCreate.checkpoint, "harnessPackage")
     ) {
       throw registrationAuthorityError("qualified-agent package absence changed");
+    }
+    if (requestedEntry.webSearchProviderOwnership !== undefined) {
+      throw registrationAuthorityError("candidate registration fabricated provider ownership");
     }
     requireAbsentPackageAuthority(
       "the route reservation fabricated candidate package authority",
@@ -288,6 +374,7 @@ function assertFinalHarnessPackageAuthority(
     expected,
     pinned.identity,
   );
+  assertFinalWebSearchProviderOwnership(requestedEntry, session, pinned, input.agent);
   return routeAuthority;
 }
 
@@ -414,6 +501,7 @@ export function buildCreatedSandboxRegistryEntry(
     input.agentVersionKnown,
     session?.harnessPackage != null,
   );
+  const webSearchProviderOwnership = buildWebSearchProviderOwnership(input, session);
   const secondaryForwardPort = input.secondaryForwardPort;
   if (secondaryForwardPort != null) {
     const allocation = input.agent?.healthProbe?.secondary_forward;
@@ -484,6 +572,7 @@ export function buildCreatedSandboxRegistryEntry(
     webSearchEnabled: input.webSearchEnabled === true,
     webSearchProvider:
       input.webSearchEnabled === true ? (input.webSearchProvider ?? "brave") : null,
+    ...(webSearchProviderOwnership ? { webSearchProviderOwnership } : {}),
     fromDockerfile: input.fromDockerfile ?? null,
     providerAuthMethod: input.providerAuthMethod ?? null,
     hermesAuthMethod: input.hermesAuthMethod ?? null,

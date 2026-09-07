@@ -132,6 +132,8 @@ describe("gateway provider metadata", () => {
 
   it("parses one complete ANSI-decorated provider identity", () => {
     expect(parseGatewayProviderMetadata(COMPLETE_OUTPUT)).toEqual({
+      id: "2ca3b7c7-eff4-4399-af5a-13c4984d7343",
+      resourceVersion: 1,
       name: "compatible-endpoint",
       type: "openai",
       credentialKeys: ["COMPATIBLE_API_KEY"],
@@ -191,8 +193,10 @@ describe("gateway provider metadata", () => {
     );
     expect(runOpenshell).toHaveBeenCalledWith(["provider", "get", "compatible-endpoint"], {
       ignoreError: true,
+      maxBuffer: 64 * 1024,
       suppressOutput: true,
       stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
     });
   });
 
@@ -206,10 +210,21 @@ describe("gateway provider metadata", () => {
       ["provider", "get", "-g", "nemoclaw-9090", "compatible-endpoint"],
       {
         ignoreError: true,
+        maxBuffer: 64 * 1024,
         suppressOutput: true,
         stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5_000,
       },
     );
+  });
+
+  it("bounds metadata readback and treats a probe timeout as unavailable", () => {
+    const runOpenshell = vi.fn((_args, options) => {
+      expect(options).toMatchObject({ maxBuffer: 64 * 1024, timeout: 5_000 });
+      throw new Error("probe timed out");
+    });
+
+    expect(readGatewayProviderMetadata("compatible-endpoint", runOpenshell)).toBeNull();
   });
 
   it("accepts providers with no credential or config bindings", () => {

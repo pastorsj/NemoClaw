@@ -641,7 +641,13 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
         },
       ],
       "nemoclaw",
-      { bestEffort: true, requireExactBindings: true },
+      {
+        bestEffort: true,
+        deferCreatedProviderCleanup: true,
+        recordMutationReceipt: expect.any(Function),
+        requireExactBindings: true,
+        revalidateSandboxIdentity: expect.any(Function),
+      },
     );
   });
 

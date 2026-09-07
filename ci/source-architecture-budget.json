@@ -28,7 +28,7 @@
       "src/lib/onboard/gateway-binding.ts": 54,
       "src/lib/onboard/sandbox-agent.ts": 18,
       "src/lib/runner.ts": 79,
-      "src/lib/security/redact.ts": 50,
+      "src/lib/security/redact.ts": 49,
       "src/lib/state/onboard-session.ts": 38,
       "src/lib/state/mcp-lifecycle-lock.ts": 21,
       "src/lib/state/mcp-lifecycle-lock-acquisition.ts": 20,

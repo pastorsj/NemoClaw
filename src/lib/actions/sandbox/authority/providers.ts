@@ -12,19 +12,15 @@ import { isValidCliOpenShellProviderIdentifier } from "../../../adapters/openshe
 import {
   inspectGatewayCredentialFamilyProviderBinding,
   inspectGatewayCredentialOnlyProviderBinding,
+  readGatewayProviderMetadata,
   type GatewayCredentialOnlyProviderInspection,
 } from "../../../onboard/gateway-provider-metadata";
 import {
   loadHarnessMessagingIntegration,
   type HarnessMessagingIntegration,
 } from "../../../agent-runtime/messaging-module";
-import { resolvePinnedHarnessPackage } from "../../../agent-runtime/package/pinned";
-import type { HarnessPackageStoreOptions } from "../../../agent-runtime/package/store";
 import type { HarnessPackageIdentity } from "../../../agent-runtime/package/types";
-import {
-  packageWebSearchProviderBinding,
-  readWebSearchCapability,
-} from "../../../agent-runtime/web-search";
+import { resolvePinnedPackageWebSearchProviderBinding } from "../../../agent-runtime/provider-profile";
 import { listMessagingCredentialMetadata } from "../../../messaging/channels/metadata";
 import { createBuiltInChannelManifestRegistry } from "../../../messaging/channels/built-ins";
 import type {
@@ -41,13 +37,18 @@ import {
   type ProviderDeleteWithRecoveryResult,
   type SandboxProviderRunOpenshell,
 } from "../../../onboard/sandbox-provider-cleanup";
-import type { SandboxEntry } from "../../../state/registry";
+import { normalizeWebSearchProviderOwnership } from "../../../state/registry-normalization";
+import type { SandboxEntry } from "../../../state/registry/types";
 
 type ProviderCredentialShape = "family" | "only";
 
 export interface ReceiptOwnedProviderBinding {
+  readonly channelId: string;
   readonly credentialKey: string;
   readonly credentialShape: ProviderCredentialShape;
+  readonly providerId: string;
+  readonly createdByNemoClaw: boolean;
+  readonly attachmentAddedByNemoClaw: boolean;
   readonly name: string;
   readonly type: string;
 }
@@ -62,6 +63,7 @@ interface ReceiptProviderAuthoritySnapshot {
   readonly pendingCreateIdentity: SandboxEntry["pendingCreateIdentity"];
   readonly webSearchEnabled: SandboxEntry["webSearchEnabled"];
   readonly webSearchProvider: SandboxEntry["webSearchProvider"];
+  readonly webSearchProviderOwnership: SandboxEntry["webSearchProviderOwnership"];
 }
 
 export interface PreparedReceiptProviderCleanup {
@@ -70,19 +72,18 @@ export interface PreparedReceiptProviderCleanup {
   readonly snapshot: ReceiptProviderAuthoritySnapshot;
 }
 
-type LoadWebSearchBinding = (
-  identity: HarnessPackageIdentity,
-  provider: "brave" | "tavily",
-  options: HarnessPackageStoreOptions,
-) => HarnessWebSearchProviderBinding | null;
-
-export interface ReceiptProviderCleanupDeps extends HarnessPackageStoreOptions {
+export interface ReceiptProviderCleanupDeps {
+  readonly storeRoot?: string;
   readonly deleteProvider?: typeof deleteProviderWithRecovery;
   readonly getSandbox: (sandboxName: string) => SandboxEntry | null;
   readonly inspectCredentialFamily?: typeof inspectGatewayCredentialFamilyProviderBinding;
   readonly inspectCredentialOnly?: typeof inspectGatewayCredentialOnlyProviderBinding;
+  readonly inspectProviderMetadata?: typeof readGatewayProviderMetadata;
   readonly loadMessagingIntegration?: typeof loadHarnessMessagingIntegration;
-  readonly loadWebSearchBinding?: LoadWebSearchBinding;
+  readonly loadWebSearchProviderBinding?: (
+    identity: HarnessPackageIdentity,
+    provider: "brave" | "tavily",
+  ) => HarnessWebSearchProviderBinding | null;
   readonly runOpenshell: SandboxProviderRunOpenshell;
 }
 
@@ -148,7 +149,7 @@ function messagingBindings(
     ]),
   );
 
-  return plan.credentialBindings.map((binding) => {
+  const declaredBindings = plan.credentialBindings.map((binding) => {
     const plannedChannel = plannedChannels.get(binding.channelId);
     const declaredChannel = declaredChannels.get(binding.channelId);
     const coreCredential = coreCredentials.get(`${binding.channelId}\0${binding.credentialId}`);
@@ -179,50 +180,139 @@ function messagingBindings(
       throw authorityError("a persisted messaging credential disagrees with its package binding.");
     }
     return Object.freeze({
+      channelId: binding.channelId,
       name: requireProviderName(sandboxName, binding.providerName),
       type: packageProvider?.profileId ?? MESSAGING_CREDENTIAL_PROVIDER_TYPE,
       credentialKey: requireCredentialKey(binding.providerEnvKey),
       credentialShape: packageProvider?.refresh ? "family" : "only",
     });
   });
+  for (const channel of plan.channels) {
+    const declaredChannel = declaredChannels.get(channel.channelId);
+    const provider = channel.credentialProvider;
+    requirePackageCredentialAgreement(provider, declaredChannel?.credentialProvider);
+    if (!provider?.refresh) continue;
+    declaredBindings.push(
+      Object.freeze({
+        channelId: channel.channelId,
+        name: requireProviderName(sandboxName, `${sandboxName}-${channel.channelId}-bridge`),
+        type: provider.profileId,
+        credentialKey: requireCredentialKey(provider.credentialEnv),
+        credentialShape: "family" as const,
+      }),
+    );
+  }
+  const uniqueDeclared = requireUniqueDeclaredBindings(declaredBindings);
+  const receipts = plan.providerReceipts ?? [];
+  const receiptKeys = new Set(
+    receipts.map((receipt) => `${receipt.channelId}\0${receipt.providerName}`),
+  );
+  const bindings = uniqueDeclared.map((binding) => {
+    const receipt = receipts.find(
+      (candidate) =>
+        candidate.channelId === binding.channelId && candidate.providerName === binding.name,
+    );
+    if (!receipt) {
+      throw authorityError(`provider '${binding.name}' has no stable ownership receipt.`);
+    }
+    return Object.freeze({
+      ...binding,
+      providerId: receipt.providerId,
+      createdByNemoClaw: receipt.createdByNemoClaw,
+      attachmentAddedByNemoClaw: receipt.attachmentAddedByNemoClaw,
+    });
+  });
+  if (
+    receipts.some(
+      (receipt) =>
+        !uniqueDeclared.some(
+          (binding) =>
+            binding.channelId === receipt.channelId && binding.name === receipt.providerName,
+        ),
+    ) ||
+    receiptKeys.size !== receipts.length
+  ) {
+    throw authorityError("the persisted provider receipt has no package-approved binding.");
+  }
+  return bindings;
 }
 
-function defaultLoadWebSearchBinding(
+function loadPinnedWebSearchProviderBinding(
   identity: HarnessPackageIdentity,
   provider: "brave" | "tavily",
-  options: HarnessPackageStoreOptions,
-): HarnessWebSearchProviderBinding | null {
-  const installed = resolvePinnedHarnessPackage(identity, options);
-  const capability = readWebSearchCapability(installed.packageManifest.manifest);
-  return packageWebSearchProviderBinding({ web_search: capability }, provider);
-}
-
-function webSearchBindings(
-  sandboxName: string,
-  sandbox: SandboxEntry,
   deps: ReceiptProviderCleanupDeps,
-): ReceiptOwnedProviderBinding[] {
-  if (sandbox.webSearchEnabled !== true) return [];
-  const provider = sandbox.webSearchProvider;
-  if (provider !== "brave" && provider !== "tavily") {
-    throw authorityError("enabled web search has no exact provider receipt.");
-  }
-  const binding = (deps.loadWebSearchBinding ?? defaultLoadWebSearchBinding)(
-    sandbox.harnessPackage!,
+): HarnessWebSearchProviderBinding | null {
+  return resolvePinnedPackageWebSearchProviderBinding(
+    identity,
     provider,
     deps.storeRoot === undefined ? {} : { storeRoot: deps.storeRoot },
   );
-  if (!binding || binding.provider !== provider) {
-    throw authorityError("the selected web-search provider is not declared by its package.");
+}
+
+function webSearchBindings(
+  sandbox: SandboxEntry,
+  deps: ReceiptProviderCleanupDeps,
+): ReceiptOwnedProviderBinding[] {
+  if (sandbox.webSearchEnabled !== true) {
+    if (sandbox.webSearchProviderOwnership !== undefined) {
+      throw authorityError("a web-search provider receipt is orphaned.");
+    }
+    return [];
+  }
+  if (
+    !sandbox.harnessPackage ||
+    (sandbox.webSearchProvider !== "brave" && sandbox.webSearchProvider !== "tavily")
+  ) {
+    throw authorityError("enabled web search has no package-approved provider.");
+  }
+  const receipt = normalizeWebSearchProviderOwnership(sandbox);
+  if (!receipt) {
+    throw authorityError("enabled web search has no stable ownership receipt.");
+  }
+  const binding = (
+    deps.loadWebSearchProviderBinding ??
+    ((identity, provider) => loadPinnedWebSearchProviderBinding(identity, provider, deps))
+  )(sandbox.harnessPackage, sandbox.webSearchProvider);
+  if (
+    !binding ||
+    receipt.providerType !== binding.profile_type ||
+    receipt.credentialEnv !== binding.credential_env
+  ) {
+    throw authorityError(
+      "the persisted web-search provider disagrees with its package declaration.",
+    );
   }
   return [
     Object.freeze({
-      name: requireProviderName(sandboxName, `${sandboxName}-${provider}-search`),
+      channelId: "web-search",
+      name: requireProviderName(sandbox.name, receipt.providerName),
       type: binding.profile_type,
       credentialKey: requireCredentialKey(binding.credential_env),
       credentialShape: "only" as const,
+      providerId: receipt.providerId,
+      createdByNemoClaw: receipt.createdByNemoClaw,
+      attachmentAddedByNemoClaw: receipt.attachmentAddedByNemoClaw,
     }),
   ];
+}
+
+type DeclaredProviderBinding = Omit<
+  ReceiptOwnedProviderBinding,
+  "providerId" | "createdByNemoClaw" | "attachmentAddedByNemoClaw"
+>;
+
+function requireUniqueDeclaredBindings(
+  bindings: readonly DeclaredProviderBinding[],
+): readonly DeclaredProviderBinding[] {
+  const byName = new Map<string, DeclaredProviderBinding>();
+  for (const binding of bindings) {
+    const existing = byName.get(binding.name);
+    if (existing && !isDeepStrictEqual(existing, binding)) {
+      throw authorityError(`provider '${binding.name}' has conflicting persisted bindings.`);
+    }
+    byName.set(binding.name, binding);
+  }
+  return Object.freeze([...byName.values()].map((binding) => Object.freeze({ ...binding })));
 }
 
 function requireUniqueBindings(
@@ -262,12 +352,22 @@ function inspectProviderBinding(
 function requireSafeProviderInspection(
   binding: ReceiptOwnedProviderBinding,
   inspection: GatewayCredentialOnlyProviderInspection,
+  deps: ReceiptProviderCleanupDeps,
 ): "exact" | "missing" {
   if (inspection.kind === "collision") {
     throw authorityError(`provider '${binding.name}' does not match its persisted binding.`);
   }
   if (inspection.kind === "indeterminate") {
     throw authorityError(`provider '${binding.name}' could not be inspected.`);
+  }
+  if (inspection.kind === "exact") {
+    const metadata = (deps.inspectProviderMetadata ?? readGatewayProviderMetadata)(
+      binding.name,
+      deps.runOpenshell,
+    );
+    if (!metadata?.id || metadata.id !== binding.providerId) {
+      throw authorityError(`provider '${binding.name}' changed from its recorded stable identity.`);
+    }
   }
   return inspection.kind;
 }
@@ -286,6 +386,10 @@ function snapshotProviderAuthority(sandbox: SandboxEntry): ReceiptProviderAuthor
         : structuredClone(sandbox.pendingCreateIdentity),
     webSearchEnabled: sandbox.webSearchEnabled,
     webSearchProvider: sandbox.webSearchProvider,
+    webSearchProviderOwnership:
+      sandbox.webSearchProviderOwnership === undefined
+        ? undefined
+        : structuredClone(sandbox.webSearchProviderOwnership),
   });
 }
 
@@ -336,12 +440,9 @@ export function prepareReceiptProviderCleanup(
     }
     messaging = messagingBindings(sandboxName, integration, plan);
   }
-  const bindings = requireUniqueBindings([
-    ...messaging,
-    ...webSearchBindings(sandboxName, sandbox, deps),
-  ]);
+  const bindings = requireUniqueBindings([...messaging, ...webSearchBindings(sandbox, deps)]);
   for (const binding of bindings) {
-    requireSafeProviderInspection(binding, inspectProviderBinding(binding, deps));
+    requireSafeProviderInspection(binding, inspectProviderBinding(binding, deps), deps);
   }
   return Object.freeze({
     sandboxName,
@@ -357,9 +458,11 @@ export function detachPreparedReceiptProviders(
 ): DetachSandboxProvidersResult {
   const detached: string[] = [];
   for (const binding of prepared.bindings) {
+    if (!binding.attachmentAddedByNemoClaw) continue;
     requireCurrentProviderAuthority(prepared, deps);
     if (
-      requireSafeProviderInspection(binding, inspectProviderBinding(binding, deps)) === "missing"
+      requireSafeProviderInspection(binding, inspectProviderBinding(binding, deps), deps) ===
+      "missing"
     ) {
       continue;
     }
@@ -370,7 +473,7 @@ export function detachPreparedReceiptProviders(
       throw authorityError(`provider '${binding.name}' could not be detached.`);
     }
     requireCurrentProviderAuthority(prepared, deps);
-    requireSafeProviderInspection(binding, inspectProviderBinding(binding, deps));
+    requireSafeProviderInspection(binding, inspectProviderBinding(binding, deps), deps);
     detached.push(...result.detached);
   }
   return { detached, failures: [] };
@@ -382,9 +485,11 @@ export function removePreparedReceiptProviders(
   deps: ReceiptProviderCleanupDeps,
 ): void {
   for (const binding of prepared.bindings) {
+    if (!binding.createdByNemoClaw) continue;
     requireCurrentProviderAuthority(prepared, deps);
     if (
-      requireSafeProviderInspection(binding, inspectProviderBinding(binding, deps)) === "missing"
+      requireSafeProviderInspection(binding, inspectProviderBinding(binding, deps), deps) ===
+      "missing"
     ) {
       continue;
     }
@@ -399,7 +504,8 @@ export function removePreparedReceiptProviders(
     }
     requireCurrentProviderAuthority(prepared, deps);
     if (
-      requireSafeProviderInspection(binding, inspectProviderBinding(binding, deps)) !== "missing"
+      requireSafeProviderInspection(binding, inspectProviderBinding(binding, deps), deps) !==
+      "missing"
     ) {
       throw authorityError(`provider '${binding.name}' deletion was not confirmed.`);
     }

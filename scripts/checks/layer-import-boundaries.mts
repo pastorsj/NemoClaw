@@ -30,6 +30,7 @@ type AgentRuntimePackageDependency = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SRC_ROOT = path.join(REPO_ROOT, "src");
 const PACKAGES_ROOT = path.join(REPO_ROOT, "packages");
+const INSTALLER_PATH = path.join(REPO_ROOT, "scripts/install.sh");
 const SKIP_DIRS = new Set([".git", "coverage", "dist", "node_modules"]);
 const LEGACY_AGENT_RUNTIME_PACKAGE_IMPORTS = new Map<string, number>();
 const PROVIDER_NEUTRAL_MANAGED_RUNTIME_MODULES = [
@@ -97,6 +98,41 @@ const PACKAGE_RECEIPT_SELECTOR_FUNCTIONS = new Set([
   "buildHarnessProviderBrokerPlan",
   "describeHarnessProviderBroker",
   "runHarnessProviderBrokerController",
+]);
+const RECEIPT_NEUTRAL_INSTALLER_FUNCTIONS = new Set([
+  "validate_deferred_onboarding_request",
+  "should_defer_onboarding",
+  "resolve_onboard_forward_recovery_intent",
+  "restore_onboard_forward_after_post_checks",
+]);
+const INSTALLER_LEGACY_SELECTOR_ALLOWANCES = new Map<string, ReadonlyMap<string, number>>([
+  [
+    "agent_display_name",
+    new Map([
+      ["hermes", 1],
+      ["langchain-deepagents-code", 1],
+      ["openclaw", 1],
+    ]),
+  ],
+  [
+    "resolve_default_sandbox_name",
+    new Map([
+      ["hermes", 1],
+      ["langchain-deepagents-code", 1],
+    ]),
+  ],
+  ["resolve_legacy_onboard_forward_recovery_intent", new Map([["hermes", 1]])],
+]);
+const INSTALLER_LEGACY_AGENT_SELECTOR_COUNTS = new Map([["resolve_default_sandbox_name", 1]]);
+const INSTALLER_CONTRACT_LITERALS = new Set([
+  "agent-runtime",
+  "legacy",
+  "null",
+  "none",
+  "object",
+  "receipt",
+  "string",
+  "utf8",
 ]);
 
 type ReceiptHarnessDecisionKind = "equality" | "lookup" | "membership" | "switch-case";
@@ -1083,6 +1119,389 @@ export function findLayerImportBoundaryViolations(
   return violations;
 }
 
+type ShellFunctionDefinition = {
+  name: string;
+  startLine: number;
+  closed: boolean;
+  lines: readonly string[];
+};
+
+type ShellHeredoc = { delimiter: string; stripTabs: boolean };
+
+type ShellQuote = "single" | "double" | undefined;
+
+type ShellCommandSubstitution = {
+  kind: "backtick" | "dollar-paren";
+  parenDepth: number;
+  returnQuote: ShellQuote;
+};
+
+function shellHeredocAt(line: string, offset: number): ShellHeredoc | undefined {
+  const match = /^<<(-)?[ \t]*((?:\\.|'[^']*'|"(?:\\.|[^"])*"|[^ \t;&|()<>])+)/u.exec(
+    line.slice(offset),
+  );
+  if (!match) return undefined;
+  const rawDelimiter = match[2];
+  let delimiter = "";
+  for (let index = 0; index < rawDelimiter.length; index += 1) {
+    const character = rawDelimiter[index];
+    if (character === "\\") {
+      index += 1;
+      if (index >= rawDelimiter.length) return undefined;
+      delimiter += rawDelimiter[index];
+      continue;
+    }
+    if (character === "'") {
+      const end = rawDelimiter.indexOf("'", index + 1);
+      if (end < 0) return undefined;
+      delimiter += rawDelimiter.slice(index + 1, end);
+      index = end;
+      continue;
+    }
+    if (character === '"') {
+      const end = rawDelimiter.indexOf('"', index + 1);
+      if (end < 0) return undefined;
+      delimiter += rawDelimiter.slice(index + 1, end).replace(/\\(.)/gu, "$1");
+      index = end;
+      continue;
+    }
+    delimiter += character;
+  }
+  return { delimiter, stripTabs: match[1] === "-" };
+}
+
+function findShellFunctionEnd(
+  lines: readonly string[],
+  startLine: number,
+  openingBrace: number,
+): number | undefined {
+  let depth = 0;
+  let quote: ShellQuote;
+  let parameterDepth = 0;
+  const heredocs: ShellHeredoc[] = [];
+  const commandSubstitutions: ShellCommandSubstitution[] = [];
+
+  for (let lineIndex = startLine; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    if (heredocs.length > 0) {
+      const current = heredocs[0];
+      const candidate = current.stripTabs ? line.replace(/^\t+/u, "") : line;
+      if (candidate === current.delimiter) heredocs.shift();
+      continue;
+    }
+
+    for (
+      let offset = lineIndex === startLine ? openingBrace : 0;
+      offset < line.length;
+      offset += 1
+    ) {
+      const character = line[offset];
+      const next = line[offset + 1];
+      if (quote === "single") {
+        if (character === "'") quote = undefined;
+        continue;
+      }
+      if (character === "\\") {
+        offset += 1;
+        continue;
+      }
+      if (character === "$" && next === "(") {
+        commandSubstitutions.push({ kind: "dollar-paren", parenDepth: 1, returnQuote: quote });
+        quote = undefined;
+        offset += 1;
+        continue;
+      }
+      if (character === "`") {
+        const current = commandSubstitutions.at(-1);
+        if (current?.kind === "backtick") {
+          commandSubstitutions.pop();
+          quote = current.returnQuote;
+        } else {
+          commandSubstitutions.push({ kind: "backtick", parenDepth: 0, returnQuote: quote });
+          quote = undefined;
+        }
+        continue;
+      }
+      if (quote === "double") {
+        if (character === '"') quote = undefined;
+        continue;
+      }
+      if (character === "#" && (offset === 0 || /[ \t;]/u.test(line[offset - 1]))) break;
+      if (character === "'") {
+        quote = "single";
+        continue;
+      }
+      if (character === '"') {
+        quote = "double";
+        continue;
+      }
+      if (character === "<" && next === "<") {
+        if (line[offset - 1] === "<" || line[offset + 2] === "<") continue;
+        const heredoc = shellHeredocAt(line, offset);
+        if (!heredoc) return undefined;
+        heredocs.push(heredoc);
+        continue;
+      }
+      if (character === "$" && next === "{") {
+        parameterDepth += 1;
+        offset += 1;
+        continue;
+      }
+      if (parameterDepth > 0) {
+        if (character === "}" && parameterDepth > 0) parameterDepth -= 1;
+        continue;
+      }
+      const current = commandSubstitutions.at(-1);
+      if (current?.kind === "dollar-paren") {
+        if (character === "(") current.parenDepth += 1;
+        if (character === ")") {
+          current.parenDepth -= 1;
+          if (current.parenDepth === 0) {
+            commandSubstitutions.pop();
+            quote = current.returnQuote;
+          }
+        }
+        continue;
+      }
+      if (current?.kind === "backtick") continue;
+      if (character === "{") {
+        depth += 1;
+      } else if (character === "}") {
+        depth -= 1;
+        if (depth === 0) return lineIndex;
+      }
+    }
+  }
+  return undefined;
+}
+
+function parseShellFunctions(
+  source: string,
+): ReadonlyMap<string, readonly ShellFunctionDefinition[]> {
+  const lines = source.split(/\r?\n/u);
+  const definitions = new Map<string, ShellFunctionDefinition[]>();
+  const declaration =
+    /^[ \t]*(?:(?:function[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)(?:[ \t]*\([ \t]*\))?)|(?:([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*\([ \t]*\)))[ \t]*(\{)?[ \t]*(?:#.*)?$/u;
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const match = declaration.exec(lines[lineIndex]);
+    const name = match?.[1] ?? match?.[2];
+    if (!match || !name) continue;
+    let openingLine = lineIndex;
+    if (!match[3]) {
+      openingLine += 1;
+      while (openingLine < lines.length && /^(?:[ \t]*|[ \t]*#.*)$/u.test(lines[openingLine])) {
+        openingLine += 1;
+      }
+      if (!/^[ \t]*\{[ \t]*(?:#.*)?$/u.test(lines[openingLine] ?? "")) continue;
+    }
+    const openingBrace = lines[openingLine].indexOf("{");
+    const endLine = findShellFunctionEnd(lines, openingLine, openingBrace);
+    const definition: ShellFunctionDefinition = {
+      name,
+      startLine: lineIndex,
+      closed: endLine !== undefined,
+      lines: lines.slice(lineIndex, (endLine ?? lines.length - 1) + 1),
+    };
+    const existing = definitions.get(name) ?? [];
+    existing.push(definition);
+    definitions.set(name, existing);
+    if (endLine !== undefined) lineIndex = endLine;
+  }
+  return definitions;
+}
+
+function referencedShellFunctions(
+  definition: ShellFunctionDefinition,
+  allNames: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const referenced = new Set<string>();
+  const source = definition.lines.join("\n");
+  for (const match of source.matchAll(/\b[a-zA-Z_][a-zA-Z0-9_]*\b/gu)) {
+    const name = match[0];
+    if (name !== definition.name && allNames.has(name)) referenced.add(name);
+  }
+  return referenced;
+}
+
+function canonicalSelectorLiterals(line: string): readonly { literal: string; column: number }[] {
+  const selector = /NEMOCLAW_AGENT|selected_package|(?:agent|harness|package)(?:[_A-Z.]|\b)/u;
+  const literals: { literal: string; column: number }[] = [];
+  const comparison =
+    /(.{0,120}?)(===|!==|==|!=|=)[ \t]*(["']?)([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\3(?=$|[ \t;\])}])/gu;
+  for (const match of line.matchAll(comparison)) {
+    const literal = match[4];
+    if (!literal || !selector.test(match[1]) || INSTALLER_CONTRACT_LITERALS.has(literal)) continue;
+    const column = (match.index ?? 0) + match[0].lastIndexOf(literal) + 1;
+    literals.push({ literal, column });
+  }
+  return literals;
+}
+
+function scanInstallerFunctionSelectors(
+  definition: ShellFunctionDefinition,
+  repoPath: string,
+  violations: Violation[],
+): void {
+  const allowedLegacyIds = INSTALLER_LEGACY_SELECTOR_ALLOWANCES.get(definition.name) ?? new Map();
+  const observedLegacyIds = new Map<string, number>();
+  const expectedLegacyAgentSelectors =
+    INSTALLER_LEGACY_AGENT_SELECTOR_COUNTS.get(definition.name) ?? 0;
+  let observedLegacyAgentSelectors = 0;
+  let selectorCase = false;
+
+  definition.lines.forEach((line, relativeLine) => {
+    const lineNumber = definition.startLine + relativeLine + 1;
+    for (const match of line.matchAll(/NEMOCLAW_AGENT/gu)) {
+      observedLegacyAgentSelectors += 1;
+      if (expectedLegacyAgentSelectors === 0) {
+        addViolation(
+          violations,
+          repoPath,
+          lineNumber,
+          (match.index ?? 0) + 1,
+          "installer-receipt-harness-neutrality",
+          `${definition.name} must not select receipt-backed behavior through NEMOCLAW_AGENT`,
+        );
+      }
+    }
+
+    const caseStart = /^[ \t]*case[ \t]+(.+)[ \t]+in(?:[ \t]*#.*)?$/u.exec(line);
+    if (caseStart) {
+      selectorCase =
+        allowedLegacyIds.size > 0 ||
+        /NEMOCLAW_AGENT|selected_package|(?:agent|harness|package)(?:[_A-Z.]|\b)/u.test(
+          caseStart[1],
+        );
+      return;
+    }
+    if (/^[ \t]*esac\b/u.test(line)) {
+      selectorCase = false;
+      return;
+    }
+    const caseLabels = selectorCase ? /^[ \t]*([^#][^)]*)\)/u.exec(line)?.[1] : undefined;
+    if (caseLabels) {
+      for (const rawLabel of caseLabels.split("|")) {
+        const literal = rawLabel.trim().replace(/^['"]|['"]$/gu, "");
+        if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(literal)) continue;
+        if (allowedLegacyIds.has(literal)) {
+          observedLegacyIds.set(literal, (observedLegacyIds.get(literal) ?? 0) + 1);
+          continue;
+        }
+        addViolation(
+          violations,
+          repoPath,
+          lineNumber,
+          line.indexOf(rawLabel) + 1,
+          "installer-receipt-harness-neutrality",
+          `${definition.name} must use package authority instead of exact package ID ${literal}`,
+        );
+      }
+    }
+
+    for (const { literal, column } of canonicalSelectorLiterals(line)) {
+      if (allowedLegacyIds.has(literal)) {
+        observedLegacyIds.set(literal, (observedLegacyIds.get(literal) ?? 0) + 1);
+        continue;
+      }
+      addViolation(
+        violations,
+        repoPath,
+        lineNumber,
+        column,
+        "installer-receipt-harness-neutrality",
+        `${definition.name} must use package authority instead of exact package ID ${literal}`,
+      );
+    }
+  });
+
+  for (const [literal, expected] of allowedLegacyIds) {
+    if ((observedLegacyIds.get(literal) ?? 0) === expected) continue;
+    addViolation(
+      violations,
+      repoPath,
+      definition.startLine + 1,
+      1,
+      "installer-receipt-harness-neutrality",
+      `${definition.name} changed its audited legacy ${literal} selector count`,
+    );
+  }
+
+  if (
+    INSTALLER_LEGACY_AGENT_SELECTOR_COUNTS.has(definition.name) &&
+    observedLegacyAgentSelectors !== expectedLegacyAgentSelectors
+  ) {
+    addViolation(
+      violations,
+      repoPath,
+      definition.startLine + 1,
+      1,
+      "installer-receipt-harness-neutrality",
+      `${definition.name} changed its audited legacy NEMOCLAW_AGENT selector count`,
+    );
+  }
+}
+
+export function findInstallerHarnessBoundaryViolations(
+  installerPath = INSTALLER_PATH,
+  _packagesRoot = PACKAGES_ROOT,
+): Violation[] {
+  const violations: Violation[] = [];
+  const repoPath = toRepoPath(installerPath);
+  const source = readFileSync(installerPath, "utf8");
+  const definitions = parseShellFunctions(source);
+  const allNames = new Set(definitions.keys());
+  const pending = [...RECEIPT_NEUTRAL_INSTALLER_FUNCTIONS];
+  const visited = new Set<string>();
+
+  while (pending.length > 0) {
+    const functionName = pending.shift()!;
+    if (visited.has(functionName)) continue;
+    visited.add(functionName);
+    const matches = definitions.get(functionName) ?? [];
+    if (matches.length === 0) {
+      addViolation(
+        violations,
+        repoPath,
+        1,
+        1,
+        "installer-receipt-harness-neutrality",
+        `audited post-reconcile installer function is missing: ${functionName}`,
+      );
+      continue;
+    }
+    if (matches.length > 1) {
+      for (const duplicate of matches.slice(1)) {
+        addViolation(
+          violations,
+          repoPath,
+          duplicate.startLine + 1,
+          1,
+          "installer-receipt-harness-neutrality",
+          `audited installer function is defined more than once: ${functionName}`,
+        );
+      }
+    }
+    for (const definition of matches) {
+      if (!definition.closed) {
+        addViolation(
+          violations,
+          repoPath,
+          definition.startLine + 1,
+          1,
+          "installer-receipt-harness-neutrality",
+          `audited installer function has no structurally matched closing brace: ${functionName}`,
+        );
+      }
+      scanInstallerFunctionSelectors(definition, repoPath, violations);
+      for (const referenced of referencedShellFunctions(definition, allNames)) {
+        pending.push(referenced);
+      }
+    }
+  }
+  return violations;
+}
+
 export function findManagedRuntimeBoundaryViolations(packagesRoot = PACKAGES_ROOT): Violation[] {
   const violations: Violation[] = [];
   const managedAgentIds = new Set(
@@ -1411,6 +1830,7 @@ export function findPackageImageBoundaryViolations(packagesRoot = PACKAGES_ROOT)
 function main(): void {
   const violations = [
     ...findLayerImportBoundaryViolations(),
+    ...findInstallerHarnessBoundaryViolations(),
     ...findManagedRuntimeBoundaryViolations(),
     ...findPackageImageBoundaryViolations(),
   ];

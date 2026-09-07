@@ -113,11 +113,15 @@ export function rebindSandboxMessagingPlanForClone(
   }
 
   const compact = compactSandboxMessagingPlanForPersistence(sourcePlan);
-  const credentialBindings = (compact.credentialBindings ?? []).map(
+  const {
+    providerReceipts: _sourceProviderReceipts,
+    ...credentialNeutralCompact
+  } = compact;
+  const credentialBindings = (credentialNeutralCompact.credentialBindings ?? []).map(
     ({ credentialHash: _sourceCredentialHash, ...binding }) => binding,
   );
   const targetIntent = {
-    ...compact,
+    ...credentialNeutralCompact,
     // A source hash describes the source gateway credential, not the explicit
     // credential that clone provisioning will write into the destination.
     credentialBindings,

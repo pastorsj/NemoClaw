@@ -890,6 +890,7 @@ const registration = credentialProviderRegistration.createCredentialProviderRegi
   getGatewayName: () => GATEWAY_NAME,
   getCredential,
   updateSession: onboardSession.updateSession,
+  loadSession: onboardSession.loadSession,
   stagedLegacyValues,
   migratedLegacyKeys,
   persistMigratedLegacyKeys,

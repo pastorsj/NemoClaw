@@ -598,6 +598,72 @@ network_policies:
     });
   });
 
+  it.each([
+    {
+      name: "enables",
+      state: "active" as const,
+      requiredKeys: ["future_collaboration"],
+      removedKeys: [] as string[],
+      liveTeamsPolicy: "",
+      replacementTeamsPolicy: `
+  future_collaboration:
+    endpoints:
+      - host: login.microsoftonline.com
+        port: 443
+        credential_binding: {provider: alpha-teams-bridge}`,
+      expectedBinding: { provider: "alpha-teams-bridge" },
+    },
+    {
+      name: "disables",
+      state: "removed" as const,
+      requiredKeys: [] as string[],
+      removedKeys: ["future_collaboration"],
+      liveTeamsPolicy: `
+  future_collaboration:
+    endpoints:
+      - host: login.microsoftonline.com
+        port: 443
+        credential_binding: {provider: alpha-teams-bridge}`,
+      replacementTeamsPolicy: "",
+      expectedBinding: undefined,
+    },
+  ])("$name package-declared Teams reconciliation without a literal teams key", (testCase) => {
+    const live = `version: 1
+network_policies:
+  outlook_graph:
+    endpoints:
+      - host: login.microsoftonline.com
+        port: 443${testCase.state === "removed" ? "\n        credential_binding: {provider: alpha-teams-bridge}" : ""}${testCase.liveTeamsPolicy}
+`;
+    const replacement = `version: 1
+network_policies:
+  outlook_graph:
+    endpoints:
+      - host: login.microsoftonline.com
+        port: 443${testCase.replacementTeamsPolicy}
+`;
+
+    const merged = mergeReplacementPolicyAccess(
+      live,
+      replacement,
+      testCase.requiredKeys,
+      testCase.removedKeys,
+      testCase.state === "active" ? [replacement] : [],
+      "alpha",
+      undefined,
+      {
+        mode: "teams-outlook-shared-login",
+        teamsChannelState: testCase.state,
+      },
+    );
+    const policies = YAML.parse(merged.source).network_policies;
+
+    expect(policies.outlook_graph.endpoints[0].credential_binding).toEqual(
+      testCase.expectedBinding,
+    );
+    expect(Object.hasOwn(policies, "future_collaboration")).toBe(testCase.state === "active");
+  });
+
   it.each(["openclaw", "hermes"] as const)(
     "preserves the complete %s messaging policy lifecycle across rebuilds",
     (agent) => {
@@ -617,10 +683,7 @@ network_policies:
         agent === "openclaw"
           ? path.join(process.cwd(), "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml")
           : path.join(process.cwd(), "packages", "nemoclaw-hermes", "policy-additions.yaml");
-      const baseSource = fs.readFileSync(
-        basePolicyPath,
-        "utf8",
-      );
+      const baseSource = fs.readFileSync(basePolicyPath, "utf8");
       const keysByChannel = getMessagingPolicyKeysByChannel({ agent });
       const keysFor = (selected: string[]) =>
         selected.flatMap((channel) => [...(keysByChannel[channel] ?? [])]);
@@ -634,9 +697,7 @@ network_policies:
       const activeDocument = YAML.parse(compose(channels));
       activeDocument.network_policies.nvidia.endpoints[0].host = "host-maintained.example.com";
       const activeSource = YAML.stringify(activeDocument);
-      expect(getCredentialBindingProviders(activeSource)).toContain(
-        `${sandboxName}-teams-bridge`,
-      );
+      expect(getCredentialBindingProviders(activeSource)).toContain(`${sandboxName}-teams-bridge`);
 
       const stopped = mergeReplacementPolicyAccess(
         activeSource,
@@ -656,9 +717,7 @@ network_policies:
         [],
         sandboxName,
       ).source;
-      expect(getCredentialBindingProviders(reenabled)).toContain(
-        `${sandboxName}-teams-bridge`,
-      );
+      expect(getCredentialBindingProviders(reenabled)).toContain(`${sandboxName}-teams-bridge`);
 
       const selectedRemoved = mergeReplacementPolicyAccess(
         reenabled,
@@ -685,7 +744,9 @@ network_policies:
       expect(Object.keys(finalPolicies)).not.toEqual(
         expect.arrayContaining(keysFor(removedChannels)),
       );
-      expect(Object.keys(finalPolicies)).toEqual(expect.arrayContaining(keysFor(remainingChannels)));
+      expect(Object.keys(finalPolicies)).toEqual(
+        expect.arrayContaining(keysFor(remainingChannels)),
+      );
     },
   );
 });

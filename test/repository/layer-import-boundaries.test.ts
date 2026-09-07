@@ -8,6 +8,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  findInstallerHarnessBoundaryViolations,
   findLayerImportBoundaryViolations,
   findManagedRuntimeBoundaryViolations,
   findPackageImageBoundaryViolations,
@@ -57,6 +58,25 @@ function harnessDebtSource(entries: readonly unknown[]): string {
   });
 }
 
+function installerBoundarySource(
+  validateDefinition: readonly string[],
+  additionalDefinitions: readonly string[] = [],
+): string {
+  return [
+    ...additionalDefinitions,
+    ...validateDefinition,
+    "should_defer_onboarding() {",
+    "  :",
+    "}",
+    "resolve_onboard_forward_recovery_intent() {",
+    "  :",
+    "}",
+    "restore_onboard_forward_after_post_checks() {",
+    "  :",
+    "}",
+  ].join("\n");
+}
+
 describe("CLI layer import boundaries (#6245)", () => {
   it("keeps domain, adapter, action, and command layers separated (#6245)", () => {
     expect(findLayerImportBoundaryViolations()).toEqual([]);
@@ -65,6 +85,300 @@ describe("CLI layer import boundaries (#6245)", () => {
   it("keeps managed runtime orchestration provider-neutral (#9145)", () => {
     expect(findManagedRuntimeBoundaryViolations()).toEqual([]);
   });
+
+  it("keeps receipt-backed installer behavior independent of known harness IDs", () => {
+    expect(findInstallerHarnessBoundaryViolations()).toEqual([]);
+  });
+
+  it("rejects a future exact package ID in post-reconcile installer behavior", () => {
+    const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-installer-packages-"));
+    const packageRoot = path.join(packagesRoot, "future-runtime");
+    const installer = path.join(packagesRoot, "install.sh");
+    fs.mkdirSync(packageRoot);
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "@example/future-runtime",
+        nemoclaw: { harnessManifest: "manifest.yaml" },
+      }),
+    );
+    fs.writeFileSync(path.join(packageRoot, "manifest.yaml"), "name: future-harness\n");
+    fs.writeFileSync(
+      installer,
+      [
+        "validate_deferred_onboarding_request() {",
+        '  [[ "$selected_package" == "future-harness" ]]',
+        "}",
+        "should_defer_onboarding() {",
+        "  :",
+        "}",
+        "resolve_onboard_forward_recovery_intent() {",
+        "  :",
+        "}",
+        "restore_onboard_forward_after_post_checks() {",
+        "  :",
+        "}",
+      ].join("\n"),
+    );
+    try {
+      expect(findInstallerHarnessBoundaryViolations(installer, packagesRoot)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rule: "installer-receipt-harness-neutrality",
+            detail: expect.stringContaining("future-harness"),
+          }),
+        ]),
+      );
+    } finally {
+      fs.rmSync(packagesRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects NEMOCLAW_AGENT selection when harness packages are external", () => {
+    const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-external-packages-"));
+    const installer = path.join(packagesRoot, "install.sh");
+    fs.writeFileSync(
+      installer,
+      [
+        "validate_deferred_onboarding_request() {",
+        '  [[ "$NEMOCLAW_AGENT" == "external-harness" ]]',
+        "}",
+        "should_defer_onboarding() {",
+        "  :",
+        "}",
+        "resolve_onboard_forward_recovery_intent() {",
+        "  :",
+        "}",
+        "restore_onboard_forward_after_post_checks() {",
+        "  :",
+        "}",
+      ].join("\n"),
+    );
+    try {
+      expect(findInstallerHarnessBoundaryViolations(installer, packagesRoot)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rule: "installer-receipt-harness-neutrality",
+            detail: expect.stringContaining("NEMOCLAW_AGENT"),
+          }),
+        ]),
+      );
+    } finally {
+      fs.rmSync(packagesRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an external package selector without a local package catalogue entry", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-external-selector-"));
+    const installer = path.join(root, "install.sh");
+    fs.writeFileSync(
+      installer,
+      installerBoundarySource([
+        "validate_deferred_onboarding_request() {",
+        '  [[ "$selected_package" == "outside-runtime" ]]',
+        "}",
+      ]),
+    );
+    try {
+      expect(findInstallerHarnessBoundaryViolations(installer, root)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ detail: expect.stringContaining("outside-runtime") }),
+        ]),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("follows helper delegation from an audited installer function", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-helper-selector-"));
+    const installer = path.join(root, "install.sh");
+    fs.writeFileSync(
+      installer,
+      installerBoundarySource(
+        ["validate_deferred_onboarding_request() {", "  select_runtime_package", "}"],
+        ["function select_runtime_package", "{", '  [[ "$harness_id" == "outside-runtime" ]]', "}"],
+      ),
+    );
+    try {
+      expect(findInstallerHarnessBoundaryViolations(installer, root)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            detail: expect.stringContaining("select_runtime_package"),
+          }),
+        ]),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an external package ID selected through a delegated case statement", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-helper-case-selector-"));
+    const installer = path.join(root, "install.sh");
+    fs.writeFileSync(
+      installer,
+      installerBoundarySource(
+        ["validate_deferred_onboarding_request() {", "  select_runtime_package", "}"],
+        [
+          "select_runtime_package() {",
+          '  case "$harness_id" in',
+          "    outside-runtime) return 0 ;;",
+          "    *) return 1 ;;",
+          "  esac",
+          "}",
+        ],
+      ),
+    );
+    try {
+      expect(findInstallerHarnessBoundaryViolations(installer, root)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ detail: expect.stringContaining("outside-runtime") }),
+        ]),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("parses alternate and repeated audited function declarations", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-alternate-functions-"));
+    const installer = path.join(root, "install.sh");
+    fs.writeFileSync(
+      installer,
+      installerBoundarySource([
+        "function validate_deferred_onboarding_request {",
+        "  :",
+        "}",
+        "validate_deferred_onboarding_request ()",
+        "{",
+        '  [[ "$selected_package" == "outside-runtime" ]]',
+        "}",
+      ]),
+    );
+    try {
+      const violations = findInstallerHarnessBoundaryViolations(installer, root);
+      expect(violations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ detail: expect.stringContaining("defined more than once") }),
+          expect.objectContaining({ detail: expect.stringContaining("outside-runtime") }),
+        ]),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects growth in an explicitly bounded legacy selector", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-legacy-selector-growth-"));
+    const installer = path.join(root, "install.sh");
+    fs.writeFileSync(
+      installer,
+      installerBoundarySource(
+        ["validate_deferred_onboarding_request() {", "  agent_display_name hermes", "}"],
+        [
+          "agent_display_name() {",
+          '  case "$agent_name" in',
+          "    hermes) : ;;",
+          "    hermes) : ;;",
+          "    langchain-deepagents-code) : ;;",
+          '    openclaw | "") : ;;',
+          "  esac",
+          "}",
+        ],
+      ),
+    );
+    try {
+      expect(findInstallerHarnessBoundaryViolations(installer, root)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            detail: expect.stringContaining("legacy hermes selector count"),
+          }),
+        ]),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let a column-zero nested brace truncate the audited function", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-nested-brace-"));
+    const installer = path.join(root, "install.sh");
+    fs.writeFileSync(
+      installer,
+      installerBoundarySource([
+        "validate_deferred_onboarding_request() {",
+        "{",
+        "  :",
+        "}",
+        '  [[ "$selected_package" == "outside-runtime" ]]',
+        "}",
+      ]),
+    );
+    try {
+      expect(findInstallerHarnessBoundaryViolations(installer, root)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ detail: expect.stringContaining("outside-runtime") }),
+        ]),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not treat a heredoc brace as the end of an audited function", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-heredoc-brace-"));
+    const installer = path.join(root, "install.sh");
+    fs.writeFileSync(
+      installer,
+      installerBoundarySource([
+        "validate_deferred_onboarding_request() {",
+        "  cat <<1PAYLOAD-END",
+        "}",
+        "1PAYLOAD-END",
+        '  [[ "$selected_package" == "outside-runtime" ]]',
+        "}",
+      ]),
+    );
+    try {
+      expect(findInstallerHarnessBoundaryViolations(installer, root)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ detail: expect.stringContaining("outside-runtime") }),
+        ]),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["dollar-parenthesis", "  ignored=$(printf })"],
+    ["backtick", "  ignored=`printf }`"],
+  ])(
+    "does not let a %s command-substitution brace truncate the audited function",
+    (_kind, command) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-command-substitution-brace-"));
+      const installer = path.join(root, "install.sh");
+      fs.writeFileSync(
+        installer,
+        installerBoundarySource([
+          "validate_deferred_onboarding_request() {",
+          command,
+          '  [[ "$selected_package" == "outside-runtime" ]]',
+          "}",
+        ]),
+      );
+      try {
+        expect(findInstallerHarnessBoundaryViolations(installer, root)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ detail: expect.stringContaining("outside-runtime") }),
+          ]),
+        );
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("discovers future package IDs for managed bootstrap neutrality", () => {
     const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-packages-"));

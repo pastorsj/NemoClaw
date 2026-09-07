@@ -367,7 +367,7 @@ function normalizePersistedCredentialBindings(
     stateUpdates: [],
     healthChecks: [],
   };
-  const generated = credentialBindingsFromManifests(
+  const generated = deriveCredentialBindingsFromManifests(
     planForBindings,
     manifests,
     new Map(channels.map((channel) => [channel.channelId, channel.inputs] as const)),
@@ -376,7 +376,8 @@ function normalizePersistedCredentialBindings(
   return generated.map((binding) => overlayPersistedCredentialBinding(binding, persisted));
 }
 
-function credentialBindingsFromManifests(
+/** Rebuild credential identity from exact manifests while retaining only availability evidence. */
+export function deriveCredentialBindingsFromManifests(
   plan: SandboxMessagingPlan,
   manifests: readonly ChannelManifest[],
   inputRegistry: ReadonlyMap<string, readonly SandboxMessagingInputReference[]>,

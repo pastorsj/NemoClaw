@@ -378,7 +378,13 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
         },
       ],
       "nemoclaw",
-      { bestEffort: true, requireExactBindings: true },
+      {
+        bestEffort: true,
+        deferCreatedProviderCleanup: true,
+        recordMutationReceipt: expect.any(Function),
+        requireExactBindings: true,
+        revalidateSandboxIdentity: expect.any(Function),
+      },
     );
     expect(bridgeProfileWasImported).toBe(true);
     expect(bridgeRefreshWasSecure).toBe(true);
@@ -438,9 +444,10 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
     const diagnostics = printedText();
     expect(diagnostics).toContain("test-sb-googlechat-bridge");
     expect(diagnostics).toContain("gateway unavailable");
-    expect(diagnostics).toContain(
+    expect(diagnostics).not.toContain(
       'openshell provider delete -g "nemoclaw" "test-sb-googlechat-bridge"',
     );
+    expect(diagnostics).toContain("Inspect those providers before retrying");
   });
 
   it("reports an uncertain existing provider when refresh status inspection throws", async () => {

@@ -121,6 +121,10 @@ export function mergeSandboxMessagingPlans(
     channels: mergedChannels,
     disabledChannels,
     credentialBindings: mergeByChannelId(existing.credentialBindings, incoming.credentialBindings),
+    providerReceipts: mergeByChannelId(
+      existing.providerReceipts ?? [],
+      incoming.providerReceipts ?? [],
+    ),
     networkPolicy: {
       presets: uniqueStrings(networkEntries.map((entry) => entry.presetName)),
       entries: networkEntries,

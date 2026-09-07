@@ -8,6 +8,21 @@ import {
   normalizeCredentialValue as normalizeStoredCredentialValue,
   prompt as promptForCredential,
 } from "../../credentials/store";
+import {
+  inspectGatewayCredentialFamilyProviderBinding,
+  inspectGatewayCredentialOnlyProviderBinding,
+  readGatewayProviderMetadata,
+  type GatewayCredentialFamilyProviderBinding,
+  type GatewayCredentialOnlyProviderInspection,
+} from "../../onboard/gateway-provider-metadata";
+import { parseCliOpenShellProviderAttachmentNames } from "../../adapters/openshell/provider-attachment-cli";
+import type { MessagingProviderMutationReceipt } from "../../onboard/messaging-prep";
+
+export type MessagingProviderAttachment = Readonly<{
+  name: string;
+  providerId: string;
+  credentialKeys: readonly string[];
+}>;
 
 export { listLegacyChannelStatePaths } from "../../messaging/legacy-profile";
 export { legacyMessagingPolicyWarningAgent } from "./policy-channel-legacy";
@@ -17,23 +32,32 @@ type MessagingProviderTokenDefinition = {
   envKey: string;
   token: string | null;
   providerType?: string;
+  expectedProviderId?: string;
 };
 
 type MessagingProviderUpsertOptions = {
   replaceExisting?: boolean;
   bestEffort?: boolean;
   requireExactBindings?: boolean;
+  requireOwnedExistingProvider?: boolean;
+  requireExistingProvider?: boolean;
+  deferCreatedProviderCleanup?: boolean;
+  allowedSandboxes?: readonly string[];
   gatewayName?: string;
+  revalidateSandboxIdentity?: (operation: string) => void;
+  recordMutationReceipt?: (receipt: MessagingProviderMutationReceipt) => void;
 };
 
 type LegacyOnboardProvidersModule = {
   isMessagingProviderBindingConflict(error: unknown): error is Error & {
     readonly mutatedProviderNames: readonly string[];
     readonly createdProviderNames?: readonly string[];
+    readonly providerIds?: Readonly<Record<string, string>>;
   };
   isMessagingProviderMutationFailure(error: unknown): error is Error & {
     readonly mutatedProviderNames: readonly string[];
     readonly createdProviderNames: readonly string[];
+    readonly providerIds: Readonly<Record<string, string>>;
   };
   upsertMessagingProviders(
     tokenDefs: MessagingProviderTokenDefinition[],
@@ -136,9 +160,56 @@ export const policyChannelDependencies = {
       gatewayName,
     });
   },
+  inspectMessagingProviderBinding(
+    binding: GatewayCredentialFamilyProviderBinding & {
+      readonly credentialShape: "family" | "only";
+    },
+    gatewayName: string,
+  ): GatewayCredentialOnlyProviderInspection {
+    return binding.credentialShape === "family"
+      ? inspectGatewayCredentialFamilyProviderBinding(binding, gatewayRunner(gatewayName))
+      : inspectGatewayCredentialOnlyProviderBinding(binding, gatewayRunner(gatewayName));
+  },
+  inspectMessagingProviderMetadata(providerName: string, gatewayName: string) {
+    return readGatewayProviderMetadata(providerName, gatewayRunner(gatewayName));
+  },
+  inspectMessagingProviderAttachments(
+    sandboxName: string,
+    gatewayName: string,
+  ): readonly MessagingProviderAttachment[] | null {
+    const run = gatewayRunner(gatewayName);
+    let result: ReturnType<typeof runOpenshell>;
+    try {
+      result = run(["sandbox", "provider", "list", sandboxName], {
+        ignoreError: true,
+        maxBuffer: 64 * 1024,
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5_000,
+      });
+    } catch {
+      return null;
+    }
+    if (result.status !== 0) return null;
+    const names = parseCliOpenShellProviderAttachmentNames(
+      `${result.stdout || ""}\n${result.stderr || ""}`,
+    );
+    if (!names) return null;
+    const attachments: MessagingProviderAttachment[] = [];
+    for (const name of names) {
+      const metadata = readGatewayProviderMetadata(name, run);
+      if (!metadata?.id) return null;
+      attachments.push({
+        name,
+        providerId: metadata.id,
+        credentialKeys: metadata.credentialKeys,
+      });
+    }
+    return attachments;
+  },
   isMessagingProviderBindingConflict(error: unknown): error is Error & {
     readonly mutatedProviderNames: readonly string[];
     readonly createdProviderNames?: readonly string[];
+    readonly providerIds?: Readonly<Record<string, string>>;
   } {
     const providers = require("../../onboard/providers") as LegacyOnboardProvidersModule;
     return providers.isMessagingProviderBindingConflict(error);
@@ -146,6 +217,7 @@ export const policyChannelDependencies = {
   isMessagingProviderMutationFailure(error: unknown): error is Error & {
     readonly mutatedProviderNames: readonly string[];
     readonly createdProviderNames: readonly string[];
+    readonly providerIds: Readonly<Record<string, string>>;
   } {
     const providers = require("../../onboard/providers") as LegacyOnboardProvidersModule;
     return providers.isMessagingProviderMutationFailure(error);

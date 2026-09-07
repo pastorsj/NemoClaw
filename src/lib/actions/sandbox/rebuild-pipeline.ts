@@ -41,6 +41,7 @@ import {
 import { mcpRebuildRequiresRuntimeSelection } from "./rebuild-mcp-phase";
 import {
   listRebuildMessagingManifests,
+  preflightRebuildMessagingProviderAuthority,
   stageMessagingManifestPlanForRebuild,
 } from "./rebuild-messaging-phase";
 import {
@@ -794,6 +795,23 @@ async function rebuildSandboxUnlocked(
               recreateOptions.managedWorkloadRebuild,
             ) ?? revalidateRebuildRouteBeforeDelete(routePreflightReceipt);
           if (!validation.ok) return validation;
+          if (
+            messagingPlan &&
+            (targetConfig.agentAuthority.harnessPackage ||
+              targetConfig.agentAuthority.harnessPackageMigration)
+          ) {
+            try {
+              preflightRebuildMessagingProviderAuthority(
+                messagingPlan,
+                targetConfig.agentAuthority,
+              );
+            } catch (error) {
+              return {
+                ok: false,
+                message: `Messaging provider authority changed before sandbox deletion: ${rebuildFailureDetail(error)}`,
+              };
+            }
+          }
           // Live MCP teardown temporarily removes credential-bound rules from
           // the source sandbox. Its preparation returned the complete
           // pre-teardown OpenShell document above and independently revalidates

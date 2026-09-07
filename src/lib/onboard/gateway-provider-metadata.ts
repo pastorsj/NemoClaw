@@ -197,11 +197,18 @@ export function readGatewayProviderMetadata(
   const args = ["provider", "get"];
   if (gatewayName) args.push("-g", gatewayName);
   args.push(name);
-  const result = runOpenshell(args, {
-    ignoreError: true,
-    suppressOutput: true,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  let result: GatewayProviderCommandResult;
+  try {
+    result = runOpenshell(args, {
+      ignoreError: true,
+      maxBuffer: PROVIDER_PROBE_DIAGNOSTIC_LIMIT,
+      suppressOutput: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: PROVIDER_PROBE_TIMEOUT_MS,
+    });
+  } catch {
+    return null;
+  }
   if (result.status !== 0) return null;
 
   const output = `${commandStreamText(result.stdout)}\n${commandStreamText(result.stderr)}`;

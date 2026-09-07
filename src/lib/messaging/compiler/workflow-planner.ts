@@ -337,6 +337,10 @@ function mergeSandboxMessagingPlans(
       existing.credentialBindings,
       incoming.credentialBindings,
     ),
+    providerReceipts: mergePlanEntriesByChannel(
+      existing.providerReceipts ?? [],
+      incoming.providerReceipts ?? [],
+    ),
     networkPolicy: {
       presets: uniqueSortedStrings(networkEntries.map((entry) => entry.presetName)),
       entries: networkEntries,
@@ -426,6 +430,7 @@ function removePlanChannel(
       (id) => id !== channelId && remainingChannelIds.has(id),
     ),
     credentialBindings: plan.credentialBindings.filter(keepEntry),
+    providerReceipts: (plan.providerReceipts ?? []).filter(keepEntry),
     networkPolicy: {
       presets: uniqueSortedStrings(networkEntries.map((entry) => entry.presetName)),
       entries: networkEntries,

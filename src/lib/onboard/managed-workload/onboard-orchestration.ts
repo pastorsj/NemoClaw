@@ -488,10 +488,13 @@ export interface PrepareOnboardSandboxWorkloadLaunchInput {
   };
   readonly plan: {
     readonly intent: SandboxCreateIntent;
+    /** Exact policy prepared before an existing sandbox may be deleted. */
+    readonly preparedPolicy?: MaterializeSandboxCreatePlanInput["preparedPolicy"];
     readonly policylessCreate?: boolean;
     readonly deferSandboxEffectsUntilIdentityVerification?: boolean;
     readonly skipProviderEffects?: boolean;
     readonly rebindMessagingTokenDefs: () => Promise<readonly MessagingTokenDef[]>;
+    readonly recordMessagingProviderMutationReceipt?: MaterializeSandboxCreatePlanInput["recordMessagingProviderMutationReceipt"];
     readonly runProviderPreDeleteCleanup: MaterializeSandboxCreatePlanInput["runProviderPreDeleteCleanup"];
     readonly upsertMessagingProviders: MaterializeSandboxCreatePlanInput["upsertMessagingProviders"];
     readonly getHermesToolGatewayProviderName: (sandboxName: string) => string;
@@ -565,6 +568,7 @@ export async function prepareOnboardSandboxWorkloadLaunch(
   const messagingTokenDefs = await input.plan.rebindMessagingTokenDefs();
   const createPlan = input.dependencies.materializeSandboxCreatePlan({
     intent: input.plan.intent,
+    preparedPolicy: input.plan.preparedPolicy,
     packageAgentDefinition: input.runtime.receiptAgentDefinition ?? undefined,
     fromRef,
     policylessCreate: input.plan.policylessCreate,
@@ -572,6 +576,7 @@ export async function prepareOnboardSandboxWorkloadLaunch(
       input.plan.deferSandboxEffectsUntilIdentityVerification,
     skipProviderEffects: input.plan.skipProviderEffects,
     messagingTokenDefs: [...messagingTokenDefs],
+    recordMessagingProviderMutationReceipt: input.plan.recordMessagingProviderMutationReceipt,
     messagingConfig:
       input.messagingConfig ?? getMessagingChannelConfigFromPlan(input.plannedMessagingPlan),
     runProviderPreDeleteCleanup: input.plan.runProviderPreDeleteCleanup,

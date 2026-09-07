@@ -244,6 +244,8 @@ describe("prepareSandboxCreatePolicy", () => {
           name: providerName,
           envKey: "WECHAT_BOT_TOKEN",
           providerType: MESSAGING_CREDENTIAL_PROVIDER_TYPE,
+          credentialShape: "only" as const,
+          credentialKeys: ["WECHAT_BOT_TOKEN"],
           credentialConfigured: true,
           channel: "wechat",
         },
@@ -363,6 +365,9 @@ describe("resolveSandboxCreateIntent", () => {
       {
         name: "sandbox-telegram-bridge",
         envKey: "TELEGRAM_BOT_TOKEN",
+        providerType: "generic",
+        credentialShape: "only",
+        credentialKeys: ["TELEGRAM_BOT_TOKEN"],
         credentialConfigured: true,
         channel: "telegram",
       },
@@ -370,6 +375,8 @@ describe("resolveSandboxCreateIntent", () => {
         name: "sandbox-brave-search",
         envKey: "BRAVE_API_KEY",
         providerType: "brave-search",
+        credentialShape: "only",
+        credentialKeys: ["BRAVE_API_KEY"],
         credentialConfigured: false,
         channel: null,
       },
@@ -388,12 +395,18 @@ describe("resolveSandboxCreateIntent", () => {
         {
           name: "sandbox-telegram-bridge",
           envKey: "TELEGRAM_BOT_TOKEN",
+          providerType: "generic",
+          credentialShape: "only" as const,
+          credentialKeys: ["TELEGRAM_BOT_TOKEN"],
           credentialConfigured: true,
           channel: "telegram",
         },
         {
           name: "sandbox-slack-bridge",
           envKey: "SLACK_BOT_TOKEN",
+          providerType: "generic",
+          credentialShape: "only" as const,
+          credentialKeys: ["SLACK_BOT_TOKEN"],
           credentialConfigured: true,
           channel: "slack",
         },
@@ -474,6 +487,7 @@ describe("resolveSandboxCreateIntent", () => {
       expect(upsertMessagingProviders).toHaveBeenCalledWith([], {
         replaceExisting: true,
         allowedSandboxes: ["sandbox"],
+        requireExactBindings: false,
       });
       plan.initialSandboxPolicy.cleanup?.();
     },
@@ -578,6 +592,7 @@ describe("resolveSandboxCreateIntent", () => {
     expect(upsertMessagingProviders).toHaveBeenCalledWith([], {
       replaceExisting: true,
       allowedSandboxes: ["sandbox"],
+      requireExactBindings: false,
     });
     expect(intent.reusableMessagingProviders).toEqual(["sandbox-discord-bridge"]);
     expect(plan.messagingProviders).toEqual(["sandbox-discord-bridge"]);
@@ -682,6 +697,7 @@ describe("resolveSandboxCreateIntent", () => {
         expect(options).toEqual({
           replaceExisting: true,
           allowedSandboxes: ["sandbox"],
+          requireExactBindings: false,
         });
         return ["sandbox-telegram-bridge"];
       }),

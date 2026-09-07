@@ -29,6 +29,19 @@ export interface MessagingTokenDef {
   /** Receipt-owned messaging provider projection used for profile registration and refresh. */
   messagingProviderProfile?: MessagingBridgeProfile;
   additionalCredentials?: Array<{ envKey: string; token: string | null }>;
+  /** Immutable identity required before updating an already-owned provider. */
+  expectedProviderId?: string;
+  /** True only when a receipt proves NemoClaw may delete this provider during replacement. */
+  allowProviderReplacement?: boolean;
+}
+
+export interface MessagingProviderMutationReceipt {
+  readonly providerNames: readonly string[];
+  readonly mutatedProviderNames: readonly string[];
+  /** Providers whose create command returned success during this operation. */
+  readonly createdProviderNames: readonly string[];
+  /** Stable identities confirmed after each successful provider mutation. */
+  readonly providerIds: Readonly<Record<string, string>>;
 }
 
 export function hasConfiguredMessagingCredential(tokenDef: MessagingTokenDef): boolean {

@@ -11,14 +11,20 @@ import { HERMES_PORTABLE_OPENSHELL_VERSION } from "../../adapters/openshell/reso
 import { createCliOpenShellSandboxObserverFromRunner } from "../../adapters/openshell/sandbox-observer-cli";
 import { NEMOCLAW_CREATE_ATTEMPT_LABEL } from "../../adapters/openshell/sandbox-identity";
 import type { AgentDefinition } from "../../agent/defs";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 import type { WebSearchConfig } from "../../inference/web-search";
+import type { MessagingProviderMutationReceipt, MessagingTokenDef } from "../messaging-prep";
 import {
   getMessagingPolicyKeysByChannel,
   listMessagingPolicyPresetMetadata,
 } from "../../messaging/channels/metadata";
 import { loadMessagingChannelPolicyPreset } from "../../messaging/channels/policy";
 import { normalizeWechatIlinkBaseUrl } from "../../messaging/channels/wechat/ilink-base-url";
-import type { ChannelManifest, SandboxMessagingPlan } from "../../messaging/manifest";
+import type {
+  ChannelManifest,
+  SandboxMessagingNetworkPolicyEntryPlan,
+  SandboxMessagingPlan,
+} from "../../messaging/manifest";
 import type { MessagingChannelConfig } from "../../messaging-channel-config";
 import {
   isDcodeAgent,
@@ -80,11 +86,18 @@ import {
   sandboxCreateBoundaryFromPendingIdentity,
 } from "./identity-boundary";
 import {
+  bindMessagingProviderReceipts,
+  findMessagingProviderReceipt,
   publishAttachedProvidersBeforeDockerSandboxCreation,
   resolveSandboxCreateMessagingManifests,
   validateAttachedMessagingProvidersBeforeSandboxCreation,
 } from "./provider-publication";
-import { materializeRebuildPolicyHandoff } from "./rebuild-policy-handoff";
+import {
+  materializeRebuildPolicyHandoff,
+  type RebuildCredentialPolicyReconciliation,
+  resolveRebuildPackageMessagingPolicySources,
+  resolveRebuildPackagePolicyRemovalExpectations,
+} from "./rebuild-policy-handoff";
 import {
   finalizeRecreatedSourceState,
   managedStartupStateRoots,
@@ -230,6 +243,28 @@ export function withHarnessPackageRevalidation<T>(
   return mutation();
 }
 
+/** Refresh reuse-path credentials without weakening a receipt-backed provider binding. */
+export function refreshReusedMessagingProviders(input: {
+  readonly messagingTokenDefs: MessagingTokenDef[];
+  readonly receiptBackedPackage: boolean;
+  readonly revalidateSandboxIdentity: (required: boolean, operation: string) => void;
+  readonly sandboxName: string;
+  readonly upsertMessagingProviders: SandboxCreateOrchestrationRuntime["upsertMessagingProviders"];
+}): void {
+  input.revalidateSandboxIdentity(true, `reusing sandbox '${input.sandboxName}'`);
+  input.upsertMessagingProviders(input.messagingTokenDefs, {
+    ...(input.receiptBackedPackage
+      ? {
+          allowedSandboxes: [input.sandboxName],
+          requireExactBindings: true,
+          requireExistingProvider: true,
+          requireOwnedExistingProvider: true,
+        }
+      : {}),
+    revalidateSandboxIdentity: (operation) => input.revalidateSandboxIdentity(true, operation),
+  });
+}
+
 function revalidateInitialPackageAuthority(
   routeAuthority: InferenceRouteReservationAuthority | null,
   revalidate: (operation: string) => unknown,
@@ -312,7 +347,8 @@ function asMessagingAgentId(
 
 export function resolveRebuildMessagingPolicyDeltas(
   plan:
-    | Pick<SandboxMessagingPlan, "agent" | "disabledChannels" | "networkPolicy">
+    | (Pick<SandboxMessagingPlan, "agent" | "disabledChannels" | "networkPolicy"> &
+        Partial<Pick<SandboxMessagingPlan, "channels" | "packageBuild">>)
     | null
     | undefined,
   fallback?: {
@@ -321,8 +357,11 @@ export function resolveRebuildMessagingPolicyDeltas(
   },
 ): {
   readonly requiredNetworkPolicyKeys: readonly string[];
+  readonly requiredNetworkPolicyEntries: readonly SandboxMessagingNetworkPolicyEntryPlan[];
   readonly requiredNetworkPolicyPresetNames: readonly string[];
   readonly removedNetworkPolicyKeys: readonly string[];
+  readonly removedNetworkPolicyEntries: readonly SandboxMessagingNetworkPolicyEntryPlan[];
+  readonly credentialPolicyReconciliation?: RebuildCredentialPolicyReconciliation | null;
 } {
   if (!plan) {
     const wechatIlinkOrigin = normalizeWechatIlinkBaseUrl(
@@ -331,8 +370,10 @@ export function resolveRebuildMessagingPolicyDeltas(
     if (!wechatIlinkOrigin) {
       return {
         requiredNetworkPolicyKeys: [],
+        requiredNetworkPolicyEntries: [],
         requiredNetworkPolicyPresetNames: [],
         removedNetworkPolicyKeys: [],
+        removedNetworkPolicyEntries: [],
       };
     }
     const fallbackAgent = fallback?.agent;
@@ -349,32 +390,65 @@ export function resolveRebuildMessagingPolicyDeltas(
     return {
       requiredNetworkPolicyKeys:
         wechatPolicy.agentPolicyKeys[fallbackAgent] ?? wechatPolicy.policyKeys,
+      requiredNetworkPolicyEntries: [],
       requiredNetworkPolicyPresetNames: [wechatPolicy.presetName],
       removedNetworkPolicyKeys: [],
+      removedNetworkPolicyEntries: [],
     };
   }
   const disabledChannels = new Set(plan.disabledChannels);
-  const policyKeysByChannel = getMessagingPolicyKeysByChannel({ agent: plan.agent });
+  const requiredNetworkPolicyEntries = plan.networkPolicy.entries.filter(
+    (entry) => !disabledChannels.has(entry.channelId),
+  );
+  const requiredNetworkPolicyKeys = [
+    ...new Set(requiredNetworkPolicyEntries.flatMap((entry) => entry.policyKeys)),
+  ];
+  const requiredNetworkPolicyKeySet = new Set(requiredNetworkPolicyKeys);
+  const removedNetworkPolicyEntries = plan.networkPolicy.entries.flatMap((entry) => {
+    if (!disabledChannels.has(entry.channelId)) return [];
+    const policyKeys = entry.policyKeys.filter((key) => !requiredNetworkPolicyKeySet.has(key));
+    return policyKeys.length === 0 ? [] : [{ ...entry, policyKeys }];
+  });
+  const policyKeysByChannel = fallback
+    ? getMessagingPolicyKeysByChannel({ agent: plan.agent })
+    : {};
+  const credentialPolicyReconciliation =
+    plan.packageBuild === undefined
+      ? undefined
+      : plan.packageBuild.credentialPolicyReconciliation === "teams-outlook-shared-login"
+        ? {
+            mode: plan.packageBuild.credentialPolicyReconciliation,
+            teamsChannelState: plan.channels?.some(
+              (channel) =>
+                channel.channelId === "teams" &&
+                channel.active &&
+                !channel.disabled &&
+                !disabledChannels.has(channel.channelId),
+            )
+              ? ("active" as const)
+              : ("removed" as const),
+          }
+        : null;
   return {
-    requiredNetworkPolicyKeys: [
-      ...new Set(
-        plan.networkPolicy.entries
-          .filter((entry) => !disabledChannels.has(entry.channelId))
-          .flatMap((entry) => entry.policyKeys),
-      ),
-    ],
+    requiredNetworkPolicyKeys,
+    requiredNetworkPolicyEntries,
     requiredNetworkPolicyPresetNames: [
-      ...new Set(
-        plan.networkPolicy.entries
-          .filter((entry) => !disabledChannels.has(entry.channelId))
-          .map((entry) => entry.presetName),
-      ),
+      ...new Set(requiredNetworkPolicyEntries.map((entry) => entry.presetName)),
     ],
     removedNetworkPolicyKeys: [
       ...new Set(
-        plan.disabledChannels.flatMap((channelId) => policyKeysByChannel[channelId] ?? []),
+        plan.disabledChannels
+          .flatMap((channelId) => {
+            const recordedKeys = plan.networkPolicy.entries
+              .filter((entry) => entry.channelId === channelId)
+              .flatMap((entry) => entry.policyKeys);
+            return recordedKeys.length > 0 ? recordedKeys : (policyKeysByChannel[channelId] ?? []);
+          })
+          .filter((policyKey) => !requiredNetworkPolicyKeySet.has(policyKey)),
       ),
     ],
+    removedNetworkPolicyEntries,
+    ...(credentialPolicyReconciliation === undefined ? {} : { credentialPolicyReconciliation }),
   };
 }
 
@@ -388,9 +462,14 @@ export function resolveRebuildObservabilityPolicyDelta(input: {
 }): {
   readonly requiredNetworkPolicyKeys: readonly string[];
   readonly removedNetworkPolicyKeys: readonly string[];
+  readonly removedAutomaticPolicyPresetNames: readonly string[];
 } {
   if (input.explicitlyRequested !== true) {
-    return { requiredNetworkPolicyKeys: [], removedNetworkPolicyKeys: [] };
+    return {
+      requiredNetworkPolicyKeys: [],
+      removedNetworkPolicyKeys: [],
+      removedAutomaticPolicyPresetNames: [],
+    };
   }
   const receiptPreset = input.receiptBackedPackage
     ? input.packagePolicy?.automatic_presets.find(
@@ -398,10 +477,18 @@ export function resolveRebuildObservabilityPolicyDelta(input: {
       )
     : undefined;
   if (input.receiptBackedPackage && !receiptPreset) {
-    return { requiredNetworkPolicyKeys: [], removedNetworkPolicyKeys: [] };
+    return {
+      requiredNetworkPolicyKeys: [],
+      removedNetworkPolicyKeys: [],
+      removedAutomaticPolicyPresetNames: [],
+    };
   }
   if (!input.receiptBackedPackage && !isDcodeAgent(input.agent)) {
-    return { requiredNetworkPolicyKeys: [], removedNetworkPolicyKeys: [] };
+    return {
+      requiredNetworkPolicyKeys: [],
+      removedNetworkPolicyKeys: [],
+      removedAutomaticPolicyPresetNames: [],
+    };
   }
   const presetName = input.receiptBackedPackage
     ? receiptPreset!.name
@@ -411,46 +498,110 @@ export function resolveRebuildObservabilityPolicyDelta(input: {
     ? {
         requiredNetworkPolicyKeys: [presetName],
         removedNetworkPolicyKeys: [],
+        removedAutomaticPolicyPresetNames: [],
       }
     : {
         requiredNetworkPolicyKeys: [],
         removedNetworkPolicyKeys: [presetName],
+        removedAutomaticPolicyPresetNames: input.receiptBackedPackage ? [presetName] : [],
       };
 }
 
 /** Preserve OpenShell's live policy plus bounded requirements for this explicit create. */
-export function selectRebuildCreatePolicy(
-  policySourcePath: string,
-  generatedPolicy: import("../initial-policy").InitialSandboxPolicy,
-  requiredNetworkPolicyKeys: readonly string[],
-  removedNetworkPolicyKeys: readonly string[],
-  requiredNetworkPolicyPresetNames: readonly string[],
-  messagingAgent: string | null | undefined,
-  messagingConfig: MessagingChannelConfig | null | undefined,
-  sandboxName: string,
-  authorizedCredentialBindingProviders: readonly string[],
-): import("../initial-policy").InitialSandboxPolicy {
-  const requiredNetworkPolicySources = requiredNetworkPolicyPresetNames.map((presetName) => {
-    const source = loadMessagingChannelPolicyPreset(presetName, {
-      agent: messagingAgent,
-      sandboxName,
-      messagingConfig,
-    });
-    if (!source) {
-      throw new Error(
-        `Cannot prepare rebuild policy handoff: required messaging policy preset '${presetName}' is unavailable.`,
-      );
-    }
-    return source;
-  });
+export function selectRebuildCreatePolicy(input: {
+  readonly policySourcePath: string;
+  readonly generatedPolicy: import("../initial-policy").InitialSandboxPolicy;
+  readonly requiredNetworkPolicyKeys: readonly string[];
+  readonly removedNetworkPolicyKeys: readonly string[];
+  readonly requiredNetworkPolicyPresetNames: readonly string[];
+  readonly requiredNetworkPolicyEntries: readonly SandboxMessagingNetworkPolicyEntryPlan[];
+  readonly removedNetworkPolicyEntries?: readonly SandboxMessagingNetworkPolicyEntryPlan[];
+  readonly removedAutomaticPolicyPresetNames?: readonly string[];
+  readonly packageAgentDefinition?: AgentDefinition | null;
+  readonly harnessPackageIdentity?: HarnessPackageIdentity | null;
+  readonly messagingAgent: string | null | undefined;
+  readonly messagingConfig: MessagingChannelConfig | null | undefined;
+  readonly sandboxName: string;
+  readonly authorizedCredentialBindingProviders: readonly string[];
+  readonly credentialPolicyReconciliation?: RebuildCredentialPolicyReconciliation | null;
+}): import("../initial-policy").InitialSandboxPolicy {
+  if (
+    input.packageAgentDefinition &&
+    input.requiredNetworkPolicyPresetNames.length > 0 &&
+    input.requiredNetworkPolicyEntries.length === 0
+  ) {
+    throw new Error(
+      "Cannot prepare rebuild policy handoff: receipt-backed messaging policies require typed package policy entries.",
+    );
+  }
+  if (Boolean(input.packageAgentDefinition) !== Boolean(input.harnessPackageIdentity)) {
+    throw new Error(
+      "Cannot prepare rebuild policy handoff: package definition and receipt authority must be provided together.",
+    );
+  }
+  const requiredNetworkPolicyKeySet = new Set(input.requiredNetworkPolicyKeys);
+  const requiredNetworkPolicySources = input.packageAgentDefinition
+    ? resolveRebuildPackageMessagingPolicySources({
+        agentDefinition: input.packageAgentDefinition,
+        entries: input.requiredNetworkPolicyEntries,
+        harnessPackageIdentity: input.harnessPackageIdentity!,
+        messagingConfig: input.messagingConfig,
+        sandboxName: input.sandboxName,
+      })
+    : input.requiredNetworkPolicyPresetNames.map((presetName) => {
+        const source = loadMessagingChannelPolicyPreset(presetName, {
+          agent: input.messagingAgent,
+          sandboxName: input.sandboxName,
+          messagingConfig: input.messagingConfig,
+        });
+        if (!source) {
+          throw new Error(
+            `Cannot prepare rebuild policy handoff: required messaging policy preset '${presetName}' is unavailable.`,
+          );
+        }
+        return source;
+      });
+  const removedNetworkPolicyKeys = input.removedNetworkPolicyKeys.filter(
+    (policyKey) => !requiredNetworkPolicyKeySet.has(policyKey),
+  );
+  const removalExpectations = input.packageAgentDefinition
+    ? resolveRebuildPackagePolicyRemovalExpectations({
+        agentDefinition: input.packageAgentDefinition,
+        harnessPackageIdentity: input.harnessPackageIdentity!,
+        messagingConfig: input.messagingConfig,
+        messagingEntries: input.removedNetworkPolicyEntries ?? [],
+        policyKeys: removedNetworkPolicyKeys,
+        automaticPresetNames: input.removedAutomaticPolicyPresetNames ?? [],
+        sandboxName: input.sandboxName,
+      })
+    : [];
+  const expectedRemovalKeys = new Set(removalExpectations.map(({ key }) => key));
+  if (
+    input.packageAgentDefinition &&
+    (expectedRemovalKeys.size !== new Set(removedNetworkPolicyKeys).size ||
+      removedNetworkPolicyKeys.some((key) => !expectedRemovalKeys.has(key)))
+  ) {
+    throw new Error(
+      "Cannot prepare rebuild policy handoff: receipt-backed network policy removal lacks exact package authority.",
+    );
+  }
   return materializeRebuildPolicyHandoff({
-    sandboxName,
-    livePolicyPath: policySourcePath,
-    replacementPolicy: generatedPolicy,
-    requiredNetworkPolicyKeys,
+    sandboxName: input.sandboxName,
+    livePolicyPath: input.policySourcePath,
+    replacementPolicy: input.generatedPolicy,
+    requiredNetworkPolicyKeys: input.requiredNetworkPolicyKeys,
     removedNetworkPolicyKeys,
     requiredNetworkPolicySources,
-    authorizedCredentialBindingProviders,
+    removalExpectations,
+    authorizedCredentialBindingProviders: input.authorizedCredentialBindingProviders,
+    reviewedMessagingUpgradeKeys: input.packageAgentDefinition
+      ? input.requiredNetworkPolicyEntries
+          .filter((entry) => entry.channelId === "wechat")
+          .flatMap((entry) => entry.policyKeys)
+      : undefined,
+    credentialPolicyReconciliation: input.packageAgentDefinition
+      ? (input.credentialPolicyReconciliation ?? null)
+      : undefined,
   });
 }
 
@@ -1125,17 +1276,20 @@ export function createProviderEffectBoundary(input: {
     | ((revalidateSandboxIdentity: (operation: string) => void) => readonly string[])
     | null;
   readonly revalidateSandboxIdentityBeforeCreate: () => void;
+  readonly recordPublishedMessagingProviders?: (providerIds: ReadonlyMap<string, string>) => void;
 }): ProviderEffectBoundary {
   const validate = async () =>
     validateAttachedMessagingProvidersBeforeSandboxCreation(
       input.preparationInput,
       input.preparationDeps,
     );
-  const publish = async () =>
-    publishAttachedProvidersBeforeDockerSandboxCreation(
+  const publish = async () => {
+    const providerIds = await publishAttachedProvidersBeforeDockerSandboxCreation(
       input.preparationInput,
       input.preparationDeps,
     );
+    input.recordPublishedMessagingProviders?.(providerIds);
+  };
   if (!input.deferred) {
     return {
       validateBeforeCreate: validate,
@@ -1796,6 +1950,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       messagingChannelSetup.MessagingHostStateApplier.readPlanStateFromEnv();
     const plannedMessagingState =
       envMessagingState?.plan.sandboxName === sandboxName ? envMessagingState : undefined;
+    let createMessagingProviderMutationReceipt: MessagingProviderMutationReceipt | undefined;
     const managedWorkloadRuntime = managedWorkloadOnboard.createManagedWorkloadOnboardRuntime(
       {
         computePlan,
@@ -1948,6 +2103,12 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       getMessagingChannelConfigFromPlan(plannedMessagingState?.plan) ??
       getStoredMessagingChannelConfig(sandboxName, createCheckpointSession);
     const effectiveMessagingAgent = plannedMessagingState?.plan?.agent ?? effectiveAgent.name;
+    const getManagedToolGatewayProviderName = (targetSandbox: string): string => {
+      const authority = revalidateHarnessPackageAuthority("describe the managed provider broker");
+      return authority.harnessPackage
+        ? describeHarnessProviderBroker(authority.harnessPackage, targetSandbox)
+        : getHermesToolGatewayBroker().getHermesToolGatewayProviderName(targetSandbox);
+    };
     const openingPendingCreateIdentity = pendingVerifiedCreateCheckpointForSession({
       sandboxName,
       gatewayName: GATEWAY_NAME,
@@ -1960,6 +2121,97 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       revalidateHarnessPackageAuthority(operation);
       if (sandboxIsLive && !createEffectsFinalized && verifiedCreateBoundary) {
         revalidateVerifiedCreateIdentity(requireVerifiedCreateBoundary(), operation);
+      }
+    };
+    let preparedSandboxCreatePolicy:
+      | NonNullable<
+          import("../sandbox-create-intent-types").MaterializeSandboxCreatePlanInput["preparedPolicy"]
+        >
+      | undefined;
+    const prepareSandboxPolicyBeforeDestructiveRecreate = (): void => {
+      if (preparedSandboxCreatePolicy || agentCreateInput.hermesPortableLifecycle) return;
+      const generatedPolicy = sandboxCreatePlanMaterialization.prepareSandboxCreatePolicy(
+        resolvedCreateIntent,
+        undefined,
+        effectiveMessagingConfig,
+        receiptBackedPackage ? effectiveAgent : undefined,
+      );
+      try {
+        const providerPlan = sandboxCreatePlanMaterialization.prepareSandboxCreateProviderPlan({
+          intent: resolvedCreateIntent,
+          messagingTokenDefs,
+          getToolGatewayProviderName: getManagedToolGatewayProviderName,
+        });
+        if (!createIntent?.rebuildPolicySourcePath) {
+          sandboxCreatePlanMaterialization.assertSandboxCreatePolicyProviderBindings(
+            generatedPolicy.initialSandboxPolicy,
+            new Set(providerPlan.createProviderNames),
+          );
+          preparedSandboxCreatePolicy = generatedPolicy;
+          return;
+        }
+        const rebuildMessagingPolicyDeltas = resolveRebuildMessagingPolicyDeltas(
+          plannedMessagingState?.plan,
+          receiptBackedPackage
+            ? undefined
+            : {
+                agent: asMessagingAgentId(effectiveMessagingAgent),
+                messagingConfig: effectiveMessagingConfig,
+              },
+        );
+        const rebuildObservabilityPolicyDelta = resolveRebuildObservabilityPolicyDelta({
+          agent: agent?.name,
+          receiptBackedPackage,
+          packagePolicy: receiptBackedPackage ? effectiveAgent.policyCapability : null,
+          enabled: createIntent.observabilityEnabled,
+          explicitlyRequested: createIntent.observabilityRequestedExplicitly,
+          tierName: createIntent.policyTier,
+        });
+        const rebuildPolicyProviderAuthority = resolveRebuildPolicyProviderAuthority({
+          createArgs: providerPlan.createProviderNames.flatMap((name) => ["--provider", name]),
+          messagingPlan: plannedMessagingState?.plan,
+          preservedMcpState,
+          managedMcpRebuildHandoff: hasManagedMcpRebuildHandoff(createIntent),
+        });
+        const selectedPolicy = selectRebuildCreatePolicy({
+          policySourcePath: createIntent.rebuildPolicySourcePath,
+          generatedPolicy: generatedPolicy.initialSandboxPolicy,
+          requiredNetworkPolicyKeys: [
+            ...rebuildMessagingPolicyDeltas.requiredNetworkPolicyKeys,
+            ...rebuildObservabilityPolicyDelta.requiredNetworkPolicyKeys,
+          ],
+          removedNetworkPolicyKeys: [
+            ...rebuildMessagingPolicyDeltas.removedNetworkPolicyKeys,
+            ...rebuildObservabilityPolicyDelta.removedNetworkPolicyKeys,
+          ],
+          requiredNetworkPolicyPresetNames:
+            rebuildMessagingPolicyDeltas.requiredNetworkPolicyPresetNames,
+          requiredNetworkPolicyEntries: rebuildMessagingPolicyDeltas.requiredNetworkPolicyEntries,
+          removedNetworkPolicyEntries: rebuildMessagingPolicyDeltas.removedNetworkPolicyEntries,
+          removedAutomaticPolicyPresetNames:
+            rebuildObservabilityPolicyDelta.removedAutomaticPolicyPresetNames,
+          packageAgentDefinition: receiptBackedPackage ? effectiveAgent : null,
+          harnessPackageIdentity: receiptBackedPackage
+            ? harnessPackageSession?.harnessPackage
+            : null,
+          messagingAgent: effectiveMessagingAgent,
+          messagingConfig: effectiveMessagingConfig,
+          sandboxName,
+          authorizedCredentialBindingProviders: rebuildPolicyProviderAuthority,
+          credentialPolicyReconciliation:
+            rebuildMessagingPolicyDeltas.credentialPolicyReconciliation,
+        });
+        sandboxCreatePlanMaterialization.assertSandboxCreatePolicyProviderBindings(
+          selectedPolicy,
+          new Set(providerPlan.createProviderNames),
+        );
+        preparedSandboxCreatePolicy = {
+          compatibilityPolicyPath: generatedPolicy.compatibilityPolicyPath,
+          initialSandboxPolicy: selectedPolicy,
+        };
+      } catch (error) {
+        generatedPolicy.initialSandboxPolicy.cleanup?.();
+        throw error;
       }
     };
     const recreateRegistryEntry = readSandboxRecreateRegistryEntry({
@@ -2230,12 +2482,14 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
               if (actionableSelectionDrift) {
                 note("  [non-interactive] Recreating sandbox due to provider/model drift.");
               } else {
-                revalidateSandboxIdentity(true, `reusing sandbox '${sandboxName}'`);
                 // Upsert messaging providers even on reuse so credential changes take
                 // effect without requiring a full sandbox recreation.
-                upsertMessagingProviders(messagingTokenDefs, {
-                  revalidateSandboxIdentity: (operation) =>
-                    revalidateSandboxIdentity(true, operation),
+                refreshReusedMessagingProviders({
+                  messagingTokenDefs,
+                  receiptBackedPackage,
+                  revalidateSandboxIdentity,
+                  sandboxName,
+                  upsertMessagingProviders,
                 });
                 if (selectionDrift.unknown) {
                   note(
@@ -2280,10 +2534,12 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
               console.log(`  Sandbox '${sandboxName}' already exists.`);
               console.log("  Choosing 'n' will delete the existing sandbox and create a new one.");
               if (await promptYesNoOrDefault("  Reuse existing sandbox?", null, true)) {
-                revalidateSandboxIdentity(true, `reusing sandbox '${sandboxName}'`);
-                upsertMessagingProviders(messagingTokenDefs, {
-                  revalidateSandboxIdentity: (operation) =>
-                    revalidateSandboxIdentity(true, operation),
+                refreshReusedMessagingProviders({
+                  messagingTokenDefs,
+                  receiptBackedPackage,
+                  revalidateSandboxIdentity,
+                  sandboxName,
+                  upsertMessagingProviders,
                 });
                 await restoreReusedSandboxDashboard(!selectionDrift.unknown);
                 return resolution(true);
@@ -2363,6 +2619,10 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
           await restoreReusedSandboxDashboard(true);
           return resolution(true);
         }
+        // Materialize every policy byte that the replacement create will consume
+        // before the source sandbox is backed up or deleted. Later create planning
+        // reuses this immutable handoff and never rereads mutable package assets.
+        prepareSandboxPolicyBeforeDestructiveRecreate();
         const previousEntry: SandboxEntry | null = registry.getSandbox(sandboxName);
         const previousProviderBrokerCleanup = prepareRecreatedProviderBroker(previousEntry);
         baseImageResolutionFlow.captureBaseResolution(
@@ -2379,6 +2639,8 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
           note("  Backing up workspace state before recreating sandbox...");
           const result = recreateProtection.backup();
           if (!result.ok) {
+            preparedSandboxCreatePolicy?.initialSandboxPolicy.cleanup?.();
+            preparedSandboxCreatePolicy = undefined;
             console.error(
               "  Set NEMOCLAW_RECREATE_WITHOUT_BACKUP=1 to recreate without preserving state.",
             );
@@ -2551,6 +2813,9 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
             },
             plan: {
               intent: resolvedCreateIntent,
+              ...(preparedSandboxCreatePolicy
+                ? { preparedPolicy: preparedSandboxCreatePolicy }
+                : {}),
               policylessCreate: apfInterceptorRequested,
               deferSandboxEffectsUntilIdentityVerification:
                 createIntent?.deferSandboxEffectsUntilIdentityVerification === true,
@@ -2560,21 +2825,40 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
                   false,
                   `registering credentials for sandbox '${sandboxName}'`,
                 );
-                return (
-                  await sandboxCreateIntentResolver.rebind(
-                    {
-                      sandboxName,
-                      enabledChannels,
-                      webSearchConfig,
-                      agent,
-                      receiptBackedPackage: harnessPackageSession?.harnessPackage != null,
-                      ...(createIntent?.reuseRegisteredCredentials
-                        ? { reuseRegisteredCredentials: true }
-                        : {}),
-                    },
-                    resolvedCreateIntent,
-                  )
-                ).messagingTokenDefs;
+                const rebound = await sandboxCreateIntentResolver.rebind(
+                  {
+                    sandboxName,
+                    enabledChannels,
+                    webSearchConfig,
+                    agent,
+                    receiptBackedPackage: harnessPackageSession?.harnessPackage != null,
+                    ...(createIntent?.reuseRegisteredCredentials
+                      ? { reuseRegisteredCredentials: true }
+                      : {}),
+                  },
+                  resolvedCreateIntent,
+                );
+                const stagedReceipts = new Map(
+                  (onboardSession.loadSession()?.stagedCredentialProviderReceipts ?? []).map(
+                    (receipt) => [receipt.providerName, receipt] as const,
+                  ),
+                );
+                return rebound.messagingTokenDefs.map((tokenDef) => {
+                  const authorityReceipt =
+                    plannedMessagingState?.plan.providerReceipts?.find(
+                      (receipt) => receipt.providerName === tokenDef.name,
+                    ) ?? stagedReceipts.get(tokenDef.name);
+                  return authorityReceipt
+                    ? {
+                        ...tokenDef,
+                        expectedProviderId: authorityReceipt.providerId,
+                        allowProviderReplacement: authorityReceipt.createdByNemoClaw,
+                      }
+                    : tokenDef;
+                });
+              },
+              recordMessagingProviderMutationReceipt: (receipt) => {
+                createMessagingProviderMutationReceipt = receipt;
               },
               runProviderPreDeleteCleanup: (verifiedIdentityRevalidation) => {
                 runAuthorityBoundProviderCleanup({
@@ -2602,14 +2886,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
                       ((targetOperation) => revalidateSandboxIdentity(false, targetOperation))
                     )(operation),
                 }),
-              getHermesToolGatewayProviderName: (targetSandbox) => {
-                const authority = revalidateHarnessPackageAuthority(
-                  "describe the managed provider broker",
-                );
-                return authority.harnessPackage
-                  ? describeHarnessProviderBroker(authority.harnessPackage, targetSandbox)
-                  : getHermesToolGatewayBroker().getHermesToolGatewayProviderName(targetSandbox);
-              },
+              getHermesToolGatewayProviderName: getManagedToolGatewayProviderName,
               discloseInitialSandboxPolicy,
             },
             launchInput: {
@@ -2682,10 +2959,12 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
     } = preparedOnboardLaunch;
     const rebuildMessagingPolicyDeltas = resolveRebuildMessagingPolicyDeltas(
       plannedMessagingState?.plan,
-      {
-        agent: asMessagingAgentId(effectiveMessagingAgent),
-        messagingConfig: effectiveMessagingConfig,
-      },
+      receiptBackedPackage
+        ? undefined
+        : {
+            agent: asMessagingAgentId(effectiveMessagingAgent),
+            messagingConfig: effectiveMessagingConfig,
+          },
     );
     const rebuildObservabilityPolicyDelta = resolveRebuildObservabilityPolicyDelta({
       agent: agent?.name,
@@ -2701,25 +2980,40 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       preservedMcpState,
       managedMcpRebuildHandoff: hasManagedMcpRebuildHandoff(createIntent),
     });
-    const initialSandboxPolicy = createIntent?.rebuildPolicySourcePath
-      ? selectRebuildCreatePolicy(
-          createIntent.rebuildPolicySourcePath,
-          materializedInitialSandboxPolicy,
-          [
-            ...rebuildMessagingPolicyDeltas.requiredNetworkPolicyKeys,
-            ...rebuildObservabilityPolicyDelta.requiredNetworkPolicyKeys,
-          ],
-          [
-            ...rebuildMessagingPolicyDeltas.removedNetworkPolicyKeys,
-            ...rebuildObservabilityPolicyDelta.removedNetworkPolicyKeys,
-          ],
-          rebuildMessagingPolicyDeltas.requiredNetworkPolicyPresetNames,
-          effectiveMessagingAgent,
-          effectiveMessagingConfig,
-          sandboxName,
-          rebuildPolicyProviderAuthority,
-        )
-      : materializedInitialSandboxPolicy;
+    const initialSandboxPolicy =
+      createIntent?.rebuildPolicySourcePath && preparedSandboxCreatePolicy
+        ? materializedInitialSandboxPolicy
+        : createIntent?.rebuildPolicySourcePath
+          ? selectRebuildCreatePolicy({
+              policySourcePath: createIntent.rebuildPolicySourcePath,
+              generatedPolicy: materializedInitialSandboxPolicy,
+              requiredNetworkPolicyKeys: [
+                ...rebuildMessagingPolicyDeltas.requiredNetworkPolicyKeys,
+                ...rebuildObservabilityPolicyDelta.requiredNetworkPolicyKeys,
+              ],
+              removedNetworkPolicyKeys: [
+                ...rebuildMessagingPolicyDeltas.removedNetworkPolicyKeys,
+                ...rebuildObservabilityPolicyDelta.removedNetworkPolicyKeys,
+              ],
+              requiredNetworkPolicyPresetNames:
+                rebuildMessagingPolicyDeltas.requiredNetworkPolicyPresetNames,
+              requiredNetworkPolicyEntries:
+                rebuildMessagingPolicyDeltas.requiredNetworkPolicyEntries,
+              removedNetworkPolicyEntries: rebuildMessagingPolicyDeltas.removedNetworkPolicyEntries,
+              removedAutomaticPolicyPresetNames:
+                rebuildObservabilityPolicyDelta.removedAutomaticPolicyPresetNames,
+              packageAgentDefinition: receiptBackedPackage ? effectiveAgent : null,
+              harnessPackageIdentity: receiptBackedPackage
+                ? harnessPackageSession?.harnessPackage
+                : null,
+              messagingAgent: effectiveMessagingAgent,
+              messagingConfig: effectiveMessagingConfig,
+              sandboxName,
+              authorizedCredentialBindingProviders: rebuildPolicyProviderAuthority,
+              credentialPolicyReconciliation:
+                rebuildMessagingPolicyDeltas.credentialPolicyReconciliation,
+            })
+          : materializedInitialSandboxPolicy;
     const createArgv = createIntent?.rebuildPolicySourcePath
       ? bindRebuildPolicyProvidersToCreateArgs(
           materializedCreateArgv.map((value, index, argv) =>
@@ -3248,6 +3542,23 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
     const providerPreparationDeps = {
       runOpenshell,
       cleanupCreateSources: cleanupSandboxCreateSources,
+      expectedMessagingProviderId: (providerName: string): string | undefined => {
+        const operationProviderId =
+          createMessagingProviderMutationReceipt?.providerIds[providerName];
+        if (operationProviderId) return operationProviderId;
+        const request = resolvedCreateIntent.messagingProviderRequests.find(
+          (candidate) => candidate.name === providerName && candidate.channel,
+        );
+        const prior = request?.channel
+          ? findMessagingProviderReceipt(plannedMessagingState?.plan, request.channel, providerName)
+          : undefined;
+        if (prior) return prior.providerId;
+        return onboardSession
+          .loadSession()
+          ?.stagedCredentialProviderReceipts?.find(
+            (receipt) => receipt.providerName === providerName,
+          )?.providerId;
+      },
     };
     const providerEffectBoundary = createProviderEffectBoundary({
       deferred: createIntent?.deferSandboxEffectsUntilIdentityVerification === true,
@@ -3257,6 +3568,62 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       preparationDeps: providerPreparationDeps,
       runVerifiedSandboxCreateEffects,
       activateDeferredProviderEffects,
+      recordPublishedMessagingProviders: (providerIds) => {
+        if (!receiptBackedPackage || providerIds.size === 0) return;
+        if (!plannedMessagingState) {
+          throw new Error("Cannot record messaging provider ownership without a messaging plan.");
+        }
+        const stagedReceipts = new Map(
+          (onboardSession.loadSession()?.stagedCredentialProviderReceipts ?? []).map(
+            (receipt) => [receipt.providerName, receipt] as const,
+          ),
+        );
+        const createdProviderNames = new Set(
+          createMessagingProviderMutationReceipt?.createdProviderNames ?? [],
+        );
+        const receipts = resolvedCreateIntent.messagingProviderRequests.flatMap((request) => {
+          if (!request.channel) return [];
+          const providerId = providerIds.get(request.name);
+          if (!providerId) {
+            throw new Error(
+              `Cannot record messaging provider '${request.name}' without a stable identity.`,
+            );
+          }
+          const prior = findMessagingProviderReceipt(
+            plannedMessagingState.plan,
+            request.channel,
+            request.name,
+          );
+          const staged = stagedReceipts.get(request.name);
+          const operationProviderId =
+            createMessagingProviderMutationReceipt?.providerIds[request.name];
+          const hasMatchingAuthority =
+            prior?.providerId === providerId ||
+            staged?.providerId === providerId ||
+            operationProviderId === providerId;
+          if (!hasMatchingAuthority) {
+            throw new Error(
+              `Cannot record messaging provider '${request.name}' without matching stable identity authority.`,
+            );
+          }
+          return [
+            {
+              channelId: request.channel,
+              providerName: request.name,
+              providerId,
+              createdByNemoClaw:
+                prior?.createdByNemoClaw === true ||
+                staged?.createdByNemoClaw === true ||
+                createdProviderNames.has(request.name),
+              attachmentAddedByNemoClaw: true,
+            },
+          ];
+        });
+        plannedMessagingState.plan = bindMessagingProviderReceipts(
+          plannedMessagingState.plan,
+          receipts,
+        );
+      },
       revalidateSandboxIdentityBeforeCreate: () =>
         revalidateSandboxIdentity(
           false,

@@ -336,9 +336,7 @@ describe("sandbox registry normalization", () => {
         deferredN1xManagedVllmAccepted: "true",
       },
     });
-    expect(() => malformed.getSandbox("malformed")).toThrow(
-      "invalid N1x preview acceptance",
-    );
+    expect(() => malformed.getSandbox("malformed")).toThrow("invalid N1x preview acceptance");
     const mismatchedRoute = await loadRegistryWith({
       mismatched: {
         name: "mismatched",
@@ -502,5 +500,143 @@ describe("sandbox registry normalization", () => {
 
     expect(registry.compareAndSetSandboxGatewayPort("alpha", replacement, 8080)).toBe(true);
     expect(registry.getSandbox("alpha")).toEqual({ ...replacement, gatewayPort: 8080 });
+  });
+
+  const webSearchProviderOwnership = {
+    schemaVersion: 1 as const,
+    purpose: "web-search" as const,
+    providerName: "alpha-brave-search",
+    providerId: "provider-id-1",
+    providerType: "brave",
+    credentialEnv: "BRAVE_API_KEY",
+    createdByNemoClaw: true,
+    attachmentAddedByNemoClaw: true,
+  };
+
+  it("validates and clones provider ownership on registry load, save, and restore", async () => {
+    const registry = await loadRegistryWith({
+      alpha: {
+        name: "alpha",
+        agent: "hermes",
+        harnessPackage,
+        webSearchEnabled: true,
+        webSearchProvider: "brave",
+        webSearchProviderOwnership,
+      },
+    });
+    const loaded = registry.getSandbox("alpha")!;
+    expect(loaded.webSearchProviderOwnership).toEqual(webSearchProviderOwnership);
+    expect(loaded.webSearchProviderOwnership).not.toBe(webSearchProviderOwnership);
+
+    const receipt = registry.removeSandboxIfCurrentWithReceipt(loaded)!;
+    expect(registry.restoreSandboxEntryIfMissing(receipt)).toBe(true);
+    expect(registry.getSandbox("alpha")?.webSearchProviderOwnership).toEqual(
+      webSearchProviderOwnership,
+    );
+
+    const document = registry.load();
+    registry.save(document);
+    vi.resetModules();
+    const reloaded = await import("./registry");
+    expect(reloaded.getSandbox("alpha")?.webSearchProviderOwnership).toEqual(
+      webSearchProviderOwnership,
+    );
+  });
+
+  it.each([
+    ["malformed", { ...webSearchProviderOwnership, providerId: "not valid!" }],
+    ["orphaned", { ...webSearchProviderOwnership, providerName: "other-brave-search" }],
+  ])("fails closed while loading %s provider ownership", async (_label, ownership) => {
+    const registry = await loadRegistryWith({
+      alpha: {
+        name: "alpha",
+        agent: "hermes",
+        harnessPackage,
+        webSearchEnabled: true,
+        webSearchProvider: "brave",
+        webSearchProviderOwnership: ownership,
+      },
+    });
+
+    expect(() => registry.load()).toThrow(/provider ownership/u);
+    expect((await import("./registry/persistence")).readSandboxRegistryState()).toEqual({
+      status: "invalid",
+    });
+  });
+
+  it("rejects generic updates that fabricate, change, or drop provider ownership", async () => {
+    const registry = await loadRegistryWith({
+      alpha: {
+        name: "alpha",
+        agent: "hermes",
+        harnessPackage,
+        webSearchEnabled: true,
+        webSearchProvider: "brave",
+        webSearchProviderOwnership,
+      },
+      beta: {
+        name: "beta",
+        agent: "hermes",
+        harnessPackage,
+        webSearchEnabled: true,
+        webSearchProvider: "brave",
+      },
+    });
+
+    expect(() =>
+      registry.updateSandbox("alpha", { webSearchProviderOwnership: undefined }),
+    ).toThrow(/outside final registration/u);
+    expect(() => registry.updateSandbox("alpha", { webSearchProvider: "tavily" })).toThrow(
+      /outside final registration/u,
+    );
+    expect(() =>
+      registry.updateSandbox("beta", {
+        webSearchProviderOwnership: {
+          ...webSearchProviderOwnership,
+          providerName: "beta-brave-search",
+        },
+      }),
+    ).toThrow(/outside final registration/u);
+
+    expect(() =>
+      registry.restoreSandboxEntry({
+        ...registry.getSandbox("alpha")!,
+        webSearchProviderOwnership: {
+          ...webSearchProviderOwnership,
+          providerId: "replacement-provider-id",
+        },
+      }),
+    ).toThrow(/changed web-search provider ownership/u);
+    expect(() =>
+      registry.restoreSandboxEntry({
+        ...registry.getSandbox("alpha")!,
+        webSearchProviderOwnership: undefined,
+      }),
+    ).toThrow(/changed web-search provider ownership/u);
+
+    expect(registry.updateSandbox("alpha", { model: "updated" })).toBe(true);
+    expect(registry.getSandbox("alpha")?.webSearchProviderOwnership).toEqual(
+      webSearchProviderOwnership,
+    );
+  });
+
+  it("rejects malformed provider ownership on registry save", async () => {
+    const registry = await loadRegistryWith({
+      alpha: {
+        name: "alpha",
+        agent: "hermes",
+        harnessPackage,
+        webSearchEnabled: true,
+        webSearchProvider: "brave",
+        webSearchProviderOwnership,
+      },
+    });
+    const document = registry.load();
+    document.sandboxes.alpha!.webSearchProviderOwnership = {
+      ...webSearchProviderOwnership,
+      credentialEnv: "secret-value",
+    } as never;
+
+    expect(() => registry.save(document)).toThrow(/provider ownership receipt is invalid/u);
   });
 });

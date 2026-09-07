@@ -12,6 +12,7 @@ import type {
   MessagingCompilerWorkflow,
   SandboxMessagingCredentialBindingPlan,
   SandboxMessagingPlan,
+  SandboxMessagingProviderReceipt,
 } from "../../src/lib/messaging";
 
 type DockerfilePlanChannel = {
@@ -31,6 +32,7 @@ export interface TestMessagingPlanOptions {
   readonly workflow?: MessagingCompilerWorkflow;
   readonly authMode?: ChannelAuthMode;
   readonly credentialBindings?: readonly SandboxMessagingCredentialBindingPlan[];
+  readonly providerReceipts?: readonly SandboxMessagingProviderReceipt[];
 }
 
 export function makeMessagingPlan(options: TestMessagingPlanOptions = {}): SandboxMessagingPlan {
@@ -42,6 +44,7 @@ export function makeMessagingPlan(options: TestMessagingPlanOptions = {}): Sandb
     workflow = "onboard",
     authMode,
     credentialBindings = [],
+    providerReceipts = [],
   } = options;
   const disabled = new Set(disabledChannels);
   return {
@@ -62,6 +65,9 @@ export function makeMessagingPlan(options: TestMessagingPlanOptions = {}): Sandb
     })),
     disabledChannels: [...disabledChannels],
     credentialBindings: credentialBindings.map((binding) => ({ ...binding })),
+    ...(providerReceipts.length > 0
+      ? { providerReceipts: providerReceipts.map((receipt) => ({ ...receipt })) }
+      : {}),
     networkPolicy: { presets: [], entries: [] },
     agentRender: [],
     buildSteps: [],

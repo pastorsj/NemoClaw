@@ -70,34 +70,6 @@ export type MessagingOpenShellRunner = (
   options?: MessagingOpenShellRunOptions,
 ) => MessagingOpenShellRunResult;
 
-export interface MessagingCredentialApplyOptions extends MessagingSetupEnvOptions {
-  readonly runOpenshell: MessagingOpenShellRunner;
-}
-
-export interface MessagingCredentialApplyResult {
-  readonly upserted: readonly {
-    readonly channelId: MessagingChannelId;
-    readonly credentialId: string;
-    readonly providerName: string;
-    readonly envKey: string;
-    readonly action: "create" | "update";
-  }[];
-  readonly reused: readonly {
-    readonly channelId: MessagingChannelId;
-    readonly credentialId: string;
-    readonly providerName: string;
-    readonly envKey: string;
-  }[];
-  readonly missing: readonly {
-    readonly channelId: MessagingChannelId;
-    readonly credentialId: string;
-    readonly providerName: string;
-    readonly envKey: string;
-  }[];
-  readonly providerNames: readonly string[];
-  readonly sandboxCreateProviderArgs: readonly string[];
-}
-
 export interface MessagingPolicyApplyContext {
   readonly agent: MessagingAgentId;
   readonly entries: readonly SandboxMessagingNetworkPolicyEntryPlan[];

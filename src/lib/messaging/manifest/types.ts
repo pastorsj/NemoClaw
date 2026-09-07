@@ -72,6 +72,8 @@ export interface ChannelManifest {
 /** Validated, non-secret provider projection copied from an installed package profile. */
 export interface ChannelCredentialProviderSpec {
   readonly profilePath: string;
+  /** SHA-256 of the receipt-verified profile bytes; required for package-backed profiles. */
+  readonly profileSha256?: string;
   readonly profileId: string;
   readonly credentialEnv: string;
   readonly sourceInputId: string;
@@ -369,6 +371,8 @@ export interface SandboxMessagingPlan {
   readonly channels: readonly SandboxMessagingChannelPlan[];
   readonly disabledChannels: readonly MessagingChannelId[];
   readonly credentialBindings: readonly SandboxMessagingCredentialBindingPlan[];
+  /** Immutable gateway identities and the mutations NemoClaw owns for each channel. */
+  readonly providerReceipts?: readonly SandboxMessagingProviderReceipt[];
   readonly networkPolicy: SandboxMessagingNetworkPolicyPlan;
   readonly agentRender: readonly SandboxMessagingAgentRenderPlan[];
   readonly buildSteps: readonly SandboxMessagingBuildStepPlan[];
@@ -378,6 +382,15 @@ export interface SandboxMessagingPlan {
   readonly healthChecks: readonly SandboxMessagingHealthCheckPlan[];
   /** Receipt-backed build behavior. Absent only for legacy serialized plans. */
   readonly packageBuild?: HarnessMessagingBuildProfile;
+}
+
+/** Non-secret ownership receipt for one OpenShell provider used by a channel. */
+export interface SandboxMessagingProviderReceipt {
+  readonly channelId: MessagingChannelId;
+  readonly providerName: MessagingTemplateString;
+  readonly providerId: string;
+  readonly createdByNemoClaw: boolean;
+  readonly attachmentAddedByNemoClaw: boolean;
 }
 
 /** Workflow that requested a compiled messaging plan. */

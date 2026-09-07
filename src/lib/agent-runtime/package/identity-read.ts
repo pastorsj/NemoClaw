@@ -3,4 +3,4 @@
 
 /** Identity parsing and comparison for persisted package receipts. */
 export { harnessPackageIdentitiesEqual, parseHarnessPackageIdentity } from "./identity-validation";
-export { inspectHarnessPackageState } from "./identity";
+export { harnessPackageAuthoritiesEqual, inspectHarnessPackageState } from "./identity";

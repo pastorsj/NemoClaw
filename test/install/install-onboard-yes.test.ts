@@ -681,7 +681,7 @@ main --non-interactive --yes-i-accept-third-party-software ${options.deferFlag ?
   };
 }
 
-describe("Hermes deferred onboarding", () => {
+describe("Deferred harness onboarding", () => {
   it("lists the installer option and environment setting (#10288)", () => {
     const result = runInstallerSourcedBody("usage", {
       extraEnv: { NEMOCLAW_AGENT: "hermes" },
@@ -691,7 +691,7 @@ describe("Hermes deferred onboarding", () => {
     expect(result.result.status, result.output).toBe(0);
     expect(result.output).toContain("--defer-onboarding");
     expect(result.output).toContain("NEMOCLAW_DEFER_ONBOARDING=1");
-    expect(result.output.match(/NEMOCLAW_AGENT=hermes/g)).toHaveLength(2);
+    expect(result.output).not.toContain("NEMOCLAW_AGENT=hermes");
     expect(result.output.match(/no registered sandboxes/g)).toHaveLength(2);
     expect(result.output.match(/no local model profile/g)).toHaveLength(2);
     expect(result.output.match(/build, cloud, or routed NVIDIA hosted provider/g)).toHaveLength(2);
@@ -719,6 +719,19 @@ describe("Hermes deferred onboarding", () => {
       expect(result.output).toContain("nemohermes onboard");
     },
   );
+
+  it("defers onboarding for an unknown installed harness without credentials", () => {
+    const result = runDeferredOnboardingMain({
+      agent: "future-terminal",
+      deferFlag: true,
+    });
+
+    expect(result.result.status, result.output).toBe(0);
+    expect(result.calls).toContain("harness-install-future-terminal");
+    expect(result.calls).not.toContain("host-preflight");
+    expect(result.calls).not.toContain("onboard");
+    expect(result.output).toContain("Harness onboarding did not run");
+  });
 
   it.each(["build", "routed", "custom"])(
     "treats the %s provider key as a selector when credentials are absent (#10288)",
@@ -785,11 +798,8 @@ describe("Hermes deferred onboarding", () => {
     expect(result.calls).not.toContain("onboard");
   });
 
-  it.each([
-    ["OpenClaw", { agent: "openclaw" }, "NEMOCLAW_AGENT=hermes"],
-    ["a non-NVIDIA provider", { provider: "openai" }, "NVIDIA hosted inference only"],
-  ])(
-    "rejects deferred Hermes onboarding for %s before installation (#10288)",
+  it.each([["a non-NVIDIA provider", { provider: "openai" }, "NVIDIA hosted inference only"]])(
+    "rejects deferred onboarding for %s before installation (#10288)",
     (_name, input, expected) => {
       const result = runDeferredOnboardingMain({ deferFlag: true, ...input });
 

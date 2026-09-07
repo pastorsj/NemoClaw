@@ -77,7 +77,7 @@ export function messagingChannelConfigsEqual(
   return leftKeys.every((key, index) => key === rightKeys[index] && left?.[key] === right?.[key]);
 }
 
-function getLegacySessionMessagingChannelConfig(
+export function getLegacySessionMessagingChannelConfig(
   session: Session | null,
 ): MessagingChannelConfig | null {
   const config: MessagingChannelConfig = {};

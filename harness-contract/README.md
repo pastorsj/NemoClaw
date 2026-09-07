@@ -110,6 +110,12 @@ provider probes. The latter currently accepts one `ollama-local` minimum between
 4,194,304 tokens. These are package requirements applied by core-owned inference runtimes, not
 host callbacks.
 
+`inference.route_probe` selects finite checks that NemoClaw owns and runs. `terminal_connect`
+requires a healthy managed inference route before the terminal smoke command. `rebuild_preflight`
+requires one inference request from the retained sandbox before backup or deletion. `models_404`
+uses an inference request when the provider does not support the models route. A package selects
+these checks with data; it does not supply probe code or receive credentials.
+
 `sandbox_create` contains finite inputs that core must apply before a managed harness starts. A
 package can declare `startup_controls` for `approval-mode` and `observability`; core resolves and
 persists those settings without branching on the package ID, then passes them through the existing

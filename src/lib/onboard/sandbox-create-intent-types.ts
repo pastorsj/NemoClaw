@@ -8,7 +8,10 @@ import type { MessagingChannelConfig } from "../messaging-channel-config";
 import type { DockerGpuRoutePlan } from "./docker-gpu-route";
 import type { InitialSandboxPolicy } from "./initial-policy";
 import type { ManagedStateVolumeMount } from "./managed-workload/managed-state-volumes";
-import type { MessagingTokenDef } from "./messaging-prep";
+import type {
+  MessagingProviderMutationReceipt,
+  MessagingTokenDef,
+} from "./messaging-prep";
 import type { MessagingChannel } from "./messaging-state";
 import type { SandboxGpuCreateConfig } from "./sandbox-gpu-create";
 
@@ -18,7 +21,11 @@ type PrepareInitialSandboxCreatePolicy =
 export type SandboxCreateMessagingProviderRequest = {
   readonly name: string;
   readonly envKey: string;
-  readonly providerType?: string;
+  readonly providerType: string;
+  /** Exact single credential, or an explicitly declared namespaced family. */
+  readonly credentialShape: "family" | "only";
+  /** Credential keys the typed provider declaration requires to be present. */
+  readonly credentialKeys: readonly string[];
   readonly credentialConfigured: boolean;
   readonly channel: string | null;
 };
@@ -104,6 +111,11 @@ export type MaterializeSandboxCreatePlanInput = {
   intent: SandboxCreateIntent;
   /** Exact receipt-pinned definition used only for package-owned policy assets. */
   packageAgentDefinition?: AgentDefinition;
+  /** Policy bytes prepared before a destructive recreate boundary. */
+  preparedPolicy?: {
+    readonly initialSandboxPolicy: InitialSandboxPolicy;
+    readonly compatibilityPolicyPath: string | null;
+  };
   fromRef: string;
   managedStateMounts?: readonly ManagedStateVolumeMount[];
   /** Opaque provider-owned OpenShell driver-config key for the managed state mount. */
@@ -114,6 +126,7 @@ export type MaterializeSandboxCreatePlanInput = {
   /** A verified create resume must rebuild its plan without replaying provider mutations. */
   skipProviderEffects?: boolean;
   messagingTokenDefs: MessagingTokenDef[];
+  recordMessagingProviderMutationReceipt?(receipt: MessagingProviderMutationReceipt): void;
   /** Non-secret config captured in the messaging plan that owns exact policy endpoints. */
   messagingConfig?: MessagingChannelConfig | null;
   runProviderPreDeleteCleanup(revalidateSandboxIdentity?: (operation: string) => void): void;
@@ -122,6 +135,9 @@ export type MaterializeSandboxCreatePlanInput = {
     options: {
       replaceExisting: true;
       allowedSandboxes: readonly [string];
+      requireExactBindings: boolean;
+      requireOwnedExistingProvider?: boolean;
+      recordMutationReceipt?(receipt: MessagingProviderMutationReceipt): void;
       revalidateSandboxIdentity?(operation: string): void;
     },
   ): string[];

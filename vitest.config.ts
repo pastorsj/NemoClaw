@@ -230,6 +230,12 @@ export default defineConfig({
           name: "package-contract",
           alias: canonicalSourceAliases,
           env: controlledNonLiveEnv,
+          // Package-contract fixtures import compiled artifacts and spawn CLI
+          // subprocesses. Run them after the source-backed projects and bound
+          // their concurrency without overriding a stricter coverage-shard cap.
+          maxWorkers: Math.min(2, cliCoverageShardScheduling.maxWorkers ?? 2),
+          sequence: { groupOrder: 3 },
+          testTimeout: testTimeout(15_000),
           setupFiles: [fixtureUmaskSetup, isolatedTestStateSetup],
           include: ["test/package-contract/**/*.test.ts"],
         },

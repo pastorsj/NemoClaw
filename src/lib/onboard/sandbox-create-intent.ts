@@ -6,6 +6,7 @@ import {
   type MessagingCredentialMetadata,
 } from "../messaging/channels";
 import { hasConfiguredMessagingCredential, type MessagingTokenDef } from "./messaging-prep";
+import { MESSAGING_BRIDGE_PENDING_VALUE } from "./messaging-bridge-provider";
 import { resolveQrSelectedChannels } from "./messaging-state";
 import type {
   ResolveSandboxCreateIntentInput,
@@ -130,7 +131,19 @@ export function resolveSandboxCreateMessagingProviderRequests(
   return messagingTokenDefs.map((tokenDef) => ({
     name: tokenDef.name,
     envKey: tokenDef.envKey,
-    ...(tokenDef.providerType ? { providerType: tokenDef.providerType } : {}),
+    providerType: tokenDef.providerType || "generic",
+    credentialShape:
+      tokenDef.token === MESSAGING_BRIDGE_PENDING_VALUE ||
+      tokenDef.messagingProviderProfile?.strategy ||
+      (tokenDef.additionalCredentials ?? []).length > 0
+        ? "family"
+        : "only",
+    credentialKeys: [
+      tokenDef.envKey,
+      ...(tokenDef.additionalCredentials ?? [])
+        .filter(({ token }) => Boolean(token))
+        .map(({ envKey }) => envKey),
+    ],
     credentialConfigured: hasConfiguredMessagingCredential(tokenDef),
     channel: getMessagingChannelForEnvKey(tokenDef.envKey),
   }));

@@ -11,12 +11,84 @@ import {
 import { isObjectRecord } from "../core/json-types";
 import { isDeferredN1xManagedVllmAcceptanceRoute } from "../domain/sandbox/n1x-managed-vllm-rebuild";
 import { normalizePendingSandboxCreateIdentity } from "./registry/pending-create-identity";
-import type { SandboxEntry } from "./registry/types";
+import type { SandboxEntry, SandboxProviderOwnershipReceipt } from "./registry/types";
 
 export { normalizePendingSandboxCreateIdentity };
 export { parseSandboxProviderBrokerOwnership } from "./registry/provider-broker";
 
 const SHA256_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
+const PROVIDER_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u;
+const PROVIDER_TYPE_PATTERN = /^[a-z][a-z0-9._-]{0,63}$/u;
+const CREDENTIAL_ENV_PATTERN = /^[A-Z_][A-Z0-9_]{0,127}$/u;
+const PROVIDER_RECEIPT_FIELDS = new Set([
+  "schemaVersion",
+  "purpose",
+  "providerName",
+  "providerId",
+  "providerType",
+  "credentialEnv",
+  "createdByNemoClaw",
+  "attachmentAddedByNemoClaw",
+]);
+
+/** Clone one bounded provider receipt, or reject an untrusted persisted shape. */
+export function cloneSandboxProviderOwnershipReceipt(
+  value: unknown,
+): SandboxProviderOwnershipReceipt | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !isObjectRecord(value) ||
+    Object.keys(value).some((key) => !PROVIDER_RECEIPT_FIELDS.has(key)) ||
+    value.schemaVersion !== 1 ||
+    value.purpose !== "web-search" ||
+    typeof value.providerName !== "string" ||
+    !PROVIDER_IDENTIFIER_PATTERN.test(value.providerName) ||
+    typeof value.providerId !== "string" ||
+    !PROVIDER_IDENTIFIER_PATTERN.test(value.providerId) ||
+    typeof value.providerType !== "string" ||
+    !PROVIDER_TYPE_PATTERN.test(value.providerType) ||
+    typeof value.credentialEnv !== "string" ||
+    !CREDENTIAL_ENV_PATTERN.test(value.credentialEnv) ||
+    typeof value.createdByNemoClaw !== "boolean" ||
+    typeof value.attachmentAddedByNemoClaw !== "boolean"
+  ) {
+    throw new Error("Sandbox provider ownership receipt is invalid");
+  }
+  return Object.freeze({
+    schemaVersion: 1,
+    purpose: "web-search",
+    providerName: value.providerName,
+    providerId: value.providerId,
+    providerType: value.providerType,
+    credentialEnv: value.credentialEnv,
+    createdByNemoClaw: value.createdByNemoClaw,
+    attachmentAddedByNemoClaw: value.attachmentAddedByNemoClaw,
+  });
+}
+
+/** Bind a web-search receipt to the exact core capability and sandbox row that owns it. */
+export function normalizeWebSearchProviderOwnership(
+  entry: Pick<
+    SandboxEntry,
+    | "name"
+    | "harnessPackage"
+    | "webSearchEnabled"
+    | "webSearchProvider"
+    | "webSearchProviderOwnership"
+  >,
+): SandboxProviderOwnershipReceipt | undefined {
+  const receipt = cloneSandboxProviderOwnershipReceipt(entry.webSearchProviderOwnership);
+  if (!receipt) return undefined;
+  if (
+    !entry.harnessPackage ||
+    entry.webSearchEnabled !== true ||
+    (entry.webSearchProvider !== "brave" && entry.webSearchProvider !== "tavily") ||
+    receipt.providerName !== `${entry.name}-${entry.webSearchProvider}-search`
+  ) {
+    throw new Error("Sandbox web-search provider ownership is orphaned");
+  }
+  return receipt;
+}
 
 /** Validate the optional N1x preview receipt against the route that owns it. */
 export function hasValidN1xPreviewAcceptance(entry: SandboxEntry): boolean {

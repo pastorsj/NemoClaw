@@ -357,6 +357,7 @@ export interface SandboxStateOptions<
       agent: Agent;
       requiredBindings: readonly CheckpointProviderBinding[];
       replaceExisting?: boolean;
+      receiptBackedPackage?: boolean;
       revalidateSandboxIdentity?(operation: string): void;
     }): Promise<readonly CheckpointProviderBinding[]>;
     promptValidatedSandboxName(agent: Agent): Promise<string>;
@@ -1748,6 +1749,7 @@ class SandboxStateFlow<
           webSearchConfig,
           agent: this.options.agent,
           requiredBindings,
+          receiptBackedPackage: hasReceiptBackedPackage(session),
           ...(replaceExisting ? { replaceExisting: true } : {}),
           ...(verifiedIdentityRevalidation
             ? { revalidateSandboxIdentity: verifiedIdentityRevalidation }

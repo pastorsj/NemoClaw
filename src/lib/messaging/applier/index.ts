@@ -6,6 +6,5 @@ export * from "./host-state-applier";
 export * from "./agent-config";
 export * from "./hook-phases";
 export * from "./conflict-detection";
-export * from "./openshell-provider";
 export * from "./policy";
 export type * from "./types";

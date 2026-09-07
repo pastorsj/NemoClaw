@@ -15,12 +15,15 @@ const ANSI_CSI_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/gu;
 const LEADING_FIELD_LABEL_RESET_PATTERN = /^(?:\x1B\[0m)*[ \t]*/u;
 const UNSAFE_FIELD_VALUE_CONTROL_PATTERN = /[\x00-\x08\x0A-\x1F\x7F-\x9F]/u;
 
-type ProviderField = "Name" | "Type" | "Credential keys" | "Config keys";
+type ProviderField = "Id" | "Name" | "Type" | "Resource version" | "Credential keys" | "Config keys";
 
-const PROVIDER_FIELD_PATTERN = /^\s*(Name|Type|Credential keys|Config keys):\s*(.*?)\s*$/i;
+const PROVIDER_FIELD_PATTERN =
+  /^\s*(Id|Name|Type|Resource version|Credential keys|Config keys):\s*(.*?)\s*$/i;
 const CANONICAL_PROVIDER_FIELDS = new Map<string, ProviderField>([
+  ["id", "Id"],
   ["name", "Name"],
   ["type", "Type"],
+  ["resource version", "Resource version"],
   ["credential keys", "Credential keys"],
   ["config keys", "Config keys"],
 ]);
@@ -76,6 +79,8 @@ export function parseCliOpenShellProviderMetadata(
 
   const name = fields.get("Name");
   const type = fields.get("Type");
+  const id = fields.get("Id");
+  const resourceVersionValue = fields.get("Resource version");
   const credentialKeysValue = fields.get("Credential keys");
   const configKeysValue = fields.get("Config keys");
   if (
@@ -84,7 +89,9 @@ export function parseCliOpenShellProviderMetadata(
     credentialKeysValue === undefined ||
     configKeysValue === undefined ||
     !isValidCliOpenShellProviderIdentifier(name) ||
-    !isValidCliOpenShellProviderIdentifier(type, MAX_PROVIDER_TYPE_LENGTH)
+    !isValidCliOpenShellProviderIdentifier(type, MAX_PROVIDER_TYPE_LENGTH) ||
+    (id !== undefined && !isValidCliOpenShellProviderIdentifier(id)) ||
+    (resourceVersionValue !== undefined && !/^\d+$/u.test(resourceVersionValue))
   ) {
     return null;
   }
@@ -92,5 +99,20 @@ export function parseCliOpenShellProviderMetadata(
   const credentialKeys = parseProviderKeys(credentialKeysValue);
   const configKeys = parseProviderKeys(configKeysValue);
   if (!credentialKeys || !configKeys) return null;
-  return { name, type, credentialKeys, configKeys };
+  const resourceVersion =
+    resourceVersionValue === undefined ? undefined : Number.parseInt(resourceVersionValue, 10);
+  if (
+    resourceVersion !== undefined &&
+    (!Number.isSafeInteger(resourceVersion) || resourceVersion < 1)
+  ) {
+    return null;
+  }
+  return {
+    ...(id === undefined ? {} : { id }),
+    ...(resourceVersion === undefined ? {} : { resourceVersion }),
+    name,
+    type,
+    credentialKeys,
+    configKeys,
+  };
 }

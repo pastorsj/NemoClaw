@@ -35,13 +35,11 @@ import type {
   SandboxMessagingPlan,
   SandboxMessagingRuntimeSetupPlan,
 } from "./manifest";
-import {
-  createChannelManifestRegistry,
-  type ChannelManifestRegistry,
-} from "./manifest/registry";
+import { createChannelManifestRegistry, type ChannelManifestRegistry } from "./manifest/registry";
 import {
   channelHooksFromManifest,
   compilerContext,
+  deriveCredentialBindingsFromManifests,
   hasFullChannelShape,
   isHookForAgent,
   normalizeFullInputs,
@@ -85,11 +83,20 @@ export function hydrateDerivedSandboxMessagingPlanFields(
       refreshFromExactManifests,
     ),
   );
-  const hydratedPlan = { ...plan, channels };
+  const planWithHydratedChannels = { ...plan, channels };
   const manifests = channels.flatMap((channel) => {
     const manifest = manifestRegistry.get(channel.channelId);
     return manifest ? [manifest] : [];
   });
+  const credentialBindings = refreshFromExactManifests
+    ? deriveCredentialBindingsFromManifests(
+        planWithHydratedChannels,
+        manifests,
+        new Map(channels.map((channel) => [channel.channelId, channel.inputs] as const)),
+        environment,
+      )
+    : plan.credentialBindings;
+  const hydratedPlan = { ...planWithHydratedChannels, credentialBindings };
   const hydrated = {
     ...hydratedPlan,
     networkPolicy: planNetworkPolicy(manifests, compilerContext(hydratedPlan)),
@@ -101,9 +108,10 @@ export function hydrateDerivedSandboxMessagingPlanFields(
       !refreshFromExactManifests && plan.buildSteps.length > 0
         ? plan.buildSteps
         : buildStepsFromManifests(hydratedPlan, manifests),
-    runtimeSetup: !refreshFromExactManifests && runtimeSetupHasEntries(plan.runtimeSetup)
-      ? plan.runtimeSetup
-      : planRuntimeSetup(manifests, plan.agent, channels),
+    runtimeSetup:
+      !refreshFromExactManifests && runtimeSetupHasEntries(plan.runtimeSetup)
+        ? plan.runtimeSetup
+        : planRuntimeSetup(manifests, plan.agent, channels),
     stateUpdates:
       !refreshFromExactManifests && plan.stateUpdates.length > 0
         ? plan.stateUpdates
@@ -116,9 +124,7 @@ export function hydrateDerivedSandboxMessagingPlanFields(
   if (!refreshFromExactManifests) return hydrated;
   const { packageBuild: _storedPackageBuild, ...withoutStoredPackageBuild } = hydrated;
   const packageBuild = resolvePackageBuildProfile(manifests);
-  return packageBuild
-    ? { ...withoutStoredPackageBuild, packageBuild }
-    : withoutStoredPackageBuild;
+  return packageBuild ? { ...withoutStoredPackageBuild, packageBuild } : withoutStoredPackageBuild;
 }
 
 function hydrateChannelFromManifest(
@@ -128,18 +134,23 @@ function hydrateChannelFromManifest(
   environment: Readonly<Record<string, string | undefined>>,
   refreshFromExactManifest: boolean,
 ): SandboxMessagingChannelPlan {
-  const { hostForward: _oldHostForward, ...channelWithoutHostForward } = channel;
+  const {
+    hostForward: _oldHostForward,
+    credentialProvider: storedCredentialProvider,
+    ...channelWithoutDerivedAuthority
+  } = channel;
   const disabled = channel.disabled || plan.disabledChannels.includes(channel.channelId);
-  const inputs = !refreshFromExactManifest && hasFullChannelShape(channel)
-    ? normalizeFullInputs(channel.channelId, channel.inputs)
-    : normalizePersistedInputs(channel, manifest);
+  const inputs =
+    !refreshFromExactManifest && hasFullChannelShape(channel)
+      ? normalizeFullInputs(channel.channelId, channel.inputs)
+      : normalizePersistedInputs(channel, manifest);
   const configured = channel.configured;
   const active = channel.active && !disabled;
   const hostForward = manifest
     ? planHostForward(manifest, inputs, active, createBuiltInRenderTemplateResolver(), environment)
     : undefined;
   return {
-    ...channelWithoutHostForward,
+    ...channelWithoutDerivedAuthority,
     displayName: channel.displayName ?? manifest?.displayName ?? channel.channelId,
     authMode: channel.authMode ?? manifest?.auth.mode ?? "none",
     configured,
@@ -150,7 +161,9 @@ function hydrateChannelFromManifest(
       ? manifest?.credentialProvider
         ? { credentialProvider: manifest.credentialProvider }
         : {}
-      : {}),
+      : storedCredentialProvider
+        ? { credentialProvider: storedCredentialProvider }
+        : {}),
     ...(hostForward ? { hostForward } : {}),
     hooks:
       !refreshFromExactManifest && channel.hooks.length > 0

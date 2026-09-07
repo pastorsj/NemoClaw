@@ -19,6 +19,7 @@ export function applyHarnessMessagingProfile(
   packageId: MessagingAgentId,
   profile: HarnessMessagingChannelProfile,
   build: HarnessMessagingBuildProfile,
+  providerProfileSha256?: string,
 ): ChannelManifest {
   const agent = packageId;
   const credentialProvider = profile.credentialProvider;
@@ -80,6 +81,7 @@ export function applyHarnessMessagingProfile(
           credentialProvider: {
             ...credentialProvider,
             sourceSecretEnv: sourceInput.envKey,
+            ...(providerProfileSha256 ? { profileSha256: providerProfileSha256 } : {}),
           },
         }
       : { credentialProvider: undefined }),

@@ -9,7 +9,15 @@ import {
   parseOpenShellPolicy,
   stripProviderComposedPolicies,
 } from "../../adapters/openshell/policy-boundary";
+import type { AgentDefinition } from "../../agent/defs";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 import { isReviewedMessagingChannelPolicyUpgrade } from "../../messaging/channels/policy";
+import type { SandboxMessagingNetworkPolicyEntryPlan } from "../../messaging/manifest";
+import type { MessagingChannelConfig } from "../../messaging-channel-config";
+import {
+  loadReceiptBoundPackagePolicyPreset,
+  resolvePackageMessagingPolicyEntries,
+} from "../../policy/package-messaging";
 import { reconcileTeamsOutlookLoginCredentialBinding } from "../../policy/microsoft-login-credential-binding";
 import { getCredentialBindingProviders, type InitialSandboxPolicy } from "../initial-policy";
 import { cleanupTempDir, createExactTempFileCleanup, secureTempFile } from "../temp-files";
@@ -17,6 +25,16 @@ import { cleanupTempDir, createExactTempFileCleanup, secureTempFile } from "../t
 const REBUILD_POLICY_HANDOFF_PREFIX = "nemoclaw-rebuild-policy-handoff";
 
 type PolicyMapping = Record<string, unknown>;
+
+export type RebuildCredentialPolicyReconciliation = {
+  readonly mode: "teams-outlook-shared-login";
+  readonly teamsChannelState: "active" | "removed";
+};
+
+export type RebuildNetworkPolicyRemovalExpectation = Readonly<{
+  key: string;
+  allowedValues: readonly unknown[];
+}>;
 
 function authorizedCredentialBindingProviders(
   source: string,
@@ -46,6 +64,126 @@ function policyMapping(value: unknown, label: string): PolicyMapping {
     throw new Error(`Cannot prepare rebuild policy handoff: ${label} must be a mapping.`);
   }
   return value;
+}
+
+/** Select rebuild policy bytes through the shared exact-package messaging boundary. */
+export function resolveRebuildPackageMessagingPolicySources(input: {
+  readonly agentDefinition: AgentDefinition;
+  readonly entries: readonly SandboxMessagingNetworkPolicyEntryPlan[];
+  readonly harnessPackageIdentity: HarnessPackageIdentity;
+  readonly includeCredentialBindings?: boolean;
+  readonly messagingConfig?: MessagingChannelConfig | null;
+  readonly sandboxName: string;
+}): string[] {
+  return resolvePackageMessagingPolicyEntries({
+    ...input,
+    includeCredentialBindings: input.includeCredentialBindings ?? true,
+  }).map(({ content }) => content);
+}
+
+function networkPolicyValuesFromSources(
+  sources: readonly string[],
+  selectedKeys: ReadonlySet<string>,
+): ReadonlyMap<string, unknown> {
+  const values = new Map<string, unknown>();
+  for (const source of sources) {
+    let parsed: unknown;
+    try {
+      parsed = YAML.parse(source);
+    } catch {
+      throw new Error(
+        "Cannot prepare rebuild policy handoff: package network policy source is invalid YAML.",
+      );
+    }
+    const policy = policyMapping(parsed, "package network policy source");
+    const networkPolicies = policyMapping(
+      policy.network_policies,
+      "package network policy source network_policies",
+    );
+    for (const [key, value] of Object.entries(networkPolicies)) {
+      if (!selectedKeys.has(key)) continue;
+      const existing = values.get(key);
+      if (existing !== undefined && !isDeepStrictEqual(existing, value)) {
+        throw new Error(
+          `Cannot prepare rebuild policy handoff: package network policy '${key}' has conflicting removal sources.`,
+        );
+      }
+      values.set(key, structuredClone(value));
+    }
+  }
+  return values;
+}
+
+/** Resolve exact package-owned values that are safe to remove during rebuild. */
+export function resolveRebuildPackagePolicyRemovalExpectations(input: {
+  readonly agentDefinition: AgentDefinition;
+  readonly harnessPackageIdentity: HarnessPackageIdentity;
+  readonly messagingConfig?: MessagingChannelConfig | null;
+  readonly messagingEntries: readonly SandboxMessagingNetworkPolicyEntryPlan[];
+  readonly policyKeys: readonly string[];
+  readonly automaticPresetNames: readonly string[];
+  readonly sandboxName: string;
+}): readonly RebuildNetworkPolicyRemovalExpectation[] {
+  const selectedKeys = new Set(input.policyKeys);
+  const boundMessagingValues = networkPolicyValuesFromSources(
+    resolveRebuildPackageMessagingPolicySources({
+      agentDefinition: input.agentDefinition,
+      entries: input.messagingEntries,
+      harnessPackageIdentity: input.harnessPackageIdentity,
+      includeCredentialBindings: true,
+      messagingConfig: input.messagingConfig,
+      sandboxName: input.sandboxName,
+    }),
+    selectedKeys,
+  );
+  const unboundMessagingValues = networkPolicyValuesFromSources(
+    resolveRebuildPackageMessagingPolicySources({
+      agentDefinition: input.agentDefinition,
+      entries: input.messagingEntries,
+      harnessPackageIdentity: input.harnessPackageIdentity,
+      includeCredentialBindings: false,
+      messagingConfig: input.messagingConfig,
+      sandboxName: input.sandboxName,
+    }),
+    selectedKeys,
+  );
+  const automaticValues = new Map<string, unknown>();
+  for (const presetName of input.automaticPresetNames) {
+    const preset = loadReceiptBoundPackagePolicyPreset({
+      agentDefinition: input.agentDefinition,
+      harnessPackageIdentity: input.harnessPackageIdentity,
+      presetName,
+    });
+    if (!preset) {
+      throw new Error(
+        `Cannot prepare rebuild policy handoff: package automatic policy preset '${presetName}' is unavailable.`,
+      );
+    }
+    const values = networkPolicyValuesFromSources([preset.content], selectedKeys);
+    if (!values.has(presetName)) {
+      throw new Error(
+        `Cannot prepare rebuild policy handoff: package automatic policy preset '${presetName}' does not own its network policy key.`,
+      );
+    }
+    automaticValues.set(presetName, values.get(presetName));
+  }
+
+  return Object.freeze(
+    input.policyKeys.flatMap((key) => {
+      const allowedValues = [
+        boundMessagingValues.get(key),
+        unboundMessagingValues.get(key),
+        automaticValues.get(key),
+      ].filter((value): value is NonNullable<typeof value> => value !== undefined);
+      const uniqueValues = allowedValues.filter(
+        (value, index) =>
+          allowedValues.findIndex((candidate) => isDeepStrictEqual(candidate, value)) === index,
+      );
+      return uniqueValues.length === 0
+        ? []
+        : [Object.freeze({ key, allowedValues: Object.freeze(uniqueValues) })];
+    }),
+  );
 }
 
 function policyPaths(value: unknown, label: string): string[] {
@@ -141,6 +279,8 @@ function mergeRequestedReplacementNetworkPolicies(
   requiredKeys: readonly string[],
   removedKeys: readonly string[],
   requiredPolicySources: readonly string[],
+  reviewedMessagingUpgradeKeys?: readonly string[],
+  removalExpectations: readonly RebuildNetworkPolicyRemovalExpectation[] = [],
 ): boolean {
   if (requiredKeys.length === 0 && removedKeys.length === 0) return false;
 
@@ -194,8 +334,31 @@ function mergeRequestedReplacementNetworkPolicies(
       : structuredClone(policyMapping(live.network_policies, "live network_policies"));
   let changed = false;
 
+  const removalExpectationsByKey = new Map<string, readonly unknown[]>();
+  for (const expectation of removalExpectations) {
+    if (
+      !removed.has(expectation.key) ||
+      expectation.allowedValues.length === 0 ||
+      removalExpectationsByKey.has(expectation.key)
+    ) {
+      throw new Error(
+        "Cannot prepare rebuild policy handoff: network policy removal authority is invalid.",
+      );
+    }
+    removalExpectationsByKey.set(expectation.key, expectation.allowedValues);
+  }
+
   for (const key of removed) {
     if (!Object.hasOwn(livePolicies, key)) continue;
+    const allowedValues = removalExpectationsByKey.get(key);
+    if (
+      allowedValues &&
+      !allowedValues.some((expectedValue) => isDeepStrictEqual(livePolicies[key], expectedValue))
+    ) {
+      throw new Error(
+        `Cannot prepare rebuild policy handoff: live network policy '${key}' does not match package removal authority.`,
+      );
+    }
     delete livePolicies[key];
     changed = true;
   }
@@ -208,7 +371,12 @@ function mergeRequestedReplacementNetworkPolicies(
     if (Object.hasOwn(livePolicies, key)) {
       if (!isDeepStrictEqual(livePolicies[key], replacementPolicies[key])) {
         if (
-          isReviewedMessagingChannelPolicyUpgrade(key, livePolicies[key], replacementPolicies[key])
+          isReviewedMessagingChannelPolicyUpgrade(
+            key,
+            livePolicies[key],
+            replacementPolicies[key],
+            reviewedMessagingUpgradeKeys,
+          )
         ) {
           livePolicies[key] = structuredClone(replacementPolicies[key]);
           changed = true;
@@ -244,13 +412,21 @@ export function mergeReplacementPolicyAccess(
   removedNetworkPolicyKeys: readonly string[] = [],
   requiredNetworkPolicySources: readonly string[] = [],
   sandboxName?: string,
+  reviewedMessagingUpgradeKeys?: readonly string[],
+  credentialPolicyReconciliation?: RebuildCredentialPolicyReconciliation | null,
+  removalExpectations: readonly RebuildNetworkPolicyRemovalExpectation[] = [],
 ): { readonly changed: boolean; readonly source: string } {
   const providerNormalizedLivePolicySource = stripProviderComposedPolicies(livePolicySource);
-  const teamsActive = requiredNetworkPolicyKeys.includes("teams")
-    ? true
-    : removedNetworkPolicyKeys.includes("teams")
-      ? false
-      : null;
+  const teamsActive =
+    credentialPolicyReconciliation === undefined
+      ? requiredNetworkPolicyKeys.includes("teams")
+        ? true
+        : removedNetworkPolicyKeys.includes("teams")
+          ? false
+          : null
+      : credentialPolicyReconciliation?.mode === "teams-outlook-shared-login"
+        ? credentialPolicyReconciliation.teamsChannelState === "active"
+        : null;
   const normalizedLivePolicySource =
     teamsActive !== null
       ? reconcileTeamsOutlookLoginCredentialBinding(
@@ -271,6 +447,8 @@ export function mergeReplacementPolicyAccess(
     requiredNetworkPolicyKeys,
     removedNetworkPolicyKeys,
     requiredNetworkPolicySources,
+    reviewedMessagingUpgradeKeys,
+    removalExpectations,
   );
   const changed =
     normalizedLivePolicySource !== livePolicySource ||
@@ -290,7 +468,10 @@ export function materializeRebuildPolicyHandoff(input: {
   readonly requiredNetworkPolicyKeys?: readonly string[];
   readonly removedNetworkPolicyKeys?: readonly string[];
   readonly requiredNetworkPolicySources?: readonly string[];
+  readonly removalExpectations?: readonly RebuildNetworkPolicyRemovalExpectation[];
   readonly authorizedCredentialBindingProviders?: readonly string[];
+  readonly reviewedMessagingUpgradeKeys?: readonly string[];
+  readonly credentialPolicyReconciliation?: RebuildCredentialPolicyReconciliation | null;
 }): InitialSandboxPolicy {
   const liveSource = fs.readFileSync(input.livePolicyPath, "utf8");
   const replacementSource =
@@ -303,6 +484,9 @@ export function materializeRebuildPolicyHandoff(input: {
     input.removedNetworkPolicyKeys,
     input.requiredNetworkPolicySources,
     input.sandboxName,
+    input.reviewedMessagingUpgradeKeys,
+    input.credentialPolicyReconciliation,
+    input.removalExpectations,
   );
   if (!merged.changed) {
     return {

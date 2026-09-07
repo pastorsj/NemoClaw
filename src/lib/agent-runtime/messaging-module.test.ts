@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -464,7 +465,7 @@ describe("installed harness messaging module", () => {
     });
   });
 
-  it("projects an unknown package provider without a core provider-profile map", () => {
+  it("projects an unknown package provider and its receipt digest without a core map", () => {
     writeFuturePackage(VALID_MODULE, undefined, [], undefined, {
       profileId: "future-channel-static",
       profileSource: futureProviderSource,
@@ -484,6 +485,7 @@ describe("installed harness messaging module", () => {
     );
     expect(projected?.credentialProvider).toEqual({
       profilePath: "provider-profiles/future-channel.yaml",
+      profileSha256: createHash("sha256").update(futureProviderSource).digest("hex"),
       profileId: "future-channel-static",
       credentialEnv: "FUTURE_CHANNEL_TOKEN",
       sourceInputId: "credential",

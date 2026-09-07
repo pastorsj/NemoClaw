@@ -6,7 +6,9 @@
 // harness-package receipts and the isolated Vitest registry. Only OpenShell/process boundaries
 // are replaced, so package messaging authority and registry persistence remain production code.
 
+import fs from "node:fs";
 import path from "node:path";
+import YAML from "yaml";
 
 import {
   afterAll,
@@ -25,8 +27,15 @@ import { policyChannelDependencies } from "../../src/lib/actions/sandbox/policy-
 import * as processRecovery from "../../src/lib/actions/sandbox/process-recovery";
 import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/types";
 import * as gatewayRuntime from "../../src/lib/gateway-runtime-action";
-import type { SandboxMessagingPlan } from "../../src/lib/messaging";
+import {
+  MESSAGING_CREDENTIAL_PROVIDER_TYPE,
+  type SandboxMessagingPlan,
+  type SandboxMessagingProviderReceipt,
+} from "../../src/lib/messaging";
+import type { GatewayProviderMetadata } from "../../src/lib/onboard/gateway-provider-metadata";
+import { materializeMessagingChannelPolicyContent } from "../../src/lib/messaging/channels";
 import * as policies from "../../src/lib/policy";
+import { captureSandboxCommandAgentAuthority } from "../../src/lib/sandbox/command-agent";
 import * as registry from "../../src/lib/state/registry";
 import type { SandboxEntry } from "../../src/lib/state/registry/types";
 import {
@@ -37,6 +46,7 @@ import { restoreEnv } from "../helpers/env-test-helpers";
 import { makeMessagingPlan } from "../helpers/messaging-plan-fixtures";
 
 const SANDBOX_NAME = "test-sb";
+const LIVE_SANDBOX_FINGERPRINT = "f".repeat(64);
 const MESSAGING_ENV_PREFIXES = [
   "TELEGRAM_",
   "DISCORD_",
@@ -47,6 +57,7 @@ const MESSAGING_ENV_PREFIXES = [
 ];
 
 type AgentUnderTest = "openclaw" | "hermes";
+type ReceiptBackedChannel = "telegram" | "wechat";
 type SandboxCommandResult = {
   readonly status: number;
   readonly stdout: string;
@@ -62,6 +73,8 @@ type StoppedCleanupResult =
 
 let packageFixtures: HarnessPackageFixture[] = [];
 let packageIdentities: Record<AgentUnderTest, HarnessPackageIdentity>;
+let packageRoots: Record<AgentUnderTest, string>;
+let livePolicyDocument = YAML.stringify({ version: 1, network_policies: {} });
 let previousNonInteractive: string | undefined;
 let removedMessagingEnvironment = new Map<string, string>();
 
@@ -71,18 +84,57 @@ let errorSpy: MockInstance;
 let listPresetsSpy: MockInstance;
 let getAppliedPresetsSpy: MockInstance;
 let removePresetSpy: MockInstance;
+let setPolicyDocumentSpy: MockInstance;
 let sandboxExecSpy: MockInstance;
 let sandboxSshSpy: MockInstance;
 let stoppedCleanupSpy: MockInstance;
+let attachedProviderNames = new Set<string>();
+let liveProviderMetadata = new Map<string, GatewayProviderMetadata>();
+
+function providerNameForChannel(channelId: ReceiptBackedChannel): string {
+  return `${SANDBOX_NAME}-${channelId}-bridge`;
+}
+
+function providerCredentialKeyForChannel(channelId: ReceiptBackedChannel): string {
+  return channelId === "telegram" ? "TELEGRAM_BOT_TOKEN" : "WECHAT_BOT_TOKEN";
+}
+
+function providerIdForChannel(channelId: ReceiptBackedChannel): string {
+  return `${channelId}-provider-id`;
+}
+
+function buildProviderReceipt(channelId: ReceiptBackedChannel): SandboxMessagingProviderReceipt {
+  return {
+    channelId,
+    providerName: providerNameForChannel(channelId),
+    providerId: providerIdForChannel(channelId),
+    createdByNemoClaw: true,
+    attachmentAddedByNemoClaw: true,
+  };
+}
+
+function installLiveProvider(channelId: ReceiptBackedChannel): void {
+  const providerName = providerNameForChannel(channelId);
+  liveProviderMetadata.set(providerName, {
+    id: providerIdForChannel(channelId),
+    name: providerName,
+    type: MESSAGING_CREDENTIAL_PROVIDER_TYPE,
+    credentialKeys: [providerCredentialKeyForChannel(channelId)],
+    configKeys: [],
+  });
+  attachedProviderNames.add(providerName);
+}
 
 function buildStoredMessagingPlan(
   agent: AgentUnderTest,
   channelInRegistry: string,
+  providerReceiptChannels: readonly ReceiptBackedChannel[],
 ): SandboxMessagingPlan {
   const plan = makeMessagingPlan({
     sandboxName: SANDBOX_NAME,
     agent,
     channels: channelInRegistry ? [channelInRegistry] : [],
+    providerReceipts: providerReceiptChannels.map(buildProviderReceipt),
     ...(channelInRegistry === "wechat" ? { authMode: "host-qr" as const } : {}),
   });
   return {
@@ -107,11 +159,42 @@ function buildStoredMessagingPlan(
   };
 }
 
+function buildInstalledPackagePolicyDocument(
+  agent: AgentUnderTest,
+  presetNames: readonly string[],
+): string {
+  const networkPolicies = Object.fromEntries(
+    presetNames.flatMap((presetName) => {
+      const presetPath = path.join(
+        packageRoots[agent],
+        "policies",
+        "presets",
+        `${presetName}.yaml`,
+      );
+      const materialized = fs.existsSync(presetPath)
+        ? materializeMessagingChannelPolicyContent(
+            fs.readFileSync(presetPath, "utf8"),
+            presetName,
+            {
+              sandboxName: SANDBOX_NAME,
+            },
+          )
+        : null;
+      const document = YAML.parse(materialized ?? "") as {
+        readonly network_policies?: Readonly<Record<string, unknown>>;
+      } | null;
+      return Object.entries(document?.network_policies ?? {});
+    }),
+  );
+  return YAML.stringify({ version: 1, network_policies: networkPolicies });
+}
+
 function registerSandboxScenario({
   presetNamesApplied = ["npm", "pypi", "huggingface", "brew", "whatsapp"],
   agent = "openclaw",
   channelInRegistry = "whatsapp",
   receiptBacked = true,
+  providerReceiptChannels,
   sandboxExecResult = {
     status: 0,
     stdout: "NEMOCLAW_CHANNEL_CLEAR_OK",
@@ -127,6 +210,7 @@ function registerSandboxScenario({
   readonly agent?: AgentUnderTest;
   readonly channelInRegistry?: string;
   readonly receiptBacked?: boolean;
+  readonly providerReceiptChannels?: readonly ReceiptBackedChannel[];
   readonly sandboxExecResult?: SandboxCommandResult | null;
   readonly sshFallbackResult?: SandboxCommandResult | null;
   readonly stoppedDockerCleanupResult?: StoppedCleanupResult;
@@ -135,17 +219,30 @@ function registerSandboxScenario({
     presetNamesApplied.map((name) => ({ file: `${name}.yaml`, name, description: "test preset" })),
   );
   getAppliedPresetsSpy.mockReturnValue([...presetNamesApplied]);
+  livePolicyDocument = buildInstalledPackagePolicyDocument(agent, presetNamesApplied);
   sandboxExecSpy.mockReturnValue(sandboxExecResult);
   sandboxSshSpy.mockReturnValue(sshFallbackResult);
   stoppedCleanupSpy.mockReturnValue(stoppedDockerCleanupResult);
+  const storedProviderReceiptChannels =
+    providerReceiptChannels ??
+    (receiptBacked && (channelInRegistry === "telegram" || channelInRegistry === "wechat")
+      ? [channelInRegistry]
+      : []);
 
   registry.registerSandbox({
     name: SANDBOX_NAME,
     agent,
-    ...(receiptBacked ? { harnessPackage: packageIdentities[agent] } : {}),
+    ...(receiptBacked
+      ? {
+          gatewayName: "nemoclaw",
+          harnessPackage: packageIdentities[agent],
+          lifecycleGeneration: "generation-1",
+          lifecycleLiveIdentityFingerprint: LIVE_SANDBOX_FINGERPRINT,
+        }
+      : {}),
     messaging: {
       schemaVersion: 1,
-      plan: buildStoredMessagingPlan(agent, channelInRegistry),
+      plan: buildStoredMessagingPlan(agent, channelInRegistry, storedProviderReceiptChannels),
     },
   });
   const persisted = registry.getSandbox(SANDBOX_NAME);
@@ -162,8 +259,19 @@ function expectCleanupBeforeQueuedRebuild(): void {
 }
 
 function expectRemovedPreset(channelId: string): void {
-  expect(removePresetSpy).toHaveBeenCalledTimes(1);
-  expect(removePresetSpy).toHaveBeenCalledWith(SANDBOX_NAME, channelId);
+  const agent = registry.getSandbox(SANDBOX_NAME)?.agent;
+  const policyKey =
+    channelId === "telegram" && agent === "openclaw"
+      ? "telegram_bot"
+      : channelId === "wechat"
+        ? "wechat_bridge"
+        : channelId;
+  expect(setPolicyDocumentSpy).toHaveBeenCalledTimes(1);
+  const desiredPolicy = YAML.parse(
+    String(setPolicyDocumentSpy.mock.calls[0]?.[1] ?? ""),
+  ).network_policies;
+  expect(desiredPolicy).not.toHaveProperty(policyKey);
+  expect(removePresetSpy).not.toHaveBeenCalled();
 }
 
 function registeredMessagingChannels(): SandboxMessagingPlan["channels"] {
@@ -193,15 +301,57 @@ beforeAll(() => {
       channelIds: ["telegram", "whatsapp"],
     },
   });
+  for (const [fixture, agent, presets] of [
+    [openclawFixture, "openclaw", ["telegram", "wechat", "whatsapp"]],
+    [hermesFixture, "hermes", ["telegram", "whatsapp"]],
+  ] as const) {
+    const packageRoot = fixture.packageRoots.get(agent);
+    expect(packageRoot, `${agent} fixture package root is unavailable`).toBeDefined();
+    const manifestPath = path.join(packageRoot!, "manifest.yaml");
+    fs.writeFileSync(
+      manifestPath,
+      fs
+        .readFileSync(manifestPath, "utf8")
+        .replace(
+          "  owned_presets: []",
+          `  owned_presets:\n${presets.map((preset) => `    - ${preset}`).join("\n")}`,
+        ),
+      { mode: 0o600 },
+    );
+    const fixturePresetDirectory = path.join(packageRoot!, "policies", "presets");
+    fs.mkdirSync(fixturePresetDirectory, { recursive: true, mode: 0o700 });
+    for (const preset of presets) {
+      fs.copyFileSync(
+        path.join(
+          process.cwd(),
+          "packages",
+          `nemoclaw-${agent}`,
+          "policies",
+          "presets",
+          `${preset}.yaml`,
+        ),
+        path.join(fixturePresetDirectory, `${preset}.yaml`),
+      );
+    }
+  }
+  const installedOpenclaw = openclawFixture.install("openclaw");
+  const installedHermes = hermesFixture.install("hermes");
   packageFixtures = [openclawFixture, hermesFixture];
   packageIdentities = {
-    openclaw: openclawFixture.install("openclaw").identity,
-    hermes: hermesFixture.install("hermes").identity,
+    openclaw: installedOpenclaw.identity,
+    hermes: installedHermes.identity,
+  };
+  packageRoots = {
+    openclaw: installedOpenclaw.packageRoot,
+    hermes: installedHermes.packageRoot,
   };
 });
 
 beforeEach(() => {
   registry.clearAll();
+  attachedProviderNames = new Set();
+  liveProviderMetadata = new Map();
+  livePolicyDocument = YAML.stringify({ version: 1, network_policies: {} });
   previousNonInteractive = process.env.NEMOCLAW_NON_INTERACTIVE;
   process.env.NEMOCLAW_NON_INTERACTIVE = "1";
   removedMessagingEnvironment = new Map(
@@ -221,6 +371,20 @@ beforeEach(() => {
   listPresetsSpy = vi.spyOn(policies, "listPresets");
   getAppliedPresetsSpy = vi.spyOn(policies, "getAppliedPresets");
   removePresetSpy = vi.spyOn(policies, "removePreset").mockReturnValue(true);
+  const policyMutationContext = (): policies.PolicyMutationContext => {
+    const sandbox = registry.getSandbox(SANDBOX_NAME);
+    return {
+      gatewayName: "nemoclaw",
+      inspection: {} as policies.PolicyMutationContext["inspection"],
+      basePolicyDocument: livePolicyDocument,
+      ...(sandbox?.harnessPackage
+        ? { agentAuthority: captureSandboxCommandAgentAuthority(sandbox) }
+        : {}),
+    };
+  };
+  vi.spyOn(policies, "inspectPolicyMutationContext").mockImplementation(policyMutationContext);
+  vi.spyOn(policies, "recheckPolicyMutationContext").mockImplementation(policyMutationContext);
+  setPolicyDocumentSpy = vi.spyOn(policies, "setPolicyDocument").mockReturnValue(true);
   sandboxExecSpy = vi.spyOn(processRecovery, "executeSandboxExecCommand");
   sandboxSshSpy = vi.spyOn(processRecovery, "executeSandboxCommand");
   stoppedCleanupSpy = vi.spyOn(policyChannelDependencies, "clearStoppedSandboxStateRoots");
@@ -229,17 +393,45 @@ beforeEach(() => {
     stdout: "",
     stderr: "",
   } as never);
-  vi.spyOn(policyChannelDependencies, "runGatewayOpenshell").mockReturnValue({
-    status: 0,
-    stdout: "",
-    stderr: "",
-  } as never);
-  vi.spyOn(policyChannelDependencies, "deleteMessagingProviderWithRecovery").mockReturnValue({
-    ok: true,
-    status: 0,
-    stdout: "",
-    stderr: "",
-  } as never);
+  vi.spyOn(policyChannelDependencies, "runGatewayOpenshell").mockImplementation(
+    (_gatewayName, args) => {
+      if (args[0] === "sandbox" && args[1] === "provider" && args[2] === "detach") {
+        attachedProviderNames.delete(String(args[4]));
+      }
+      return { status: 0, stdout: "", stderr: "" } as never;
+    },
+  );
+  vi.spyOn(policyChannelDependencies, "deleteMessagingProviderWithRecovery").mockImplementation(
+    (providerName) => {
+      liveProviderMetadata.delete(providerName);
+      attachedProviderNames.delete(providerName);
+      return { ok: true, status: 0, stdout: "", stderr: "" } as never;
+    },
+  );
+  vi.spyOn(policyChannelDependencies, "inspectMessagingProviderAttachmentTarget").mockReturnValue(
+    LIVE_SANDBOX_FINGERPRINT,
+  );
+  vi.spyOn(policyChannelDependencies, "inspectMessagingProviderBinding").mockImplementation(
+    (binding) => ({ kind: liveProviderMetadata.has(binding.name) ? "exact" : "missing" }),
+  );
+  vi.spyOn(policyChannelDependencies, "inspectMessagingProviderMetadata").mockImplementation(
+    (providerName) => liveProviderMetadata.get(providerName) ?? null,
+  );
+  vi.spyOn(policyChannelDependencies, "inspectMessagingProviderAttachments").mockImplementation(
+    () =>
+      [...attachedProviderNames].flatMap((providerName) => {
+        const metadata = liveProviderMetadata.get(providerName);
+        return metadata?.id
+          ? [
+              {
+                name: providerName,
+                providerId: metadata.id,
+                credentialKeys: metadata.credentialKeys,
+              },
+            ]
+          : [];
+      }),
+  );
   vi.spyOn(gatewayRuntime, "recoverNamedGatewayRuntime").mockResolvedValue({
     recovered: true,
     attempted: false,
@@ -310,6 +502,7 @@ describe.sequential("channels remove full teardown (#3998)", () => {
       presetNamesApplied: ["npm", "pypi"],
       agent: "openclaw",
       channelInRegistry: "telegram",
+      providerReceiptChannels: ["wechat"],
       sandboxExecResult: { status: 1, stdout: "", stderr: "sandbox stopped" },
       sshFallbackResult: { status: 255, stdout: "", stderr: "sandbox stopped" },
       stoppedDockerCleanupResult: { cleared: true },
@@ -507,5 +700,91 @@ describe.sequential("channels remove full teardown (#3998)", () => {
         pendingRemoval: true,
       }),
     ]);
+  });
+
+  it("detaches and deletes only an exact receipt-owned static provider", async () => {
+    registerSandboxScenario({
+      presetNamesApplied: ["npm", "pypi", "telegram"],
+      agent: "openclaw",
+      channelInRegistry: "telegram",
+    });
+    installLiveProvider("telegram");
+
+    await expect(
+      removeSandboxChannel(SANDBOX_NAME, { channel: "telegram" }),
+    ).resolves.toBeUndefined();
+
+    expect(policyChannelDependencies.inspectMessagingProviderBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentialKey: "TELEGRAM_BOT_TOKEN",
+        credentialShape: "only",
+        name: "test-sb-telegram-bridge",
+      }),
+      "nemoclaw",
+    );
+    expect(policyChannelDependencies.runGatewayOpenshell).toHaveBeenCalledWith(
+      "nemoclaw",
+      ["sandbox", "provider", "detach", SANDBOX_NAME, "test-sb-telegram-bridge"],
+      expect.any(Object),
+    );
+    expect(policyChannelDependencies.deleteMessagingProviderWithRecovery).toHaveBeenCalledWith(
+      "test-sb-telegram-bridge",
+      SANDBOX_NAME,
+      "nemoclaw",
+    );
+  });
+
+  it.each([
+    ["colliding", { kind: "collision" }],
+    ["indeterminate", { kind: "indeterminate", message: "gateway unavailable" }],
+  ] as const)(
+    "refuses a %s receipt-owned provider before changing channel state",
+    async (_description, inspection) => {
+      process.env.TELEGRAM_BOT_TOKEN = "test-token-that-must-remain";
+      const original = registerSandboxScenario({
+        presetNamesApplied: ["npm", "pypi", "telegram"],
+        agent: "openclaw",
+        channelInRegistry: "telegram",
+      });
+      vi.mocked(policyChannelDependencies.inspectMessagingProviderBinding).mockReturnValue(
+        inspection,
+      );
+
+      await expect(removeSandboxChannel(SANDBOX_NAME, { channel: "telegram" })).rejects.toThrow(
+        "process.exit(1)",
+      );
+
+      expect(policyChannelDependencies.inspectMessagingProviderBinding).toHaveBeenCalledWith(
+        expect.objectContaining({ credentialShape: "only" }),
+        "nemoclaw",
+      );
+      expect(sandboxExecSpy).not.toHaveBeenCalled();
+      expect(setPolicyDocumentSpy).not.toHaveBeenCalled();
+      expect(policyChannelDependencies.runGatewayOpenshell).not.toHaveBeenCalled();
+      expect(policyChannelDependencies.deleteMessagingProviderWithRecovery).not.toHaveBeenCalled();
+      expect(registry.getSandbox(SANDBOX_NAME)).toEqual(original);
+      expect(process.env.TELEGRAM_BOT_TOKEN).toBe("test-token-that-must-remain");
+    },
+  );
+
+  it("refuses provider teardown when the live sandbox identity drifts", async () => {
+    const original = registerSandboxScenario({
+      presetNamesApplied: ["npm", "pypi", "telegram"],
+      agent: "openclaw",
+      channelInRegistry: "telegram",
+    });
+    vi.mocked(policyChannelDependencies.inspectMessagingProviderAttachmentTarget)
+      .mockReturnValueOnce(LIVE_SANDBOX_FINGERPRINT)
+      .mockReturnValue("0".repeat(64));
+
+    await expect(removeSandboxChannel(SANDBOX_NAME, { channel: "telegram" })).rejects.toThrow(
+      "process.exit(1)",
+    );
+
+    expect(policyChannelDependencies.inspectMessagingProviderBinding).not.toHaveBeenCalled();
+    expect(setPolicyDocumentSpy).not.toHaveBeenCalled();
+    expect(policyChannelDependencies.runGatewayOpenshell).not.toHaveBeenCalled();
+    expect(policyChannelDependencies.deleteMessagingProviderWithRecovery).not.toHaveBeenCalled();
+    expect(registry.getSandbox(SANDBOX_NAME)).toEqual(original);
   });
 });

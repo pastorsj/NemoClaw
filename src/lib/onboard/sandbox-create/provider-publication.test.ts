@@ -17,11 +17,65 @@ import {
 const providerName = "my-assistant-telegram-bridge";
 const target = { kind: "named", gatewayName: "nemoclaw" } as const;
 const exactMetadata = {
+  id: "provider-id-1",
   name: providerName,
   type: MESSAGING_CREDENTIAL_PROVIDER_TYPE,
   credentialKeys: ["TELEGRAM_BOT_TOKEN"],
   configKeys: [],
 } as const;
+
+const FINAL_MESSAGING_PROVIDER_MISMATCHES = [
+  {
+    name: "custom static wrong type",
+    exactValue: {
+      ...exactMetadata,
+      type: "discord-hermes-static-v1",
+      credentialKeys: ["DISCORD_BOT_TOKEN"],
+    },
+    mismatchedValue: {
+      ...exactMetadata,
+      type: "generic",
+      credentialKeys: ["DISCORD_BOT_TOKEN"],
+    },
+    credentialShape: "only",
+    credentialKeys: ["DISCORD_BOT_TOKEN"],
+  },
+  {
+    name: "custom static extra credential",
+    exactValue: {
+      ...exactMetadata,
+      type: "discord-hermes-static-v1",
+      credentialKeys: ["DISCORD_BOT_TOKEN"],
+    },
+    mismatchedValue: {
+      ...exactMetadata,
+      type: "discord-hermes-static-v1",
+      credentialKeys: ["DISCORD_BOT_TOKEN", "DISCORD_BOT_TOKEN_EXTRA"],
+    },
+    credentialShape: "only",
+    credentialKeys: ["DISCORD_BOT_TOKEN"],
+  },
+  {
+    name: "refresh family collision",
+    exactValue: {
+      ...exactMetadata,
+      type: "google-chat-openclaw-v1",
+      credentialKeys: ["GOOGLE_CHAT_ACCESS_TOKEN"],
+    },
+    mismatchedValue: {
+      ...exactMetadata,
+      type: "google-chat-openclaw-v1",
+      credentialKeys: ["GOOGLE_CHAT_ACCESS_TOKEN", "UNRELATED_TOKEN"],
+    },
+    credentialShape: "family",
+    credentialKeys: ["GOOGLE_CHAT_ACCESS_TOKEN"],
+  },
+] as const;
+
+const FINAL_MESSAGING_PROVIDER_SEAMS = FINAL_MESSAGING_PROVIDER_MISMATCHES.flatMap((testCase) => [
+  { ...testCase, phase: "before" as const },
+  { ...testCase, phase: "after" as const },
+]);
 
 function typedProviderAdapter(
   overrides: Partial<OpenShellProviderAdapter> = {},
@@ -59,6 +113,8 @@ function publicationInput(
         name: providerName,
         envKey: "TELEGRAM_BOT_TOKEN",
         providerType: MESSAGING_CREDENTIAL_PROVIDER_TYPE,
+        credentialShape: "only",
+        credentialKeys: ["TELEGRAM_BOT_TOKEN"],
         credentialConfigured: false,
         channel: "telegram",
       },
@@ -113,7 +169,7 @@ describe("sandbox provider preparation", () => {
       credentials: [],
       config: [],
     });
-    expect(harness.adapter.getProvider).toHaveBeenNthCalledWith(2, {
+    expect(harness.adapter.getProvider).toHaveBeenNthCalledWith(3, {
       target,
       providerName,
     });
@@ -122,7 +178,7 @@ describe("sandbox provider preparation", () => {
     expect(harness.cleanupCreateSources).not.toHaveBeenCalled();
   });
 
-  it("accepts canonical and namespaced messaging credentials through exact adapter calls (#9806)", async () => {
+  it("rejects extra namespaced credentials on a static messaging provider (#9806)", async () => {
     const getProvider: OpenShellProviderAdapter["getProvider"] = vi.fn(async (request) => ({
       ok: true as const,
       value: {
@@ -133,7 +189,11 @@ describe("sandbox provider preparation", () => {
     }));
     const harness = createHarness(typedProviderAdapter({ getProvider }));
 
-    await validateAttachedMessagingProvidersBeforeSandboxCreation(publicationInput(), harness.deps);
+    await expect(
+      validateAttachedMessagingProvidersBeforeSandboxCreation(publicationInput(), harness.deps),
+    ).rejects.toThrowError(
+      `OpenShell did not confirm messaging provider '${providerName}' before sandbox creation.`,
+    );
 
     expect(harness.adapter.importProviderProfile).toHaveBeenCalledExactlyOnceWith({
       target,
@@ -145,7 +205,7 @@ describe("sandbox provider preparation", () => {
     });
     expect(harness.adapter.updateProvider).not.toHaveBeenCalled();
     expect(harness.runOpenshell).not.toHaveBeenCalled();
-    expect(harness.cleanupCreateSources).not.toHaveBeenCalled();
+    expect(harness.cleanupCreateSources).toHaveBeenCalledOnce();
   });
 
   it("rejects an ambient endpoint before a named messaging profile operation (#9806)", async () => {
@@ -224,6 +284,43 @@ describe("sandbox provider preparation", () => {
         providerName,
       });
       expect(harness.adapter.updateProvider).not.toHaveBeenCalled();
+      expect(harness.cleanupCreateSources).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(FINAL_MESSAGING_PROVIDER_SEAMS)(
+    "rejects a $name $phase final messaging-provider seam",
+    async ({ exactValue, mismatchedValue, credentialShape, credentialKeys, phase }) => {
+      const request = {
+        name: providerName,
+        envKey: credentialKeys[0],
+        providerType: exactValue.type,
+        credentialShape,
+        credentialKeys,
+        credentialConfigured: true,
+        channel: "telegram",
+      } as const;
+      const input = publicationInput({ messagingProviderRequests: [request] });
+
+      const getProvider: OpenShellProviderAdapter["getProvider"] =
+        phase === "before"
+          ? vi.fn(async () => ({ ok: true as const, value: mismatchedValue }))
+          : vi
+              .fn()
+              .mockResolvedValueOnce({ ok: true as const, value: exactValue })
+              .mockResolvedValueOnce({ ok: true as const, value: exactValue })
+              .mockResolvedValueOnce({ ok: true as const, value: mismatchedValue });
+      const harness = createHarness(typedProviderAdapter({ getProvider }));
+      const operation =
+        phase === "before"
+          ? validateAttachedMessagingProvidersBeforeSandboxCreation(input, harness.deps)
+          : prepareProviders(input, harness.deps);
+
+      await expect(operation).rejects.toThrowError(
+        `OpenShell did not confirm messaging provider '${providerName}' ${
+          phase === "before" ? "before sandbox creation" : "after publication"
+        }.`,
+      );
       expect(harness.cleanupCreateSources).toHaveBeenCalledOnce();
     },
   );
@@ -386,10 +483,7 @@ describe("sandbox provider preparation", () => {
     const cleanupCreateSources = vi.fn(() => {
       throw cleanupFailure;
     });
-    const harness = createHarness(
-      typedProviderAdapter({ updateProvider }),
-      cleanupCreateSources,
-    );
+    const harness = createHarness(typedProviderAdapter({ updateProvider }), cleanupCreateSources);
 
     const failure = await publishAttachedProvidersBeforeDockerSandboxCreation(
       publicationInput({
@@ -467,7 +561,7 @@ describe("sandbox provider preparation", () => {
     vi.mocked(harness.adapter.updateProvider).mockClear();
     await expect(
       publishAttachedProvidersBeforeDockerSandboxCreation(input, harness.deps),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual(new Map());
 
     expect(harness.adapter.updateProvider).toHaveBeenCalledTimes(2);
     expect(harness.adapter.updateProvider).toHaveBeenCalledWith({
@@ -491,6 +585,7 @@ describe("sandbox provider preparation", () => {
     const getProvider: OpenShellProviderAdapter["getProvider"] = vi
       .fn()
       .mockResolvedValueOnce({ ok: true as const, value: exactMetadata })
+      .mockResolvedValueOnce({ ok: true as const, value: exactMetadata })
       .mockResolvedValueOnce({
         ok: true as const,
         value: { ...exactMetadata, type: "generic" },
@@ -507,7 +602,33 @@ describe("sandbox provider preparation", () => {
       credentials: [],
       config: [],
     });
-    expect(harness.adapter.getProvider).toHaveBeenNthCalledWith(2, { target, providerName });
+    expect(harness.adapter.getProvider).toHaveBeenNthCalledWith(3, { target, providerName });
+    expect(harness.cleanupCreateSources).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an extra static credential introduced during publication", async () => {
+    const getProvider: OpenShellProviderAdapter["getProvider"] = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true as const, value: exactMetadata })
+      .mockResolvedValueOnce({ ok: true as const, value: exactMetadata })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        value: {
+          ...exactMetadata,
+          credentialKeys: ["TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN_WORKSPACE"],
+        },
+      });
+    const harness = createHarness(typedProviderAdapter({ getProvider }));
+
+    await expect(prepareProviders(publicationInput(), harness.deps)).rejects.toThrowError(
+      `OpenShell did not confirm messaging provider '${providerName}' after publication.`,
+    );
+    expect(harness.adapter.updateProvider).toHaveBeenCalledExactlyOnceWith({
+      target,
+      providerName,
+      credentials: [],
+      config: [],
+    });
     expect(harness.cleanupCreateSources).toHaveBeenCalledOnce();
   });
 

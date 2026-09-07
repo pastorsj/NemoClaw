@@ -4,15 +4,21 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import type { HarnessWebSearchProviderBinding } from "@nvidia/nemoclaw-harness-contract";
+import type {
+  HarnessWebSearchProvider,
+  HarnessWebSearchProviderBinding,
+} from "@nvidia/nemoclaw-harness-contract";
 import { assertHarnessWebSearchProviderProfile } from "@nvidia/nemoclaw-harness-contract/provider-profile";
 
 import { REPOSITORY_ROOT } from "../core/repository-root";
 import {
   listActiveHarnessPackageIds,
   readInstalledHarnessPackage,
+  resolvePinnedHarnessPackage,
   type HarnessPackageStoreOptions,
 } from "./package/store";
+import type { HarnessPackageIdentity } from "./package/types";
+import { packageWebSearchProviderBinding, readWebSearchCapability } from "./web-search";
 
 const PROVIDER_PROFILE_TYPE_PATTERN = /^[a-z][a-z0-9._-]{0,63}$/u;
 const PROVIDER_PROFILE_MAX_BYTES = 256 * 1024;
@@ -98,6 +104,17 @@ export function resolvePackageCredentialProviderProfile(
   }
   const profilePath = regularProfilePath(candidate);
   return profilePath ? Object.freeze({ profileType, profilePath }) : null;
+}
+
+/** Load one web-search binding from the immutable package selected by a receipt. */
+export function resolvePinnedPackageWebSearchProviderBinding(
+  identity: HarnessPackageIdentity,
+  provider: HarnessWebSearchProvider,
+  options: HarnessPackageStoreOptions = {},
+): HarnessWebSearchProviderBinding | null {
+  const installed = resolvePinnedHarnessPackage(identity, options);
+  const capability = readWebSearchCapability(installed.packageManifest.manifest);
+  return packageWebSearchProviderBinding({ web_search: capability }, provider);
 }
 
 /** Resolve an installed package profile before falling back to a core profile. */

@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
 import type { ChannelManifest } from "../messaging/manifest";
@@ -15,6 +18,7 @@ import {
   listMessagingBridgeProfiles,
   matchesRegisteredMessagingBridgeProfile,
   MESSAGING_BRIDGE_PENDING_VALUE,
+  messagingBridgeProfilesFromChannelManifests,
   type MessagingBridgeProfile,
   refreshStatusForCredential,
 } from "./messaging-bridge-provider";
@@ -137,6 +141,57 @@ const BRIDGE_DEF = {
   token: MESSAGING_BRIDGE_PENDING_VALUE,
 };
 
+const PACKAGE_PROFILE_SOURCE = YAML.stringify(DISCORD_PROFILE_DOC);
+const EXACT_BRIDGE_METADATA = {
+  status: 0,
+  stdout: [
+    "Id: provider-id-a",
+    "Name: sbx-googlechat-bridge",
+    "Type: google-chat-bridge",
+    "Credential keys: GOOGLE_CHAT_ACCESS_TOKEN",
+    "Config keys: <none>",
+    "",
+  ].join("\n"),
+  stderr: "",
+};
+const ATTACHED_BRIDGE_TABLE = {
+  status: 0,
+  stdout: [
+    "NAME TYPE CREDENTIAL_KEYS CONFIG_KEYS",
+    "sbx-googlechat-bridge google-chat-bridge 1 0",
+  ].join("\n"),
+  stderr: "",
+};
+const SUCCESSFUL_COMMAND = { status: 0, stdout: "", stderr: "" };
+
+function packageProfileManifest(profileSha256: string | undefined): ChannelManifest {
+  return {
+    id: "future-chat",
+    credentialProvider: {
+      profilePath: "provider-profiles/future-chat.yaml",
+      ...(profileSha256 === undefined ? {} : { profileSha256 }),
+      profileId: "future-chat-static",
+      credentialEnv: "FUTURE_CHAT_TOKEN",
+      sourceInputId: "credential",
+      sourceSecretEnv: "FUTURE_CHAT_TOKEN",
+    },
+  } as ChannelManifest;
+}
+
+function sandboxList(...names: string[]): string {
+  return JSON.stringify(
+    names.map((name, index) => ({
+      id: `sandbox-id-${index}`,
+      name,
+      labels: {},
+      resource_version: 1,
+      created_at: "2026-09-07T00:00:00Z",
+      phase: "Ready",
+      current_policy_version: 1,
+    })),
+  );
+}
+
 function collectInput(
   overrides: Partial<Parameters<typeof collectMessagingBridgeTokenDefs>[0]> = {},
 ) {
@@ -240,6 +295,161 @@ describe("configureMessagingBridgeRefreshes", () => {
     });
     expect(result.ok).toBe(false);
     expect(runOpenshell).not.toHaveBeenCalled();
+  });
+
+  it("does not resolve refresh material when the first stable-ID binding check is inexact", () => {
+    const getCredential = vi.fn(() => SA_JSON);
+    const commands: string[] = [];
+    const runOpenshell = vi.fn((args: string[]) => {
+      commands.push(args.join(" "));
+      return {
+        status: 0,
+        stdout: [
+          "Id: provider-id-a",
+          "Name: sbx-googlechat-bridge",
+          "Type: google-chat-bridge",
+          "Credential keys: GOOGLE_CHAT_ACCESS_TOKEN, OTHER_TOKEN",
+          "Config keys: UNEXPECTED_CONFIG",
+          "",
+        ].join("\n"),
+        stderr: "",
+      };
+    });
+
+    const result = configureMessagingBridgeRefreshes(
+      [{ ...BRIDGE_DEF, expectedProviderId: "provider-id-a" }],
+      {
+        runOpenshell,
+        redactFull,
+        getCredential,
+        log: noLog,
+        profiles: [GC_PROFILE],
+      },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "provider identity changed" });
+    expect(getCredential).not.toHaveBeenCalled();
+    expect(
+      commands.filter((command) => /^provider (?:create|update|refresh)\b/u.test(command)),
+    ).toEqual([]);
+  });
+
+  it("rejects same-ID credential-shape drift immediately before refresh", () => {
+    const getCredential = vi.fn(() => SA_JSON);
+    const commands: string[] = [];
+    let metadataReads = 0;
+    const runOpenshell = vi.fn((args: string[]) => {
+      const command = args.join(" ");
+      commands.push(command);
+      metadataReads += 1;
+      return {
+        status: 0,
+        stdout: [
+          "Id: provider-id-a",
+          "Name: sbx-googlechat-bridge",
+          "Type: google-chat-bridge",
+          `Credential keys: GOOGLE_CHAT_ACCESS_TOKEN${metadataReads === 1 ? "" : ", OTHER_TOKEN"}`,
+          `Config keys: ${metadataReads === 1 ? "<none>" : "UNEXPECTED_CONFIG"}`,
+          "",
+        ].join("\n"),
+        stderr: "",
+      };
+    });
+
+    const result = configureMessagingBridgeRefreshes(
+      [{ ...BRIDGE_DEF, expectedProviderId: "provider-id-a" }],
+      {
+        runOpenshell,
+        redactFull,
+        getCredential,
+        log: noLog,
+        profiles: [GC_PROFILE],
+      },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "provider identity changed" });
+    expect(metadataReads).toBe(2);
+    expect(getCredential).toHaveBeenCalledOnce();
+    expect(
+      commands.filter((command) => /^provider (?:create|update|refresh)\b/u.test(command)),
+    ).toEqual([]);
+  });
+
+  it("refuses refresh when a receipt-owned provider is attached to a foreign sandbox", () => {
+    const getCredential = vi.fn(() => SA_JSON);
+    const commands: string[] = [];
+    const responses = new Map([
+      ["provider get sbx-googlechat-bridge", EXACT_BRIDGE_METADATA],
+      ["sandbox list -o json", { status: 0, stdout: sandboxList("sbx", "foreign"), stderr: "" }],
+      ["sandbox provider list sbx", ATTACHED_BRIDGE_TABLE],
+      ["sandbox provider list foreign", ATTACHED_BRIDGE_TABLE],
+    ]);
+    const runOpenshell = vi.fn((args: string[]) => {
+      const command = args.join(" ");
+      commands.push(command);
+      return responses.get(command) ?? SUCCESSFUL_COMMAND;
+    });
+
+    const result = configureMessagingBridgeRefreshes(
+      [{ ...BRIDGE_DEF, expectedProviderId: "provider-id-a" }],
+      {
+        runOpenshell,
+        redactFull,
+        getCredential,
+        allowedSandboxes: ["sbx"],
+        log: noLog,
+        profiles: [GC_PROFILE],
+      },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "provider attachment ownership could not be confirmed",
+    });
+    expect(getCredential).not.toHaveBeenCalled();
+    expect(
+      commands.filter((command) => /^provider (?:create|update|refresh)\b/u.test(command)),
+    ).toEqual([]);
+  });
+
+  it("rechecks attachment ownership immediately before refresh configuration", () => {
+    const commands: string[] = [];
+    const sandboxInventory = vi
+      .fn()
+      .mockReturnValueOnce({ status: 0, stdout: sandboxList("sbx"), stderr: "" })
+      .mockReturnValueOnce({ status: 0, stdout: sandboxList("sbx", "foreign"), stderr: "" });
+    const responses = new Map<string, () => typeof SUCCESSFUL_COMMAND>([
+      ["provider get sbx-googlechat-bridge", () => EXACT_BRIDGE_METADATA],
+      ["sandbox list -o json", sandboxInventory],
+      ["sandbox provider list sbx", () => ATTACHED_BRIDGE_TABLE],
+      ["sandbox provider list foreign", () => ATTACHED_BRIDGE_TABLE],
+    ]);
+    const runOpenshell = vi.fn((args: string[]) => {
+      const command = args.join(" ");
+      commands.push(command);
+      return (responses.get(command) ?? (() => SUCCESSFUL_COMMAND))();
+    });
+
+    const result = configureMessagingBridgeRefreshes(
+      [{ ...BRIDGE_DEF, expectedProviderId: "provider-id-a" }],
+      {
+        runOpenshell,
+        redactFull,
+        getCredential: () => SA_JSON,
+        allowedSandboxes: ["sbx"],
+        log: noLog,
+        profiles: [GC_PROFILE],
+      },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "provider attachment ownership changed",
+    });
+    expect(sandboxInventory).toHaveBeenCalledTimes(2);
+    expect(
+      commands.filter((command) => /^provider (?:create|update|refresh)\b/u.test(command)),
+    ).toEqual([]);
   });
 
   it("fails closed when the service account JSON cannot be parsed", () => {
@@ -379,10 +589,11 @@ describe("configureMessagingBridgeRefreshes", () => {
     const privateKey = "unique-private-key-material-for-redaction";
     const sourceSecret = JSON.stringify({ client_email: clientEmail, private_key: privateKey });
     const scope = GC_PROFILE.scopes.join(" ");
+    const terminalPayload = "clipboard-payload";
     const log = vi.fn();
-    const runOpenshell = vi.fn(() => ({
+    const runOpenshell = vi.fn((_args: string[], _options: unknown) => ({
       status: 1,
-      stderr: `source=${sourceSecret} private_key=${privateKey}`,
+      stderr: `source=${sourceSecret} private_key=${privateKey}\u001b]52;c;${terminalPayload}\u0007\u0000`,
       stdout: `client_email=${clientEmail} scope=${scope}`,
     }));
 
@@ -401,7 +612,13 @@ describe("configureMessagingBridgeRefreshes", () => {
     expect(diagnostic).not.toContain(privateKey);
     expect(diagnostic).not.toContain(scope);
     expect(diagnostic).not.toContain(privateKey.slice(0, 4));
+    expect(diagnostic).not.toContain(terminalPayload);
+    expect(diagnostic).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/u);
     expect(diagnostic).toContain("<REDACTED>");
+    expect(runOpenshell.mock.calls[0]?.[1]).toMatchObject({
+      maxBuffer: 64 * 1024,
+      timeout: 30_000,
+    });
   });
 
   it("resolves the secret from the injected env too (parity)", () => {
@@ -545,7 +762,7 @@ describe("configureMessagingBridgeRefreshes", () => {
       sleep: () => undefined,
     });
     const statusCall = runOpenshell.mock.calls.find((call) => call[0][2] === "status");
-    expect(statusCall?.[1]).toMatchObject({ timeout: 15_000 });
+    expect(statusCall?.[1]).toMatchObject({ maxBuffer: 64 * 1024, timeout: 15_000 });
   });
 
   it("bounds refresh configuration and fails closed when the command times out", () => {
@@ -580,6 +797,87 @@ describe("refreshStatusForCredential", () => {
   it("returns an empty status when the credential has no row", () => {
     expect(refreshStatusForCredential(STATUS_HEADER, "GOOGLE_CHAT_ACCESS_TOKEN")).toBe("");
     expect(refreshStatusForCredential("", "GOOGLE_CHAT_ACCESS_TOKEN")).toBe("");
+  });
+});
+
+describe("receipt-backed provider profile materialization", () => {
+  function withPackageDirectory(
+    run: (packageDirectory: string, profilePath: string) => void,
+  ): void {
+    const packageDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nemoclaw-messaging-profile-test-"),
+    );
+    const profilePath = path.join(packageDirectory, "provider-profiles", "future-chat.yaml");
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    try {
+      run(packageDirectory, profilePath);
+    } finally {
+      fs.rmSync(packageDirectory, { force: true, recursive: true });
+    }
+  }
+
+  it("returns the exact bytes selected by the package receipt", () => {
+    withPackageDirectory((packageDirectory, profilePath) => {
+      fs.writeFileSync(profilePath, PACKAGE_PROFILE_SOURCE);
+      const profileSha256 = createHash("sha256").update(PACKAGE_PROFILE_SOURCE).digest("hex");
+
+      expect(
+        messagingBridgeProfilesFromChannelManifests(
+          [packageProfileManifest(profileSha256)],
+          "future-harness",
+          packageDirectory,
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          channelId: "future-chat",
+          profilePath,
+          profileSource: PACKAGE_PROFILE_SOURCE,
+        }),
+      ]);
+    });
+  });
+
+  it("rejects a package-backed profile without a receipt digest", () => {
+    withPackageDirectory((packageDirectory, profilePath) => {
+      fs.writeFileSync(profilePath, PACKAGE_PROFILE_SOURCE);
+
+      expect(() =>
+        messagingBridgeProfilesFromChannelManifests(
+          [packageProfileManifest(undefined)],
+          "future-harness",
+          packageDirectory,
+        ),
+      ).toThrow("has no receipt-bound digest");
+    });
+  });
+
+  it("rejects a package-backed profile whose source is missing", () => {
+    withPackageDirectory((packageDirectory) => {
+      const profileSha256 = createHash("sha256").update(PACKAGE_PROFILE_SOURCE).digest("hex");
+
+      expect(() =>
+        messagingBridgeProfilesFromChannelManifests(
+          [packageProfileManifest(profileSha256)],
+          "future-harness",
+          packageDirectory,
+        ),
+      ).toThrow();
+    });
+  });
+
+  it("rejects a package-backed profile whose bytes drift from the receipt", () => {
+    withPackageDirectory((packageDirectory, profilePath) => {
+      fs.writeFileSync(profilePath, `${PACKAGE_PROFILE_SOURCE}\n# changed after verification\n`);
+      const profileSha256 = createHash("sha256").update(PACKAGE_PROFILE_SOURCE).digest("hex");
+
+      expect(() =>
+        messagingBridgeProfilesFromChannelManifests(
+          [packageProfileManifest(profileSha256)],
+          "future-harness",
+          packageDirectory,
+        ),
+      ).toThrow("changed from its receipt");
+    });
   });
 });
 
@@ -622,6 +920,62 @@ describe("ensureMessagingBridgeProfiles", () => {
       30_000, 30_000, 30_000,
     ]);
     expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("imports receipt-verified bytes through a private temporary file", () => {
+    const fixtureDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nemoclaw-profile-import-test-"),
+    );
+    const originalProfilePath = path.join(fixtureDirectory, "future-chat.yaml");
+    fs.writeFileSync(originalProfilePath, PACKAGE_PROFILE_SOURCE, { mode: 0o600 });
+    let importedProfilePath: string | undefined;
+    const exportProfile = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        fs.writeFileSync(originalProfilePath, "untrusted replacement\n", { mode: 0o600 });
+        return { status: 1, stderr: "provider profile not found" };
+      })
+      .mockReturnValueOnce({ status: 0, stdout: JSON.stringify(DISCORD_PROFILE_DOC) });
+    const importProfile = vi.fn((args: string[]) => {
+      importedProfilePath = args[4];
+      expect(importedProfilePath).toBeDefined();
+      expect(importedProfilePath).not.toBe(originalProfilePath);
+      expect(fs.readFileSync(importedProfilePath!, "utf8")).toBe(PACKAGE_PROFILE_SOURCE);
+      expect(fs.statSync(importedProfilePath!).mode & 0o777).toBe(0o600);
+      return { status: 0 };
+    });
+    type ProfileCommandResult = ReturnType<
+      Parameters<typeof ensureMessagingBridgeProfiles>[1]["runOpenshell"]
+    >;
+    const profileCommands = new Map<string, (args: string[]) => ProfileCommandResult>([
+      ["provider profile export", exportProfile],
+      ["provider profile import", importProfile],
+    ]);
+    const runOpenshell = vi.fn((args: string[]) => {
+      const command = args.slice(0, 3).join(" ");
+      return (
+        profileCommands.get(command) ?? (() => ({ status: 1, stderr: "unexpected command" }))
+      )(args);
+    });
+    const profile: MessagingBridgeProfile = {
+      ...DISCORD_PROFILE,
+      profilePath: originalProfilePath,
+      profileSource: PACKAGE_PROFILE_SOURCE,
+    };
+
+    try {
+      ensureMessagingBridgeProfiles([STATIC_DEF], {
+        ...baseDeps(),
+        profiles: [profile],
+        runOpenshell,
+      });
+
+      expect(importedProfilePath).toBeDefined();
+      expect(fs.existsSync(importedProfilePath!)).toBe(false);
+      expect(fs.readFileSync(originalProfilePath, "utf8")).toBe("untrusted replacement\n");
+    } finally {
+      fs.rmSync(fixtureDirectory, { force: true, recursive: true });
+    }
   });
 
   it("validates without importing when the profile is already registered", () => {
@@ -984,11 +1338,13 @@ describe("listMessagingBridgeProfiles", () => {
 
       const checkedIn = fs.readFileSync(profile!.profilePath, "utf8");
       const canonicalExport = YAML.parse(checkedIn) as {
-        credentials: Array<Record<string, unknown> & {
-          refresh?: {
-            material?: Array<Record<string, unknown> & { required?: boolean; secret?: boolean }>;
-          };
-        }>;
+        credentials: Array<
+          Record<string, unknown> & {
+            refresh?: {
+              material?: Array<Record<string, unknown> & { required?: boolean; secret?: boolean }>;
+            };
+          }
+        >;
       };
       canonicalExport.credentials = canonicalExport.credentials.map((credential) => ({
         ...credential,

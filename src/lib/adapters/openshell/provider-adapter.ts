@@ -52,6 +52,10 @@ export type OpenShellProviderInventory = Readonly<{
 }>;
 
 export type OpenShellProviderMetadata = Readonly<{
+  /** Stable OpenShell resource identity when emitted by the gateway. */
+  id?: string;
+  /** Monotonic resource revision when emitted by the gateway. */
+  resourceVersion?: number;
   name: string;
   type: string;
   credentialKeys: readonly string[];

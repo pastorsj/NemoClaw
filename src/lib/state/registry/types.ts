@@ -84,6 +84,24 @@ export interface SandboxHostLocalInferenceProvenance {
   readonly receiptSha256: string;
 }
 
+/**
+ * Stable, secret-free ownership for a core-managed OpenShell provider.
+ *
+ * The purpose discriminator keeps this receipt independent of any harness
+ * while preventing one capability from borrowing another capability's
+ * provider authority.
+ */
+export interface SandboxProviderOwnershipReceipt {
+  readonly schemaVersion: 1;
+  readonly purpose: "web-search";
+  readonly providerName: string;
+  readonly providerId: string;
+  readonly providerType: string;
+  readonly credentialEnv: string;
+  readonly createdByNemoClaw: boolean;
+  readonly attachmentAddedByNemoClaw: boolean;
+}
+
 export interface SandboxEntry extends Partial<InferenceSelection> {
   name: string;
   /** Route-only placeholder created before sandbox creation; never eligible as the default. */
@@ -115,6 +133,8 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   dcodeAutoApprovalMode?: DcodeAutoApprovalMode;
   /** Durable provider identity for enabled managed web search. */
   webSearchProvider?: WebSearchProvider | null;
+  /** Exact stable identity and lifecycle ownership for the selected web-search provider. */
+  webSearchProviderOwnership?: SandboxProviderOwnershipReceipt;
   agent?: string | null;
   /** Exact immutable agent-runtime package authority; absence preserves legacy and candidate rows. */
   harnessPackage?: HarnessPackageIdentity;

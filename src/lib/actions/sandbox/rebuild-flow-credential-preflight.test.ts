@@ -76,7 +76,7 @@ function installPreparedOpenClawRecovery() {
 }
 
 function makeStagedHermesMessagingPlan() {
-  return makeMessagingPlan({
+  const plan = makeMessagingPlan({
     sandboxName: "alpha",
     agent: "hermes",
     channels: ["discord"],
@@ -93,6 +93,34 @@ function makeStagedHermesMessagingPlan() {
       },
     ],
   });
+  return {
+    ...plan,
+    channels: [
+      {
+        ...plan.channels[0],
+        credentialProvider: {
+          profilePath: "provider-profiles/discord.yaml",
+          profileId: "discord-hermes-static-v1",
+          credentialEnv: "DISCORD_BOT_TOKEN",
+          sourceInputId: "botToken",
+          sourceSecretEnv: "DISCORD_BOT_TOKEN",
+        },
+      },
+    ],
+    packageBuild: { configRoot: "~/.hermes", packageManagers: [] },
+  };
+}
+
+function hermesDiscordProviderResult(
+  credentialKeys = "DISCORD_BOT_TOKEN",
+) {
+  const output = [
+    "Name: alpha-discord-bridge",
+    "Type: discord-hermes-static-v1",
+    `Credential keys: ${credentialKeys}`,
+    "Config keys: <none>",
+  ].join("\n");
+  return { status: 0, output, stdout: output, stderr: "" };
 }
 
 describe("rebuildSandbox flow: credential preflight", () => {
@@ -367,6 +395,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
 
   it("copies the staged Hermes messaging plan into the rebuild resume session", async () => {
     const plan = makeStagedHermesMessagingPlan();
+    const inferenceRuntime = providerRuntime(["nvidia-prod"]);
     const harness = createRebuildFlowHarness({
       sandboxEntry: {
         agent: "hermes",
@@ -377,7 +406,10 @@ describe("rebuildSandbox flow: credential preflight", () => {
       buildMessagingRebuildPlan: () => plan,
       receiptMessagingChannelIds: ["discord"],
       hydrateCredentialEnv: () => "saved-provider-key",
-      runOpenshell: providerRuntime(["nvidia-prod"]),
+      runOpenshell: (args) =>
+        args.join(" ") === "provider get alpha-discord-bridge"
+          ? hermesDiscordProviderResult()
+          : inferenceRuntime(args),
     });
     configureSession(harness, "nvidia-prod", "NVIDIA_INFERENCE_API_KEY");
 
@@ -390,6 +422,188 @@ describe("rebuildSandbox flow: credential preflight", () => {
       (harness.session.messagingPlan as typeof plan).channels.map((channel) => channel.channelId),
     ).toEqual(["discord"]);
     expect(harness.onboardSpy).toHaveBeenCalledOnce();
+  });
+
+  it("rejects extra credentials on a static Hermes provider before backup", async () => {
+    const restoreEnv = snapshotEnv(["DISCORD_BOT_TOKEN"]);
+    process.env.DISCORD_BOT_TOKEN = "recoverable-discord-token";
+    const inferenceRuntime = providerRuntime(["nvidia-prod"]);
+    const harness = createRebuildFlowHarness({
+      sandboxEntry: {
+        agent: "hermes",
+        provider: "nvidia-prod",
+        model: MODEL,
+        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      },
+      buildMessagingRebuildPlan: () => makeStagedHermesMessagingPlan(),
+      receiptMessagingChannelIds: ["discord"],
+      hydrateCredentialEnv: () => "saved-provider-key",
+      runOpenshell: (args) =>
+        args.join(" ") === "provider get alpha-discord-bridge"
+          ? hermesDiscordProviderResult("DISCORD_BOT_TOKEN, DISCORD_BOT_TOKEN_SUFFIX")
+          : inferenceRuntime(args),
+    });
+    configureSession(harness, "nvidia-prod", "NVIDIA_INFERENCE_API_KEY");
+
+    try {
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+      ).rejects.toThrow("Package messaging provider preflight failed");
+
+      expect(diagnostics(harness)).toContain("does not match its exact credential binding");
+      expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
+      expectNoSandboxDelete(harness.runOpenshellSpy);
+      expect(harness.onboardSpy).not.toHaveBeenCalled();
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  it("rechecks receipt messaging provider authority at the delete edge", async () => {
+    const restoreEnv = snapshotEnv(["DISCORD_BOT_TOKEN"]);
+    delete process.env.DISCORD_BOT_TOKEN;
+    let messagingProviderLookups = 0;
+    const inferenceRuntime = providerRuntime(["nvidia-prod"]);
+    const missingMessagingProvider = {
+      status: 1,
+      output: "",
+      stdout: "",
+      stderr: "provider 'alpha-discord-bridge' not found",
+    };
+    const messagingProviderResults = [hermesDiscordProviderResult(), missingMessagingProvider];
+    const harness = createRebuildFlowHarness({
+      sandboxEntry: {
+        agent: "hermes",
+        provider: "nvidia-prod",
+        model: MODEL,
+        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      },
+      buildMessagingRebuildPlan: () => makeStagedHermesMessagingPlan(),
+      receiptMessagingChannelIds: ["discord"],
+      hydrateCredentialEnv: () => "saved-provider-key",
+      runOpenshell: (args) => {
+        const messagingLookup = args.join(" ") === "provider get alpha-discord-bridge";
+        messagingProviderLookups += Number(messagingLookup);
+        return messagingLookup
+          ? (messagingProviderResults.shift() ?? missingMessagingProvider)
+          : inferenceRuntime(args);
+      },
+    });
+    configureSession(harness, "nvidia-prod", "NVIDIA_INFERENCE_API_KEY");
+
+    try {
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+      ).rejects.toThrow("Messaging provider authority changed before sandbox deletion");
+
+      expect(messagingProviderLookups).toBe(2);
+      expect(harness.backupSandboxStateSpy).toHaveBeenCalledOnce();
+      expectNoSandboxDelete(harness.runOpenshellSpy);
+      expect(harness.onboardSpy).not.toHaveBeenCalled();
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  it.each([
+    {
+      name: "collision",
+      changedProvider: {
+        status: 0,
+        output:
+          "Name: alpha-discord-bridge\nType: generic\nCredential keys: DISCORD_BOT_TOKEN\nConfig keys: <none>\n",
+        stdout:
+          "Name: alpha-discord-bridge\nType: generic\nCredential keys: DISCORD_BOT_TOKEN\nConfig keys: <none>\n",
+        stderr: "",
+      },
+    },
+    {
+      name: "indeterminate lookup",
+      changedProvider: {
+        status: 1,
+        output: "",
+        stdout: "",
+        stderr: "gateway unavailable",
+      },
+    },
+  ])(
+    "rejects a messaging provider $name at the delete edge despite a host source",
+    async (testCase) => {
+      const restoreEnv = snapshotEnv(["DISCORD_BOT_TOKEN"]);
+      process.env.DISCORD_BOT_TOKEN = "replacement-discord-token";
+      const inferenceRuntime = providerRuntime(["nvidia-prod"]);
+      const messagingProviderResults = [hermesDiscordProviderResult(), testCase.changedProvider];
+      const harness = createRebuildFlowHarness({
+        sandboxEntry: {
+          agent: "hermes",
+          provider: "nvidia-prod",
+          model: MODEL,
+          credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        },
+        buildMessagingRebuildPlan: () => makeStagedHermesMessagingPlan(),
+        receiptMessagingChannelIds: ["discord"],
+        hydrateCredentialEnv: () => "saved-provider-key",
+        runOpenshell: (args) =>
+          args.join(" ") === "provider get alpha-discord-bridge"
+            ? (messagingProviderResults.shift() ?? testCase.changedProvider)
+            : inferenceRuntime(args),
+      });
+      configureSession(harness, "nvidia-prod", "NVIDIA_INFERENCE_API_KEY");
+
+      try {
+        await expect(
+          harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+        ).rejects.toThrow("Messaging provider authority changed before sandbox deletion");
+        expect(harness.backupSandboxStateSpy).toHaveBeenCalledOnce();
+        expectNoSandboxDelete(harness.runOpenshellSpy);
+        expect(harness.onboardSpy).not.toHaveBeenCalled();
+      } finally {
+        restoreEnv();
+      }
+    },
+  );
+
+  it("repairs a provider that becomes missing at the delete edge from a valid host source", async () => {
+    const restoreEnv = snapshotEnv(["DISCORD_BOT_TOKEN"]);
+    process.env.DISCORD_BOT_TOKEN = "replacement-discord-token";
+    const inferenceRuntime = providerRuntime(["nvidia-prod"]);
+    const missingMessagingProvider = {
+      status: 1,
+      output: "",
+      stdout: "",
+      stderr: "provider 'alpha-discord-bridge' not found",
+    };
+    const messagingProviderResults = [hermesDiscordProviderResult(), missingMessagingProvider];
+    const harness = createRebuildFlowHarness({
+      sandboxEntry: {
+        agent: "hermes",
+        provider: "nvidia-prod",
+        model: MODEL,
+        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      },
+      buildMessagingRebuildPlan: () => makeStagedHermesMessagingPlan(),
+      receiptMessagingChannelIds: ["discord"],
+      hydrateCredentialEnv: () => "saved-provider-key",
+      runOpenshell: (args) =>
+        args.join(" ") === "provider get alpha-discord-bridge"
+          ? (messagingProviderResults.shift() ?? missingMessagingProvider)
+          : inferenceRuntime(args),
+    });
+    configureSession(harness, "nvidia-prod", "NVIDIA_INFERENCE_API_KEY");
+
+    try {
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+      ).resolves.toBeUndefined();
+      expect(harness.backupSandboxStateSpy).toHaveBeenCalledOnce();
+      expect(harness.runOpenshellSpy).toHaveBeenCalledWith(
+        ["sandbox", "delete", "-g", "nemoclaw", "alpha"],
+        expect.objectContaining({ ignoreError: true }),
+      );
+      expect(harness.onboardSpy).toHaveBeenCalledOnce();
+    } finally {
+      restoreEnv();
+    }
   });
 
   it("stops before backup when the agent base-image preflight fails", async () => {

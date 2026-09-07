@@ -32,7 +32,6 @@ const {
   registerCreatedSandbox,
   registerPreparedCreatedSandbox,
   revalidatePreparedCreatedSandboxRegistration,
-  selection,
 } = requireDist("./sandbox-registration.ts") as typeof import("./sandbox-registration");
 
 const runtimeFields = {
@@ -56,6 +55,39 @@ const OPENCLAW_PACKAGE_MIGRATION = {
   source: "legacy-current-bundle" as const,
   legacyAgent: null,
   migratedAt: "2026-08-28T00:00:00.000Z",
+};
+const BRAVE_WEB_SEARCH_BINDING = Object.freeze({
+  provider: "brave" as const,
+  credential_env: "BRAVE_API_KEY",
+  profile_type: "brave",
+  config_verification: Object.freeze({
+    path: "/sandbox/config.json" as const,
+    format: "json" as const,
+    assertions: Object.freeze([
+      Object.freeze({ path: Object.freeze(["web", "enabled"]), equals: true }),
+    ]),
+    credential_paths: Object.freeze([]),
+  }),
+  egress_verification: Object.freeze({
+    method: "GET" as const,
+    url: "https://example.test/search" as const,
+    parameters: Object.freeze([]),
+    credential: Object.freeze({ kind: "header" as const, name: "X-Key", prefix: "none" as const }),
+    result_array_path: Object.freeze(["results"]),
+  }),
+});
+const OPENCLAW_WEB_SEARCH_AGENT = {
+  name: "openclaw",
+  web_search: {
+    support: "providers" as const,
+    providers: [BRAVE_WEB_SEARCH_BINDING],
+  },
+} as never;
+const PINNED_WEB_SEARCH_MANIFEST = {
+  web_search: {
+    support: "providers",
+    providers: [BRAVE_WEB_SEARCH_BINDING],
+  },
 };
 
 function verifiedPackageCreateFixture() {
@@ -189,6 +221,69 @@ function createdRegistryEntryInput(
 }
 
 describe("buildCreatedSandboxRegistryEntry", () => {
+  it("projects only the selected staged web-search provider into durable ownership", () => {
+    const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+      sandboxName: "demo",
+      harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+      stagedCredentialProviderReceipts: [
+        {
+          providerName: "demo-brave-search",
+          providerId: "provider-id-1",
+          createdByNemoClaw: false,
+        },
+        {
+          providerName: "demo-discord-bridge",
+          providerId: "provider-id-2",
+          createdByNemoClaw: true,
+        },
+      ],
+    } as never);
+    try {
+      const entry = buildCreatedSandboxRegistryEntry(
+        createdRegistryEntryInput({
+          agent: OPENCLAW_WEB_SEARCH_AGENT,
+          webSearchEnabled: true,
+          webSearchProvider: "brave",
+        }),
+      );
+
+      expect(entry.webSearchProviderOwnership).toEqual({
+        schemaVersion: 1,
+        purpose: "web-search",
+        providerName: "demo-brave-search",
+        providerId: "provider-id-1",
+        providerType: "brave",
+        credentialEnv: "BRAVE_API_KEY",
+        createdByNemoClaw: false,
+        attachmentAddedByNemoClaw: true,
+      });
+      expect(JSON.stringify(entry)).not.toContain("demo-discord-bridge");
+    } finally {
+      loadSession.mockRestore();
+    }
+  });
+
+  it("rejects enabled package web search without the exact staged stable receipt", () => {
+    const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+      sandboxName: "demo",
+      harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+      stagedCredentialProviderReceipts: [],
+    } as never);
+    try {
+      expect(() =>
+        buildCreatedSandboxRegistryEntry(
+          createdRegistryEntryInput({
+            agent: OPENCLAW_WEB_SEARCH_AGENT,
+            webSearchEnabled: true,
+            webSearchProvider: "brave",
+          }),
+        ),
+      ).toThrow(/missing exact package and stable identity authority/u);
+    } finally {
+      loadSession.mockRestore();
+    }
+  });
+
   it("registers receipt-backed managed tools only in neutral state", () => {
     const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
       harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
@@ -659,66 +754,6 @@ describe("buildCreatedSandboxRegistryEntry", () => {
   });
 });
 
-describe("selection", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("does not borrow endpoint credential or NIM metadata from an unrelated session", () => {
-    vi.spyOn(onboardSession, "loadSession").mockReturnValue({
-      sandboxName: "other",
-      provider: "compatible-endpoint",
-      model: "llama",
-      endpointUrl: "https://wrong.test/v1",
-      credentialEnv: "WRONG_KEY",
-      compatibleEndpointReasoning: "true",
-      compatibleEndpointReasoningEffort: null,
-      nimContainer: "wrong",
-    });
-
-    expect(
-      selection("demo", "compatible-endpoint", "llama", "openai-completions", "onboard"),
-    ).toEqual({
-      provider: "compatible-endpoint",
-      model: "llama",
-      endpointUrl: null,
-      endpointSource: null,
-      credentialEnv: null,
-      preferredInferenceApi: "openai-completions",
-      compatibleEndpointReasoning: null,
-      compatibleEndpointReasoningEffort: null,
-      nimContainer: null,
-    });
-  });
-
-  it("borrows session-scoped metadata only when sandbox provider and model match", () => {
-    vi.spyOn(onboardSession, "loadSession").mockReturnValue({
-      sandboxName: "demo",
-      provider: "compatible-endpoint",
-      model: "llama",
-      endpointUrl: "https://right.test/v1",
-      credentialEnv: "COMPATIBLE_API_KEY",
-      compatibleEndpointReasoning: "true",
-      compatibleEndpointReasoningEffort: "high",
-      nimContainer: "nim-right",
-    });
-
-    expect(
-      selection("demo", "compatible-endpoint", "llama", "openai-completions", "onboard"),
-    ).toEqual({
-      provider: "compatible-endpoint",
-      model: "llama",
-      endpointUrl: "https://right.test/v1",
-      endpointSource: "onboard",
-      credentialEnv: "COMPATIBLE_API_KEY",
-      preferredInferenceApi: "openai-completions",
-      compatibleEndpointReasoning: "true",
-      compatibleEndpointReasoningEffort: "high",
-      nimContainer: "nim-right",
-    });
-  });
-});
-
 describe("registerCreatedSandbox", () => {
   const runtimeAuthority = {
     schemaVersion: 1 as const,
@@ -792,6 +827,122 @@ describe("registerCreatedSandbox", () => {
       loadSession.mockRestore();
       getSandbox.mockRestore();
     }
+  });
+
+  it("revalidates web-search stable identity and pinned declaration at final publication", () => {
+    const fixture = verifiedPackageCreateFixture();
+    const currentEntry = {
+      ...fixture.reservation.entry,
+      lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+      lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+      pendingCreateIdentity: fixture.checkpoint,
+    };
+    vi.spyOn(sandboxRegistry, "getSandbox").mockReturnValue(currentEntry);
+    const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+      sessionId: "session-1",
+      sandboxName: "demo",
+      agent: "openclaw",
+      harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+      harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+      stagedCredentialProviderReceipts: [
+        {
+          providerName: "demo-brave-search",
+          providerId: "provider-id-1",
+          createdByNemoClaw: true,
+        },
+      ],
+      checkpoint: {
+        schemaVersion: 5,
+        sessionId: "session-1",
+        harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+        sandboxRecreate: null,
+      },
+    } as never);
+    vi.spyOn(harnessPackageStore, "resolvePinnedHarnessPackage").mockReturnValue({
+      identity: OPENCLAW_PACKAGE_IDENTITY,
+      packageManifest: { manifest: PINNED_WEB_SEARCH_MANIFEST },
+    } as never);
+    const registerSandbox = vi.fn();
+
+    const entry = registerCreatedSandbox({
+      ...createdRegistryEntryInput({
+        agent: OPENCLAW_WEB_SEARCH_AGENT,
+        webSearchEnabled: true,
+        webSearchProvider: "brave",
+        lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+        lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+      }),
+      inferenceRouteReservation: fixture.reservation,
+      verifiedCreate: fixture.verifiedCreate,
+      registerSandbox,
+    });
+
+    expect(entry.webSearchProviderOwnership?.providerId).toBe("provider-id-1");
+    expect(registerSandbox).toHaveBeenCalledOnce();
+  });
+
+  it("refuses final publication after the staged web-search receipt drifts", () => {
+    const fixture = verifiedPackageCreateFixture();
+    const currentEntry = {
+      ...fixture.reservation.entry,
+      lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+      lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+      pendingCreateIdentity: fixture.checkpoint,
+    };
+    vi.spyOn(sandboxRegistry, "getSandbox").mockReturnValue(currentEntry);
+    const session = {
+      sessionId: "session-1",
+      sandboxName: "demo",
+      agent: "openclaw",
+      harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+      harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+      stagedCredentialProviderReceipts: [
+        {
+          providerName: "demo-brave-search",
+          providerId: "provider-id-1",
+          createdByNemoClaw: true,
+        },
+      ],
+      checkpoint: {
+        schemaVersion: 5,
+        sessionId: "session-1",
+        harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+        sandboxRecreate: null,
+      },
+    };
+    const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue(session as never);
+    vi.spyOn(harnessPackageStore, "resolvePinnedHarnessPackage").mockReturnValue({
+      identity: OPENCLAW_PACKAGE_IDENTITY,
+      packageManifest: { manifest: PINNED_WEB_SEARCH_MANIFEST },
+    } as never);
+    const input = {
+      ...createdRegistryEntryInput({
+        agent: OPENCLAW_WEB_SEARCH_AGENT,
+        webSearchEnabled: true,
+        webSearchProvider: "brave",
+        lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+        lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+      }),
+      inferenceRouteReservation: fixture.reservation,
+      verifiedCreate: fixture.verifiedCreate,
+      registerSandbox: vi.fn(),
+    };
+    const prepared = prepareCreatedSandboxRegistration(input);
+    loadSession.mockReturnValue({
+      ...session,
+      stagedCredentialProviderReceipts: [
+        {
+          providerName: "demo-brave-search",
+          providerId: "replacement-provider-id",
+          createdByNemoClaw: true,
+        },
+      ],
+    } as never);
+
+    expect(() => registerPreparedCreatedSandbox(input, prepared)).toThrow(
+      /registration authority.*changed before publication/u,
+    );
+    expect(input.registerSandbox).not.toHaveBeenCalled();
   });
 
   it("refuses final publication when checkpoint package authority drifts", () => {

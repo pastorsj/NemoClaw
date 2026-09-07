@@ -19,6 +19,7 @@ import {
   readManagedDcodeCreateSelectionDrift,
   readSandboxRecreateRegistryEntry,
   reconcileCreatedHermesCredentialEnvironment,
+  refreshReusedMessagingProviders,
   persistPostCreateRecovery,
   persistRetainedSandboxRecoveryMessage,
   runAuthorityBoundProviderCleanup,
@@ -40,6 +41,54 @@ const RECOVERY_HARNESS_PACKAGE = {
   packageVersion: "1.0.0",
   contentDigest: "f".repeat(64),
 };
+
+describe("reused sandbox messaging providers", () => {
+  it("requires the typed provider binding for a receipt-backed package", () => {
+    const conflict = new Error("provider binding differs");
+    const upsertMessagingProviders = vi.fn(() => {
+      throw conflict;
+    });
+    const revalidateSandboxIdentity = vi.fn();
+    const continued = vi.fn();
+
+    expect(() => {
+      refreshReusedMessagingProviders({
+        messagingTokenDefs: [],
+        receiptBackedPackage: true,
+        revalidateSandboxIdentity,
+        sandboxName: "alpha",
+        upsertMessagingProviders: upsertMessagingProviders as never,
+      });
+      continued();
+    }).toThrow(conflict);
+
+    expect(upsertMessagingProviders).toHaveBeenCalledWith([], {
+      allowedSandboxes: ["alpha"],
+      requireExactBindings: true,
+      requireExistingProvider: true,
+      requireOwnedExistingProvider: true,
+      revalidateSandboxIdentity: expect.any(Function),
+    });
+    expect(revalidateSandboxIdentity).toHaveBeenCalledWith(true, "reusing sandbox 'alpha'");
+    expect(continued).not.toHaveBeenCalled();
+  });
+
+  it("keeps the legacy provider reuse path free of package-only binding requirements", () => {
+    const upsertMessagingProviders = vi.fn(() => []);
+
+    refreshReusedMessagingProviders({
+      messagingTokenDefs: [],
+      receiptBackedPackage: false,
+      revalidateSandboxIdentity: vi.fn(),
+      sandboxName: "alpha",
+      upsertMessagingProviders: upsertMessagingProviders as never,
+    });
+
+    expect(upsertMessagingProviders).toHaveBeenCalledWith([], {
+      revalidateSandboxIdentity: expect.any(Function),
+    });
+  });
+});
 
 describe("created Hermes credential environment reconciliation", () => {
   const plan = {

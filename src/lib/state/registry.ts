@@ -47,6 +47,7 @@ export {
   type SandboxInferenceRouteReservationDisposition,
 } from "./registry/route-reservation";
 import { cloneSandboxWorkloadReceipt } from "./registry/workload";
+import { getSandbox as readSandbox } from "./registry/read";
 import { normalizeSandboxMcpState } from "./registry-mcp";
 import {
   hasValidN1xPreviewAcceptance,
@@ -54,6 +55,7 @@ import {
   normalizeSandboxPolicyAttribution,
   normalizePendingSandboxCreateIdentity,
   normalizeSnapshotSourceRegistryFingerprint,
+  normalizeWebSearchProviderOwnership,
   parseSandboxProviderBrokerOwnership,
   retainedDefaultSandbox,
 } from "./registry-normalization";
@@ -119,6 +121,7 @@ export type {
   PendingSandboxCreateIdentity,
   SandboxRegistry,
   SandboxWorkloadReceipt,
+  SandboxProviderOwnershipReceipt,
 } from "./registry/types";
 export type { McpBridgeEntry, SandboxMcpState } from "./registry-mcp";
 export { normalizeSandboxMcpState };
@@ -131,10 +134,14 @@ export {
   type SandboxMessagingState,
 } from "./registry-messaging";
 export { hasUnsafeHostMountTerminalText, normalizeSandboxPolicyAttribution };
+export { normalizeWebSearchProviderOwnership };
 
 export type SandboxRemovalReceipt = reversibleRemoval.RegistryRemovalReceipt<SandboxEntry>;
 
-export { getSandbox } from "./registry/read";
+/** Compatibility facade; new owners should import the read module directly. */
+export function getSandbox(name: string): SandboxEntry | null {
+  return readSandbox(name);
+}
 
 export function getDefault(): string | null {
   const data = load();
@@ -450,6 +457,7 @@ export function registerSandbox(
       throw new Error("Cannot register a sandbox with invalid N1x preview acceptance");
     }
     const normalizedPolicyEntry = normalizeSandboxPolicyAttribution(entry);
+    const webSearchProviderOwnership = normalizeWebSearchProviderOwnership(normalizedPolicyEntry);
     if (!normalizedPolicyEntry.harnessPackage && entry.dashboardUi !== undefined) {
       throw new Error("Cannot register a no-receipt sandbox with package dashboard state");
     }
@@ -560,6 +568,7 @@ export function registerSandbox(
         (entry.webSearchProvider === "brave" || entry.webSearchProvider === "tavily")
           ? entry.webSearchProvider
           : null,
+      webSearchProviderOwnership,
       // New receipt-backed rows persist the canonical package ID. A null agent
       // remains a read-only compatibility encoding for pre-package OpenClaw
       // records and must not be produced for current package authority.
@@ -961,6 +970,27 @@ function updatedSandboxEntry(
     return false;
   }
   if (changesHostLocalInferenceLifecycleAuthority(current, updates)) return false;
+  const changesWebSearchProviderOwnership = [
+    "webSearchEnabled",
+    "webSearchProvider",
+    "webSearchProviderOwnership",
+  ].some(
+    (field) =>
+      Object.prototype.hasOwnProperty.call(updates, field) &&
+      !isDeepStrictEqual(
+        updates[field as keyof SandboxEntry],
+        current[field as keyof SandboxEntry],
+      ),
+  );
+  if (
+    changesWebSearchProviderOwnership &&
+    (current.webSearchProviderOwnership !== undefined ||
+      updates.webSearchProviderOwnership !== undefined)
+  ) {
+    throw new Error(
+      `Refusing to update sandbox '${name}' web-search provider ownership outside final registration.`,
+    );
+  }
   const changesHarnessPackageAuthority =
     Object.prototype.hasOwnProperty.call(updates, "harnessPackage") ||
     Object.prototype.hasOwnProperty.call(updates, "harnessPackageMigration");
@@ -1239,6 +1269,17 @@ export function restoreSandboxEntry(
     const data = load();
     const normalizedEntry = normalizeSandboxPolicyAttribution(entry);
     const current = data.sandboxes[normalizedEntry.name];
+    if (
+      current &&
+      !isDeepStrictEqual(
+        normalizeWebSearchProviderOwnership(current),
+        normalizeWebSearchProviderOwnership(normalizedEntry),
+      )
+    ) {
+      throw new Error(
+        `Refusing to restore sandbox '${normalizedEntry.name}' with changed web-search provider ownership.`,
+      );
+    }
     if (current?.pendingCreateIdentity && !isDeepStrictEqual(current, normalizedEntry)) {
       throw new Error(
         `Refusing to restore sandbox '${normalizedEntry.name}' while its verified create checkpoint is incomplete.`,

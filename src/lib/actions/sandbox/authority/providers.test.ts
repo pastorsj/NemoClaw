@@ -15,7 +15,9 @@ import {
 } from "./providers";
 
 const PROVIDER_NAME = "alpha-discord-bridge";
+const WEB_SEARCH_PROVIDER_NAME = "alpha-brave-search";
 const EXACT_PROVIDER = [
+  "Id: provider-id-1",
   `Name: ${PROVIDER_NAME}`,
   "Type: nemoclaw-mcp-v1",
   "Credential keys: DISCORD_BOT_TOKEN",
@@ -42,9 +44,28 @@ const MESSAGING_INTEGRATION = Object.freeze({
 }) satisfies HarnessMessagingSupportedIntegration;
 const PACKAGE_PROVIDER = Object.freeze({
   profilePath: "provider-profiles/discord-v2.yaml",
+  profileSha256: "a".repeat(64),
   profileId: "package-discord-v2",
   credentialEnv: "DISCORD_BOT_TOKEN",
   sourceInputId: "botToken",
+});
+const WEB_SEARCH_PROVIDER = Object.freeze({
+  provider: "brave" as const,
+  credential_env: "BRAVE_API_KEY",
+  profile_type: "brave",
+  config_verification: Object.freeze({
+    path: "/sandbox/config.json" as const,
+    format: "json" as const,
+    assertions: Object.freeze([]),
+    credential_paths: Object.freeze([]),
+  }),
+  egress_verification: Object.freeze({
+    method: "GET" as const,
+    url: "https://example.test/search" as const,
+    parameters: Object.freeze([]),
+    credential: Object.freeze({ kind: "header" as const, name: "X-Key", prefix: "none" as const }),
+    result_array_path: Object.freeze(["results"]),
+  }),
 });
 const PACKAGE_MESSAGING_INTEGRATION = Object.freeze({
   ...MESSAGING_INTEGRATION,
@@ -71,6 +92,15 @@ function discordMessagingPlan() {
         placeholder: "openshell:resolve:env:DISCORD_BOT_TOKEN",
         credentialAvailable: true,
         credentialHash: "non-secret-test-hash",
+      },
+    ],
+    providerReceipts: [
+      {
+        channelId: "discord",
+        providerName: PROVIDER_NAME,
+        providerId: "provider-id-1",
+        createdByNemoClaw: true,
+        attachmentAddedByNemoClaw: true,
       },
     ],
   });
@@ -112,13 +142,17 @@ describe("receipt-backed provider cleanup authority", () => {
 
     expect(prepared.bindings).toEqual([
       {
+        channelId: "discord",
         name: PROVIDER_NAME,
         type: "package-discord-v2",
         credentialKey: "DISCORD_BOT_TOKEN",
         credentialShape: "only",
+        providerId: "provider-id-1",
+        createdByNemoClaw: true,
+        attachmentAddedByNemoClaw: true,
       },
     ]);
-    expect(runOpenshell).toHaveBeenCalledOnce();
+    expect(runOpenshell).toHaveBeenCalledTimes(2);
   });
 
   it.each(["missing", "corrupt"])(
@@ -258,5 +292,174 @@ describe("receipt-backed provider cleanup authority", () => {
         ([args]) => args[0] === "sandbox" || (args[0] === "provider" && args[1] === "delete"),
       ),
     ).toBe(false);
+  });
+
+  function webSearchSandbox(
+    ownership: Partial<NonNullable<SandboxEntry["webSearchProviderOwnership"]>> = {},
+  ): SandboxEntry {
+    return {
+      name: "alpha",
+      agent: "openclaw",
+      harnessPackage: HARNESS_PACKAGE,
+      webSearchEnabled: true,
+      webSearchProvider: "brave",
+      webSearchProviderOwnership: {
+        schemaVersion: 1,
+        purpose: "web-search",
+        providerName: WEB_SEARCH_PROVIDER_NAME,
+        providerId: "web-provider-id-1",
+        providerType: "brave",
+        credentialEnv: "BRAVE_API_KEY",
+        createdByNemoClaw: true,
+        attachmentAddedByNemoClaw: true,
+        ...ownership,
+      },
+    };
+  }
+
+  function webSearchCleanupHarness(sandbox: SandboxEntry) {
+    let providerExists = true;
+    const detach = vi.fn(() => ({ status: 0, stdout: "", stderr: "" }));
+    const deleteProvider = vi.fn(() => {
+      providerExists = false;
+      return {
+        ok: true,
+        status: 0,
+        stdout: "",
+        stderr: "",
+        recoveryFailures: [],
+      };
+    });
+    const deps = {
+      getSandbox: () => sandbox,
+      loadWebSearchProviderBinding: () => WEB_SEARCH_PROVIDER,
+      inspectCredentialOnly: () => ({ kind: providerExists ? "exact" : "missing" }) as const,
+      inspectProviderMetadata: () =>
+        providerExists
+          ? {
+              id: "web-provider-id-1",
+              name: WEB_SEARCH_PROVIDER_NAME,
+              type: "brave",
+              credentialKeys: ["BRAVE_API_KEY"],
+              configKeys: [],
+            }
+          : null,
+      deleteProvider,
+      runOpenshell: detach,
+    };
+    return { deps, detach, deleteProvider };
+  }
+
+  it("detaches and deletes a created web-search provider under its stable receipt", () => {
+    const sandbox = webSearchSandbox();
+    const { deps, detach, deleteProvider } = webSearchCleanupHarness(sandbox);
+
+    const prepared = prepareReceiptProviderCleanup("alpha", sandbox, deps);
+    expect(prepared.bindings).toMatchObject([
+      {
+        channelId: "web-search",
+        name: WEB_SEARCH_PROVIDER_NAME,
+        providerId: "web-provider-id-1",
+        createdByNemoClaw: true,
+        attachmentAddedByNemoClaw: true,
+      },
+    ]);
+    detachPreparedReceiptProviders(prepared, deps);
+    removePreparedReceiptProviders(prepared, deps);
+
+    expect(detach).toHaveBeenCalledWith(
+      ["sandbox", "provider", "detach", "alpha", WEB_SEARCH_PROVIDER_NAME],
+      expect.any(Object),
+    );
+    expect(deleteProvider).toHaveBeenCalledExactlyOnceWith(WEB_SEARCH_PROVIDER_NAME, {
+      allowedSandboxes: ["alpha"],
+      runOpenshell: detach,
+    });
+  });
+
+  it.each([
+    {
+      label: "attachment added by NemoClaw",
+      ownership: { createdByNemoClaw: false, attachmentAddedByNemoClaw: true },
+      detachCount: 1,
+    },
+    {
+      label: "pre-existing attachment",
+      ownership: { createdByNemoClaw: false, attachmentAddedByNemoClaw: false },
+      detachCount: 0,
+    },
+  ])("does not delete an adopted provider with $label", ({ ownership, detachCount }) => {
+    const sandbox = webSearchSandbox(ownership);
+    const { deps, detach, deleteProvider } = webSearchCleanupHarness(sandbox);
+
+    const prepared = prepareReceiptProviderCleanup("alpha", sandbox, deps);
+    detachPreparedReceiptProviders(prepared, deps);
+    removePreparedReceiptProviders(prepared, deps);
+
+    expect(detach).toHaveBeenCalledTimes(detachCount);
+    expect(deleteProvider).not.toHaveBeenCalled();
+  });
+
+  it("fails before inspection when enabled web search has no ownership receipt", () => {
+    const sandbox = webSearchSandbox();
+    delete sandbox.webSearchProviderOwnership;
+    const inspectCredentialOnly = vi.fn();
+
+    expect(() =>
+      prepareReceiptProviderCleanup("alpha", sandbox, {
+        getSandbox: () => sandbox,
+        loadWebSearchProviderBinding: () => WEB_SEARCH_PROVIDER,
+        inspectCredentialOnly,
+        runOpenshell: vi.fn(),
+      }),
+    ).toThrow(/no stable ownership receipt/u);
+    expect(inspectCredentialOnly).not.toHaveBeenCalled();
+  });
+
+  it("fails before mutation when the stable web-search provider identity drifts", () => {
+    const sandbox = webSearchSandbox();
+    const deleteProvider = vi.fn();
+
+    expect(() =>
+      prepareReceiptProviderCleanup("alpha", sandbox, {
+        getSandbox: () => sandbox,
+        loadWebSearchProviderBinding: () => WEB_SEARCH_PROVIDER,
+        inspectCredentialOnly: () => ({ kind: "exact" }),
+        inspectProviderMetadata: () => ({
+          id: "replacement-provider-id",
+          name: WEB_SEARCH_PROVIDER_NAME,
+          type: "brave",
+          credentialKeys: ["BRAVE_API_KEY"],
+          configKeys: [],
+        }),
+        deleteProvider,
+        runOpenshell: vi.fn(),
+      }),
+    ).toThrow(/changed from its recorded stable identity/u);
+    expect(deleteProvider).not.toHaveBeenCalled();
+  });
+
+  it("rejects orphaned and package-drifted web-search receipts before inspection", () => {
+    const orphaned = { ...webSearchSandbox(), webSearchEnabled: false };
+    const inspectCredentialOnly = vi.fn();
+    expect(() =>
+      prepareReceiptProviderCleanup("alpha", orphaned, {
+        getSandbox: () => orphaned,
+        loadWebSearchProviderBinding: () => WEB_SEARCH_PROVIDER,
+        inspectCredentialOnly,
+        runOpenshell: vi.fn(),
+      }),
+    ).toThrow(/orphaned/u);
+
+    const drifted = webSearchSandbox({ providerType: "replacement-profile" });
+    expect(() =>
+      prepareReceiptProviderCleanup("alpha", drifted, {
+        getSandbox: () => drifted,
+        loadWebSearchProviderBinding: () => WEB_SEARCH_PROVIDER,
+        inspectCredentialOnly,
+        runOpenshell: vi.fn(),
+      }),
+    ).toThrow(/disagrees with its package declaration/u);
+    expect(inspectCredentialOnly).not.toHaveBeenCalled();
   });
 });

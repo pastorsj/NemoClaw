@@ -143,6 +143,8 @@ const {
       knownExists?: boolean;
       replaceExisting?: boolean;
       allowedSandboxes?: readonly string[];
+      expectedProviderId?: string;
+      requireExistingProvider?: boolean;
       requireExactBinding?: boolean;
       revalidateSandboxIdentity?(operation: string): void;
     },
@@ -153,15 +155,23 @@ const {
       envKey: string;
       token: string | null;
       providerType?: string;
+      expectedProviderId?: string;
     }>,
     runOpenshell: RunOpenshell,
     options?: {
       allowedSandboxes?: readonly string[];
       bestEffort?: boolean;
+      deferCreatedProviderCleanup?: boolean;
       gatewayName?: string;
       replaceExisting?: boolean;
       revalidateSandboxIdentity?(operation: string): void;
       requireExactBindings?: boolean;
+      requireExistingProvider?: boolean;
+      recordMutationReceipt?(receipt: {
+        readonly createdProviderNames: readonly string[];
+        readonly mutatedProviderNames: readonly string[];
+        readonly providerNames: readonly string[];
+      }): void;
     },
   ) => string[];
 };
@@ -750,6 +760,7 @@ describe("onboard provider helpers", () => {
   it("imports the endpointless profile before creating a static messaging provider (#9875)", () => {
     const credential = "discord-credential-must-not-leak";
     const calls: Array<{ command: string[]; env?: Record<string, string | undefined> }> = [];
+    const recordMutationReceipt = vi.fn();
     let created = false;
     let profileImported = false;
     const providers = upsertMessagingProviders(
@@ -778,7 +789,7 @@ describe("onboard provider helpers", () => {
               ? {
                   status: 0,
                   stdout:
-                    "Name: alpha-discord-bridge\nType: nemoclaw-mcp-v1\nCredential keys: DISCORD_BOT_TOKEN\nConfig keys: <none>\n",
+                    "Id: alpha-discord-provider-id\nName: alpha-discord-bridge\nType: nemoclaw-mcp-v1\nCredential keys: DISCORD_BOT_TOKEN\nConfig keys: <none>\n",
                 }
               : {
                   status: 1,
@@ -790,6 +801,7 @@ describe("onboard provider helpers", () => {
         }
         return { status: 0, stdout: "", stderr: "" };
       },
+      { recordMutationReceipt },
     );
 
     expect(providers).toEqual(["alpha-discord-bridge"]);
@@ -804,6 +816,12 @@ describe("onboard provider helpers", () => {
     ]);
     expect(calls[5]?.env).toEqual({ DISCORD_BOT_TOKEN: credential });
     expect(calls.flatMap(({ command }) => command)).not.toContain(credential);
+    expect(recordMutationReceipt).toHaveBeenCalledWith({
+      createdProviderNames: ["alpha-discord-bridge"],
+      mutatedProviderNames: ["alpha-discord-bridge"],
+      providerNames: ["alpha-discord-bridge"],
+      providerIds: { "alpha-discord-bridge": "alpha-discord-provider-id" },
+    });
   });
 
   it("rejects credential-free reuse when the messaging profile is incompatible (#9875)", () => {
@@ -1240,7 +1258,11 @@ describe("onboard provider helpers", () => {
           mutatedProviderNames: ["alpha-googlechat-bridge"],
         }),
       );
-      expect(commands).toEqual(["provider get alpha-googlechat-bridge"]);
+      expect(commands).toEqual([
+        "provider get alpha-googlechat-bridge",
+        "provider get alpha-googlechat-bridge",
+        "provider get alpha-googlechat-bridge",
+      ]);
       expect(commands.some((command) => /provider (create|update|delete)/u.test(command))).toBe(
         false,
       );

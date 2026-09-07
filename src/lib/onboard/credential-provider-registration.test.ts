@@ -10,10 +10,18 @@ import {
   type CredentialProviderRegistrationDeps,
   createCredentialProviderRegistration,
 } from "./credential-provider-registration";
+import type { MessagingBridgeProfile } from "./messaging-bridge-provider";
 import type { MessagingTokenDef } from "./messaging-prep";
 
 const messagingBridgeProvider =
   require("./messaging-bridge-provider") as typeof import("./messaging-bridge-provider");
+const providersModule = require("./providers") as {
+  upsertMessagingProviders(
+    tokenDefs: MessagingTokenDef[],
+    runOpenshell: CredentialProviderRegistrationDeps["runOpenshell"],
+    options?: { allowedSandboxes?: readonly string[] },
+  ): string[];
+};
 
 const BRAVE_SECRET = "brv-resume-secret";
 const DISCORD_SECRET = "discord-resume-secret";
@@ -36,6 +44,18 @@ const DISCORD_STATIC_PROFILE = {
   endpoints: [],
   binaries: [],
   inference_capable: false,
+};
+
+const DISCORD_MESSAGING_PROFILE: MessagingBridgeProfile = {
+  channelId: "discord",
+  agent: "hermes",
+  profilePath: `${process.cwd()}/packages/nemoclaw-hermes/provider-profiles/discord.yaml`,
+  profileId: "discord-hermes-static-v1",
+  credentialKey: "DISCORD_BOT_TOKEN",
+  strategy: null,
+  scopes: [],
+  secretMaterialKeys: [],
+  sourceSecretEnv: "DISCORD_BOT_TOKEN",
 };
 
 const BRAVE_PROFILE = {
@@ -195,6 +215,31 @@ function bridgeRefreshCleanupScenario(deleteStatus: number, deleteError: string)
 }
 
 describe("credential provider registration", () => {
+  it("confines receipt-backed provider mutations to the target sandbox", async () => {
+    const session = { stagedCredentialProviders: [] } as unknown as Session;
+    const runOpenshell = vi.fn(() => ({ status: 0, stdout: "", stderr: "" }));
+    const registration = createCredentialProviderRegistration(
+      registrationDeps(runOpenshell, session),
+    );
+    const upsert = vi.spyOn(providersModule, "upsertMessagingProviders").mockReturnValue([]);
+    try {
+      await expect(
+        registration.stageSandboxCredentialProviders(
+          {
+            ...sandboxInput([]),
+            receiptBackedPackage: true,
+          },
+          async () => ({ messagingTokenDefs: [] }),
+        ),
+      ).resolves.toEqual([]);
+
+      expect(upsert).toHaveBeenCalledOnce();
+      expect(upsert.mock.calls[0]?.[2]).toMatchObject({ allowedSandboxes: ["alpha"] });
+    } finally {
+      upsert.mockRestore();
+    }
+  });
+
   it.each([
     { condition: "matches", endpoints: [], expected: true },
     {
@@ -557,9 +602,16 @@ describe("credential provider registration", () => {
     const session = { stagedCredentialProviders: [] } as unknown as Session;
     const missing = { status: 1, stdout: "", stderr: "not found" };
     const success = { status: 0, stdout: "", stderr: "" };
-    const runOpenshell = vi.fn((args: string[]) =>
-      args[0] === "provider" && args[1] === "get" ? missing : success,
-    );
+    let created = false;
+    const runOpenshell = vi.fn((args: string[]) => {
+      const operation = args.slice(0, 2).join(" ");
+      created ||= operation === "provider create";
+      return operation === "provider get"
+        ? created
+          ? providerMetadata("alpha-discord-bridge", "generic", "DISCORD_BOT_TOKEN")
+          : missing
+        : success;
+    });
     const registration = createCredentialProviderRegistration(
       registrationDeps(runOpenshell, session),
     );
@@ -599,22 +651,35 @@ describe("credential provider registration", () => {
 
   it("registers one static Hermes Discord provider from the checkpoint binding", async () => {
     const session = { stagedCredentialProviders: [] } as unknown as Session;
-    const missing = {
+    const missingProfile = {
       status: 1,
       stdout: "",
       stderr: "provider profile 'discord-hermes-static-v1' not found",
     };
+    const missingProvider = {
+      status: 1,
+      stdout: "",
+      stderr: "provider 'alpha-discord-bridge' not found",
+    };
     const success = { status: 0, stdout: "", stderr: "" };
     let profileImported = false;
+    let providerCreated = false;
     const runOpenshell = vi.fn((args: string[]) => {
       profileImported ||=
         args[0] === "provider" && args.includes("profile") && args.includes("import");
+      providerCreated ||= args[0] === "provider" && args[1] === "create";
       return args[0] === "provider" && args.includes("profile") && args.includes("export")
         ? profileImported
           ? { ...success, stdout: JSON.stringify(DISCORD_STATIC_PROFILE) }
-          : missing
+          : missingProfile
         : args[0] === "provider" && args[1] === "get"
-          ? missing
+          ? providerCreated
+            ? providerMetadata(
+                "alpha-discord-bridge",
+                "discord-hermes-static-v1",
+                "DISCORD_BOT_TOKEN",
+              )
+            : missingProvider
           : success;
     });
     const registration = createCredentialProviderRegistration(
@@ -663,6 +728,7 @@ describe("credential provider registration", () => {
         envKey: "DISCORD_BOT_TOKEN",
         token: DISCORD_SECRET,
         providerType: "discord-hermes-static-v1",
+        messagingProviderProfile: DISCORD_MESSAGING_PROFILE,
       },
     ];
 
@@ -700,6 +766,88 @@ describe("credential provider registration", () => {
       ],
       expect.objectContaining({ env: { DISCORD_BOT_TOKEN: DISCORD_SECRET } }),
     );
+  });
+
+  it("rejects an extra credential on a static package provider before credential update", async () => {
+    const session = { stagedCredentialProviders: [] } as unknown as Session;
+    const providerWithExtraCredential = {
+      status: 0,
+      stdout: [
+        "Name: alpha-discord-bridge",
+        "Type: discord-hermes-static-v1",
+        "Credential keys: DISCORD_BOT_TOKEN, DISCORD_BOT_TOKEN_EXTRA",
+        "Config keys: <none>",
+        "",
+      ].join("\n"),
+      stderr: "",
+    };
+    const runOpenshell = vi.fn((args: string[]) =>
+      args.includes("profile") && args.includes("export")
+        ? { status: 0, stdout: JSON.stringify(DISCORD_STATIC_PROFILE), stderr: "" }
+        : providerWithExtraCredential,
+    );
+    const registration = createCredentialProviderRegistration(
+      registrationDeps(runOpenshell, session),
+    );
+    const tokenDef: MessagingTokenDef = {
+      name: "alpha-discord-bridge",
+      envKey: "DISCORD_BOT_TOKEN",
+      token: DISCORD_SECRET,
+      providerType: "discord-hermes-static-v1",
+      messagingProviderProfile: DISCORD_MESSAGING_PROFILE,
+    };
+
+    await expect(
+      registration.stageSandboxCredentialProviders(
+        sandboxInput(requiredBindings([tokenDef])),
+        async () => ({ messagingTokenDefs: [tokenDef] }),
+      ),
+    ).rejects.toThrow("An existing credential provider does not match the required binding.");
+
+    expect(session.stagedCredentialProviders).toEqual([]);
+    expect(
+      runOpenshell.mock.calls
+        .map(([args]) => args)
+        .filter((args) => args[0] === "provider" && ["create", "update"].includes(args[1] ?? "")),
+    ).toEqual([]);
+  });
+
+  it("rejects an extra credential on an endpointless static provider", async () => {
+    const session = { stagedCredentialProviders: [] } as unknown as Session;
+    const runOpenshell = vi.fn((_args: string[]) => ({
+      status: 0,
+      stdout: [
+        "Name: alpha-telegram-bridge",
+        "Type: nemoclaw-mcp-v1",
+        "Credential keys: TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_TOKEN_EXTRA",
+        "Config keys: <none>",
+        "",
+      ].join("\n"),
+      stderr: "",
+    }));
+    const registration = createCredentialProviderRegistration(
+      registrationDeps(runOpenshell, session),
+    );
+    const tokenDef: MessagingTokenDef = {
+      name: "alpha-telegram-bridge",
+      envKey: "TELEGRAM_BOT_TOKEN",
+      token: "telegram-test",
+      providerType: "nemoclaw-mcp-v1",
+    };
+
+    await expect(
+      registration.stageSandboxCredentialProviders(
+        sandboxInput(requiredBindings([tokenDef])),
+        async () => ({ messagingTokenDefs: [tokenDef] }),
+      ),
+    ).rejects.toThrow("An existing credential provider does not match the required binding.");
+
+    expect(session.stagedCredentialProviders).toEqual([]);
+    expect(
+      runOpenshell.mock.calls
+        .map(([args]) => args)
+        .filter((args) => args[0] === "provider" && ["create", "update"].includes(args[1] ?? "")),
+    ).toEqual([]);
   });
 
   it("rejects a mismatched existing provider before updating it (#6743)", async () => {

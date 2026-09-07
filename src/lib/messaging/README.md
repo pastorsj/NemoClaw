@@ -129,7 +129,6 @@ classDiagram
     +applyHooksForPhase(plan, phase, options)
     +applyPreEnableChecks(plan, options)
     +applyHealthChecks(plan, options)
-    +applyCredentialsAtOpenShell(plan, options)
     +applyPolicyAtOpenShell(plan, options)
     +applyAgentConfigAtOpenShell(plan, options)
   }
@@ -176,7 +175,7 @@ Important plan sections are:
 | Plan field | Source | Consumer |
 |---|---|---|
 | `channels` | Manifest metadata plus resolved inputs, disabled state, hooks, and optional host-forward data. | Lifecycle commands, hook request builders, status, diagnostics, host-forward setup. |
-| `credentialBindings` | `manifest.credentials`. | OpenShell provider creation or reuse and agent config placeholder preservation. |
+| `credentialBindings` | `manifest.credentials`. | Receipt-backed provider registration and agent config placeholder preservation. |
 | `networkPolicy` | `manifest.policyPresets`. | Policy application during onboard and channel lifecycle changes. |
 | `agentRender` | `manifest.render` after template and credential placeholder resolution. | Host config applier and build-time config applier. |
 | `buildSteps` | `manifest.agentPackages` and hook outputs of kind `build-arg`, `build-file`, or `package-install`. | Image build and post-agent-install application. |
@@ -449,10 +448,13 @@ await planner.buildChannelAddPlanFromSandboxEntry({
 
 `MessagingSetupApplier` is the host-side facade for plan application.
 
+Credential providers are intentionally not applied through this facade. Onboarding and channel
+lifecycle actions bind each provider mutation to a stable provider identity, sandbox attachment,
+and durable ownership receipt before the plan can be persisted.
+
 ```ts
 MessagingSetupApplier.writePlanToEnv(plan);
 
-MessagingSetupApplier.applyCredentialsAtOpenShell(plan, credentialOptions);
 MessagingSetupApplier.applyPolicyAtOpenShell(plan, policyOptions);
 await MessagingSetupApplier.applyPreEnableChecks(plan, hookOptions);
 await MessagingSetupApplier.applyAgentConfigAtOpenShell(plan, configOptions);

@@ -48,7 +48,11 @@ import {
   mcpRebuildRequiresRuntimeSelection,
 } from "./rebuild-mcp-phase";
 import { preflightRebuildMessagingConflicts } from "./rebuild-messaging-conflict-preflight";
-import { stageRebuildMessagingPlanOrBail } from "./rebuild-messaging-phase";
+import {
+  preflightRebuildMessagingPolicyAuthorityOrBail,
+  preflightRebuildMessagingProviderAuthorityOrBail,
+  stageRebuildMessagingPlanOrBail,
+} from "./rebuild-messaging-phase";
 import {
   checkRebuildGatewaySchemaPreflight,
   commitRebuildRoutePreflight,
@@ -288,7 +292,21 @@ export async function prepareRebuildTargetPreflights(args: {
     agentAuthority,
     log,
     bail,
+    targetConfig.sessionSnapshot,
   );
+  if (
+    !preflightRebuildMessagingPolicyAuthorityOrBail(
+      {
+        agentAuthority,
+        fallbackMessagingSession: targetConfig.sessionSnapshot,
+        messagingPlan,
+        sandboxName,
+      },
+      bail,
+    )
+  ) {
+    return null;
+  }
   if (managedWorkloadRebuildCatalog) {
     try {
       recreateOptions.managedWorkloadRebuild = prepareManagedRebuildProfileHandoff({
@@ -338,6 +356,9 @@ export async function prepareRebuildTargetPreflights(args: {
       ensureRebuildTargetGatewaySelected(sandboxName, sandboxEntry, log, bail, mcpRuntimeSelection),
   });
   if (!gatewayRecovered) return null;
+  if (!preflightRebuildMessagingProviderAuthorityOrBail({ agentAuthority, messagingPlan }, bail)) {
+    return null;
+  }
   if (!checkRebuildGatewaySchemaPreflight(sandboxName, sandboxEntry, bail, mcpRuntimeSelection)) {
     return null;
   }

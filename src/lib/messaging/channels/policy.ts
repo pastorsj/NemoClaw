@@ -28,6 +28,8 @@ export type MessagingChannelPolicyLoadOptions = {
   readonly agent?: MessagingAgentId | string | null;
   readonly sandboxName?: string;
   readonly messagingConfig?: Readonly<Record<string, string | undefined>> | null;
+  /** Exact package-declared keys eligible for channel-specific materialization. */
+  readonly policyKeys?: readonly string[];
 };
 
 const WECHAT_BASE_URL_ENV_KEY = "WECHAT_BASE_URL";
@@ -111,8 +113,9 @@ export function isReviewedMessagingChannelPolicyUpgrade(
   key: string,
   liveValue: unknown,
   replacementValue: unknown,
+  reviewedPolicyKeys: readonly string[] = [WECHAT_POLICY_KEY],
 ): boolean {
-  if (key !== WECHAT_POLICY_KEY) return false;
+  if (!reviewedPolicyKeys.includes(key)) return false;
   if (!isRecord(liveValue) || !isRecord(replacementValue)) return false;
   if (!Array.isArray(liveValue.endpoints) || !Array.isArray(replacementValue.endpoints)) {
     return false;
@@ -169,6 +172,7 @@ export function isReviewedMessagingChannelPolicyUpgrade(
 function materializeWechatIlinkEndpoint(
   content: string,
   messagingConfig: Readonly<Record<string, string | undefined>> | null | undefined,
+  policyKeys: readonly string[],
 ): string {
   const baseUrl = normalizeWechatIlinkBaseUrl(messagingConfig?.[WECHAT_BASE_URL_ENV_KEY]);
   if (!baseUrl) return content;
@@ -184,17 +188,37 @@ function materializeWechatIlinkEndpoint(
   if (!isRecord(parsed) || !isRecord(parsed.network_policies)) {
     throw new Error("Cannot materialize the WeChat IDC endpoint without network policies.");
   }
+  const networkPolicies = parsed.network_policies;
 
-  const policy = parsed.network_policies[WECHAT_POLICY_KEY];
-  if (!isRecord(policy) || !Array.isArray(policy.endpoints)) {
+  const candidates = policyKeys.flatMap((key) => {
+    const policy = networkPolicies[key];
+    if (!isRecord(policy) || !Array.isArray(policy.endpoints)) return [];
+    const endpoints = policy.endpoints;
+    return endpoints.some(
+      (candidate) => isRecord(candidate) && candidate.host === WECHAT_TEMPLATE_HOST,
+    )
+      ? [{ key, endpoints }]
+      : [];
+  });
+  if (candidates.length !== 1) {
+    if (policyKeys.length === 1 && policyKeys[0] === WECHAT_POLICY_KEY) {
+      throw new Error(
+        `Cannot materialize the WeChat IDC endpoint; reviewed template '${WECHAT_TEMPLATE_HOST}' is missing.`,
+      );
+    }
     throw new Error(
-      `Cannot materialize the WeChat IDC endpoint; policy '${WECHAT_POLICY_KEY}' has no endpoint list.`,
+      "Cannot materialize the WeChat IDC endpoint; the authorized policy keys must contain exactly one reviewed endpoint template.",
     );
   }
-  if (policy.endpoints.some((candidate) => isRecord(candidate) && candidate.host === hostname)) {
+  const selected = candidates[0];
+  if (!selected) {
+    throw new Error("Cannot materialize the WeChat IDC endpoint without an authorized policy.");
+  }
+  const { endpoints } = selected;
+  if (endpoints.some((candidate) => isRecord(candidate) && candidate.host === hostname)) {
     return content;
   }
-  const template = policy.endpoints.find(
+  const template = endpoints.find(
     (candidate) => isRecord(candidate) && candidate.host === WECHAT_TEMPLATE_HOST,
   );
   if (!isRecord(template)) {
@@ -202,7 +226,7 @@ function materializeWechatIlinkEndpoint(
       `Cannot materialize the WeChat IDC endpoint; reviewed template '${WECHAT_TEMPLATE_HOST}' is missing.`,
     );
   }
-  policy.endpoints.push({ ...template, host: hostname });
+  endpoints.push({ ...template, host: hostname });
   return YAML.stringify(parsed);
 }
 
@@ -210,12 +234,19 @@ function materializeWechatIlinkEndpoint(
 export function materializeMessagingChannelPolicyContent(
   content: string,
   channelId: string,
-  options: Pick<MessagingChannelPolicyLoadOptions, "sandboxName" | "messagingConfig"> = {},
+  options: Pick<
+    MessagingChannelPolicyLoadOptions,
+    "sandboxName" | "messagingConfig" | "policyKeys"
+  > = {},
 ): string | null {
   const materialized = materializeMessagingPolicySandboxName(content, options.sandboxName);
   if (materialized === null) return null;
   return channelId === "wechat"
-    ? materializeWechatIlinkEndpoint(materialized, options.messagingConfig)
+    ? materializeWechatIlinkEndpoint(
+        materialized,
+        options.messagingConfig,
+        options.policyKeys ?? [WECHAT_POLICY_KEY],
+      )
     : materialized;
 }
 

@@ -4,9 +4,14 @@
 import type { WebSearchConfig } from "../inference/web-search";
 import type { CheckpointProviderBinding } from "../state/onboard-checkpoint-types";
 import type { Session } from "../state/onboard-session";
+import type { StagedCredentialProviderReceipt } from "../state/onboard-session";
 import * as gatewayProviderMetadata from "./gateway-provider-metadata";
 import * as messagingBridgeProvider from "./messaging-bridge-provider";
-import { hasConfiguredMessagingCredential, type MessagingTokenDef } from "./messaging-prep";
+import {
+  hasConfiguredMessagingCredential,
+  type MessagingProviderMutationReceipt,
+  type MessagingTokenDef,
+} from "./messaging-prep";
 import type { OpenshellCliHelpers } from "./openshell-cli";
 import { createGatewayScopedOpenshellRunner } from "./setup-inference";
 
@@ -19,6 +24,7 @@ export interface StageSandboxCredentialProvidersInput<Agent> {
   agent: Agent;
   requiredBindings: readonly CheckpointProviderBinding[];
   replaceExisting?: boolean;
+  receiptBackedPackage?: boolean;
   revalidateSandboxIdentity?(operation: string): void;
 }
 
@@ -26,7 +32,12 @@ export interface MessagingProviderRegistrationOptions {
   replaceExisting?: boolean;
   bestEffort?: boolean;
   allowedSandboxes?: readonly string[];
+  requireExactBindings?: boolean;
+  requireOwnedExistingProvider?: boolean;
+  requireExistingProvider?: boolean;
+  deferCreatedProviderCleanup?: boolean;
   revalidateSandboxIdentity?(operation: string): void;
+  recordMutationReceipt?(receipt: MessagingProviderMutationReceipt): void;
 }
 
 type PreparedCredentialProviders = {
@@ -43,6 +54,7 @@ export interface CredentialProviderRegistrationDeps {
   getGatewayName(): string;
   getCredential(name: string): string | null;
   updateSession(mutator: (session: Session) => Session | void): Session;
+  loadSession?(): Session | null;
   stagedLegacyValues: ReadonlyMap<string, string>;
   migratedLegacyKeys: Set<string>;
   persistMigratedLegacyKeys(): void;
@@ -227,14 +239,17 @@ export function createCredentialProviderRegistration(deps: CredentialProviderReg
       },
     );
     if (profileMatches === false) return { kind: "indeterminate" };
-    return gatewayProviderMetadata.inspectGatewayCredentialFamilyProviderBinding(
-      {
-        name: binding.name,
-        type: binding.type,
-        credentialKey: binding.credentialEnv,
-      },
-      runOpenshell,
-    );
+    const expected = {
+      name: binding.name,
+      type: binding.type,
+      credentialKey: binding.credentialEnv,
+    };
+    return messagingProviderProfile?.strategy
+      ? gatewayProviderMetadata.inspectGatewayCredentialFamilyProviderBinding(
+          expected,
+          runOpenshell,
+        )
+      : gatewayProviderMetadata.inspectGatewayCredentialOnlyProviderBinding(expected, runOpenshell);
   }
 
   function inspectGatewayCredential(
@@ -268,6 +283,8 @@ export function createCredentialProviderRegistration(deps: CredentialProviderReg
     plannedTokenDefs: ReadonlyMap<string, MessagingTokenDef>,
     runOpenshell: OpenshellCliHelpers["runOpenshell"],
     replaceExisting: boolean,
+    requireOwnedExistingProvider: boolean,
+    stagedReceipts: ReadonlyMap<string, StagedCredentialProviderReceipt>,
   ): void {
     for (const binding of requiredBindings) {
       const tokenDef = plannedTokenDefs.get(binding.name);
@@ -282,6 +299,19 @@ export function createCredentialProviderRegistration(deps: CredentialProviderReg
         runOpenshell,
         tokenDef?.messagingProviderProfile,
       );
+      if (requireOwnedExistingProvider) {
+        const receipt = stagedReceipts.get(binding.name);
+        const metadata = gatewayProviderMetadata.readGatewayProviderMetadata(
+          binding.name,
+          runOpenshell,
+        );
+        if (!receipt || !metadata?.id || metadata.id !== receipt.providerId) {
+          throw new Error(EXISTING_BINDING_ERROR);
+        }
+        if (replaceExisting && receipt.createdByNemoClaw !== true) {
+          throw new Error(EXISTING_BINDING_ERROR);
+        }
+      }
       if (matches) continue;
       if (!replaceExisting || !tokenDef || !hasConfiguredMessagingCredential(tokenDef)) {
         throw new Error(EXISTING_BINDING_ERROR);
@@ -294,16 +324,32 @@ export function createCredentialProviderRegistration(deps: CredentialProviderReg
     prepareCredentialProviders: PrepareCredentialProviders<Agent>,
   ): Promise<readonly CheckpointProviderBinding[]> {
     const messaging = await prepareCredentialProviders(input);
+    const stagedReceipts = new Map(
+      (deps.loadSession?.()?.stagedCredentialProviderReceipts ?? []).map((receipt) => [
+        receipt.providerName,
+        receipt,
+      ]),
+    );
+    const preparedTokenDefs = messaging.messagingTokenDefs.map((tokenDef) => {
+      const receipt = stagedReceipts.get(tokenDef.name);
+      return receipt
+        ? {
+            ...tokenDef,
+            expectedProviderId: receipt.providerId,
+            allowProviderReplacement: receipt.createdByNemoClaw,
+          }
+        : tokenDef;
+    });
     input.revalidateSandboxIdentity?.("stage sandbox credential providers after planning");
     const plannedBindings = validatePlannedCredentialProviderBindings(
-      messaging.messagingTokenDefs,
+      preparedTokenDefs,
       input.requiredBindings,
       hasConfiguredMessagingCredential,
     );
     const plannedTokenDefs = new Map(
-      messaging.messagingTokenDefs.map((tokenDef) => [tokenDef.name, tokenDef]),
+      preparedTokenDefs.map((tokenDef) => [tokenDef.name, tokenDef]),
     );
-    const tokenDefs = messaging.messagingTokenDefs.filter(hasConfiguredMessagingCredential);
+    const tokenDefs = preparedTokenDefs.filter(hasConfiguredMessagingCredential);
     const gatewayName = deps.getGatewayName();
     const runOpenshell = gatewayRunner(gatewayName);
     preflightRequiredCredentialProviderBindings(
@@ -311,6 +357,8 @@ export function createCredentialProviderRegistration(deps: CredentialProviderReg
       plannedTokenDefs,
       runOpenshell,
       input.replaceExisting === true,
+      input.receiptBackedPackage === true,
+      stagedReceipts,
     );
     input.revalidateSandboxIdentity?.("clear staged credential provider receipts");
     setStagedCredentialProviderReceipts(
@@ -318,17 +366,59 @@ export function createCredentialProviderRegistration(deps: CredentialProviderReg
       false,
       deps,
     );
+    let mutationReceipt: MessagingProviderMutationReceipt | undefined;
     const registered = upsertMessagingProvidersAtGateway(
       tokenDefs,
       {
         replaceExisting: input.replaceExisting === true,
-        allowedSandboxes: input.replaceExisting === true ? [input.sandboxName] : undefined,
+        allowedSandboxes:
+          input.receiptBackedPackage === true || input.replaceExisting === true
+            ? [input.sandboxName]
+            : undefined,
+        requireExactBindings: true,
+        requireOwnedExistingProvider: input.receiptBackedPackage === true,
+        recordMutationReceipt: (receipt) => {
+          mutationReceipt = receipt;
+        },
         revalidateSandboxIdentity: input.revalidateSandboxIdentity,
       },
       gatewayName,
       runOpenshell,
     );
-    input.revalidateSandboxIdentity?.("record staged credential provider receipts");
+    const createdProviderNames = new Set(mutationReceipt?.createdProviderNames ?? []);
+    const recordedReceipts = registered.map((providerName) => {
+      const metadata = gatewayProviderMetadata.readGatewayProviderMetadata(
+        providerName,
+        runOpenshell,
+      );
+      if (!metadata?.id) {
+        throw new Error(`OpenShell did not return a stable identity for '${providerName}'.`);
+      }
+      const prior = stagedReceipts.get(providerName);
+      if (prior && prior.providerId !== metadata.id && !input.replaceExisting) {
+        throw new Error(EXISTING_BINDING_ERROR);
+      }
+      return {
+        providerName,
+        providerId: metadata.id,
+        createdByNemoClaw:
+          prior?.createdByNemoClaw === true || createdProviderNames.has(providerName),
+      } satisfies StagedCredentialProviderReceipt;
+    });
+    if (recordedReceipts.length > 0) {
+      input.revalidateSandboxIdentity?.("record staged credential provider receipts");
+      deps.updateSession((current) => {
+        const next = new Map(
+          (current.stagedCredentialProviderReceipts ?? []).map((receipt) => [
+            receipt.providerName,
+            receipt,
+          ]),
+        );
+        for (const receipt of recordedReceipts) next.set(receipt.providerName, receipt);
+        current.stagedCredentialProviderReceipts = [...next.values()];
+        return current;
+      });
+    }
     setStagedCredentialProviderReceipts(registered, true, deps);
     return registered.map((name) => {
       const binding = plannedBindings.get(name);

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { TextDecoder } from "node:util";
@@ -8,14 +9,15 @@ import { TextDecoder } from "node:util";
 import type {
   HarnessMessagingBuildFileTemplate,
   HarnessMessagingChannelProfile,
+  HarnessMessagingCredentialProvider,
   HarnessMessagingHookOperation,
+  HarnessMessagingSupportedIntegration,
   HarnessWhatsappStatusProbe,
 } from "@nvidia/nemoclaw-harness-contract";
 
 import {
   HARNESS_MESSAGING_ADAPTER_CONTRACT,
   type HarnessMessagingDisabledIntegration,
-  type HarnessMessagingIntegration,
   type HarnessMessagingProfileReference,
   validateHarnessMessagingBuildProfile,
   validateHarnessMessagingChannelProfiles,
@@ -38,7 +40,20 @@ import {
 import type { HarnessPackageIdentity } from "./package/types";
 import { assertMessagingCredentialProviderProfileMatches } from "./messaging-provider";
 
-export type { HarnessMessagingIntegration } from "./adapter/messaging";
+export type ReceiptBoundMessagingCredentialProvider = HarnessMessagingCredentialProvider &
+  Readonly<{ profileSha256: string }>;
+
+export type ReceiptBoundMessagingChannelProfile = Omit<
+  HarnessMessagingChannelProfile,
+  "credentialProvider"
+> &
+  Readonly<{ credentialProvider?: ReceiptBoundMessagingCredentialProvider }>;
+
+/** Core projection enriched with receipt-verified provider-profile identity. */
+export type HarnessMessagingIntegration =
+  | HarnessMessagingDisabledIntegration
+  | (Omit<HarnessMessagingSupportedIntegration, "channels"> &
+      Readonly<{ channels: readonly ReceiptBoundMessagingChannelProfile[] }>);
 
 interface DeclaredMessagingIntegration {
   readonly support: "channels" | "disabled";
@@ -148,6 +163,7 @@ function readChannelProfiles(
     );
   }
   const profiles = validateHarnessMessagingChannelProfiles(parsed);
+  const providerProfileDigests = new Map<HarnessMessagingCredentialProvider, string>();
   validateChannelProfileSemantics(profiles, (profile) => {
     const providerPath = path.posix.join(
       path.posix.dirname(installed.packageManifest.envelope.manifest),
@@ -165,11 +181,11 @@ function readChannelProfiles(
         "Installed harness messaging credential provider profile is missing or oversized",
       );
     }
+    let providerBytes: Buffer;
     let providerSource: string;
     try {
-      providerSource = UTF8_DECODER.decode(
-        readVerifiedFile(providerEntry, PROVIDER_PROFILE_MAX_BYTES),
-      );
+      providerBytes = readVerifiedFile(providerEntry, PROVIDER_PROFILE_MAX_BYTES);
+      providerSource = UTF8_DECODER.decode(providerBytes);
     } catch (error) {
       throw new HarnessMessagingModuleError(
         "Installed harness messaging credential provider profile is invalid",
@@ -186,9 +202,25 @@ function readChannelProfiles(
         { cause: error },
       );
     }
+    providerProfileDigests.set(profile, createHash("sha256").update(providerBytes).digest("hex"));
   });
   assertTreeAuthority(authority);
-  return profiles;
+  return Object.freeze(
+    profiles.map((profile): ReceiptBoundMessagingChannelProfile => {
+      const { credentialProvider, ...profileWithoutCredentialProvider } = profile;
+      if (!credentialProvider) return Object.freeze(profileWithoutCredentialProvider);
+      const profileSha256 = providerProfileDigests.get(credentialProvider);
+      if (!profileSha256) {
+        throw new HarnessMessagingModuleError(
+          "Installed harness messaging provider profile has no receipt-bound identity",
+        );
+      }
+      return Object.freeze({
+        ...profileWithoutCredentialProvider,
+        credentialProvider: Object.freeze({ ...credentialProvider, profileSha256 }),
+      });
+    }),
+  );
 }
 
 function validateChannelProfileSemantics(
@@ -198,6 +230,7 @@ function validateChannelProfileSemantics(
   ) => void,
 ): void {
   const channelIds = new Set<string>();
+  const providerProfileIds = new Set<string>();
   for (const profile of profiles) {
     if (channelIds.has(profile.channelId)) {
       throw new HarnessMessagingModuleError(
@@ -205,7 +238,15 @@ function validateChannelProfileSemantics(
       );
     }
     channelIds.add(profile.channelId);
-    if (profile.credentialProvider) validateCredentialProvider(profile.credentialProvider);
+    if (profile.credentialProvider) {
+      if (providerProfileIds.has(profile.credentialProvider.profileId)) {
+        throw new HarnessMessagingModuleError(
+          `Installed harness messaging profile repeats credential provider '${profile.credentialProvider.profileId}'`,
+        );
+      }
+      providerProfileIds.add(profile.credentialProvider.profileId);
+      validateCredentialProvider(profile.credentialProvider);
+    }
     const visibilityKeys = new Set<string>();
     for (const entry of profile.config.visibility) {
       const key = entry.key ?? entry.inputId;

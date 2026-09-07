@@ -478,9 +478,8 @@ resolve_onboarded_agent() {
   fi
 }
 
-# Read the API port the named sandbox was registered with. Each Hermes sandbox
-# allocates its own, so the forward must target this sandbox's port rather than
-# the default a sibling sandbox may already hold.
+# Decode the API port recorded by receiptless Hermes releases. Receipt-backed
+# packages use secondaryForwardPort and never enter this compatibility reader.
 resolve_hermes_api_port() {
   local registry_file
   registry_file="$(nemoclaw_state_dir)/sandboxes.json"
@@ -520,56 +519,300 @@ resolve_hermes_api_port() {
   ' "$registry_file" "$1" 2>/dev/null
 }
 
-restore_onboard_forward_after_post_checks() {
-  local sandbox_name agent_name agent_display port selected_state_dir state_dir pid_file cli_runner
-  sandbox_name="$(resolve_default_sandbox_name)"
-  agent_name="$(resolve_onboarded_agent)"
-  agent_display="$(agent_display_name "$agent_name")"
+resolve_onboard_forward_recovery_intent() {
+  local registry_file session_file
+  registry_file="$(nemoclaw_state_dir)/sandboxes.json"
+  session_file="$(nemoclaw_state_dir)/onboard-session.json"
+  if ! command_exists node; then
+    return 1
+  fi
+  # shellcheck disable=SC2016 # JavaScript template interpolation is evaluated by Node.js.
+  node -e '
+    const fs = require("fs");
+    try {
+      const maxStateDocumentBytes = 16 * 1024 * 1024;
+      const noFollow = fs.constants.O_NOFOLLOW;
+      const nonblock = typeof fs.constants.O_NONBLOCK === "number" ? fs.constants.O_NONBLOCK : 0;
+      if (typeof noFollow !== "number") {
+        throw new Error("O_NOFOLLOW is unavailable");
+      }
+      const isRecord = (value) =>
+        typeof value === "object" && value !== null && !Array.isArray(value);
+      const readDocument = (file, label) => {
+        let descriptor;
+        try {
+          descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonblock);
+        } catch (error) {
+          if (error && typeof error === "object" && error.code === "ENOENT") return null;
+          throw new Error(`${label} is unavailable`);
+        }
+        try {
+          const metadata = fs.fstatSync(descriptor);
+          if (!metadata.isFile() || metadata.size > maxStateDocumentBytes) {
+            throw new Error(`${label} is not a bounded regular file`);
+          }
+          const bytes = Buffer.allocUnsafe(maxStateDocumentBytes + 1);
+          let length = 0;
+          while (length < bytes.length) {
+            const count = fs.readSync(descriptor, bytes, length, bytes.length - length, null);
+            if (count === 0) break;
+            length += count;
+          }
+          if (length > maxStateDocumentBytes) {
+            throw new Error(`${label} exceeds its byte limit`);
+          }
+          const value = JSON.parse(bytes.subarray(0, length).toString("utf8"));
+          if (!isRecord(value)) throw new Error(`${label} is malformed`);
+          return value;
+        } finally {
+          fs.closeSync(descriptor);
+        }
+      };
+      const parseIdentity = (value, label) => {
+        if (!isRecord(value)) throw new Error(`${label} is malformed`);
+        const identityFields = new Set(["kind", "id", "packageVersion", "contentDigest"]);
+        const identityKeys = Object.keys(value);
+        const validId = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+        const validPackageVersion =
+          /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+        if (
+          value.kind !== "agent-runtime" ||
+          identityKeys.length !== identityFields.size ||
+          identityKeys.some((key) => !identityFields.has(key)) ||
+          typeof value.id !== "string" ||
+          value.id.length > 63 ||
+          !validId.test(value.id) ||
+          typeof value.packageVersion !== "string" ||
+          value.packageVersion.length > 128 ||
+          !validPackageVersion.test(value.packageVersion) ||
+          typeof value.contentDigest !== "string" ||
+          !/^[0-9a-f]{64}$/u.test(value.contentDigest)
+        ) {
+          throw new Error(`${label} is malformed`);
+        }
+        return value;
+      };
+      const parseMigration = (value, identity, label) => {
+        if (value === undefined || value === null) return null;
+        if (!isRecord(value)) throw new Error(`${label} is malformed`);
+        const migrationFields = new Set(["schemaVersion", "source", "legacyAgent", "migratedAt"]);
+        const migrationKeys = Object.keys(value);
+        const standardLegacyAgents = new Set([
+          "openclaw",
+          "hermes",
+          "langchain-deepagents-code",
+          "pi",
+        ]);
+        if (
+          migrationKeys.length !== migrationFields.size ||
+          migrationKeys.some((key) => !migrationFields.has(key)) ||
+          value.schemaVersion !== 1 ||
+          value.source !== "legacy-current-bundle" ||
+          (value.legacyAgent !== null && !standardLegacyAgents.has(value.legacyAgent)) ||
+          typeof value.migratedAt !== "string" ||
+          !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value.migratedAt)
+        ) {
+          throw new Error(`${label} is malformed`);
+        }
+        let canonicalTimestamp;
+        try {
+          canonicalTimestamp = new Date(value.migratedAt).toISOString();
+        } catch {
+          throw new Error(`${label} is malformed`);
+        }
+        if (canonicalTimestamp !== value.migratedAt) {
+          throw new Error(`${label} is malformed`);
+        }
+        const expectedId = value.legacyAgent ?? "openclaw";
+        if (identity.id !== expectedId) {
+          throw new Error(`${label} does not match package identity`);
+        }
+        return value;
+      };
+      const readAuthority = (holder, label) => {
+        const migrationValue = holder?.harnessPackageMigration;
+        if (!holder || !Object.prototype.hasOwnProperty.call(holder, "harnessPackage")) {
+          if (migrationValue !== undefined && migrationValue !== null) {
+            throw new Error(`${label} migration has no package identity`);
+          }
+          return null;
+        }
+        if (holder.harnessPackage === null) {
+          if (migrationValue !== undefined && migrationValue !== null) {
+            throw new Error(`${label} migration has no package identity`);
+          }
+          return null;
+        }
+        const identity = parseIdentity(holder.harnessPackage, `${label} harness package authority`);
+        const migration = parseMigration(migrationValue, identity, `${label} package migration`);
+        return { identity, migration };
+      };
+      const sameMigration = (left, right) =>
+        left === right ||
+        (left !== null &&
+          right !== null &&
+          left.schemaVersion === right.schemaVersion &&
+          left.source === right.source &&
+          left.legacyAgent === right.legacyAgent &&
+          left.migratedAt === right.migratedAt);
+      const sameAuthority = (left, right) =>
+        left.identity.kind === right.identity.kind &&
+        left.identity.id === right.identity.id &&
+        left.identity.packageVersion === right.identity.packageVersion &&
+        left.identity.contentDigest === right.identity.contentDigest &&
+        sameMigration(left.migration, right.migration);
 
+      const registry = readDocument(process.argv[1], "sandbox registry");
+      const session = readDocument(process.argv[3], "onboard session");
+      const name = process.argv[2];
+      if (
+        typeof name !== "string" ||
+        name.length < 1 ||
+        name.length > 19 ||
+        !/^(?!.*--)[a-z]([a-z0-9-]*[a-z0-9])?$/u.test(name)
+      ) {
+        throw new Error("sandbox name is malformed");
+      }
+      if (session && Object.prototype.hasOwnProperty.call(session, "sandboxName")) {
+        if (
+          typeof session.sandboxName !== "string" ||
+          session.sandboxName.length === 0 ||
+          session.sandboxName !== name
+        ) {
+          throw new Error("onboard session sandbox authority does not match");
+        }
+      }
+      let entry = null;
+      if (registry) {
+        if (!isRecord(registry.sandboxes)) {
+          throw new Error("sandbox registry entries are malformed");
+        }
+        if (Object.prototype.hasOwnProperty.call(registry.sandboxes, name)) {
+          entry = registry.sandboxes[name];
+          if (!isRecord(entry)) throw new Error("sandbox registry row is malformed");
+        }
+      }
+
+      const sessionAuthority = readAuthority(session, "onboard session");
+      const registryAuthority = readAuthority(entry, "sandbox registry row");
+      if (sessionAuthority || registryAuthority) {
+        if (!session || !entry || !sessionAuthority || !registryAuthority) {
+          throw new Error("receipt-backed session and registry authority are incomplete");
+        }
+        if (!sameAuthority(sessionAuthority, registryAuthority)) {
+          throw new Error("receipt-backed session and registry authority conflict");
+        }
+        if (
+          !Object.prototype.hasOwnProperty.call(session, "sandboxName") ||
+          session.sandboxName !== name
+        ) {
+          throw new Error("receipt-backed onboard session has no matching sandbox authority");
+        }
+        if (
+          Object.prototype.hasOwnProperty.call(session, "agent") &&
+          session.agent !== sessionAuthority.identity.id
+        ) {
+          throw new Error("receipt-backed onboard session agent authority conflicts");
+        }
+        if (
+          Object.prototype.hasOwnProperty.call(entry, "agent") &&
+          entry.agent !== registryAuthority.identity.id
+        ) {
+          throw new Error("receipt-backed sandbox registry agent authority conflicts");
+        }
+      } else {
+        process.stdout.write("legacy");
+        process.exit(0);
+      }
+
+      const port = entry.secondaryForwardPort;
+      if (port === undefined || port === null) {
+        process.stdout.write("none");
+        process.exit(0);
+      }
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error("secondary forward port is malformed");
+      }
+      process.stdout.write(`receipt\t${registryAuthority.identity.id}\t${String(port)}`);
+    } catch {
+      process.exitCode = 1;
+    }
+  ' "$registry_file" "$1" "$session_file" 2>/dev/null
+}
+
+resolve_legacy_onboard_forward_recovery_intent() {
+  local sandbox_name="$1" agent_name port
+  agent_name="$(resolve_onboarded_agent)"
   case "$agent_name" in
     hermes)
       if ! port="$(resolve_hermes_api_port "$sandbox_name")"; then
         error "Could not restore the Hermes forward because the registered API port for sandbox '$sandbox_name' is unavailable or invalid."
       fi
+      printf "legacy\t%s\t%s" "$agent_name" "$port"
       ;;
-    *) return 0 ;;
+    *) printf "none" ;;
   esac
+}
 
-  selected_state_dir="$(ensure_nemoclaw_state_dir)" || return 1
-  state_dir="${selected_state_dir}/state"
-  assert_nemoclaw_state_path_safe "$state_dir"
-  (umask 077 && mkdir -p "$state_dir") \
-    || error "Could not create gateway-scoped runtime state directory: ${state_dir}"
-  assert_nemoclaw_state_path_safe "$state_dir"
-  chmod 700 "$state_dir" \
-    || error "Could not secure gateway-scoped runtime state directory: ${state_dir}"
-  pid_file="${state_dir}/${agent_name}-${sandbox_name}-${port}.forward.pid"
-  if [[ -f "$pid_file" ]]; then
-    local old_pid expected_watcher_script current_uid old_uid old_args node_bin openshell_bin expected_args
-    old_pid="$(cat "$pid_file" 2>/dev/null || true)"
-    expected_watcher_script="${pid_file}.js"
-    current_uid="$(id -u)"
-    if [[ "$old_pid" =~ ^[0-9]+$ ]] && kill -0 "$old_pid" >/dev/null 2>&1; then
-      old_uid="$(ps -p "$old_pid" -o uid= 2>/dev/null | tr -d '[:space:]' || true)"
-      old_args="$(ps -p "$old_pid" -o args= 2>/dev/null || true)"
-      node_bin="$(command -v node 2>/dev/null || true)"
-      if [[ -n "${NEMOCLAW_OPENSHELL_BIN:-}" && -x "$NEMOCLAW_OPENSHELL_BIN" ]]; then
-        openshell_bin="$NEMOCLAW_OPENSHELL_BIN"
-      else
-        openshell_bin="$(command -v openshell 2>/dev/null || true)"
-      fi
-      expected_args="${node_bin} ${expected_watcher_script} ${openshell_bin} ${port} ${sandbox_name}"
-      if [[ -z "$node_bin" || -z "$openshell_bin" || "$old_uid" != "$current_uid" || "$old_args" != "$expected_args" ]]; then
-        warn "Could not authenticate the legacy ${agent_display} forward watcher; leaving it untouched."
-        return 1
-      fi
-      kill "$old_pid" >/dev/null 2>&1 \
-        || {
-          warn "Could not stop the authenticated legacy ${agent_display} forward watcher."
+restore_onboard_forward_after_post_checks() {
+  local sandbox_name recovery_intent recovery_kind agent_name port agent_display cli_runner
+  sandbox_name="$(resolve_default_sandbox_name)"
+  if ! recovery_intent="$(resolve_onboard_forward_recovery_intent "$sandbox_name")"; then
+    warn "Could not inspect package authority for the newly onboarded sandbox '$sandbox_name'."
+    return 1
+  fi
+  if [[ "$recovery_intent" == "legacy" ]]; then
+    recovery_intent="$(resolve_legacy_onboard_forward_recovery_intent "$sandbox_name")" || return 1
+  fi
+  IFS=$'\t' read -r recovery_kind agent_name port <<<"$recovery_intent"
+  [[ "$recovery_kind" != "none" ]] || return 0
+  agent_display="$(agent_display_name "$agent_name")"
+
+  if [[ "$recovery_kind" == "legacy" ]]; then
+    local selected_state_dir state_dir pid_file old_pid expected_watcher_script
+    local current_uid old_uid old_args node_bin openshell_bin expected_args
+    selected_state_dir="$(ensure_nemoclaw_state_dir)" || return 1
+    state_dir="${selected_state_dir}/state"
+    assert_nemoclaw_state_path_safe "$state_dir"
+    (umask 077 && mkdir -p "$state_dir") \
+      || error "Could not create gateway-scoped runtime state directory: ${state_dir}"
+    assert_nemoclaw_state_path_safe "$state_dir"
+    chmod 700 "$state_dir" \
+      || error "Could not secure gateway-scoped runtime state directory: ${state_dir}"
+    pid_file="${state_dir}/${agent_name}-${sandbox_name}-${port}.forward.pid"
+    if [[ -f "$pid_file" ]]; then
+      old_pid="$(cat "$pid_file" 2>/dev/null || true)"
+      expected_watcher_script="${pid_file}.js"
+      current_uid="$(id -u)"
+      if [[ "$old_pid" =~ ^[0-9]+$ ]] && kill -0 "$old_pid" >/dev/null 2>&1; then
+        old_uid="$(ps -p "$old_pid" -o uid= 2>/dev/null | tr -d '[:space:]' || true)"
+        old_args="$(ps -p "$old_pid" -o args= 2>/dev/null || true)"
+        node_bin="$(command -v node 2>/dev/null || true)"
+        if [[ -n "${NEMOCLAW_OPENSHELL_BIN:-}" && -x "$NEMOCLAW_OPENSHELL_BIN" ]]; then
+          openshell_bin="$NEMOCLAW_OPENSHELL_BIN"
+        else
+          openshell_bin="$(command -v openshell 2>/dev/null || true)"
+        fi
+        expected_args="${node_bin} ${expected_watcher_script} ${openshell_bin} ${port} ${sandbox_name}"
+        if [[ -z "$node_bin" || -z "$openshell_bin" || "$old_uid" != "$current_uid" || "$old_args" != "$expected_args" ]]; then
+          warn "Could not authenticate the legacy ${agent_display} forward watcher; leaving it untouched."
           return 1
-        }
+        fi
+        # A PID can be reused after the first check. Re-read its identity at the signal boundary.
+        old_uid="$(ps -p "$old_pid" -o uid= 2>/dev/null | tr -d '[:space:]' || true)"
+        old_args="$(ps -p "$old_pid" -o args= 2>/dev/null || true)"
+        if [[ "$old_uid" != "$current_uid" || "$old_args" != "$expected_args" ]]; then
+          warn "The legacy ${agent_display} forward watcher changed after authentication; leaving it untouched."
+          return 1
+        fi
+        kill "$old_pid" >/dev/null 2>&1 \
+          || {
+            warn "Could not stop the authenticated legacy ${agent_display} forward watcher."
+            return 1
+          }
+      fi
+      rm -f "$pid_file" "$expected_watcher_script"
     fi
-    rm -f "$pid_file" "$expected_watcher_script"
   fi
 
   cli_runner="${_CLI_PATH:-$_CLI_BIN}"
@@ -582,7 +825,8 @@ restore_onboard_forward_after_post_checks() {
     warn "Run: ${_CLI_BIN} ${sandbox_name} recover"
     return 1
   fi
-  if command_exists curl \
+  if [[ "$recovery_kind" == "legacy" ]] \
+    && command_exists curl \
     && ! curl -sf --max-time 3 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
     warn "${agent_display} recovery completed, but its host forward on port ${port} is unhealthy."
     warn "Run: ${_CLI_BIN} ${sandbox_name} status"
@@ -790,8 +1034,8 @@ usage() {
   printf "  ${C_DIM}Options:${C_RESET}\n"
   printf "    --non-interactive    Skip prompts (uses env vars / defaults)\n"
   printf "    --yes-i-accept-third-party-software Accept the third-party software notice without prompting\n"
-  printf "    --defer-onboarding   Install Hermes without onboarding when NVIDIA inference credentials are absent\n"
-  printf "                          Use only with NEMOCLAW_AGENT=hermes, no registered sandboxes, no local model profile,\n"
+  printf "    --defer-onboarding   Install without onboarding when NVIDIA inference credentials are absent\n"
+  printf "                          Use only with no registered sandboxes, no local model profile,\n"
   printf "                          and the build, cloud, or routed NVIDIA hosted provider\n"
   printf "    --fresh              Discard any failed/interrupted onboarding session and start over\n"
   printf "    --station-deepseek   Use DeepSeek V4 Flash for DGX Station express install (interactive terminal required)\n"
@@ -803,7 +1047,7 @@ usage() {
   printf "    NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 Same as --yes-i-accept-third-party-software\n"
   printf "    NEMOCLAW_NON_INTERACTIVE=1    Same as --non-interactive\n"
   printf "    NEMOCLAW_DEFER_ONBOARDING=1   Same as --defer-onboarding\n"
-  printf "                                  Use only with NEMOCLAW_AGENT=hermes, no registered sandboxes, no local model profile,\n"
+  printf "                                  Use only with no registered sandboxes, no local model profile,\n"
   printf "                                  and the build, cloud, or routed NVIDIA hosted provider\n"
   printf "    NEMOCLAW_NON_INTERACTIVE_SUDO_MODE=prompt Allow sudo prompts during non-interactive onboarding\n"
   printf "    NEMOCLAW_FRESH=1              Same as --fresh\n"
@@ -3955,12 +4199,9 @@ recover_preexisting_sandboxes_before_onboard() {
   return 1
 }
 
-validate_deferred_hermes_onboarding_request() {
+validate_deferred_onboarding_request() {
   [[ "${DEFER_ONBOARDING:-}" == "1" ]] || return 0
 
-  if [[ "${NEMOCLAW_AGENT:-openclaw}" != "hermes" ]]; then
-    error "--defer-onboarding currently requires NEMOCLAW_AGENT=hermes."
-  fi
   if [[ "${NEMOCLAW_ENABLE_LOCAL_MODEL_PROFILE:-}" == "1" ]]; then
     error "--defer-onboarding does not support a local model profile."
   fi
@@ -3972,11 +4213,17 @@ validate_deferred_hermes_onboarding_request() {
   esac
 }
 
-should_defer_hermes_onboarding() {
+provider_key_is_route_selector() {
+  case "$1" in
+    "" | inference | cloud | nim | vllm | open-router | openrouterai | anthropiccompatible | hermes | hermes-provider | hermesprovider | nous | nous-portal | build | openrouter | openai | anthropic | gemini | ollama | llama-cpp | install-llama-cpp | custom | nim-local | routed | install-vllm | install-ollama | install-windows-ollama | start-windows-ollama) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+should_defer_onboarding() {
   local registered_sandbox_count="${1:-0}"
   local provider_key="${NEMOCLAW_PROVIDER_KEY:-}"
   [[ "${DEFER_ONBOARDING:-}" == "1" ]] || return 1
-  [[ "${NEMOCLAW_AGENT:-openclaw}" == "hermes" ]] || return 1
   [[ "$registered_sandbox_count" == "0" ]] || return 1
   [[ -z "${NVIDIA_INFERENCE_API_KEY:-}" ]] || return 1
   [[ -z "${NVIDIA_API_KEY:-}" ]] || return 1
@@ -3984,13 +4231,9 @@ should_defer_hermes_onboarding() {
   provider_key="${provider_key#"${provider_key%%[![:space:]]*}"}"
   provider_key="${provider_key%"${provider_key##*[![:space:]]}"}"
   provider_key="$(printf '%s' "$provider_key" | tr '[:upper:]' '[:lower:]')"
-  # Keep this list aligned with PROVIDER_KEY_ROUTE_VALUES in
-  # src/lib/onboard/providers.ts. These values select a route; they are not
-  # inference credentials.
-  case "$provider_key" in
-    "" | inference | cloud | nim | vllm | open-router | openrouterai | anthropiccompatible | hermes | hermes-provider | hermesprovider | nous | nous-portal | build | openrouter | openai | anthropic | gemini | ollama | llama-cpp | install-llama-cpp | custom | nim-local | routed | install-vllm | install-ollama | install-windows-ollama | start-windows-ollama) ;;
-    *) return 1 ;;
-  esac
+  # Keep provider_key_is_route_selector aligned with PROVIDER_KEY_ROUTE_VALUES
+  # in src/lib/onboard/providers.ts. Selectors are not inference credentials.
+  provider_key_is_route_selector "$provider_key"
 }
 
 run_onboard() {
@@ -6335,7 +6578,7 @@ main() {
     && { [ -n "${NEMOCLAW_PROVIDER:-}" ] || [ -n "${NEMOCLAW_MODEL:-}" ]; }; then
     error "The local model profile does not accept NEMOCLAW_PROVIDER or NEMOCLAW_MODEL overrides."
   fi
-  validate_deferred_hermes_onboarding_request
+  validate_deferred_onboarding_request
   # If the user explicitly accepted the third-party-software notice, treat
   # that as non-interactive intent for the rest of the run too — show_usage_notice
   # is only one of several phase-3 steps that need a TTY or --non-interactive
@@ -6387,7 +6630,7 @@ main() {
 
   # Express selection can change the provider after the initial argument
   # validation. Recheck deferred-onboarding scope before installation.
-  validate_deferred_hermes_onboarding_request
+  validate_deferred_onboarding_request
 
   install_nemoclaw_before_onboarding
   if [[ "${_INSTALLER_EXIT_AFTER_HARNESS_GUIDANCE:-false}" == true ]]; then
@@ -6421,8 +6664,8 @@ main() {
       warn "Consider destroying existing sessions with '${_CLI_BIN} <name> destroy' first."
       warn "Set NEMOCLAW_SINGLE_SESSION=1 to abort the installer when sessions are active."
     fi
-    if should_defer_hermes_onboarding "$_registered_sandbox_count"; then
-      info "NVIDIA inference credentials are absent. Hermes onboarding did not run."
+    if should_defer_onboarding "$_registered_sandbox_count"; then
+      info "NVIDIA inference credentials are absent. Harness onboarding did not run."
     elif run_installer_host_preflight; then
       if ! recover_preexisting_sandboxes_before_onboard "$_cli_runner"; then
         finalize_install
@@ -6444,7 +6687,7 @@ main() {
       else
         run_onboard || fail_onboarding "$?"
         ONBOARD_RAN=true
-        restore_onboard_forward_after_post_checks || error "Hermes host forward restore failed."
+        restore_onboard_forward_after_post_checks || error "Harness host forward restore failed."
       fi
     elif [ "${NON_INTERACTIVE:-}" = "1" ]; then
       error "Skipping onboarding until the host prerequisites above are fixed."

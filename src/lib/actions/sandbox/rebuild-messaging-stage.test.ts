@@ -13,6 +13,7 @@ import { MessagingSetupApplier } from "../../messaging/applier/setup-applier";
 import type { SandboxMessagingPlan } from "../../messaging/manifest";
 import type { SandboxMessagingProfileAuthority } from "../../messaging/profile-authority";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
+import { hashCredential } from "../../security/credential-hash";
 import type { SandboxEntry } from "../../state/registry";
 import { stageRebuildMessagingPlanOrBail } from "./rebuild-messaging-phase";
 import { stageMessagingManifestPlanForRebuild } from "./rebuild-messaging-stage";
@@ -43,12 +44,24 @@ const OPENCLAW_PACKAGE = {
   contentDigest: "a".repeat(64),
 } as const;
 
+const OPENCLAW_PACKAGE_MIGRATION = {
+  schemaVersion: 1,
+  source: "legacy-current-bundle",
+  legacyAgent: null,
+  migratedAt: "2026-09-07T00:00:00.000Z",
+} as const;
+
 const OPENCLAW_AUTHORITY = {
   recordedAgent: null,
   effectiveAgentId: "openclaw",
   definition: pinnedAgent("openclaw"),
   harnessPackage: OPENCLAW_PACKAGE,
   harnessPackageMigration: null,
+} satisfies ResolvedSandboxAgent;
+
+const MIGRATED_OPENCLAW_AUTHORITY = {
+  ...OPENCLAW_AUTHORITY,
+  harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
 } satisfies ResolvedSandboxAgent;
 
 const receiptTelegramPlan = {
@@ -106,8 +119,72 @@ function exactReceiptMessagingProfile(): SandboxMessagingProfileAuthority {
   };
 }
 
+function exactMigratedMessagingProfile(): SandboxMessagingProfileAuthority {
+  return {
+    agent: MIGRATED_OPENCLAW_AUTHORITY.definition,
+    packageAuthority: MIGRATED_OPENCLAW_AUTHORITY,
+    integration: {
+      kind: "channels",
+      packageId: "openclaw",
+      build: {
+        configRoot: "~/.receipt-openclaw",
+        packageManagers: [],
+      },
+      channels: [
+        {
+          channelId: "telegram",
+          config: {
+            visibility: [],
+            renders: [
+              {
+                id: "receipt-telegram-render",
+                kind: "json-fragment",
+                target: "~/.receipt-openclaw/receipt.json",
+                path: "channels.telegram",
+                value: { enabled: true },
+              },
+            ],
+          },
+          policy: [
+            {
+              presetName: "package-telegram-egress",
+              policyKeys: ["package_telegram_bot"],
+              requiredAtCreate: true,
+            },
+          ],
+          lifecycle: { hookIds: [] },
+        },
+        {
+          channelId: "wechat",
+          config: {
+            visibility: [],
+            renders: [
+              {
+                id: "receipt-wechat-render",
+                kind: "json-fragment",
+                target: "~/.receipt-openclaw/receipt.json",
+                path: "channels.wechat",
+                value: { enabled: true },
+              },
+            ],
+          },
+          policy: [
+            {
+              presetName: "package-wechat-egress",
+              policyKeys: ["package_wechat_bridge"],
+              requiredAtCreate: true,
+            },
+          ],
+          lifecycle: { hookIds: [] },
+        },
+      ],
+    },
+  };
+}
+
 describe("stageMessagingManifestPlanForRebuild non-messaging agent guard", () => {
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -216,13 +293,40 @@ describe("stageMessagingManifestPlanForRebuild non-messaging agent guard", () =>
       .mockImplementation(() => undefined);
     const resolveProfile = vi.fn(() => exactReceiptMessagingProfile());
 
+    const driftedCredentialPlan = {
+      ...receiptTelegramPlan,
+      channels: [
+        {
+          ...receiptTelegramPlan.channels[0],
+          credentialProvider: {
+            profilePath: "provider-profiles/legacy-provider.yaml",
+            profileId: "legacy-provider",
+            credentialEnv: "LEGACY_TELEGRAM_TOKEN",
+            sourceInputId: "botToken",
+            sourceSecretEnv: "LEGACY_TELEGRAM_TOKEN",
+          },
+        },
+      ],
+      credentialBindings: [
+        {
+          channelId: "telegram",
+          credentialId: "legacyTelegramToken",
+          sourceInput: "botToken",
+          providerName: "legacy-provider",
+          providerEnvKey: "LEGACY_TELEGRAM_TOKEN",
+          placeholder: "legacy-placeholder",
+          credentialAvailable: true,
+          credentialHash: "c".repeat(64),
+        },
+      ],
+    } satisfies SandboxMessagingPlan;
     const result = await stageMessagingManifestPlanForRebuild(
       "openclaw-sandbox",
       {
         name: "openclaw-sandbox",
         agent: null,
         harnessPackage: OPENCLAW_PACKAGE,
-        messaging: { schemaVersion: 1, plan: receiptTelegramPlan },
+        messaging: { schemaVersion: 1, plan: driftedCredentialPlan },
       },
       OPENCLAW_AUTHORITY.definition,
       vi.fn(),
@@ -243,7 +347,227 @@ describe("stageMessagingManifestPlanForRebuild non-messaging agent guard", () =>
     expect(result?.agentRender.some((render) => render.target.includes("~/.openclaw/"))).toBe(
       false,
     );
+    expect(result?.credentialBindings).toEqual([
+      expect.objectContaining({
+        credentialId: "telegramBotToken",
+        providerName: "openclaw-sandbox-telegram-bridge",
+        providerEnvKey: "TELEGRAM_BOT_TOKEN",
+        placeholder: "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
+        credentialAvailable: true,
+        credentialHash: "c".repeat(64),
+      }),
+    ]);
+    expect(result?.channels[0]).not.toHaveProperty("credentialProvider");
     expect(writePlanEnvSpy).toHaveBeenCalledWith(result);
+  });
+
+  it("restores a migrated session-only WeChat channel through the pinned package profile", async () => {
+    vi.stubEnv("WECHAT_ACCOUNT_ID", "legacy-account");
+    const writePlanEnvSpy = vi
+      .spyOn(MessagingSetupApplier, "writePlanToEnv")
+      .mockImplementation(() => undefined);
+    const log = vi.fn();
+
+    const result = await stageMessagingManifestPlanForRebuild(
+      "openclaw-sandbox",
+      {
+        name: "openclaw-sandbox",
+        agent: null,
+        harnessPackage: OPENCLAW_PACKAGE,
+        harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+      },
+      MIGRATED_OPENCLAW_AUTHORITY.definition,
+      log,
+      {
+        agentAuthority: MIGRATED_OPENCLAW_AUTHORITY,
+        legacyMessagingConfig: {
+          WECHAT_ACCOUNT_ID: "legacy-account",
+        },
+        legacyCredentialHashes: { WECHAT_BOT_TOKEN: "a".repeat(64) },
+        resolveMessagingProfileAuthority: () => exactMigratedMessagingProfile(),
+      },
+    );
+
+    expect(result?.channels).toContainEqual(
+      expect.objectContaining({ channelId: "wechat", active: true, disabled: false }),
+    );
+    expect(result?.channels[0]?.inputs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inputId: "botToken", credentialAvailable: true }),
+        expect.objectContaining({ inputId: "accountId", value: "legacy-account" }),
+      ]),
+    );
+    expect(
+      result?.channels[0]?.inputs.find((input) => input.inputId === "baseUrl"),
+    ).not.toHaveProperty("value");
+    expect(result?.networkPolicy.entries).toEqual([
+      {
+        channelId: "wechat",
+        presetName: "package-wechat-egress",
+        policyKeys: ["package_wechat_bridge"],
+        source: "manifest",
+      },
+    ]);
+    expect(result?.credentialBindings[0]?.credentialHash).toBe("a".repeat(64));
+    expect(result?.agentRender).toContainEqual(
+      expect.objectContaining({ renderId: "receipt-wechat-render" }),
+    );
+    expect(result?.packageBuild?.configRoot).toBe("~/.receipt-openclaw");
+    expect(writePlanEnvSpy).toHaveBeenCalledWith(result);
+    expect(log).toHaveBeenCalledWith(
+      "Messaging manifest rebuild plan restored from legacy session state",
+    );
+  });
+
+  it.each([
+    {
+      name: "Telegram only",
+      legacyMessagingConfig: { TELEGRAM_REQUIRE_MENTION: "0", WECHAT_ACCOUNT_ID: "" },
+      expectedChannelIds: ["telegram"],
+      expectedPolicyKeys: ["package_telegram_bot"],
+      legacyCredentialHashes: {
+        TELEGRAM_BOT_TOKEN: "b".repeat(64),
+        WECHAT_BOT_TOKEN: "",
+      },
+    },
+    {
+      name: "coexisting Telegram and WeChat",
+      legacyMessagingConfig: {
+        TELEGRAM_REQUIRE_MENTION: "1",
+        WECHAT_ACCOUNT_ID: "legacy-account",
+      },
+      expectedChannelIds: ["telegram", "wechat"],
+      expectedPolicyKeys: ["package_telegram_bot", "package_wechat_bridge"],
+      legacyCredentialHashes: {
+        TELEGRAM_BOT_TOKEN: "b".repeat(64),
+        WECHAT_BOT_TOKEN: "a".repeat(64),
+      },
+    },
+  ])("restores $name legacy state through exact package manifests", async (testCase) => {
+    vi.stubEnv("TELEGRAM_REQUIRE_MENTION", testCase.legacyMessagingConfig.TELEGRAM_REQUIRE_MENTION);
+    vi.stubEnv("WECHAT_ACCOUNT_ID", testCase.legacyMessagingConfig.WECHAT_ACCOUNT_ID);
+    const result = await stageMessagingManifestPlanForRebuild(
+      "openclaw-sandbox",
+      {
+        name: "openclaw-sandbox",
+        agent: null,
+        harnessPackage: OPENCLAW_PACKAGE,
+        harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+      },
+      MIGRATED_OPENCLAW_AUTHORITY.definition,
+      vi.fn(),
+      {
+        agentAuthority: MIGRATED_OPENCLAW_AUTHORITY,
+        legacyCredentialHashes: testCase.legacyCredentialHashes,
+        legacyMessagingConfig: testCase.legacyMessagingConfig,
+        resolveMessagingProfileAuthority: () => exactMigratedMessagingProfile(),
+      },
+    );
+
+    expect(result?.channels.map((channel) => channel.channelId)).toEqual(
+      testCase.expectedChannelIds,
+    );
+    expect(result?.networkPolicy.entries.flatMap((entry) => entry.policyKeys)).toEqual(
+      testCase.expectedPolicyKeys,
+    );
+  });
+
+  it("uses a validated current credential hash instead of stale migration provenance", async () => {
+    const currentToken = "123456:rotated-telegram-token";
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", currentToken);
+
+    const result = await stageMessagingManifestPlanForRebuild(
+      "openclaw-sandbox",
+      {
+        name: "openclaw-sandbox",
+        agent: null,
+        harnessPackage: OPENCLAW_PACKAGE,
+        harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+      },
+      MIGRATED_OPENCLAW_AUTHORITY.definition,
+      vi.fn(),
+      {
+        agentAuthority: MIGRATED_OPENCLAW_AUTHORITY,
+        legacyCredentialHashes: { TELEGRAM_BOT_TOKEN: "b".repeat(64) },
+        legacyMessagingConfig: { TELEGRAM_REQUIRE_MENTION: "1" },
+        resolveMessagingProfileAuthority: () => exactMigratedMessagingProfile(),
+      },
+    );
+
+    expect(result?.credentialBindings[0]?.credentialHash).toBe(hashCredential(currentToken));
+  });
+
+  it("rejects migrated messaging without a current credential or stored credential hash", async () => {
+    await expect(
+      stageMessagingManifestPlanForRebuild(
+        "openclaw-sandbox",
+        {
+          name: "openclaw-sandbox",
+          agent: null,
+          harnessPackage: OPENCLAW_PACKAGE,
+          harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+        },
+        MIGRATED_OPENCLAW_AUTHORITY.definition,
+        vi.fn(),
+        {
+          agentAuthority: MIGRATED_OPENCLAW_AUTHORITY,
+          legacyMessagingConfig: { TELEGRAM_REQUIRE_MENTION: "1" },
+          resolveMessagingProfileAuthority: () => exactMigratedMessagingProfile(),
+        },
+      ),
+    ).rejects.toThrow("cannot prove its legacy 'telegram' credential");
+  });
+
+  it.each([
+    [
+      "malformed",
+      {} as SandboxMessagingPlan,
+      "could not be reconstructed from its exact package manifests",
+    ],
+    [
+      "unsupported-channel",
+      {
+        ...receiptTelegramPlan,
+        channels: [
+          {
+            ...receiptTelegramPlan.channels[0],
+            channelId: "discord",
+            displayName: "Discord",
+          },
+        ],
+      } as SandboxMessagingPlan,
+      "channel is missing from its exact composed manifests",
+    ],
+  ])("rejects %s persisted package messaging authority", async (_name, plan, expected) => {
+    const clearPlanEnvSpy = vi.spyOn(MessagingSetupApplier, "clearPlanEnv");
+    const writePlanEnvSpy = vi.spyOn(MessagingSetupApplier, "writePlanToEnv");
+    const log = vi.fn();
+    const sandboxEntry = {
+      name: "openclaw-sandbox",
+      agent: null,
+      harnessPackage: OPENCLAW_PACKAGE,
+      harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+      messaging: { schemaVersion: 1, plan },
+    } satisfies SandboxEntry;
+
+    await expect(
+      stageMessagingManifestPlanForRebuild(
+        "openclaw-sandbox",
+        sandboxEntry,
+        MIGRATED_OPENCLAW_AUTHORITY.definition,
+        log,
+        {
+          agentAuthority: MIGRATED_OPENCLAW_AUTHORITY,
+          resolveMessagingProfileAuthority: () => exactMigratedMessagingProfile(),
+        },
+      ),
+    ).rejects.toThrow(expected);
+
+    expect(clearPlanEnvSpy).not.toHaveBeenCalled();
+    expect(writePlanEnvSpy).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalledWith(
+      "Messaging manifest rebuild plan restored from legacy session state",
+    );
   });
 
   it("fails closed when a receipt-backed staging caller omits package authority", async () => {

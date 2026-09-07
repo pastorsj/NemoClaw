@@ -107,6 +107,21 @@ function createBuiltHarnessArtifact(fixtureRoot: string): string {
     BUILT_HARNESS_MANIFEST,
   );
   writeArtifactFile(artifactDirectory, "runtime/payload.txt", "first payload\n");
+  writeArtifactFile(
+    artifactDirectory,
+    "agents/example-runtime/host/config-adapter.cts",
+    "export {};\n",
+  );
+  writeArtifactFile(
+    artifactDirectory,
+    "agents/example-runtime/host/messaging-adapter.cts",
+    "export {};\n",
+  );
+  writeArtifactFile(
+    artifactDirectory,
+    "agents/example-runtime/host/startup-adapter.cts",
+    "export {};\n",
+  );
   return artifactDirectory;
 }
 

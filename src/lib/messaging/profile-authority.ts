@@ -91,6 +91,7 @@ export function listMessagingChannelsForIntegration(
         integration.packageId,
         profile,
         integration.build,
+        profile.credentialProvider?.profileSha256,
       );
     } catch (error) {
       throw new HarnessMessagingSupportError(

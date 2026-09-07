@@ -317,6 +317,8 @@ export interface Session {
   messagingPlan: SandboxMessagingPlan | null;
   /** Non-secret names of credential providers registered before sandbox setup completed. */
   stagedCredentialProviders: string[];
+  /** Immutable ownership captured for providers staged before sandbox creation. */
+  stagedCredentialProviderReceipts?: StagedCredentialProviderReceipt[];
   // SHA-256 hex digest of every legacy credential value successfully
   // written to the OpenShell gateway during this onboard session, keyed by
   // env-name. Persisted across process restarts so a `--resume` run that
@@ -336,6 +338,12 @@ export interface Session {
   machine: OnboardMachineSnapshot;
   checkpoint: OnboardCheckpoint | null;
   steps: Record<string, StepState>;
+}
+
+export interface StagedCredentialProviderReceipt {
+  readonly providerName: string;
+  readonly providerId: string;
+  readonly createdByNemoClaw: boolean;
 }
 
 export interface TelegramConfig {
@@ -607,6 +615,37 @@ function readCanonicalIsoTimestamp(value: SessionJsonValue | undefined): string 
 function readStringArray(value: SessionJsonValue | undefined): string[] | null {
   if (!Array.isArray(value)) return null;
   return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function readStagedCredentialProviderReceipts(
+  value: unknown,
+): StagedCredentialProviderReceipt[] {
+  if (!Array.isArray(value)) return [];
+  const receipts: StagedCredentialProviderReceipt[] = [];
+  const names = new Set<string>();
+  for (const candidate of value) {
+    if (
+      !isObject(candidate) ||
+      Object.keys(candidate).some(
+        (key) => !["providerName", "providerId", "createdByNemoClaw"].includes(key),
+      ) ||
+      typeof candidate.providerName !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u.test(candidate.providerName) ||
+      typeof candidate.providerId !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u.test(candidate.providerId) ||
+      typeof candidate.createdByNemoClaw !== "boolean" ||
+      names.has(candidate.providerName)
+    ) {
+      return [];
+    }
+    names.add(candidate.providerName);
+    receipts.push({
+      providerName: candidate.providerName,
+      providerId: candidate.providerId,
+      createdByNemoClaw: candidate.createdByNemoClaw,
+    });
+  }
+  return receipts;
 }
 
 function readStringRecord(value: SessionJsonValue | undefined): Record<string, string> | null {
@@ -1095,6 +1134,13 @@ export function createSession(overrides: Partial<Session> = {}): Session {
     hermesToolGateways: receiptBacked ? null : readStringArray(overrides.hermesToolGateways),
     messagingPlan: parseSandboxMessagingPlan(overrides.messagingPlan),
     stagedCredentialProviders: readStringArray(overrides.stagedCredentialProviders) ?? [],
+    ...(readStagedCredentialProviderReceipts(overrides.stagedCredentialProviderReceipts).length > 0
+      ? {
+          stagedCredentialProviderReceipts: readStagedCredentialProviderReceipts(
+            overrides.stagedCredentialProviderReceipts,
+          ),
+        }
+      : {}),
     migratedLegacyValueHashes: overrides.migratedLegacyValueHashes
       ? readStringRecord(overrides.migratedLegacyValueHashes)
       : null,
@@ -1234,6 +1280,13 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
     hermesToolGateways: readStringArray(data.hermesToolGateways),
     messagingPlan: parseSandboxMessagingPlan(data.messagingPlan),
     stagedCredentialProviders: readStringArray(data.stagedCredentialProviders) ?? [],
+    ...(readStagedCredentialProviderReceipts(data.stagedCredentialProviderReceipts).length > 0
+      ? {
+          stagedCredentialProviderReceipts: readStagedCredentialProviderReceipts(
+            data.stagedCredentialProviderReceipts,
+          ),
+        }
+      : {}),
     migratedLegacyValueHashes: readStringRecord(data.migratedLegacyValueHashes),
     gpuPassthrough: data.gpuPassthrough === true,
     telegramConfig: parseTelegramConfig(data.telegramConfig),

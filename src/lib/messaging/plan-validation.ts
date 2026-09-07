@@ -39,6 +39,7 @@ export function parseSandboxMessagingPlan(
     !Array.isArray(value.channels) ||
     !Array.isArray(value.disabledChannels) ||
     !isOptionalObjectArray(value, "credentialBindings") ||
+    !isOptionalObjectArray(value, "providerReceipts") ||
     (Object.hasOwn(value, "networkPolicy") && !isObjectRecord(value.networkPolicy)) ||
     !isOptionalObjectArray(value, "agentRender") ||
     !isOptionalObjectArray(value, "buildSteps") ||
@@ -129,6 +130,7 @@ export function parseSandboxMessagingPlan(
   }
   if (
     !hasCanonicalChannelReferences(value.credentialBindings) ||
+    !hasValidProviderReceipts(value.providerReceipts) ||
     !hasMatchingAgentRenderEntries(value.agentRender, value.agent) ||
     !hasCanonicalChannelReferences(value.agentRender) ||
     !hasCanonicalChannelReferences(value.buildSteps) ||
@@ -149,10 +151,46 @@ export function parseSandboxMessagingPlan(
   );
 }
 
+function hasValidProviderReceipts(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value)) return false;
+  const identities = new Set<string>();
+  return value.every((receipt) => {
+    if (
+      !isObjectRecord(receipt) ||
+      Object.keys(receipt).some(
+        (key) =>
+          ![
+            "channelId",
+            "providerName",
+            "providerId",
+            "createdByNemoClaw",
+            "attachmentAddedByNemoClaw",
+          ].includes(key),
+      ) ||
+      !isCanonicalMessagingChannelId(receipt.channelId) ||
+      typeof receipt.providerName !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u.test(receipt.providerName) ||
+      typeof receipt.providerId !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u.test(receipt.providerId) ||
+      typeof receipt.createdByNemoClaw !== "boolean" ||
+      typeof receipt.attachmentAddedByNemoClaw !== "boolean" ||
+      (receipt.createdByNemoClaw && !receipt.attachmentAddedByNemoClaw)
+    ) {
+      return false;
+    }
+    const identity = `${receipt.channelId}:${receipt.providerName}`;
+    if (identities.has(identity)) return false;
+    identities.add(identity);
+    return true;
+  });
+}
+
 function isCredentialProvider(value: unknown): boolean {
   if (!isObjectRecord(value)) return false;
   const allowedKeys = new Set([
     "profilePath",
+    "profileSha256",
     "profileId",
     "credentialEnv",
     "sourceInputId",
@@ -188,6 +226,8 @@ function isCredentialProvider(value: unknown): boolean {
     typeof value.profilePath === "string" &&
     value.profilePath.length <= 256 &&
     /^provider-profiles\/[A-Za-z0-9._-]+\.yaml$/u.test(value.profilePath) &&
+    (value.profileSha256 === undefined ||
+      (typeof value.profileSha256 === "string" && /^[a-f0-9]{64}$/u.test(value.profileSha256))) &&
     typeof value.profileId === "string" &&
     value.profileId.length <= 256 &&
     /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(value.profileId) &&

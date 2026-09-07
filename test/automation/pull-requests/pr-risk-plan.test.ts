@@ -398,7 +398,6 @@ describe("deterministic PR risk plan", () => {
   });
 
   it.each([
-    "src/lib/messaging/applier/openshell-provider.ts",
     "src/lib/onboard/credential-provider-registration.ts",
     "src/lib/onboard/messaging-policy-presets.ts",
   ])("selects the full messaging runtime proof set for %s (#10153)", (changedFile) => {

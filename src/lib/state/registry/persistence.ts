@@ -16,6 +16,7 @@ import {
 } from "../registry-messaging";
 import {
   normalizeSandboxPolicyAttribution,
+  normalizeWebSearchProviderOwnership,
   parseSandboxRegistryEntries,
   retainedDefaultSandbox,
 } from "../registry-normalization";
@@ -241,6 +242,7 @@ function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
   const mcp = normalizeSandboxMcpState(entry.mcp);
   const secondaryForwardPort = normalizeSecondaryForwardPortOrThrow(policyEntry, "load");
   const dashboardUi = normalizeDashboardUiStateOrThrow(policyEntry, "load");
+  const webSearchProviderOwnership = normalizeWebSearchProviderOwnership(policyEntry);
   const {
     cuaRuntimeReadiness: _legacyCuaRuntimeReadiness,
     messaging: _messaging,
@@ -251,6 +253,7 @@ function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
     deferredN1xManagedVllmAccepted: _deferredN1xManagedVllmAccepted,
     mcp: _mcp,
     dashboardUi: _dashboardUi,
+    webSearchProviderOwnership: _webSearchProviderOwnership,
     hermesDashboardEnabled,
     hermesDashboardPort,
     hermesDashboardInternalPort,
@@ -268,6 +271,7 @@ function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
     ...(mcp ? { mcp } : {}),
     ...(secondaryForwardPort !== undefined ? { secondaryForwardPort } : {}),
     ...(dashboardUi ? { dashboardUi } : {}),
+    ...(webSearchProviderOwnership ? { webSearchProviderOwnership } : {}),
     ...(!policyEntry.harnessPackage
       ? {
           ...(hermesDashboardEnabled !== undefined ? { hermesDashboardEnabled } : {}),
@@ -323,6 +327,7 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
   const mcp = serializeSandboxMcpStateForDisk(durable.mcp);
   const secondaryForwardPort = normalizeSecondaryForwardPortOrThrow(policyEntry, "save");
   const dashboardUi = normalizeDashboardUiStateOrThrow(policyEntry, "save");
+  const webSearchProviderOwnership = normalizeWebSearchProviderOwnership(policyEntry);
   const {
     cuaRuntimeReadiness: _legacyCuaRuntimeReadiness,
     messaging: _messaging,
@@ -333,6 +338,7 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
     deferredN1xManagedVllmAccepted: _deferredN1xManagedVllmAccepted,
     mcp: _mcp,
     dashboardUi: _dashboardUi,
+    webSearchProviderOwnership: _webSearchProviderOwnership,
     hermesDashboardEnabled,
     hermesDashboardPort,
     hermesDashboardInternalPort,
@@ -351,6 +357,7 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
     ...(mcp ? { mcp } : {}),
     ...(secondaryForwardPort !== undefined ? { secondaryForwardPort } : {}),
     ...(dashboardUi ? { dashboardUi } : {}),
+    ...(webSearchProviderOwnership ? { webSearchProviderOwnership } : {}),
     ...(!policyEntry.harnessPackage
       ? {
           ...(hermesDashboardEnabled !== undefined ? { hermesDashboardEnabled } : {}),

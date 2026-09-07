@@ -1,9 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SandboxMessagingPlan } from "../../messaging";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import * as registry from "../../state/registry";
+import { makeAgent } from "../../../../test/helpers/base-image-test-harness";
+import { validateHarnessPackageTree } from "../../agent-runtime/package/tree";
 
 const OPENCLAW_AGENT_AUTHORITY = Object.freeze({
   recordedAgent: null,
@@ -23,17 +30,162 @@ const OPENCLAW_AGENT_AUTHORITY = Object.freeze({
 
 const mocks = vi.hoisted(() => ({
   bail: vi.fn(),
+  ensureRebuildTargetGatewaySelected: vi.fn(async (..._args: unknown[]) => true),
   getMcpPreparationRuntimeSelection: vi.fn(),
   preflightAuthoritativeOnboardRuntime: vi.fn(async (..._args: unknown[]) => false),
   prepareManagedWorkloadRebuildHandoff: vi.fn(),
   prepareSandboxWorkloadSourceFromRebuildHandoff: vi.fn(),
   prepareRebuildTargetConfig: vi.fn(),
   prepareRebuildRecreateOptions: vi.fn(),
+  preflightRebuildMessagingConflicts: vi.fn(async () => undefined),
   resolveContextWindowForModel: vi.fn(() => 131_072),
   resolveManagedStartupInferenceRoute: vi.fn(),
+  runOpenshell: vi.fn(),
   stageRebuildHermesDashboardConfig: vi.fn((..._args: unknown[]) => true),
-  stageRebuildMessagingPlanOrBail: vi.fn(async (..._args: unknown[]) => null),
+  stageRebuildMessagingPlanOrBail: vi.fn(
+    async (..._args: unknown[]): Promise<SandboxMessagingPlan | null> => null,
+  ),
   stageManagedWorkloadRebuildProfile: vi.fn(),
+}));
+
+let temporaryPackageRoot: string | null = null;
+
+function futureHarnessAuthority(
+  presetName: string,
+  source: string | null,
+  owned = true,
+): ResolvedSandboxAgent {
+  const agentDir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-rebuild-policy-preflight-")),
+  );
+  temporaryPackageRoot = agentDir;
+  const presetDirectory = path.join(agentDir, "policies", "presets");
+  fs.mkdirSync(presetDirectory, { recursive: true });
+  switch (source) {
+    case null:
+      break;
+    default:
+      fs.writeFileSync(path.join(presetDirectory, `${presetName}.yaml`), source, { mode: 0o600 });
+  }
+  const definition = makeAgent({
+    name: "future-harness",
+    agentDir,
+    packageRoot: agentDir,
+    policyCapability: {
+      owned_presets: owned ? [presetName] : [],
+      automatic_presets: [],
+      baseline_exclusion_impacts: {},
+    },
+  });
+  return {
+    recordedAgent: "future-harness",
+    effectiveAgentId: "future-harness",
+    definition,
+    harnessPackage: {
+      kind: "agent-runtime",
+      id: "future-harness",
+      packageVersion: "1.0.0",
+      contentDigest: validateHarnessPackageTree(agentDir, {
+        sourceTrust: "mutable",
+      }).contentDigest,
+    },
+    harnessPackageMigration: null,
+  };
+}
+
+function futureMessagingPlan(
+  presetName: string,
+  credentialProviderName?: string,
+): SandboxMessagingPlan {
+  return {
+    schemaVersion: 1,
+    sandboxName: "alpha",
+    agent: "future-harness",
+    workflow: "rebuild",
+    channels: [
+      {
+        channelId: "discord",
+        displayName: "Discord",
+        authMode: "token-paste",
+        active: true,
+        selected: true,
+        configured: true,
+        disabled: false,
+        inputs: [],
+        hooks: [],
+      },
+    ],
+    disabledChannels: [],
+    credentialBindings: credentialProviderName
+      ? [
+          {
+            channelId: "discord",
+            credentialId: "futureToken",
+            sourceInput: "botToken",
+            providerName: credentialProviderName,
+            providerEnvKey: "FUTURE_TOKEN",
+            placeholder: "openshell:resolve:env:FUTURE_TOKEN",
+            credentialAvailable: true,
+          },
+        ]
+      : [],
+    networkPolicy: {
+      presets: [presetName],
+      entries: [
+        {
+          channelId: "discord",
+          presetName,
+          policyKeys: ["future_transport"],
+          source: "manifest",
+        },
+      ],
+    },
+    agentRender: [],
+    buildSteps: [],
+    stateUpdates: [],
+    healthChecks: [],
+  };
+}
+
+function configureFutureRebuildTarget(agentAuthority: ResolvedSandboxAgent): void {
+  mocks.prepareRebuildTargetConfig.mockReturnValue({
+    agentAuthority,
+    agentDefinition: agentAuthority.definition,
+    resumeConfig: {
+      provider: "ollama-local",
+      model: "future-model",
+      preferredInferenceApi: "openai-completions",
+      endpointUrl: null,
+      compatibleEndpointReasoning: null,
+      compatibleEndpointReasoningEffort: null,
+      registryInferenceRoute: null,
+    },
+    durableConfig: {
+      toolDisclosure: "progressive",
+      dcodeAutoApprovalMode: "disabled",
+      webSearchConfig: null,
+    },
+    credentialEnv: null,
+    fromDockerfile: null,
+    hermesToolGateways: [],
+  });
+  mocks.prepareRebuildRecreateOptions.mockReturnValue({
+    controlUiPort: null,
+    targetGatewayName: "nemoclaw",
+    toolDisclosure: "progressive",
+    dcodeAutoApprovalMode: "disabled",
+    observabilityEnabled: false,
+  });
+}
+
+vi.mock("../../adapters/openshell/runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../adapters/openshell/runtime")>()),
+  runOpenshell: mocks.runOpenshell,
+}));
+
+vi.mock("./rebuild-flow-helpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./rebuild-flow-helpers")>()),
+  ensureRebuildTargetGatewaySelected: mocks.ensureRebuildTargetGatewaySelected,
 }));
 
 vi.mock("./rebuild-mcp-phase", async (importOriginal) => ({
@@ -66,12 +218,13 @@ vi.mock("./rebuild-target-preflight", async (importOriginal) => ({
   stageRebuildHermesDashboardConfig: mocks.stageRebuildHermesDashboardConfig,
 }));
 
-vi.mock("./rebuild-messaging-phase", () => ({
+vi.mock("./rebuild-messaging-phase", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./rebuild-messaging-phase")>()),
   stageRebuildMessagingPlanOrBail: mocks.stageRebuildMessagingPlanOrBail,
 }));
 
 vi.mock("./rebuild-messaging-conflict-preflight", () => ({
-  preflightRebuildMessagingConflicts: vi.fn(async () => undefined),
+  preflightRebuildMessagingConflicts: mocks.preflightRebuildMessagingConflicts,
 }));
 
 import { managedRebuildProfileDependencies } from "./agents/managed-workload-rebuild-profile";
@@ -79,7 +232,16 @@ import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 import { prepareRebuildTargetPreflights } from "./rebuild-preflight-target-phase";
 
 describe("prepareRebuildTargetPreflights", () => {
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    switch (temporaryPackageRoot) {
+      case null:
+        break;
+      default:
+        fs.rmSync(temporaryPackageRoot, { recursive: true, force: true });
+        temporaryPackageRoot = null;
+    }
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -91,6 +253,157 @@ describe("prepareRebuildTargetPreflights", () => {
     });
     mocks.prepareManagedWorkloadRebuildHandoff.mockResolvedValue(null);
     mocks.preflightAuthoritativeOnboardRuntime.mockResolvedValue(false);
+    mocks.ensureRebuildTargetGatewaySelected.mockResolvedValue(true);
+    mocks.stageRebuildMessagingPlanOrBail.mockResolvedValue(null);
+  });
+
+  it.each([
+    {
+      name: "missing",
+      source: null,
+      owned: true,
+      expected: "package asset is unavailable",
+    },
+    {
+      name: "unowned",
+      source: [
+        "preset:",
+        "  name: future-channel-egress",
+        '  description: "Unowned source"',
+        "network_policies:",
+        "  future_transport: {}",
+        "",
+      ].join("\n"),
+      owned: false,
+      expected: "does not own required messaging policy preset",
+    },
+    {
+      name: "malformed",
+      source: "preset: [\n",
+      owned: true,
+      expected: "contains invalid YAML",
+    },
+    {
+      name: "key mismatch",
+      source: [
+        "preset:",
+        "  name: future-channel-egress",
+        '  description: "Wrong key"',
+        "network_policies:",
+        "  another_transport: {}",
+        "",
+      ].join("\n"),
+      owned: true,
+      expected: "does not provide declared network policy key 'future_transport'",
+    },
+    {
+      name: "credential provider outside the plan",
+      source: [
+        "preset:",
+        "  name: future-channel-egress",
+        '  description: "Wrong provider"',
+        "network_policies:",
+        "  future_transport:",
+        "    endpoints:",
+        "      - host: future.example.test",
+        "        port: 443",
+        "        credential_binding:",
+        "          provider: unowned-provider",
+        "    binaries: []",
+        "",
+      ].join("\n"),
+      owned: true,
+      expected: "outside its typed package plan",
+    },
+  ])(
+    "rejects a $name receipt policy before the caller can enter backup or delete",
+    async ({ source, owned, expected }) => {
+      const presetName = "future-channel-egress";
+      const agentAuthority = futureHarnessAuthority(presetName, source, owned);
+      const messagingPlan = futureMessagingPlan(presetName);
+      configureFutureRebuildTarget(agentAuthority);
+      mocks.stageRebuildMessagingPlanOrBail.mockResolvedValue(messagingPlan);
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      try {
+        await expect(
+          prepareRebuildTargetPreflights({
+            sandboxName: "alpha",
+            sandboxEntry: {
+              name: "alpha",
+              agent: "future-harness",
+              gatewayName: "nemoclaw",
+              openshellDriver: "docker",
+            } as never,
+            agentAuthority,
+            autoYes: true,
+            log: vi.fn(),
+            bail: mocks.bail as never,
+          }),
+        ).resolves.toBeNull();
+
+        expect(mocks.bail).toHaveBeenCalledWith("Package messaging policy preflight failed");
+        expect(errorSpy.mock.calls.flat().map(String)).toContainEqual(
+          expect.stringContaining(expected),
+        );
+        expect(mocks.preflightRebuildMessagingConflicts).not.toHaveBeenCalled();
+        expect(mocks.preflightAuthoritativeOnboardRuntime).not.toHaveBeenCalled();
+      } finally {
+        errorSpy.mockRestore();
+      }
+    },
+  );
+
+  it("recovers the gateway before rejecting a missing receipt messaging provider", async () => {
+    const presetName = "future-channel-egress";
+    const agentAuthority = futureHarnessAuthority(
+      presetName,
+      [
+        "preset:",
+        `  name: ${presetName}`,
+        '  description: "Future channel"',
+        "network_policies:",
+        "  future_transport: {}",
+        "",
+      ].join("\n"),
+    );
+    configureFutureRebuildTarget(agentAuthority);
+    mocks.stageRebuildMessagingPlanOrBail.mockResolvedValue(
+      futureMessagingPlan(presetName, "alpha-future-bridge"),
+    );
+    mocks.preflightAuthoritativeOnboardRuntime.mockResolvedValue(true);
+    mocks.runOpenshell.mockReturnValue({
+      status: 1,
+      stderr: "provider 'alpha-future-bridge' not found",
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(
+      prepareRebuildTargetPreflights({
+        sandboxName: "alpha",
+        sandboxEntry: {
+          name: "alpha",
+          agent: "future-harness",
+          gatewayName: "nemoclaw",
+          openshellDriver: "docker",
+        } as never,
+        agentAuthority,
+        autoYes: true,
+        log: vi.fn(),
+        bail: mocks.bail as never,
+      }),
+    ).resolves.toBeNull();
+
+    expect(mocks.preflightAuthoritativeOnboardRuntime).toHaveBeenCalledOnce();
+    expect(mocks.ensureRebuildTargetGatewaySelected).toHaveBeenCalledOnce();
+    expect(mocks.runOpenshell).toHaveBeenCalledOnce();
+    expect(mocks.preflightAuthoritativeOnboardRuntime.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.runOpenshell.mock.invocationCallOrder[0],
+    );
+    expect(mocks.ensureRebuildTargetGatewaySelected.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.runOpenshell.mock.invocationCallOrder[0],
+    );
+    expect(mocks.bail).toHaveBeenCalledWith("Package messaging provider preflight failed");
   });
 
   async function prepareN1xTarget(

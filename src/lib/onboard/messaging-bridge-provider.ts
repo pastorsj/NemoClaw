@@ -15,11 +15,15 @@
 // profile before provider creation and configures refresh only for profiles that
 // declare it.
 
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { stripVTControlCharacters, TextDecoder } from "node:util";
 
+import { openRegularFileNoFollow } from "../adapters/fs/regular-file";
 import { parseMessagingCredentialProviderProfile } from "../agent-runtime/messaging-provider";
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "../adapters/openshell/provider-command";
+import { inspectProviderAttachmentOwnership } from "../adapters/openshell/provider-ownership";
 import {
   exportedProviderProfileMatchesContract,
   parseCheckedInProviderProfileContract,
@@ -27,6 +31,10 @@ import {
 import { registerCheckedInProviderProfile } from "../adapters/openshell/provider-profile-registration";
 import { compactText } from "../core/url-utils";
 import { createBuiltInChannelManifestRegistry } from "../messaging/channels";
+import {
+  matchesGatewayCredentialFamilyProviderBinding,
+  readGatewayProviderMetadata,
+} from "./gateway-provider-metadata";
 import type {
   ChannelCredentialProviderSpec,
   ChannelManifest,
@@ -43,6 +51,10 @@ import { sleepMs, waitUntil } from "./readiness-wait";
 export const MESSAGING_BRIDGE_PENDING_VALUE = "openshell-managed-pending-mint";
 
 const CHANNELS_SUBPATH = ["src", "lib", "messaging", "channels"] as const;
+const PACKAGE_PROVIDER_PROFILE_MAX_BYTES = 64 * 1024;
+const BRIDGE_PROVIDER_COMMAND_MAX_BUFFER_BYTES = 64 * 1024;
+const UNSAFE_REFRESH_DIAGNOSTIC_CHARACTERS = /[\p{Cc}\p{Cf}]/gu;
+const PROFILE_UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const PROVIDER_PROFILE_FILE_BY_AGENT: Readonly<Record<MessagingAgentId, string>> = {
   openclaw: "openclaw.yaml",
   hermes: "hermes.yaml",
@@ -62,6 +74,7 @@ type TokenDefShape = {
   providerType?: string;
   token: string | null;
   messagingProviderProfile?: MessagingBridgeProfile;
+  expectedProviderId?: string;
 };
 
 /** Preserve the package-owned provider projection carried by receipt token definitions. */
@@ -79,6 +92,8 @@ export interface MessagingBridgeProfile {
   readonly channelId: string;
   readonly agent: MessagingAgentId;
   readonly profilePath: string;
+  /** Receipt-verified bytes used for a secure, immutable import copy. */
+  readonly profileSource?: string;
   /** OpenShell profile id (`provider create --type <profileId>`). */
   readonly profileId: string;
   /** Injectable credential env var the gateway mints + the L7 proxy injects. */
@@ -151,6 +166,7 @@ export interface MatchRegisteredMessagingBridgeProfileDeps {
 export interface ConfigureMessagingBridgeRefreshesDeps extends MessagingBridgeSecretResolveDeps {
   readonly runOpenshell: RunOpenshell;
   readonly redactFull: (input: string) => string;
+  readonly allowedSandboxes?: readonly string[];
   readonly log?: (message?: string) => void;
   readonly profiles?: readonly MessagingBridgeProfile[];
   /** Injected for tests; defaults to a synchronous wait. */
@@ -184,7 +200,10 @@ function redactRefreshDiagnostic(
   for (const value of exactValues) {
     if (value) redacted = redacted.replaceAll(value, "<REDACTED>");
   }
-  return redactFull(redacted);
+  return stripVTControlCharacters(redactFull(redacted)).replace(
+    UNSAFE_REFRESH_DIAGNOSTIC_CHARACTERS,
+    " ",
+  );
 }
 
 function profileMatchesCheckedInBoundary(
@@ -193,7 +212,9 @@ function profileMatchesCheckedInBoundary(
   readFileSync: (file: string) => string,
 ): boolean {
   try {
-    const expected = parseCheckedInProviderProfileContract(readFileSync(profile.profilePath));
+    const expected = parseCheckedInProviderProfileContract(
+      profile.profileSource ?? readFileSync(profile.profilePath),
+    );
     return (
       expected !== null &&
       expected.profileId === profile.profileId &&
@@ -286,10 +307,30 @@ function materializeCredentialProvider(
   if (relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) {
     throw new Error("Installed harness messaging provider profile escaped its package directory");
   }
+  if (!provider.profileSha256 || !/^[a-f0-9]{64}$/u.test(provider.profileSha256)) {
+    throw new Error("Installed harness messaging provider profile has no receipt-bound digest");
+  }
+  const opened = openRegularFileNoFollow(profilePath);
+  let profileBytes: Buffer;
+  try {
+    profileBytes = opened.readBytes(PACKAGE_PROVIDER_PROFILE_MAX_BYTES);
+  } finally {
+    opened.close();
+  }
+  if (createHash("sha256").update(profileBytes).digest("hex") !== provider.profileSha256) {
+    throw new Error("Installed harness messaging provider profile changed from its receipt");
+  }
+  let profileSource: string;
+  try {
+    profileSource = PROFILE_UTF8_DECODER.decode(profileBytes);
+  } catch {
+    throw new Error("Installed harness messaging provider profile is not valid UTF-8");
+  }
   return Object.freeze({
     channelId,
     agent,
     profilePath,
+    profileSource,
     profileId: provider.profileId,
     credentialKey: provider.credentialEnv,
     strategy: provider.refresh?.strategy ?? null,
@@ -530,6 +571,7 @@ export function ensureMessagingBridgeProfiles(
   for (const profile of active) {
     const result = registerCheckedInProviderProfile({
       profilePath: profile.profilePath,
+      ...(profile.profileSource === undefined ? {} : { profileSource: profile.profileSource }),
       runOpenshell: deps.runOpenshell,
       readProfileFile: deps.readFileSync,
     });
@@ -564,7 +606,7 @@ export function ensureMessagingBridgeProfiles(
 }
 
 function buildRefreshMaterial(
-  profile: RefreshingMessagingBridgeProfile,
+  profile: Pick<RefreshingMessagingBridgeProfile, "strategy" | "scopes" | "secretMaterialKeys">,
   secret: string,
 ):
   | { ok: true; material: { key: string; value: string }[]; secretKeys: string[] }
@@ -604,6 +646,22 @@ function buildRefreshMaterial(
     return { ok: true, material, secretKeys };
   }
   return { ok: false, reason: `unsupported refresh strategy '${profile.strategy}'` };
+}
+
+/** Validate package bridge recovery material without mutating gateway provider state. */
+export function isMessagingBridgeSourceSecretValid(
+  provider: ChannelCredentialProviderSpec,
+  secret: string | null | undefined,
+): boolean {
+  if (!provider.refresh || !secret?.trim()) return false;
+  return buildRefreshMaterial(
+    {
+      strategy: provider.refresh.strategy,
+      scopes: provider.refresh.scopes,
+      secretMaterialKeys: provider.refresh.secretMaterialKeys,
+    },
+    secret,
+  ).ok;
 }
 
 // Gateway-side minting is asynchronous: `provider refresh configure` records the
@@ -665,6 +723,7 @@ function waitForMintedBridgeCredential(
         // poll reprints the whole status table into the onboarding transcript.
         {
           ignoreError: true,
+          maxBuffer: BRIDGE_PROVIDER_COMMAND_MAX_BUFFER_BYTES,
           stdio: ["ignore", "pipe", "pipe"],
           suppressOutput: true,
           timeout: BRIDGE_MINT_STATUS_TIMEOUT_MS,
@@ -713,9 +772,42 @@ export function configureMessagingBridgeRefreshes(
   const warn = deps.log ?? console.error;
   for (const profile of active) {
     const bridge = tokenDefs.find(
-      ({ providerType, token }) => providerType === profile.profileId && Boolean(token),
+      ({ messagingProviderProfile, providerType, token }) =>
+        providerType === profile.profileId &&
+        Boolean(token) &&
+        (!messagingProviderProfile || messagingProviderProfile.channelId === profile.channelId),
     );
     if (!bridge) continue;
+    const hasExpectedBridgeIdentity = (): boolean => {
+      if (!bridge.expectedProviderId) return true;
+      const metadata = readGatewayProviderMetadata(bridge.name, deps.runOpenshell);
+      return Boolean(
+        metadata &&
+        metadata.id === bridge.expectedProviderId &&
+        matchesGatewayCredentialFamilyProviderBinding(metadata, {
+          name: bridge.name,
+          type: profile.profileId,
+          credentialKey: profile.credentialKey,
+        }),
+      );
+    };
+    const hasAuthorizedBridgeAttachments = (): boolean =>
+      !bridge.expectedProviderId ||
+      !deps.allowedSandboxes ||
+      inspectProviderAttachmentOwnership(bridge.name, deps.allowedSandboxes, deps.runOpenshell)
+        .kind === "authorized";
+    if (!hasExpectedBridgeIdentity()) {
+      warn(
+        `\n  ✗ ${profile.channelId} bridge: provider identity changed; refusing to configure gateway token minting.`,
+      );
+      return { ok: false, reason: "provider identity changed" };
+    }
+    if (!hasAuthorizedBridgeAttachments()) {
+      warn(
+        `\n  ✗ ${profile.channelId} bridge: provider attachment ownership could not be confirmed; refusing to configure gateway token minting.`,
+      );
+      return { ok: false, reason: "provider attachment ownership could not be confirmed" };
+    }
 
     const secret = resolveBridgeSecret(profile.sourceSecretEnv, deps);
     if (!secret) {
@@ -752,6 +844,18 @@ export function configureMessagingBridgeRefreshes(
     }
     let result;
     try {
+      if (!hasAuthorizedBridgeAttachments()) {
+        warn(
+          `\n  ✗ ${profile.channelId} bridge: provider attachments changed; refusing to submit gateway token minting material.`,
+        );
+        return { ok: false, reason: "provider attachment ownership changed" };
+      }
+      if (!hasExpectedBridgeIdentity()) {
+        warn(
+          `\n  ✗ ${profile.channelId} bridge: provider identity changed; refusing to submit gateway token minting material.`,
+        );
+        return { ok: false, reason: "provider identity changed" };
+      }
       result = deps.runOpenshell(
         [
           "provider",
@@ -768,6 +872,7 @@ export function configureMessagingBridgeRefreshes(
         {
           env: secretMaterialEnv,
           ignoreError: true,
+          maxBuffer: BRIDGE_PROVIDER_COMMAND_MAX_BUFFER_BYTES,
           stdio: ["ignore", "pipe", "pipe"],
           timeout: OPENSHELL_OPERATION_TIMEOUT_MS,
         },
@@ -786,6 +891,12 @@ export function configureMessagingBridgeRefreshes(
       return { ok: false, reason: diagnostic || "gateway refresh configuration failed" };
     }
     if (result.status === 0) {
+      if (!hasExpectedBridgeIdentity()) {
+        warn(
+          `\n  ✗ ${profile.channelId} bridge: provider identity changed after refresh configuration.`,
+        );
+        return { ok: false, reason: "provider identity changed" };
+      }
       let minted;
       try {
         minted = waitForMintedBridgeCredential(bridge.name, profile.credentialKey, deps);

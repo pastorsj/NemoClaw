@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { REPOSITORY_ROOT } from "../../core/repository-root";
 import {
   importCliOpenShellProviderProfile,
@@ -8,6 +12,8 @@ import {
   type CliOpenShellProviderProfileResult,
 } from "./provider-adapter-cli";
 import { endpointlessProviderProfilePath } from "./provider-profile";
+
+const RECEIPT_PROVIDER_PROFILE_MAX_BYTES = 64 * 1024;
 
 export type EndpointlessProviderProfileRunner = (
   args: string[],
@@ -42,16 +48,45 @@ function capturedResult(
 /** Normalize a legacy runner and delegate the registration protocol to the CLI adapter owner. */
 export function registerCheckedInProviderProfile(input: {
   readonly profilePath: string;
+  /** Exact receipt-verified source. Package callers must use this immutable import boundary. */
+  readonly profileSource?: string;
   readonly runOpenshell: EndpointlessProviderProfileRunner;
   readonly readProfileFile?: (profilePath: string) => string;
 }): CliOpenShellProviderProfileResult {
-  return importCliOpenShellProviderProfile(
-    { profilePath: input.profilePath, target: { kind: "selected" } },
-    {
-      readProfileFile: input.readProfileFile,
-      run: (args, options) => capturedResult(input.runOpenshell(args, options)),
-    },
+  const run = (profilePath: string, readProfileFile?: (profilePath: string) => string) =>
+    importCliOpenShellProviderProfile(
+      { profilePath, target: { kind: "selected" } },
+      {
+        readProfileFile,
+        run: (args, options) => capturedResult(input.runOpenshell(args, options)),
+      },
   );
+  if (input.profileSource === undefined) return run(input.profilePath, input.readProfileFile);
+  if (Buffer.byteLength(input.profileSource, "utf8") > RECEIPT_PROVIDER_PROFILE_MAX_BYTES) {
+    return {
+      ok: false,
+      error: {
+        kind: "validation",
+        message: "The receipt-verified OpenShell provider profile is oversized.",
+      },
+      operation: "read",
+    };
+  }
+
+  const temporaryDirectory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "nemoclaw-provider-profile-"),
+  );
+  const temporaryProfilePath = path.join(temporaryDirectory, "profile.yaml");
+  try {
+    fs.writeFileSync(temporaryProfilePath, input.profileSource, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    return run(temporaryProfilePath, () => input.profileSource!);
+  } finally {
+    fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+  }
 }
 
 export type EndpointlessProviderProfileFailureReason =

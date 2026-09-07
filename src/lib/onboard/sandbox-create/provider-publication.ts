@@ -17,6 +17,10 @@ import {
   messagingCredentialProviderProfilePath,
   MESSAGING_CREDENTIAL_PROVIDER_TYPE,
 } from "../../messaging/provider-profile";
+export {
+  bindMessagingProviderReceipts,
+  findMessagingProviderReceipt,
+} from "../../messaging/provider-receipts";
 import type { SandboxEntry } from "../../state/registry";
 import { createBuiltInChannelManifestRegistry } from "../../messaging/channels/built-ins";
 import {
@@ -24,7 +28,10 @@ import {
   resolveSandboxMessagingProfileAuthority,
 } from "../../messaging/profile-authority";
 import type { HarnessPackageSessionAuthority } from "../package/package-authority";
-import { matchesGatewayCredentialFamilyProviderBinding } from "../gateway-provider-metadata";
+import {
+  matchesGatewayCredentialFamilyProviderBinding,
+  matchesGatewayCredentialOnlyProviderBinding,
+} from "../gateway-provider-metadata";
 import { resolveRegisteredRuntimeProvider } from "../runtime-provider/selection";
 import type { SandboxCreateIntent } from "../sandbox-create-intent-types";
 
@@ -56,22 +63,25 @@ export function resolveSandboxCreateMessagingManifests(
 
 type ProviderPreparationDeps = Pick<SandboxCreateOrchestrationRuntime, "runOpenshell"> & {
   readonly cleanupCreateSources: () => void;
+  readonly expectedMessagingProviderId?: (providerName: string) => string | undefined;
   readonly environment?: OpenShellGatewayEndpointEnvironment;
   readonly providerAdapter?: OpenShellProviderAdapter;
 };
 
 function expectedMessagingBindings(input: ProviderPreparationInput) {
   return new Map(
-    input.messagingProviderRequests
-      .filter(({ providerType }) => providerType === MESSAGING_CREDENTIAL_PROVIDER_TYPE)
-      .map(({ envKey, name }) => [
+    input.messagingProviderRequests.map(
+      ({ credentialKeys, credentialShape, envKey, name, providerType }) => [
         name,
         {
           name,
-          type: MESSAGING_CREDENTIAL_PROVIDER_TYPE,
+          type: providerType,
           credentialKey: envKey,
+          credentialKeys,
+          credentialShape,
         },
-      ]),
+      ],
+    ),
   );
 }
 
@@ -86,7 +96,8 @@ function resolveProviderAdapter(deps: ProviderPreparationDeps): OpenShellProvide
 }
 
 type ExpectedMessagingBindingInspection =
-  | Readonly<{ kind: "exact" | "mismatch" }>
+  | Readonly<{ kind: "exact"; providerId?: string }>
+  | Readonly<{ kind: "mismatch" }>
   | Readonly<{ kind: "failed"; error: OpenShellProviderError }>;
 
 async function inspectExpectedMessagingBinding(
@@ -94,6 +105,7 @@ async function inspectExpectedMessagingBinding(
   adapter: OpenShellProviderAdapter,
   providerName: string,
   expectedBindings: ReturnType<typeof expectedMessagingBindings>,
+  expectedProviderId?: string,
 ): Promise<ExpectedMessagingBindingInspection> {
   const expected = expectedBindings.get(providerName);
   if (!expected) return { kind: "exact" };
@@ -102,11 +114,26 @@ async function inspectExpectedMessagingBinding(
     providerName,
   });
   if (!result.ok) return { kind: "failed", error: result.error };
-  return {
-    kind: matchesGatewayCredentialFamilyProviderBinding(result.value, expected)
-      ? "exact"
-      : "mismatch",
+  const baseBinding = {
+    name: expected.name,
+    type: expected.type,
+    credentialKey: expected.credentialKey,
   };
+  const shapeMatches =
+    expected.credentialShape === "family"
+      ? matchesGatewayCredentialFamilyProviderBinding(result.value, baseBinding) &&
+        expected.credentialKeys.every((key) => result.value.credentialKeys.includes(key))
+      : expected.credentialKeys.length === 1 &&
+        expected.credentialKeys[0] === expected.credentialKey &&
+        matchesGatewayCredentialOnlyProviderBinding(result.value, baseBinding);
+  const identityMatches =
+    expectedProviderId === undefined || result.value.id === expectedProviderId;
+  return shapeMatches && identityMatches
+    ? {
+        kind: "exact",
+        ...(result.value.id ? { providerId: result.value.id } : {}),
+      }
+    : { kind: "mismatch" };
 }
 
 function throwAfterCleanup(deps: ProviderPreparationDeps, message: string): never {
@@ -115,9 +142,7 @@ function throwAfterCleanup(deps: ProviderPreparationDeps, message: string): neve
     deps.cleanupCreateSources();
   } catch (error) {
     const cleanupFailure =
-      error instanceof Error
-        ? error
-        : new Error("Temporary sandbox create-source cleanup failed.");
+      error instanceof Error ? error : new Error("Temporary sandbox create-source cleanup failed.");
     throw new AggregateError(
       [providerFailure, cleanupFailure],
       `${message} Temporary sandbox create-source cleanup also failed.`,
@@ -131,8 +156,15 @@ function requireExactMessagingBinding(
   inspection: ExpectedMessagingBindingInspection,
   phase: "before sandbox creation" | "after publication",
   deps: ProviderPreparationDeps,
-): void {
-  if (inspection.kind === "exact") return;
+  requireStableIdentity = false,
+): string | undefined {
+  if (inspection.kind === "exact") {
+    if (!requireStableIdentity || inspection.providerId) return inspection.providerId;
+    throwAfterCleanup(
+      deps,
+      `OpenShell did not return a stable identity for messaging provider '${providerName}' ${phase}.`,
+    );
+  }
   if (inspection.kind === "failed") {
     throwAfterCleanup(
       deps,
@@ -161,23 +193,38 @@ export async function validateAttachedMessagingProvidersBeforeSandboxCreation(
 
   const adapter = resolveProviderAdapter(deps);
   const target = namedOpenShellGateway(input.gatewayName);
-  const profile = await adapter.importProviderProfile({
-    target,
-    profilePath: messagingCredentialProviderProfilePath(REPOSITORY_ROOT),
-  });
-  if (!profile.ok) {
-    throwAfterCleanup(
-      deps,
-      `Could not prepare the OpenShell messaging credential profile: ${profile.error.message}`,
-    );
+  if (
+    attachedMessagingProviders.some(
+      (providerName) =>
+        expectedBindings.get(providerName)?.type === MESSAGING_CREDENTIAL_PROVIDER_TYPE,
+    )
+  ) {
+    const profile = await adapter.importProviderProfile({
+      target,
+      profilePath: messagingCredentialProviderProfilePath(REPOSITORY_ROOT),
+    });
+    if (!profile.ok) {
+      throwAfterCleanup(
+        deps,
+        `Could not prepare the OpenShell messaging credential profile: ${profile.error.message}`,
+      );
+    }
   }
 
   for (const providerName of attachedMessagingProviders) {
+    const expectedProviderId = deps.expectedMessagingProviderId?.(providerName);
     requireExactMessagingBinding(
       providerName,
-      await inspectExpectedMessagingBinding(input, adapter, providerName, expectedBindings),
+      await inspectExpectedMessagingBinding(
+        input,
+        adapter,
+        providerName,
+        expectedBindings,
+        expectedProviderId,
+      ),
       "before sandbox creation",
       deps,
+      expectedProviderId !== undefined,
     );
   }
 }
@@ -185,14 +232,14 @@ export async function validateAttachedMessagingProvidersBeforeSandboxCreation(
 export async function publishAttachedProvidersBeforeDockerSandboxCreation(
   input: ProviderPreparationInput,
   deps: ProviderPreparationDeps,
-): Promise<void> {
+): Promise<ReadonlyMap<string, string>> {
   const runtimeProvider = resolveRegisteredRuntimeProvider(input.openshellDriver);
   if (
     !runtimeProvider ||
     runtimeProvider.gateway.launcher !== "nemoclaw" ||
     runtimeProvider.bootstrap.supported !== true
   )
-    return;
+    return new Map();
 
   const expectedBindings = expectedMessagingBindings(input);
   const providersRequiringExistenceProbe = new Set(
@@ -208,6 +255,7 @@ export async function publishAttachedProvidersBeforeDockerSandboxCreation(
   ]);
   const adapter = resolveProviderAdapter(deps);
   const target = namedOpenShellGateway(input.gatewayName);
+  const providerIds = new Map<string, string>();
   for (const attachedProvider of attachedProviders) {
     if (providersRequiringExistenceProbe.has(attachedProvider)) {
       const observed = await adapter.getProvider({ target, providerName: attachedProvider });
@@ -218,6 +266,22 @@ export async function publishAttachedProvidersBeforeDockerSandboxCreation(
           `Could not inspect attached provider '${attachedProvider}' before publication: ${observed.error.message}`,
         );
       }
+    }
+    if (expectedBindings.has(attachedProvider)) {
+      const expectedProviderId = deps.expectedMessagingProviderId?.(attachedProvider);
+      requireExactMessagingBinding(
+        attachedProvider,
+        await inspectExpectedMessagingBinding(
+          input,
+          adapter,
+          attachedProvider,
+          expectedBindings,
+          expectedProviderId,
+        ),
+        "before sandbox creation",
+        deps,
+        expectedProviderId !== undefined,
+      );
     }
     const refreshed = await adapter.updateProvider({
       target,
@@ -231,11 +295,20 @@ export async function publishAttachedProvidersBeforeDockerSandboxCreation(
         `Could not publish attached provider '${attachedProvider}' before managed sandbox creation: ${refreshed.error.message}`,
       );
     }
-    requireExactMessagingBinding(
+    const providerId = requireExactMessagingBinding(
       attachedProvider,
-      await inspectExpectedMessagingBinding(input, adapter, attachedProvider, expectedBindings),
+      await inspectExpectedMessagingBinding(
+        input,
+        adapter,
+        attachedProvider,
+        expectedBindings,
+        deps.expectedMessagingProviderId?.(attachedProvider),
+      ),
       "after publication",
       deps,
+      expectedBindings.has(attachedProvider),
     );
+    if (providerId) providerIds.set(attachedProvider, providerId);
   }
+  return providerIds;
 }

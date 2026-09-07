@@ -289,6 +289,12 @@ Managed host-local inference also carries the complete package receipt as its ap
 authority. The closed OpenClaw, Hermes, and Deep Agents Code ID list is used only for no-receipt
 legacy sessions.
 
+A package can select core-owned route checks through `inference.route_probe`. The available checks
+cover terminal connection, inference before rebuild, and providers whose models route returns 404.
+The rebuild check runs against the retained sandbox before backup or deletion. A failed check stops
+the rebuild without changing the sandbox. Packages select these checks with finite manifest data;
+they cannot supply host probe code.
+
 A receipt-backed package that needs one additional forwarded endpoint declares its complete
 allocation under `health_probe.secondary_forward`. Core allocates and reserves a port from that
 bounded declaration, publishes it through the declared environment variable, and records it as
