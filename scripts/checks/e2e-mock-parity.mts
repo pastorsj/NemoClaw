@@ -27,6 +27,7 @@ export type MockParityManifest = {
 
 const LIVE_TEST = /^test\/e2e\/live\/.+\.test\.ts$/u;
 const LIVE_HELPER = /^test\/e2e\/live\/(?!.*\.test\.ts$).+\.ts$/u;
+const LIVE_TOOL = /^tools\/e2e\/.+\.mts$/u;
 const FAST_TESTS = [
   /^src\/.+\.test\.ts$/u,
   /^packages\/nemoclaw-[^/]+\/(?:plugin\/src|tests)\/.+\.test\.ts$/u,
@@ -104,8 +105,13 @@ export function validateMockParity(options: {
       errors.push("mock parity entries must be objects with a live path");
       continue;
     }
-    if (!isSafeRepoPath(entry.live) || !LIVE_TEST.test(entry.live)) {
-      errors.push(`${entry.live}: live path must be a test/e2e/live/**/*.test.ts file`);
+    if (
+      !isSafeRepoPath(entry.live) ||
+      (!LIVE_TEST.test(entry.live) && !LIVE_TOOL.test(entry.live))
+    ) {
+      errors.push(
+        `${entry.live}: live path must be a live Vitest target or tools/e2e/*.mts target`,
+      );
       continue;
     }
     if (entries.has(entry.live)) {
@@ -141,10 +147,13 @@ export function validateMockParity(options: {
       errors.push(`${entry.live}: map at least one fast test or provide a live-only reason`);
     }
 
-    if (!fileExists(entry.live)) errors.push(`${entry.live}: live test does not exist`);
+    if (!fileExists(entry.live)) errors.push(`${entry.live}: live target does not exist`);
     for (const sourceFile of new Set(entry.liveSources ?? [])) {
-      if (!isSafeRepoPath(sourceFile) || !LIVE_HELPER.test(sourceFile)) {
-        errors.push(`${entry.live}: ${sourceFile} is not a test/e2e/live/**/*.ts helper file`);
+      if (
+        !isSafeRepoPath(sourceFile) ||
+        (!LIVE_HELPER.test(sourceFile) && !LIVE_TOOL.test(sourceFile))
+      ) {
+        errors.push(`${entry.live}: ${sourceFile} is not a supported live E2E helper file`);
         continue;
       }
       if (!fileExists(sourceFile)) {
@@ -180,7 +189,9 @@ export function validateMockParity(options: {
     }
   };
 
-  for (const liveFile of [...changedFileSet].filter((file) => LIVE_TEST.test(file))) {
+  for (const liveFile of [...changedFileSet].filter(
+    (file) => LIVE_TEST.test(file) || entries.has(file),
+  )) {
     const entry = entries.get(liveFile);
     if (!entry) {
       errors.push(`${liveFile}: changed live E2E needs an entry in ${DEFAULT_PARITY_MANIFEST}`);
@@ -189,7 +200,9 @@ export function validateMockParity(options: {
     requireChangedFastTest(entry, liveFile);
   }
 
-  for (const helperFile of [...changedFileSet].filter((file) => LIVE_HELPER.test(file))) {
+  for (const helperFile of [...changedFileSet].filter(
+    (file) => !entries.has(file) && (LIVE_HELPER.test(file) || sourceOwners.has(file)),
+  )) {
     const owners = sourceOwners.get(helperFile) ?? [];
     if (owners.length === 0) {
       errors.push(
@@ -227,7 +240,13 @@ export function filterMockParityRelevantChangedFiles(
   sourceAtHead: (file: string) => string | null,
 ): string[] {
   return files.filter((file) => {
-    if (!LIVE_TEST.test(file) && !LIVE_HELPER.test(file) && !isFastPrTest(file)) return true;
+    if (
+      !LIVE_TEST.test(file) &&
+      !LIVE_HELPER.test(file) &&
+      !LIVE_TOOL.test(file) &&
+      !isFastPrTest(file)
+    )
+      return true;
     return isMockParityRelevantSourceChange(sourceAtBase(file), sourceAtHead(file));
   });
 }

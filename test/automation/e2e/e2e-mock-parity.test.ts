@@ -11,6 +11,8 @@ import {
 
 const live = "test/e2e/live/example.test.ts";
 const liveHelper = "test/e2e/live/example-helper.ts";
+const liveTool = "tools/e2e/example.mts";
+const liveToolHelper = "tools/e2e/example-journey.mts";
 const fast = "test/e2e/support/example.test.ts";
 const packageFast = "packages/nemoclaw-openclaw/tests/runtime/example.test.ts";
 const TAGGED_NEW_SOURCE = "// @module-tag e2e/credential-free\n";
@@ -111,6 +113,26 @@ describe("changed live E2E mock parity", () => {
         fileExists: exists,
       }),
     ).toEqual([]);
+  });
+
+  it("accepts an explicitly declared tool-driven live E2E and helper", () => {
+    expect(
+      validateMockParity({
+        manifest: manifest([{ live: liveTool, liveSources: [liveToolHelper], fast: [fast] }]),
+        changedFiles: [liveTool, liveToolHelper, fast],
+        fileExists: (file) => [liveTool, liveToolHelper, fast].includes(file),
+      }),
+    ).toEqual([]);
+  });
+
+  it("requires fast parity when an explicitly declared tool-driven helper changes", () => {
+    expect(
+      validateMockParity({
+        manifest: manifest([{ live: liveTool, liveSources: [liveToolHelper], fast: [fast] }]),
+        changedFiles: [liveToolHelper],
+        fileExists: (file) => [liveTool, liveToolHelper, fast].includes(file),
+      }),
+    ).toEqual([`${liveToolHelper}: change at least one fast PR test mapped from ${liveTool}`]);
   });
 
   it("accepts a harness-package test as fast parity coverage", () => {
