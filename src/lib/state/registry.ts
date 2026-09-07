@@ -49,6 +49,7 @@ export {
 import { cloneSandboxWorkloadReceipt } from "./registry/workload";
 import { normalizeSandboxMcpState } from "./registry-mcp";
 import {
+  hasValidN1xPreviewAcceptance,
   normalizeSandboxHarnessPackageAuthority,
   normalizeSandboxPolicyAttribution,
   normalizePendingSandboxCreateIdentity,
@@ -445,6 +446,9 @@ export function registerSandbox(
     if (entry.servingProfileProvenance !== undefined && !servingProfileProvenance) {
       throw new Error("Cannot register a sandbox with invalid serving profile provenance");
     }
+    if (!hasValidN1xPreviewAcceptance(entry)) {
+      throw new Error("Cannot register a sandbox with invalid N1x preview acceptance");
+    }
     const normalizedPolicyEntry = normalizeSandboxPolicyAttribution(entry);
     if (!normalizedPolicyEntry.harnessPackage && entry.dashboardUi !== undefined) {
       throw new Error("Cannot register a no-receipt sandbox with package dashboard state");
@@ -519,6 +523,7 @@ export function registerSandbox(
       name: entry.name,
       createdAt: entry.createdAt || new Date().toISOString(),
       servingProfileProvenance: servingProfileProvenance ?? undefined,
+      deferredN1xManagedVllmAccepted: entry.deferredN1xManagedVllmAccepted,
       ...inferenceSelectionRegistryFields(entry),
       gpuEnabled: entry.gpuEnabled || false,
       hostGpuDetected: entry.hostGpuDetected === true,
@@ -870,6 +875,7 @@ export function reserveSandboxInferenceRoute(
     const next = normalizeSandboxPolicyAttribution({
       ...existingForReservation,
       pendingRouteReservation: true,
+      deferredN1xManagedVllmAccepted: undefined,
       reservationSessionId:
         route.reservationSessionId ??
         (existing?.pendingRouteReservation === true ? existing.reservationSessionId : undefined),
@@ -906,6 +912,15 @@ const HOST_LOCAL_INFERENCE_LIFECYCLE_AUTHORITY_FIELDS = new Set<keyof SandboxEnt
   "model",
   "openshellDriver",
   "preferredInferenceApi",
+  "provider",
+]);
+const DEFERRED_N1X_ROUTE_AUTHORITY_FIELDS = new Set<keyof SandboxEntry>([
+  "endpointSource",
+  "endpointUrl",
+  "hostLocalInferenceReceipt",
+  "model",
+  "nimContainer",
+  "openshellDriver",
   "provider",
 ]);
 
@@ -958,7 +973,18 @@ function updatedSandboxEntry(
       );
     }
   }
-  return normalizeSandboxPolicyAttribution({ ...current, ...updates });
+  const next = normalizeSandboxPolicyAttribution({ ...current, ...updates });
+  if (
+    current.deferredN1xManagedVllmAccepted === true &&
+    Object.entries(updates).some(
+      ([field, value]) =>
+        DEFERRED_N1X_ROUTE_AUTHORITY_FIELDS.has(field as keyof SandboxEntry) &&
+        !isDeepStrictEqual(value, current[field as keyof SandboxEntry]),
+    )
+  ) {
+    next.deferredN1xManagedVllmAccepted = undefined;
+  }
+  return next;
 }
 export function updateSandbox(name: string, updates: Partial<SandboxEntry>): boolean {
   return withLock(() => {

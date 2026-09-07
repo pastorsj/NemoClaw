@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isObjectRecord } from "../../core/json-types";
 import { GATEWAY_PORT } from "../../core/ports";
+import { isDeferredN1xManagedVllmAcceptanceRoute } from "../../domain/sandbox/n1x-managed-vllm-rebuild";
 import { parseServingProfileProvenance } from "../../inference/serving/profile-provenance";
 import { readConfigFile, writeConfigFile } from "../config-io";
 import { normalizeExtraProviders } from "../extra-providers";
@@ -102,6 +103,17 @@ function normalizeSecondaryForwardPortOrThrow(
   return value;
 }
 
+function normalizeDeferredN1xManagedVllmAcceptance(
+  entry: SandboxEntry,
+  operation: "load" | "save",
+): SandboxEntry["deferredN1xManagedVllmAccepted"] {
+  const value = entry.deferredN1xManagedVllmAccepted;
+  if (value !== undefined && (value !== true || !isDeferredN1xManagedVllmAcceptanceRoute(entry))) {
+    throw new Error(`Cannot ${operation} a sandbox entry with invalid N1x preview acceptance`);
+  }
+  return value;
+}
+
 function normalizeDashboardUiStateOrThrow(
   entry: SandboxEntry,
   operation: "load" | "save",
@@ -117,7 +129,6 @@ function normalizeDashboardUiStateOrThrow(
     throw new Error(`Cannot ${operation} a sandbox entry with invalid package dashboard state`);
   }
 }
-
 export const REGISTRY_FILE = path.join(
   nemoclawStateRoot(process.env.HOME || "/tmp", GATEWAY_PORT),
   "sandboxes.json",
@@ -226,6 +237,7 @@ function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
     entry.servingProfileProvenance,
     "load",
   );
+  const deferredN1xManagedVllmAccepted = normalizeDeferredN1xManagedVllmAcceptance(entry, "load");
   const mcp = normalizeSandboxMcpState(entry.mcp);
   const secondaryForwardPort = normalizeSecondaryForwardPortOrThrow(policyEntry, "load");
   const dashboardUi = normalizeDashboardUiStateOrThrow(policyEntry, "load");
@@ -236,6 +248,7 @@ function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
     hostLocalInferenceReceipt: _hostLocalInferenceReceipt,
     hostLocalInferenceProvenance: _hostLocalInferenceProvenance,
     servingProfileProvenance: _servingProfileProvenance,
+    deferredN1xManagedVllmAccepted: _deferredN1xManagedVllmAccepted,
     mcp: _mcp,
     dashboardUi: _dashboardUi,
     hermesDashboardEnabled,
@@ -250,6 +263,7 @@ function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
     ...(hostLocalInferenceReceipt !== undefined ? { hostLocalInferenceReceipt } : {}),
     ...(hostLocalInferenceProvenance ? { hostLocalInferenceProvenance } : {}),
     ...(servingProfileProvenance ? { servingProfileProvenance } : {}),
+    ...(deferredN1xManagedVllmAccepted ? { deferredN1xManagedVllmAccepted } : {}),
     ...(messaging ? { messaging } : {}),
     ...(mcp ? { mcp } : {}),
     ...(secondaryForwardPort !== undefined ? { secondaryForwardPort } : {}),
@@ -305,6 +319,7 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
     durable.servingProfileProvenance,
     "save",
   );
+  const deferredN1xManagedVllmAccepted = normalizeDeferredN1xManagedVllmAcceptance(durable, "save");
   const mcp = serializeSandboxMcpStateForDisk(durable.mcp);
   const secondaryForwardPort = normalizeSecondaryForwardPortOrThrow(policyEntry, "save");
   const dashboardUi = normalizeDashboardUiStateOrThrow(policyEntry, "save");
@@ -315,6 +330,7 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
     hostLocalInferenceReceipt: _hostLocalInferenceReceipt,
     hostLocalInferenceProvenance: _hostLocalInferenceProvenance,
     servingProfileProvenance: _servingProfileProvenance,
+    deferredN1xManagedVllmAccepted: _deferredN1xManagedVllmAccepted,
     mcp: _mcp,
     dashboardUi: _dashboardUi,
     hermesDashboardEnabled,
@@ -330,6 +346,7 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
     ...(hostLocalInferenceReceipt !== undefined ? { hostLocalInferenceReceipt } : {}),
     ...(hostLocalInferenceProvenance ? { hostLocalInferenceProvenance } : {}),
     ...(servingProfileProvenance ? { servingProfileProvenance } : {}),
+    ...(deferredN1xManagedVllmAccepted ? { deferredN1xManagedVllmAccepted } : {}),
     ...(messaging ? { messaging } : {}),
     ...(mcp ? { mcp } : {}),
     ...(secondaryForwardPort !== undefined ? { secondaryForwardPort } : {}),

@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { HarnessManagedExtension } from "@nvidia/nemoclaw-harness-contract";
 
 import type { AgentDefinition } from "../agent/defs";
+import { isDeferredN1xManagedVllmAcceptanceRoute } from "../domain/sandbox/n1x-managed-vllm-rebuild";
 import type {
   HarnessPackageAuthority,
   HarnessPackageIdentity,
@@ -83,6 +84,7 @@ export interface CreatedSandboxRegistryEntryInput {
   workload?: SandboxEntry["workload"];
   hostLocalInferenceReceipt?: SandboxEntry["hostLocalInferenceReceipt"];
   hostLocalInferenceProvenance?: SandboxEntry["hostLocalInferenceProvenance"];
+  deferredN1xManagedVllmPreviewIntent?: true;
   openclawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
   managedImageExtensions?: readonly HarnessManagedExtension[];
   toolDisclosure?: ToolDisclosure;
@@ -396,6 +398,17 @@ export function buildCreatedSandboxRegistryEntry(
       hostLocalInferenceReceipt,
     );
   }
+  const deferredN1xManagedVllmAccepted =
+    input.deferredN1xManagedVllmPreviewIntent === true &&
+    isDeferredN1xManagedVllmAcceptanceRoute({
+      ...input.inferenceSelection,
+      openshellDriver: input.runtimeFields.openshellDriver,
+    });
+  if (input.deferredN1xManagedVllmPreviewIntent !== undefined && !deferredN1xManagedVllmAccepted) {
+    throw new RuntimeProviderSelectionError(
+      "Sandbox Deferred N1x preview acceptance failed closed validation.",
+    );
+  }
   const agentFields = getSandboxAgentRegistryFields(
     input.agent,
     input.agentVersionKnown,
@@ -444,6 +457,7 @@ export function buildCreatedSandboxRegistryEntry(
     workload,
     ...(hostLocalInferenceReceipt !== undefined ? { hostLocalInferenceReceipt } : {}),
     ...(hostLocalInferenceProvenance ? { hostLocalInferenceProvenance } : {}),
+    ...(deferredN1xManagedVllmAccepted ? { deferredN1xManagedVllmAccepted: true as const } : {}),
     ...(input.openclawImagePluginInstalls !== undefined
       ? {
           openclawImagePluginInstalls: input.openclawImagePluginInstalls.map((install) => ({

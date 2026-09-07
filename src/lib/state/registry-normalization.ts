@@ -9,6 +9,7 @@ import {
   type HarnessPackageMigration,
 } from "../agent-runtime/package/identity";
 import { isObjectRecord } from "../core/json-types";
+import { isDeferredN1xManagedVllmAcceptanceRoute } from "../domain/sandbox/n1x-managed-vllm-rebuild";
 import { normalizePendingSandboxCreateIdentity } from "./registry/pending-create-identity";
 import type { SandboxEntry } from "./registry/types";
 
@@ -16,6 +17,12 @@ export { normalizePendingSandboxCreateIdentity };
 export { parseSandboxProviderBrokerOwnership } from "./registry/provider-broker";
 
 const SHA256_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
+
+/** Validate the optional N1x preview receipt against the route that owns it. */
+export function hasValidN1xPreviewAcceptance(entry: SandboxEntry): boolean {
+  const value = entry.deferredN1xManagedVllmAccepted;
+  return value === undefined || (value === true && isDeferredN1xManagedVllmAcceptanceRoute(entry));
+}
 
 const POLICY_SHADOW_FIELDS = [
   "baselineExclusions",

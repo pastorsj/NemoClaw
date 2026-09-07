@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import * as registry from "../../state/registry";
 
@@ -79,6 +79,8 @@ import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 import { prepareRebuildTargetPreflights } from "./rebuild-preflight-target-phase";
 
 describe("prepareRebuildTargetPreflights", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(registry, "getSandbox").mockReturnValue(null);
@@ -92,11 +94,16 @@ describe("prepareRebuildTargetPreflights", () => {
   });
 
   async function prepareN1xTarget(
-    endpointSource: "onboard" | "inference-set",
+    endpointSource: "onboard" | "inference-set" | null,
     mcp: { bridges: Record<string, { server: string }> } | null = null,
     provider = "vllm-local",
     model = "nvidia/Qwen3.6-35B-A3B-NVFP4",
     nimContainer: string | null = null,
+    accepted = endpointSource === null,
+    entryOverrides: {
+      endpointUrl?: string | null;
+      hostLocalInferenceReceipt?: string | null;
+    } = {},
   ) {
     const resumeConfig = {
       provider,
@@ -137,10 +144,16 @@ describe("prepareRebuildTargetPreflights", () => {
         openshellDriver: "docker",
         provider: resumeConfig.provider,
         model: resumeConfig.model,
-        endpointUrl: "http://host.openshell.internal:8000/v1",
+        endpointUrl: endpointSource === null ? null : "http://host.openshell.internal:8000/v1",
         endpointSource,
         nimContainer,
+        ...(endpointSource === null && accepted
+          ? {
+              deferredN1xManagedVllmAccepted: true,
+            }
+          : {}),
         mcp,
+        ...entryOverrides,
       } as never,
       agentAuthority: OPENCLAW_AGENT_AUTHORITY,
       autoYes: true,
@@ -238,6 +251,46 @@ describe("prepareRebuildTargetPreflights", () => {
       expect.objectContaining({ allowDeferredN1xManagedVllm: true }),
     );
   });
+
+  it("passes normalized N1x Express intent into readiness (#10959)", async () => {
+    const readinessOptions = await prepareN1xTarget(null);
+
+    expect(readinessOptions).toEqual(
+      expect.objectContaining({ allowDeferredN1xManagedVllm: true }),
+    );
+  });
+
+  it("passes explicit v0.0.119 recovery intent into readiness (#10959)", async () => {
+    vi.stubEnv("NEMOCLAW_PROVIDER", "install-vllm");
+    const readinessOptions = await prepareN1xTarget(null, null, undefined, undefined, null, false);
+
+    expect(readinessOptions).toEqual(
+      expect.objectContaining({ allowDeferredN1xManagedVllm: true }),
+    );
+  });
+
+  it.each([
+    ["a recorded endpoint", null, null, { endpointUrl: "http://host.openshell.internal:8000/v1" }],
+    ["another endpoint source", "inference-set", null, {}],
+    ["a NIM container", null, "nemoclaw-nim", {}],
+    ["a malformed receipt", null, null, { hostLocalInferenceReceipt: "invalid" }],
+  ] as const)(
+    "withholds explicit recovery for %s (#10959)",
+    async (_case, source, nim, overrides) => {
+      vi.stubEnv("NEMOCLAW_PROVIDER", "install-vllm");
+      const readinessOptions = await prepareN1xTarget(
+        source,
+        null,
+        undefined,
+        undefined,
+        nim,
+        false,
+        overrides,
+      );
+
+      expect(readinessOptions).not.toHaveProperty("allowDeferredN1xManagedVllm");
+    },
+  );
 
   it("passes recorded Ollama intent into authoritative readiness (#11041)", async () => {
     const readinessOptions = await prepareN1xTarget("onboard", null, "ollama-local", "qwen3.5:9b");
