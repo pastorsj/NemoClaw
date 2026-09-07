@@ -137,11 +137,32 @@ main "$@"
 elif entrypoint == "accepted-station-main":
     script = r'''
 source "$INSTALLER_UNDER_TEST" >/dev/null
+node() {
+  if [ "\${1:-}" = "--version" ]; then
+    printf 'v22.19.0\n'
+    return 0
+  fi
+  ${JSON.stringify(process.execPath)} "$@"
+}
+npm() {
+  if [ "\${1:-}" = "--version" ]; then
+    printf '10.9.0\n'
+    return 0
+  fi
+  PATH=${JSON.stringify(path.dirname(process.execPath))}:"$PATH" \
+    ${JSON.stringify(path.join(path.dirname(process.execPath), "npm"))} "$@"
+}
 detect_express_platform() { printf "$EXPRESS_PLATFORM"; }
 print_banner() { :; }
 classify_dgx_station_release() { printf "%s" "\${EXPRESS_RELEASE_STATE:-generic-ubuntu}"; }
 station_installer_revision() { printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; }
 station_express_resume_generation() { printf '0123456789abcdef0123456789abcdef'; }
+fix_npm_permissions() { :; }
+prepare_current_cli_for_preupgrade_backup() { :; }
+resolve_prepared_cli_runner() { printf '/bin/true'; }
+reconcile_and_select_installer_harness() { :; }
+resolve_pending_express_wsl_provider() { :; }
+ensure_station_express_pair() { :; }
 bash() {
   printf "RESULT NON_INTERACTIVE=%s SUDO_MODE=%s PROVIDER=%s MODEL=%s VLLM_MODEL=%s POLICY=%s YES=%s SANDBOX=%s STATION_EXPRESS=%s PROFILE_GATE=%s PROFILE_RUNTIME=%s SPARK_SELECTION=%s NO_EXPRESS=%s\\n" \
     "\${NON_INTERACTIVE:-}" "\${NEMOCLAW_NON_INTERACTIVE_SUDO_MODE:-}" "\${NEMOCLAW_PROVIDER:-}" "\${NEMOCLAW_MODEL:-}" \

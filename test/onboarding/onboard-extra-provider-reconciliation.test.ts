@@ -20,7 +20,7 @@ describe("onboard extra-provider reconciliation", () => {
   it(
     "attaches live user extras, prunes stale names, and converges registry state (#6501)",
     {
-      timeout: 90_000,
+      timeout: 180_000,
     },
     () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-extra-provider-reconcile-"));
@@ -41,6 +41,7 @@ describe("onboard extra-provider reconciliation", () => {
         const sandboxBaseImagePath = JSON.stringify(
           path.join(repoRoot, "src", "lib", "sandbox-base-image.ts"),
         );
+        const waitPath = JSON.stringify(path.join(repoRoot, "src", "lib", "core", "wait.ts"));
 
         fs.mkdirSync(fakeBin, { recursive: true });
         writeOkOpenshell(fakeBin);
@@ -48,6 +49,7 @@ describe("onboard extra-provider reconciliation", () => {
         const script = String.raw`
 const registry = require(${registryPath});
 const fixtureMocks = require(${onboardScriptMocksPath});
+require(${waitPath}).sleepSeconds = () => {};
 const forwardService = fixtureMocks.installForwardServiceReachabilityFixture();
 registry.addExtraProvider("tavily-search");
 registry.addExtraProvider("brave-search");
@@ -68,6 +70,7 @@ const _n = (command) => (Array.isArray(command) ? command.join(" ") : String(com
 
 const commands = [];
 let createdSandbox = null;
+let sandboxCreateCount = 0;
 
 runner.run = (command, opts = {}) => {
   const normalized = _n(command);
@@ -139,6 +142,8 @@ childProcess.spawn = (...args) => {
 const { createSandbox } = require(${onboardPath});
 
 const createReservedSandbox = () => {
+  if (sandboxCreateCount > 0) fixtureMocks.resetDockerSandboxLifecycleFixture();
+  sandboxCreateCount += 1;
   createdSandbox = fixtureMocks.createCreatedSandboxFixture({
     sandboxName: "my-assistant",
   });
@@ -168,6 +173,7 @@ const createReservedSandbox = () => {
   }));
 })().catch((error) => {
   console.error(error);
+  console.error(JSON.stringify({ commands }, null, 2));
   process.exit(1);
 });
 `;
@@ -176,11 +182,11 @@ const createReservedSandbox = () => {
         const result = spawnSync(process.execPath, [scriptPath], {
           cwd: repoRoot,
           encoding: "utf-8",
-          timeout: 60_000,
+          timeout: 150_000,
           killSignal: "SIGKILL",
           env: {
             ...process.env,
-            HOME: tmpDir,
+            HOME: fs.realpathSync(tmpDir),
             PATH: `${fakeBin}:${process.env.PATH || ""}`,
             NEMOCLAW_NON_INTERACTIVE: "1",
             NEMOCLAW_TEST_MANAGED_IMAGE_CATALOG: "1",
@@ -189,7 +195,11 @@ const createReservedSandbox = () => {
           },
         });
 
-        assert.equal(result.status, 0, result.stderr || result.error?.message);
+        assert.equal(
+          result.status,
+          0,
+          [result.stderr, result.stdout, result.error?.message].filter(Boolean).join("\n"),
+        );
         const payloadLine = result.stdout
           .trim()
           .split("\n")

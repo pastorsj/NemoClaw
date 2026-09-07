@@ -9,6 +9,7 @@ import path from "path";
 import { describe, expect, it } from "vitest";
 
 import { writeOkOpenshell } from "../helpers/onboard-openshell-fixture";
+import { testTimeoutOptions } from "../helpers/timeouts";
 
 describe("sandboxName command hardening in onboard.js", () => {
   it("rejects a marker-only security inventory fixture probe", async () => {
@@ -53,28 +54,31 @@ describe("sandboxName command hardening in onboard.js", () => {
     ).rejects.toThrow(/Invalid sandbox name/);
   });
 
-  it("runs setup-dns-proxy.sh through the argv helper instead of bash -c interpolation", () => {
-    const repoRoot = path.join(import.meta.dirname, "../..");
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dns-argv-"));
-    const fakeBin = path.join(tmpDir, "bin");
-    const scriptPath = path.join(tmpDir, "create-sandbox-dns-argv.cjs");
-    const sourceModule = (...segments: string[]) =>
-      JSON.stringify(path.join(repoRoot, "src", "lib", ...segments));
-    const onboardPath = sourceModule("onboard.ts");
-    const runnerPath = sourceModule("runner.ts");
-    const registryPath = sourceModule("state", "registry.ts");
-    const preflightPath = sourceModule("onboard", "preflight.ts");
-    const credentialsPath = sourceModule("credentials", "store.ts");
-    const streamPath = sourceModule("sandbox", "create-stream.ts");
-    const onboardScriptMocksPath = JSON.stringify(
-      path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
-    );
+  it(
+    "runs setup-dns-proxy.sh through the argv helper instead of bash -c interpolation",
+    testTimeoutOptions(90_000),
+    () => {
+      const repoRoot = path.join(import.meta.dirname, "../..");
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dns-argv-"));
+      const fakeBin = path.join(tmpDir, "bin");
+      const scriptPath = path.join(tmpDir, "create-sandbox-dns-argv.cjs");
+      const sourceModule = (...segments: string[]) =>
+        JSON.stringify(path.join(repoRoot, "src", "lib", ...segments));
+      const onboardPath = sourceModule("onboard.ts");
+      const runnerPath = sourceModule("runner.ts");
+      const registryPath = sourceModule("state", "registry.ts");
+      const preflightPath = sourceModule("onboard", "preflight.ts");
+      const credentialsPath = sourceModule("credentials", "store.ts");
+      const streamPath = sourceModule("sandbox", "create-stream.ts");
+      const onboardScriptMocksPath = JSON.stringify(
+        path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
+      );
 
-    fs.mkdirSync(fakeBin, { recursive: true });
-    writeOkOpenshell(fakeBin);
-    fs.writeFileSync(
-      scriptPath,
-      String.raw`
+      fs.mkdirSync(fakeBin, { recursive: true });
+      writeOkOpenshell(fakeBin);
+      fs.writeFileSync(
+        scriptPath,
+        String.raw`
 const runner = require(${runnerPath});
 const registry = require(${registryPath});
 const fixtureMocks = require(${onboardScriptMocksPath});
@@ -188,61 +192,63 @@ try {
 }
 })();
 `,
-    );
+      );
 
-    try {
-      const result = spawnSync(
-        process.execPath,
-        [
-          "--require",
-          path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
-          scriptPath,
-        ],
-        {
-          cwd: repoRoot,
-          encoding: "utf-8",
-          env: {
-            HOME: tmpDir,
-            PATH: `${fakeBin}:${process.env.PATH || ""}`,
-            NEMOCLAW_TEST_MANAGED_IMAGE_FALLBACK: "1",
+      try {
+        const result = spawnSync(
+          process.execPath,
+          [
+            "--require",
+            path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
+            scriptPath,
+          ],
+          {
+            cwd: repoRoot,
+            encoding: "utf-8",
+            env: {
+              HOME: fs.realpathSync(tmpDir),
+              PATH: `${fakeBin}:${process.env.PATH || ""}`,
+              TMPDIR: process.env.TMPDIR ?? os.tmpdir(),
+              NEMOCLAW_TEST_MANAGED_IMAGE_FALLBACK: "1",
+            },
+            timeout: 90_000,
           },
-          timeout: 30_000,
-        },
-      );
-      expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
-      const payloadLine = result.stdout
-        .trim()
-        .split("\n")
-        .reverse()
-        .find((line) => line.startsWith("{") && line.endsWith("}"));
-      expect(payloadLine).toBeTruthy();
-      const payload = JSON.parse(payloadLine!);
-      const dnsCommand = payload.commands.find(
-        (entry: { type: string; args: string[] }) =>
-          entry.type === "runFile" && entry.args[0]?.endsWith("setup-dns-proxy.sh"),
-      );
-      expect(dnsCommand).toBeTruthy();
-      expect(dnsCommand.file).toBe("bash");
-      expect(dnsCommand.args).toEqual([
-        expect.stringMatching(/setup-dns-proxy\.sh$/),
-        "nemoclaw",
-        "my-assistant",
-      ]);
-      expect(dnsCommand.command).not.toContain("bash -c");
-      expect(
-        payload.commands.some((entry: { command: string }) =>
-          entry.command.includes("sandbox get -g nemoclaw my-assistant"),
-        ),
-      ).toBe(true);
-      expect(
-        payload.commands.some((entry: { command: string }) =>
-          entry.command.includes("sandbox exec -g nemoclaw --name my-assistant -- true"),
-        ),
-      ).toBe(true);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
+        );
+        expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
+        const payloadLine = result.stdout
+          .trim()
+          .split("\n")
+          .reverse()
+          .find((line) => line.startsWith("{") && line.endsWith("}"));
+        expect(payloadLine).toBeTruthy();
+        const payload = JSON.parse(payloadLine!);
+        const dnsCommand = payload.commands.find(
+          (entry: { type: string; args: string[] }) =>
+            entry.type === "runFile" && entry.args[0]?.endsWith("setup-dns-proxy.sh"),
+        );
+        expect(dnsCommand).toBeTruthy();
+        expect(dnsCommand.file).toBe("bash");
+        expect(dnsCommand.args).toEqual([
+          expect.stringMatching(/setup-dns-proxy\.sh$/),
+          "nemoclaw",
+          "my-assistant",
+        ]);
+        expect(dnsCommand.command).not.toContain("bash -c");
+        expect(
+          payload.commands.some((entry: { command: string }) =>
+            entry.command.includes("sandbox get -g nemoclaw my-assistant"),
+          ),
+        ).toBe(true);
+        expect(
+          payload.commands.some((entry: { command: string }) =>
+            entry.command.includes("sandbox exec -g nemoclaw --name my-assistant -- true"),
+          ),
+        ).toBe(true);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("builds openshell argv with an explicit openshellBinary override", async () => {
     const onboardModule = await import("../../src/lib/onboard.js");

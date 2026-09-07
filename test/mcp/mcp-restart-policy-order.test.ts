@@ -8,6 +8,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { authorizeMcpHarnessScript } from "../helpers/mcp-authority";
+
 const MATCHING_OPENSHELL = path.resolve("test/fixtures/openshell-v0.0.106");
 
 describe("MCP restart policy ordering", () => {
@@ -141,7 +143,7 @@ operationPromise.then(
   },
 );
 `;
-      const result = spawnSync(process.execPath, ["-e", script], {
+      const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
         cwd: process.cwd(),
         encoding: "utf8",
         env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL },
@@ -271,7 +273,7 @@ bridge.restartMcpBridge("alpha", "example").then(
   (error) => { console.error(error); process.exit(1); },
 );
 `;
-    const result = spawnSync(process.execPath, ["-e", script], {
+    const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
       cwd: process.cwd(),
       encoding: "utf8",
       env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL },
@@ -443,7 +445,7 @@ bridge.restartMcpBridge("alpha", ${restartAll ? "undefined" : '"example"'}).then
   },
 );
 `;
-    const result = spawnSync(process.execPath, ["-e", script], {
+    const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
       cwd: process.cwd(),
       encoding: "utf8",
       env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL },

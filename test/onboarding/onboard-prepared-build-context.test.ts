@@ -165,6 +165,8 @@ runner.runCapture = (command) => {
   const normalized = normalize(command);
   const sandboxCapture = createdSandbox.capture(command);
   if (sandboxCapture !== null) return sandboxCapture;
+  const qualificationCapture = fixtureMocks.mockOnboardRunCapture(command);
+  if (qualificationCapture !== null) return qualificationCapture;
   if (
     normalized.includes(
       "sandbox exec --name " +
@@ -274,8 +276,7 @@ const { createSandbox } = require(${onboardPath});
     encoding: "utf-8",
     env: {
       ...process.env,
-      HOME: tmpDir,
-      NEMOCLAW_HOME: path.join(tmpDir, ".nemoclaw"),
+      HOME: fs.realpathSync(tmpDir),
       NEMOCLAW_NON_INTERACTIVE: "1",
       PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
     },

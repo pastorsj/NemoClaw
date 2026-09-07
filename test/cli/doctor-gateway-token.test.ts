@@ -99,9 +99,11 @@ describe("CLI dispatch", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("$ nemoclaw alpha gateway-token [--quiet|-q]");
     expect(r.out).toContain("Print the sandbox agent's auth token to stdout");
-    expect(r.out).toContain("OpenClaw gateway");
-    expect(r.out).toContain("token, or a bearer_token agent");
-    expect(r.out).toContain("Hermes' API_SERVER_KEY");
+    expect(r.out).toMatch(
+      /Print the retrievable auth token declared by the running sandbox's installed\s+harness package\./,
+    );
+    expect(r.out).not.toContain("OpenClaw gateway");
+    expect(r.out).not.toContain("Hermes' API_SERVER_KEY");
   });
 
   it(

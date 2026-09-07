@@ -668,7 +668,6 @@ process.stdout.write("\n__RESULT__" + JSON.stringify({
     let fakeOpenshell: string;
     let origHome: string | undefined;
     let resolveSpy: ReturnType<typeof vi.spyOn>;
-    let savedGetSandbox: any;
 
     beforeEach(() => {
       tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-issue4586-"));
@@ -680,15 +679,15 @@ process.stdout.write("\n__RESULT__" + JSON.stringify({
       resolveSpy = vi
         .spyOn(resolveOpenshellModule, "resolveOpenshell")
         .mockReturnValue(fakeOpenshell);
-      savedGetSandbox = registryModule.getSandbox;
-      registryModule.getSandbox = (name: string) => managedSandboxEntry(name);
+      vi.spyOn(registryModule, "getSandbox").mockImplementation((name: string) =>
+        managedSandboxEntry(name),
+      );
     });
 
     afterEach(() => {
       if (origHome === undefined) delete process.env.HOME;
       else process.env.HOME = origHome;
       resolveSpy.mockRestore();
-      registryModule.getSandbox = savedGetSandbox;
       fs.rmSync(tmpHome, { recursive: true, force: true });
     });
 
@@ -751,8 +750,6 @@ network_policies:
     let fakeOpenshell: string;
     let origHome: string | undefined;
     let resolveSpy: ReturnType<typeof vi.spyOn>;
-    let savedGetSandbox: any;
-    let savedUpdateSandbox: any;
 
     beforeEach(() => {
       tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-issue4510-"));
@@ -784,23 +781,19 @@ exit 0
       resolveSpy = vi
         .spyOn(resolveOpenshellModule, "resolveOpenshell")
         .mockReturnValue(fakeOpenshell);
-      savedGetSandbox = registryModule.getSandbox;
-      savedUpdateSandbox = registryModule.updateSandbox;
     });
 
     afterEach(() => {
       if (origHome === undefined) delete process.env.HOME;
       else process.env.HOME = origHome;
       resolveSpy.mockRestore();
-      registryModule.getSandbox = savedGetSandbox;
-      registryModule.updateSandbox = savedUpdateSandbox;
       fs.rmSync(tmpHome, { recursive: true, force: true });
     });
 
     it("refuses a custom preset when sandbox policy state cannot be located", () => {
       // The sandbox is ready on the gateway but missing from the local
       // registry, so the first observed authority cannot be persisted.
-      registryModule.getSandbox = () => null;
+      vi.spyOn(registryModule, "getSandbox").mockImplementation(() => null);
       const errors: string[] = [];
       const errSpy = vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => {
         errors.push(a.map((x) => String(x)).join(" "));
@@ -824,9 +817,9 @@ exit 0
     });
 
     it("refuses a built-in preset when sandbox policy state cannot be located", () => {
-      registryModule.getSandbox = () => null;
+      vi.spyOn(registryModule, "getSandbox").mockImplementation(() => null);
       const updateSpy = vi.fn(() => true);
-      registryModule.updateSandbox = updateSpy;
+      vi.spyOn(registryModule, "updateSandbox").mockImplementation(updateSpy);
       const errors: string[] = [];
       const errSpy = vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => {
         errors.push(a.map((x) => String(x)).join(" "));
@@ -847,11 +840,13 @@ exit 0
 
     it("applies a well-formed custom preset without recording a policy copy", () => {
       let sandbox: Record<string, unknown> = managedSandboxEntry("my-assistant");
-      registryModule.getSandbox = () => sandbox;
-      registryModule.updateSandbox = (_name: string, updates: Record<string, unknown>) => {
-        sandbox = { ...sandbox, ...updates };
-        return true;
-      };
+      vi.spyOn(registryModule, "getSandbox").mockImplementation(() => sandbox);
+      vi.spyOn(registryModule, "updateSandbox").mockImplementation(
+        (_name: string, updates: Record<string, unknown>) => {
+          sandbox = { ...sandbox, ...updates };
+          return true;
+        },
+      );
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
       const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
       try {

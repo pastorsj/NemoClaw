@@ -144,10 +144,10 @@ process.exit(0);
       cmd.includes("d='/sandbox/.openclaw/workspace'"),
     );
     expect(cleanupCommand).toBeDefined();
-    expect(cleanupCommand).toContain("! -name 'nemoclaw'");
-    expect(cleanupCommand).toContain("! -name 'openclaw-weixin'");
+    expect(cleanupCommand).not.toContain("! -name 'nemoclaw'");
+    expect(cleanupCommand).not.toContain("! -name 'openclaw-weixin'");
     expect(cleanupCommand).not.toContain("rm -rf -- '/sandbox/.openclaw/extensions'");
-    expect(cleanupCommand).not.toContain("d='/sandbox/.openclaw/extensions'");
+    expect(cleanupCommand).toContain("d='/sandbox/.openclaw/extensions'");
     expect(loggedCommands).not.toEqual(
       expect.arrayContaining([expect.stringContaining("d='/sandbox/.openclaw/agents'")]),
     );

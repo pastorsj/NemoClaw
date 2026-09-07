@@ -83,6 +83,9 @@ describe("onboard sandbox recreate reservation safety", () => {
       writeOkOpenshell(workspace.binDir);
 
       const script = String.raw`
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const runner = require(${runnerPath});
 require(${onboardScriptMocksPath}).mockStandaloneGatewayTeardownAuthority();
 const _n = (c) => (Array.isArray(c) ? c.join(" ") : String(c)).replace(/'/g, "");
@@ -92,6 +95,19 @@ const onboardSession = require(${onboardSessionPath});
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const harnessFixture = fixtureMocks.installOnboardProcessHarnessPackage("openclaw");
+const agentOnboard = require(${JSON.stringify(path.join(repoRoot, "src", "lib", "agent", "onboard.ts"))});
+agentOnboard.createAgentSandbox = (selectedAgent) => {
+  const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-"));
+  const stagedDockerfile = path.join(buildCtx, "Dockerfile");
+  fs.copyFileSync(selectedAgent.dockerfilePath, stagedDockerfile);
+  return { buildCtx, stagedDockerfile };
+};
+const dockerExec = require(${JSON.stringify(path.join(repoRoot, "src", "lib", "adapters", "docker", "exec.ts"))});
+dockerExec.dockerSpawn = () => {
+  const child = new EventEmitter();
+  process.nextTick(() => child.emit("close", 0));
+  return child;
+};
 
 const events = [];
 const createdSandbox = fixtureMocks.createCreatedSandboxFixture({
@@ -115,6 +131,23 @@ runner.run = (command) => {
 };
 runner.runCapture = (command) => {
   const cmd = _n(command);
+  const selectorMatch = cmd.match(/--selector(?:=|\s+)([^\s]+)/u);
+  if (selectorMatch) {
+    if (createdSandbox.state.lifecycleState !== "created") return "[]";
+    const selector = selectorMatch[1] || "";
+    const separator = selector.indexOf("=");
+    const label = selector.slice(0, separator);
+    const nonce = selector.slice(separator + 1);
+    return JSON.stringify([{
+      id: createdSandbox.state.sandboxId,
+      name: "my-assistant",
+      labels: { [label]: nonce },
+      resource_version: createdSandbox.state.generation,
+      created_at: "2026-08-25T00:00:00Z",
+      phase: createdSandbox.state.phase,
+      current_policy_version: 1,
+    }]);
+  }
   const sandboxCapture = createdSandbox.capture(command);
   if (sandboxCapture !== null) return sandboxCapture;
   if (cmd.includes("forward list")) return "SANDBOX BIND PORT PID STATUS";
@@ -262,6 +295,8 @@ const { createSandbox } = require(${onboardPath});
 
       const result = runOnboardProcess([scriptPath], {
         env: workspaceEnv(workspace, {
+          HOME: fs.realpathSync(workspace.homeDir),
+          TMPDIR: fs.realpathSync(workspace.root),
           NEMOCLAW_NON_INTERACTIVE: "1",
           NEMOCLAW_TEST_MANAGED_IMAGE_CATALOG: "1",
           NEMOCLAW_SANDBOX_PREBUILD: "1",
@@ -282,7 +317,7 @@ const { createSandbox } = require(${onboardPath});
         events: Array<{ kind: string; cmd?: string; name?: string; removed?: boolean }>;
         retainedReservation: { reservationSessionId?: string; model?: string } | null;
         expectedRegistryAuthority: {
-          agent: null;
+          agent: "openclaw";
           harnessPackage: Record<string, unknown>;
         };
       }>(result.stdout);
@@ -349,6 +384,9 @@ const { createSandbox } = require(${onboardPath});
       const recreateJournalPath = JSON.stringify(
         path.join(repoRoot, "src", "lib", "onboard", "onboard-recreate-journal.ts"),
       );
+      const onboardCheckpointPath = JSON.stringify(
+        path.join(repoRoot, "src", "lib", "state", "onboard-checkpoint-migrate.ts"),
+      );
       const preflightPath = JSON.stringify(
         path.join(repoRoot, "src", "lib", "onboard", "preflight.ts"),
       );
@@ -370,6 +408,7 @@ const fixtureMocks = require(${onboardScriptMocksPath});
 fixtureMocks.mockStandaloneGatewayTeardownAuthority();
 const registry = require(${registryPath});
 const onboardSession = require(${onboardSessionPath});
+const onboardCheckpoint = require(${onboardCheckpointPath});
 const recreateJournal = require(${recreateJournalPath});
 const preflight = require(${preflightPath});
 const credentials = require(${credentialsPath});
@@ -380,6 +419,15 @@ const createCountPath = ${JSON.stringify(createCountPath)};
 const effectCountPath = ${JSON.stringify(effectCountPath)};
 const normalize = (command) => (Array.isArray(command) ? command.join(" ") : String(command)).replace(/'/g, "");
 const keepAlive = setInterval(() => {}, 1000);
+const path = require("node:path");
+const harnessFixture = fixtureMocks.installOnboardProcessHarnessPackage("openclaw");
+const agentOnboard = require(${JSON.stringify(path.join(repoRoot, "src", "lib", "agent", "onboard.ts"))});
+agentOnboard.createAgentSandbox = (selectedAgent) => {
+  const buildCtx = fs.mkdtempSync(path.join(process.env.TMPDIR, "nemoclaw-build-"));
+  const stagedDockerfile = path.join(buildCtx, "Dockerfile");
+  fs.copyFileSync(selectedAgent.dockerfilePath, stagedDockerfile);
+  return { buildCtx, stagedDockerfile };
+};
 
 process.env.OPENSHELL_GATEWAY = "nemoclaw";
 preflight.checkPortAvailable = async () => ({ ok: true });
@@ -395,17 +443,22 @@ const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry,
   provider: null,
   model: null,
   sessionId: "session-owner",
+  harnessPackage: harnessFixture.harnessPackage,
+  harnessPackageMigration: harnessFixture.harnessPackageMigration,
+  agentDefinition: harnessFixture.agentDefinition,
   durableRegistry: true,
 });
 
 if (mode === "seed") {
-  onboardSession.saveSession(onboardSession.createSession({
+  const session = onboardSession.createSession({
     sessionId: "session-owner",
     sandboxName: "my-assistant",
     agent: "openclaw",
     harnessPackage: createFixture.harnessPackage,
     harnessPackageMigration: createFixture.harnessPackageMigration,
-  }));
+  });
+  session.checkpoint = onboardCheckpoint.deriveCheckpointFromSession(session);
+  onboardSession.saveSession(session);
   registry.save({
     defaultSandbox: null,
     sandboxes: {
@@ -420,7 +473,7 @@ if (mode === "seed") {
         preferredInferenceApi: null,
         pendingRouteReservation: true,
         reservationSessionId: "session-owner",
-        agent: null,
+        agent: "openclaw",
         harnessPackage: createFixture.harnessPackage,
       },
     },
@@ -484,6 +537,23 @@ runner.run = (command) => {
 };
 runner.runCapture = (command) => {
   const cmd = normalize(command);
+  const selectorMatch = cmd.match(/--selector(?:=|\s+)([^\s]+)/u);
+  if (selectorMatch) {
+    if (createdSandbox.state.lifecycleState !== "created") return "[]";
+    const selector = selectorMatch[1] || "";
+    const separator = selector.indexOf("=");
+    const label = selector.slice(0, separator);
+    const nonce = selector.slice(separator + 1);
+    return JSON.stringify([{
+      id: createdSandbox.state.sandboxId,
+      name: "my-assistant",
+      labels: { [label]: nonce },
+      resource_version: createdSandbox.state.generation,
+      created_at: "2026-08-25T00:00:00Z",
+      phase: createdSandbox.state.phase,
+      current_policy_version: 1,
+    }]);
+  }
   if (cmd.includes("gateway info")) return "Gateway endpoint: http://127.0.0.1:8080";
   if (cmd.includes("policy get") && cmd.includes("--output json")) {
     return JSON.stringify({
@@ -530,7 +600,10 @@ childProcess.spawn = (...args) => {
   };
   child.pid = 4248;
   createChild = child;
-  process.nextTick(() => child.stdout.emit("data", Buffer.from("Created sandbox: my-assistant\n")));
+  process.nextTick(() => {
+    child.stdout.emit("data", Buffer.from("Created sandbox: my-assistant\n"));
+    child.emit("close", 0);
+  });
   return child;
 };
 
@@ -587,6 +660,8 @@ createArgs[16] = async () => {
 `;
       fs.writeFileSync(scriptPath, script);
       const env = workspaceEnv(workspace, {
+        HOME: fs.realpathSync(workspace.homeDir),
+        TMPDIR: fs.realpathSync(workspace.root),
         NEMOCLAW_NON_INTERACTIVE: "1",
         NEMOCLAW_TEST_MANAGED_IMAGE_CATALOG: "1",
         NEMOCLAW_SANDBOX_PREBUILD: "1",
@@ -596,7 +671,11 @@ createArgs[16] = async () => {
         env,
         timeoutMs: 40_000,
       });
-      assert.equal(first.status, 0, first.stderr || first.error?.message);
+      assert.equal(
+        first.status,
+        0,
+        first.output || first.error?.message || "seed subprocess failed",
+      );
       const retained = trailingJsonPayload<{
         error: string;
         registryEntry: {

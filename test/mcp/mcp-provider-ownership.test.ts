@@ -8,6 +8,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { authorizeMcpHarnessScript } from "../helpers/mcp-authority";
+
 function runRemoveIdentityRace(swapAt: "detach" | "delete") {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-mcp-provider-race-"));
   const script = `
@@ -103,7 +105,7 @@ bridge.removeMcpBridge("alpha", "fake").then(
   })),
 );
 `;
-  const result = spawnSync(process.execPath, ["-e", script], {
+  const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
     cwd: process.cwd(),
     encoding: "utf8",
     env: { ...process.env, HOME: home },
@@ -206,7 +208,7 @@ bridge.removeMcpBridge("alpha", "fake").then(
   (error) => { console.error(error); process.exit(1); },
 );
 `;
-  const result = spawnSync(process.execPath, ["-e", script], {
+  const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
     cwd: process.cwd(),
     encoding: "utf8",
     env: { ...process.env, HOME: home },
@@ -346,11 +348,15 @@ bridge.statusMcpBridge("alpha", "fake").then(
   (error) => { console.error(error); process.exit(1); },
 );
 `;
-    const result = spawnSync(process.execPath, ["-e", script], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: openshellStub },
-    });
+    const result = spawnSync(
+      process.execPath,
+      ["-e", authorizeMcpHarnessScript(home, script, { delegateExecToProcessRecovery: false })],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: openshellStub },
+      },
+    );
     const openshellCalls = fs.existsSync(openshellLog) ? fs.readFileSync(openshellLog, "utf8") : "";
     fs.rmSync(home, { recursive: true, force: true });
 
@@ -420,7 +426,7 @@ const secondOutcome = providerActions.detachMissingProviderReference("alpha", {
 const after = providerActions.inspectMcpProviderAttachments("alpha", runtimeSelection);
 process.stdout.write(JSON.stringify({ before, firstOutcome, afterFirst, secondOutcome, after, calls }));
 `;
-    const result = spawnSync(process.execPath, ["-e", script], {
+    const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
       cwd: process.cwd(),
       encoding: "utf8",
       env: { ...process.env, HOME: home },
@@ -501,7 +507,7 @@ try {
 }
 process.stdout.write(JSON.stringify({ message, resourceVersion, calls }));
 `;
-    const result = spawnSync(process.execPath, ["-e", script], {
+    const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
       cwd: process.cwd(),
       encoding: "utf8",
       env: { ...process.env, HOME: home },
@@ -557,7 +563,7 @@ try {
 }
 process.stdout.write(JSON.stringify({ message, calls }));
 `;
-    const result = spawnSync(process.execPath, ["-e", script], {
+    const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
       cwd: process.cwd(),
       encoding: "utf8",
       env: { ...process.env, HOME: home },
@@ -638,7 +644,7 @@ bridge.removeMcpBridge("alpha", "fake", { force: true }).then(
   })),
 );
 `;
-    const result = spawnSync(process.execPath, ["-e", script], {
+    const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
       cwd: process.cwd(),
       encoding: "utf8",
       env: { ...process.env, HOME: home },

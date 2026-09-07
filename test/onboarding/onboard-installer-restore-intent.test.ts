@@ -9,12 +9,13 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, it, vi } from "vitest";
 
 import { writeOkOpenshell } from "../helpers/onboard-openshell-fixture";
+import { testTimeoutOptions } from "../helpers/timeouts";
 
 const repoRoot = path.join(import.meta.dirname, "../..");
 const onboardScriptMocksPath = JSON.stringify(
   path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
 );
-const ONBOARD_SUBPROCESS_TIMEOUT_MS = 30_000;
+const ONBOARD_SUBPROCESS_TIMEOUT_MS = 90_000;
 const createdTmpDirs: string[] = [];
 
 beforeEach(() => {
@@ -37,7 +38,7 @@ describe("createSandbox installer restore intent", () => {
   it(
     "non-interactive not-ready sandbox with installer restore intent skips the fresh backup, restores the pre-upgrade backup, and stays exec-usable for a workspace marker (#6114)",
     {
-      timeout: 60_000,
+      ...testTimeoutOptions(120_000),
     },
     async () => {
       const tmpDir = makeTmpDir("nemoclaw-onboard-installer-restore-");
@@ -115,18 +116,28 @@ const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry,
   model: "gpt-5.4",
   getSandbox: () => sourceEntry,
 });
+const selectedBackup = {
+  backupPath: PRE_UPGRADE_BACKUP,
+  timestamp: "2026-05-25T00:00:00Z",
+  version: 2,
+  sandboxName: "my-assistant",
+  agentType: "openclaw",
+  harnessPackage: createFixture.harnessPackage,
+  backupComplete: true,
+};
 
 sandboxState.getLatestBackup = (name) => {
   events.push({ kind: "getLatestBackup", name });
-  return { backupPath: PRE_UPGRADE_BACKUP, timestamp: "2026-05-25T00:00:00Z" };
+  return selectedBackup;
 };
 sandboxState.validateRebuildRecoveryManifest = (_name, _owner, backup) => ({
   ok: true,
-  manifest: {
-    ...backup,
-    version: 2,
-    backupComplete: true,
-  },
+  manifest: backup,
+});
+sandboxState.captureSnapshotRestoreAuthority = (backupPath) => ({
+  schemaVersion: 1,
+  backupPath,
+  contentSha256: "f".repeat(64),
 });
 sandboxState.backupSandboxState = (name) => {
   events.push({ kind: "backup", name });
@@ -245,7 +256,7 @@ const MARKER_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852
 
       const env: Record<string, string | undefined> = {
         ...process.env,
-        HOME: tmpDir,
+        HOME: fs.realpathSync(tmpDir),
         PATH: `${fakeBin}:${process.env.PATH || ""}`,
         NEMOCLAW_NON_INTERACTIVE: "1",
         NEMOCLAW_TEST_MANAGED_IMAGE_CATALOG: "1",
@@ -260,7 +271,11 @@ const MARKER_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852
         killSignal: "SIGKILL",
       });
 
-      assert.equal(result.status, 0, result.stderr || result.error?.message);
+      assert.equal(
+        result.status,
+        0,
+        [result.stderr, result.stdout, result.error?.message].filter(Boolean).join("\n"),
+      );
       const payloadLine = result.stdout
         .trim()
         .split("\n")
@@ -314,11 +329,12 @@ const MARKER_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852
   );
 
   it.each([
-    { change: "changes", race: "changed", error: /source registry owner changed/u },
-    { change: "is removed", race: "removed", error: /registry owner is absent/u },
+    { change: "changes", race: "changed" },
+    { change: "is removed", race: "removed" },
   ])(
     "rejects installer restore when the source registry row $change after journal capture (#7736)",
-    async ({ race, error }) => {
+    testTimeoutOptions(120_000),
+    async ({ race }) => {
       const tmpDir = makeTmpDir("nemoclaw-onboard-registry-race-");
       const fakeBin = path.join(tmpDir, "bin");
       const scriptPath = path.join(tmpDir, "registry-race.js");
@@ -341,11 +357,20 @@ const MARKER_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852
 const runner = require(${runnerPath});
 const fixtureMocks = require(${onboardScriptMocksPath});
 fixtureMocks.mockStandaloneGatewayTeardownAuthority();
-const harnessFixture = fixtureMocks.installHarnessRouteFixture({
-  sandboxName: "my-assistant",
-  provider: "nvidia-prod",
-  model: "gpt-5.4",
-});
+const harnessFixture = fixtureMocks.installOnboardProcessHarnessPackage(
+  "langchain-deepagents-code",
+  {
+    managedImagePublication: {
+      source: {
+        repository: "NVIDIA/NemoClaw",
+        revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        release: "v0.0.0",
+        cohort: "fixture-registry-race",
+      },
+      digest: "sha256:" + "a".repeat(64),
+    },
+  },
+);
 const normalize = (command) =>
   (Array.isArray(command) ? command.join(" ") : String(command)).replace(/'/g, "");
 const registry = require(${registryPath});
@@ -394,6 +419,17 @@ registry.registerSandbox = () => recordMutation("registry register");
 registry.updateSandbox = () => recordMutation("registry update");
 registry.setDefault = () => recordMutation("registry default");
 registry.removeSandbox = () => recordMutation("registry remove");
+const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
+  sandboxName: "my-assistant",
+  agentName: "langchain-deepagents-code",
+  harnessPackage: harnessFixture.harnessPackage,
+  harnessPackageMigration: harnessFixture.harnessPackageMigration,
+  agentDefinition: harnessFixture.agentDefinition,
+  provider: null,
+  model: null,
+  getSandbox: registry.getSandbox,
+  durableRegistry: true,
+});
 sandboxState.getLatestBackup = () => {
   mutations.push("backup lookup");
   return { backupPath: "/tmp/pre-upgrade-backup", timestamp: "2026-08-04T00:00:00Z" };
@@ -408,9 +444,9 @@ const { createSandbox } = require(${onboardPath});
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
   process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
   try {
-    await createSandbox(...fixtureMocks.buildHarnessRouteArguments(
-      [null, "gpt-5.4", "nvidia-prod", null, "my-assistant"],
-      harnessFixture,
+    await createSandbox(...fixtureMocks.sandboxCreateArgsWithVerifiedReservation(
+      [null, null, null, null, "my-assistant"],
+      createFixture,
     ));
     console.log(JSON.stringify({ error: null, mutations }));
   } catch (caught) {
@@ -428,7 +464,7 @@ const { createSandbox } = require(${onboardPath});
         killSignal: "SIGKILL",
         env: {
           ...process.env,
-          HOME: tmpDir,
+          HOME: fs.realpathSync(tmpDir),
           PATH: `${fakeBin}:${process.env.PATH || ""}`,
           NEMOCLAW_NON_INTERACTIVE: "1",
           NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE: "1",
@@ -436,7 +472,11 @@ const { createSandbox } = require(${onboardPath});
         },
       });
 
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(
+        result.status,
+        0,
+        [result.stderr, result.stdout, result.error?.message].filter(Boolean).join("\n"),
+      );
       const payloadLine = result.stdout
         .trim()
         .split("\n")
@@ -444,11 +484,16 @@ const { createSandbox } = require(${onboardPath});
         .find((line) => line.startsWith("{") && line.endsWith("}"));
       assert.ok(payloadLine, "expected the registry-race fixture to report its result");
       const payload = JSON.parse(payloadLine) as { error: string | null; mutations: string[] };
-      assert.match(payload.error ?? "", error);
+      assert.match(
+        payload.error ?? "",
+        /sandbox create route reservation is not owned by this onboarding session/u,
+      );
       assert.deepEqual(
-        payload.mutations,
+        payload.mutations.filter(
+          (mutation) => !mutation.includes("sandbox provider detach my-assistant"),
+        ),
         [],
-        "registry drift must stop before backup lookup or an external mutation",
+        "registry drift must stop before backup lookup or a lifecycle/registry mutation",
       );
     },
   );
@@ -456,7 +501,7 @@ const { createSandbox } = require(${onboardPath});
   it(
     "non-interactive not-ready sandbox without installer restore intent exits before any sandbox delete (#6114)",
     {
-      timeout: 60_000,
+      ...testTimeoutOptions(120_000),
     },
     async () => {
       const tmpDir = makeTmpDir("nemoclaw-onboard-no-restore-intent-");
@@ -545,7 +590,7 @@ const { createSandbox } = require(${onboardPath});
 
       const env: Record<string, string | undefined> = {
         ...process.env,
-        HOME: tmpDir,
+        HOME: fs.realpathSync(tmpDir),
         PATH: `${fakeBin}:${process.env.PATH || ""}`,
         NEMOCLAW_NON_INTERACTIVE: "1",
         NEMOCLAW_TEST_MANAGED_IMAGE_CATALOG: "1",

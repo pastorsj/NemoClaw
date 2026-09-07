@@ -10,6 +10,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const requireSource = createRequire(import.meta.url);
+const gatewayRestart = requireSource(
+  "../../src/lib/actions/sandbox/gateway-restart.ts",
+) as typeof import("../../src/lib/actions/sandbox/gateway-restart.js");
 const {
   executeGatewaySupervisorAction,
   executeSandboxCommand,
@@ -288,9 +291,28 @@ describe("waitForManagedGatewaySupervisor", () => {
 describe("executeGatewaySupervisorAction", () => {
   const targetContainerId = "a".repeat(64);
 
+  function stubLifecycleResult(options: {
+    status: number;
+    stdout?: string;
+    stderr?: string;
+  }): void {
+    vi.spyOn(gatewayRestart, "executeSandboxProcessLifecycle").mockReturnValue({
+      kind: "completed",
+      authority: "legacy",
+      nonce: "c".repeat(64),
+      targetResourceHandle: targetContainerId,
+      result: {
+        status: options.status,
+        signal: null,
+        stdout: Buffer.from(options.stdout ?? ""),
+        stderr: Buffer.from(options.stderr ?? ""),
+      },
+    });
+  }
+
   it("sanitizes a temporarily unavailable direct container into the retry marker", () => {
     const privilegedExec = requireSource("../../src/lib/sandbox/privileged-exec.ts");
-    vi.spyOn(privilegedExec, "resolvePrivilegedSandboxTarget").mockImplementation(() => {
+    vi.spyOn(gatewayRestart, "executeSandboxProcessLifecycle").mockImplementation(() => {
       throw new Error("temporary direct-container discovery detail");
     });
     vi.spyOn(privilegedExec, "isDirectSandboxFallbackUnavailableError").mockReturnValue(true);
@@ -304,7 +326,7 @@ describe("executeGatewaySupervisorAction", () => {
 
   it("keeps other privileged-control refusals terminal and classified", () => {
     const privilegedExec = requireSource("../../src/lib/sandbox/privileged-exec.ts");
-    vi.spyOn(privilegedExec, "resolvePrivilegedSandboxTarget").mockImplementation(() => {
+    vi.spyOn(gatewayRestart, "executeSandboxProcessLifecycle").mockImplementation(() => {
       throw new Error(
         "OpenShell container identity changed for sandbox 'new-clone'; refusing privileged execution against a different container.",
       );
@@ -321,7 +343,7 @@ describe("executeGatewaySupervisorAction", () => {
 
   it("emits the managed-control identity marker for a pinned container refusal (#9364)", () => {
     const privilegedExec = requireSource("../../src/lib/sandbox/privileged-exec.ts");
-    vi.spyOn(privilegedExec, "resolvePrivilegedSandboxTarget").mockImplementation(() => {
+    vi.spyOn(gatewayRestart, "executeSandboxProcessLifecycle").mockImplementation(() => {
       throw new Error(
         "OpenShell container identity changed for sandbox 'new-clone'; refusing privileged execution against a different container.",
       );
@@ -338,18 +360,11 @@ describe("executeGatewaySupervisorAction", () => {
   });
 
   it("binds an exact Docker restart transition to the selected container (#8726)", () => {
-    const privilegedExec = requireSource("../../src/lib/sandbox/privileged-exec.ts");
-    vi.spyOn(privilegedExec, "resolvePrivilegedSandboxTarget").mockReturnValue({
-      resourceHandle: targetContainerId,
-    });
-    vi.spyOn(privilegedExec, "executePrivilegedSandboxCommand").mockReturnValue({
+    stubLifecycleResult({
       status: 1,
-      signal: null,
-      stdout: Buffer.alloc(0),
-      stderr: Buffer.from(
+      stderr:
         `Error response from daemon: Container ${targetContainerId} is restarting, wait until the container is running`,
-      ),
-    } as never);
+    });
 
     expect(executeGatewaySupervisorAction("new-clone", "probe", 100)).toEqual({
       status: 1,
@@ -367,18 +382,12 @@ describe("executeGatewaySupervisorAction", () => {
   ])(
     "does not bind %s as a Docker restart transition (#8726)",
     (_case, status, stdout, id, suffix) => {
-      const privilegedExec = requireSource("../../src/lib/sandbox/privileged-exec.ts");
-      vi.spyOn(privilegedExec, "resolvePrivilegedSandboxTarget").mockReturnValue({
-        resourceHandle: targetContainerId,
-      });
-      vi.spyOn(privilegedExec, "executePrivilegedSandboxCommand").mockReturnValue({
+      stubLifecycleResult({
         status,
-        signal: null,
-        stdout: Buffer.from(stdout),
-        stderr: Buffer.from(
+        stdout,
+        stderr:
           `Error response from daemon: Container ${id} is restarting, wait until the container is running${suffix}`,
-        ),
-      } as never);
+      });
 
       expect(executeGatewaySupervisorAction("new-clone", "probe", 100)).toEqual({
         status,

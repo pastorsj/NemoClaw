@@ -260,7 +260,7 @@ startGateway(null).catch((error) => {
         encoding: "utf-8",
         env: {
           ...process.env,
-          HOME: tmpDir,
+          HOME: fs.realpathSync(tmpDir),
           PATH: `${fakeBin}:${process.env.PATH || ""}`,
           NEMOCLAW_HEALTH_POLL_COUNT: "0",
           NEMOCLAW_NON_INTERACTIVE: "1",
@@ -514,6 +514,8 @@ startGateway(null).catch((error) => {
     };
     const session = {
       agent: "hermes",
+      harnessPackage: null,
+      harnessPackageMigration: null,
       provider: "hermes-provider",
       model: "moonshotai/kimi-k2.6",
       endpointUrl: "https://8.8.8.8/v1",
@@ -689,16 +691,20 @@ startGateway(null).catch((error) => {
 	const _n = (c) => (Array.isArray(c) ? c.join(" ") : String(c)).replace(/'/g, "");
 	const registry = require(${registryPath});
 	const fixtureMocks = require(${onboardScriptMocksPath});
-	const harnessFixture = fixtureMocks.installHarnessRouteFixture({
+	const existingSandbox = fixtureMocks.createCreatedSandboxFixture({ lifecycleState: "created" });
+	const harnessFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
 	  sandboxName: "my-assistant",
 	  provider: "nvidia-prod",
 	  model: "gpt-5.4",
+	  getSandbox: () => fixtureMocks.sandboxLifecycleFixture({
+	    name: "my-assistant",
+	    toolDisclosure: "progressive",
+	  }, { sandboxId: existingSandbox.state.sandboxId }),
 	});
 	const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
 const commands = [];
-const existingSandbox = fixtureMocks.createCreatedSandboxFixture({ lifecycleState: "created" });
 const forwardService = fixtureMocks.installForwardServiceReachabilityFixture();
 existingSandbox.installRuntimeObservation();
 const sandboxCommand = (command) => Array.isArray(command) ? command : _n(command).split(/\s+/u);
@@ -714,12 +720,6 @@ runner.runCapture = (command) => {
   if (_n(command).includes("forward list")) return "SANDBOX BIND PORT PID STATUS";
   return "";
 };
-	registry.getSandbox = () => fixtureMocks.sandboxLifecycleFixture({
-	  name: "my-assistant",
-	  toolDisclosure: "progressive",
-	  ...harnessFixture.registryAuthority,
-	}, { sandboxId: existingSandbox.state.sandboxId });
-
 childProcess.spawn = (...args) => {
   forwardService.recordSpawn(args);
   const child = new EventEmitter();
@@ -738,7 +738,7 @@ const { createSandbox } = require(${onboardPath});
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
   process.env.CHAT_UI_URL = "https://chat.example.com:${dashboardPort}";
   const sandboxName = await createSandbox(
-    ...fixtureMocks.buildHarnessRouteArguments(
+    ...fixtureMocks.sandboxCreateArgsWithVerifiedReservation(
       [null, "gpt-5.4", "nvidia-prod", null, "my-assistant"],
       harnessFixture,
     ),
@@ -756,13 +756,13 @@ const { createSandbox } = require(${onboardPath});
       encoding: "utf-8",
       env: {
         ...process.env,
-        HOME: tmpDir,
+        HOME: fs.realpathSync(tmpDir),
         PATH: `${fakeBin}:${process.env.PATH || ""}`,
         NEMOCLAW_NON_INTERACTIVE: "1",
       },
     });
 
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
     const payload = parseStdoutJson<{
       sandboxName: string;
       commands: CommandEntry[];
@@ -773,7 +773,7 @@ const { createSandbox } = require(${onboardPath});
         (entry: CommandEntry) =>
           entry.command.includes("forward service my-assistant") &&
           entry.command.includes("--target-port 18789") &&
-          entry.command.includes("--local 0.0.0.0:18789"),
+          entry.command.includes(`--local 0.0.0.0:${dashboardPort}`),
       ),
       "expected dashboard forward restore on sandbox reuse",
     );
@@ -943,7 +943,7 @@ const { createSandbox } = require(${onboardPath});
       encoding: "utf-8",
       env: {
         ...process.env,
-        HOME: tmpDir,
+        HOME: fs.realpathSync(tmpDir),
         PATH: `${fakeBin}:${process.env.PATH || ""}`,
         NEMOCLAW_NON_INTERACTIVE: "1",
         NEMOCLAW_RECREATE_SANDBOX: "1",
@@ -1137,7 +1137,7 @@ const { createSandboxWithTemporaryManagedRuntime } = require(${onboardPath});
 
     const env: Record<string, string | undefined> = {
       ...process.env,
-      HOME: tmpDir,
+      HOME: fs.realpathSync(tmpDir),
       PATH: `${fakeBin}:${process.env.PATH || ""}`,
       NEMOCLAW_EXPERIMENTAL_PROFILE: "portable",
       NEMOCLAW_NON_INTERACTIVE: "1",

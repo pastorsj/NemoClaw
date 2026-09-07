@@ -22,8 +22,9 @@ import {
   type ShippedManagedImageAgent,
 } from "../../src/lib/onboard/managed-image/contract";
 import {
-  decodeManagedStartupProfile,
-  encodeManagedStartupProfile,
+  decodeManagedStartupDurableProfile,
+  encodeManagedStartupDurableProfile,
+  isManagedStartupPackageProfile,
 } from "../../src/lib/onboard/managed-startup/profile";
 import { nodeOptionsWithoutSourceLoader, SOURCE_REQUIRE_HOOK } from "./source-loader-options";
 
@@ -33,13 +34,13 @@ const MODEL = "nvidia/test-managed-model";
 const PROVIDER = "nvidia-prod";
 const SOURCE_REVISION = getBuildIdentity({ rootDir: REPO_ROOT }).sourceRevision;
 const CATALOG_RELEASE = "v0.0.97";
-const AUTHENTICATED_PROXY_ENVIRONMENT = {
-  HTTP_PROXY: "http://upper-http:upper-secret@upper-http.example.test:18080",
-  HTTPS_PROXY: "http://upper-https:upper-secret@upper-https.example.test:18443",
+const HOST_PROXY_ENVIRONMENT = {
+  HTTP_PROXY: "http://upper-http.example.test:18080",
+  HTTPS_PROXY: "http://upper-https.example.test:18443",
   NO_PROXY: "upper.internal",
-  http_proxy: "http://lower-http:lower-secret@lower-http.example.test:28080",
-  https_proxy: "http://lower-https:lower-secret@lower-https.example.test:28443",
-  no_proxy: "lower.internal",
+  http_proxy: "http://upper-http.example.test:18080",
+  https_proxy: "http://upper-https.example.test:18443",
+  no_proxy: "upper.internal",
 } as const;
 const DIGESTS = {
   openclaw: `sha256:${"1".repeat(64)}`,
@@ -94,6 +95,7 @@ interface ChildPayload {
     };
   }>;
   runnerCommands: string[];
+  selectionQualificationCommand: string[] | null;
   sandboxId: string;
   spawnCalls: SpawnCall[];
 }
@@ -193,6 +195,9 @@ const replace = (target, name, value) => {
 };
 const childProcess = require("node:child_process");
 const fixtureMocks = require(${source("test/helpers/onboard-script-mocks.cjs")});
+const harnessFixture = fixtureMocks.installOnboardProcessHarnessPackage(agentName, {
+  managedImagePublication: catalogTemplate[agentName],
+});
 fixtureMocks.mockStandaloneGatewayTeardownAuthority();
 const createdSandbox = fixtureMocks.createCreatedSandboxFixture({
   sandboxName,
@@ -437,6 +442,7 @@ runner.run = (command, options = {}) => {
     createdSandbox.delete();
     forwardService.release();
     existingEntryAvailable = false;
+    registry.removeSandbox(sandboxName);
   }
   if (/(?:^|\s)docker(?:\s+buildx)?\s+build(?:\s|$)/u.test(normalized)) {
     return poison("docker build");
@@ -533,6 +539,7 @@ const sourceEntry = recreate ? fixtureMocks.sandboxLifecycleFixture({
   imageTag: catalogTemplate.hermes.reference,
   model,
   provider,
+  secondaryForwardPort: 8642,
   toolDisclosure: "progressive",
   workload: {
     schemaVersion: 1,
@@ -546,7 +553,7 @@ const sourceEntry = recreate ? fixtureMocks.sandboxLifecycleFixture({
     startupProfileContractVersion: 1,
     encodedProfile: "existing-profile",
     startupProfileSha256: "0".repeat(64),
-    credentialProxyReplayRequired: true,
+    credentialProxyReplayRequired: false,
     shared: true,
   },
 }, { sandboxName, sandboxId: createdSandbox.state.sandboxId }) : null;
@@ -564,10 +571,13 @@ registry.removeSandbox = () => true;
 const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
   sandboxName,
   agentName,
+  harnessPackage: harnessFixture.harnessPackage,
+  harnessPackageMigration: harnessFixture.harnessPackageMigration,
+  agentDefinition: harnessFixture.agentDefinition,
   provider,
   model,
   preferredInferenceApi: "openai-completions",
-  getSandbox: registry.getSandbox,
+  sourceEntry,
   registerSandbox: (entry) => {
     registerCalls.push(entry);
     registeredSandbox = entry;
@@ -607,7 +617,6 @@ childProcess.spawn = (command, args = [], options = {}) => {
   return child;
 };
 
-const { loadAgent } = require(${source("src/lib/agent/defs.ts")});
 const { createSandbox } = require(${source("src/lib/onboard.ts")});
 
 (async () => {
@@ -623,7 +632,7 @@ const { createSandbox } = require(${source("src/lib/onboard.ts")});
         null,
         [],
         null,
-        loadAgent(agentName),
+        harnessFixture.agentDefinition,
         null,
         null,
         null,
@@ -639,11 +648,19 @@ const { createSandbox } = require(${source("src/lib/onboard.ts")});
     managedBootstrapCalls,
     registerCalls,
     runnerCommands,
+    selectionQualificationCommand:
+      harnessFixture.agentDefinition.runtime?.selection_qualification?.command ?? null,
     sandboxId: createdSandbox.state.sandboxId,
     spawnCalls,
   }));
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : error);
+  console.error(JSON.stringify({
+    createdSandbox: createdSandbox.state,
+    registryEntry: registry.getSandbox(sandboxName),
+    runnerCommands,
+    session: require(${source("src/lib/state/onboard-session.ts")}).loadSession(),
+  }));
   process.exit(1);
 });
 `;
@@ -660,7 +677,23 @@ function writeRuntimeStubs(fakeBin: string, dockerLog: string): void {
       'if [ "${1:-}" = "policy" ] && [ "${2:-}" = "list" ] && [[ " $* " = *" --global "* ]]; then',
       '  printf "%s\\n" "No global policy history found" >&2',
       "fi",
+      'if [ "${1:-}" = "sandbox" ] && [ "${2:-}" = "ssh-config" ]; then',
+      '  printf "Host openshell-%s.default\\n  HostName 127.0.0.1\\n  User sandbox\\n" "${3:-sandbox}"',
+      "fi",
       "exit 0",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(
+    path.join(fakeBin, "ssh"),
+    [
+      "#!/usr/bin/env bash",
+      'if [[ "$*" = *"inspect-managed-extensions"* ]]; then',
+      `  printf '%s\\n' '{"schemaVersion":1,"extensions":[]}'`,
+      "else",
+      `  printf '%s\\n' '{"version":1,"installRecords":{},"loadPaths":[]}'`,
+      "fi",
       "",
     ].join("\n"),
     { mode: 0o755 },
@@ -726,7 +759,7 @@ function runManagedOnboard(
       NODE_OPTIONS: nodeOptionsWithoutSourceLoader(process.env.NODE_OPTIONS),
       PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
       TMPDIR: process.env.TMPDIR ?? os.tmpdir(),
-      ...AUTHENTICATED_PROXY_ENVIRONMENT,
+      ...HOST_PROXY_ENVIRONMENT,
     },
   });
   expect(
@@ -773,16 +806,7 @@ function assertManagedLaunch(
     sandboxName: expect.stringMatching(/^managed-/u),
     profileFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u),
   });
-  expect(result.payload.catalogCalls).toHaveLength(1);
-  expect(result.payload.catalogCalls[0]?.release).toBe(CATALOG_RELEASE);
-  expect(result.payload.catalogCalls[0]?.references).toEqual(
-    Object.fromEntries(
-      SHIPPED_MANAGED_IMAGE_AGENTS.map((catalogAgent) => [
-        catalogAgent,
-        contractFor(catalogAgent).reference,
-      ]),
-    ),
-  );
+  expect(result.payload.catalogCalls).toEqual([]);
 
   const createCalls = result.payload.spawnCalls.filter(
     ({ args }) => args[0] === "sandbox" && args[1] === "create",
@@ -817,20 +841,31 @@ function assertManagedLaunch(
   const encodedProfile = bootstrapRequest?.encodedProfile;
   expect(encodedProfile).toEqual(expect.any(String));
   const requiredEncodedProfile = encodedProfile as string;
-  const profile = decodeManagedStartupProfile(requiredEncodedProfile);
-  expect(encodeManagedStartupProfile(profile)).toBe(requiredEncodedProfile);
+  const profile = decodeManagedStartupDurableProfile(requiredEncodedProfile);
+  expect(encodeManagedStartupDurableProfile(profile)).toBe(requiredEncodedProfile);
+  expect(isManagedStartupPackageProfile(profile)).toBe(true);
+  if (!isManagedStartupPackageProfile(profile)) {
+    throw new Error(`${agent} did not emit the receipt-backed managed startup profile`);
+  }
   expect(profile).toMatchObject({
     schemaVersion: MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
+    profileKind: "package",
     agent,
-    agentConfig: { agent },
-    inference: {
-      model: MODEL,
-      upstreamProvider: PROVIDER,
+    harnessPackage: {
+      id: agent,
     },
-    dashboard: { agent },
+    desiredState: {
+      configuration: { agent },
+      inference: {
+        model: MODEL,
+        upstreamProvider: PROVIDER,
+      },
+      dashboard: { agent },
+    },
   });
+  const desiredState = profile.desiredState;
   if (agent === "langchain-deepagents-code") {
-    expect(profile.dashboard).toEqual({ agent, mode: "disabled" });
+    expect(desiredState.dashboard).toEqual({ agent, mode: "disabled" });
     expect(createArgs.join("\n")).not.toContain("CHAT_UI_URL=");
     expect(createArgs.join("\n")).not.toContain("NEMOCLAW_DASHBOARD_PORT=");
     expect(
@@ -843,8 +878,11 @@ function assertManagedLaunch(
       command.includes("sandbox exec --name"),
     );
     expect(sandboxExecCommands).toHaveLength(1);
+    expect(result.payload.selectionQualificationCommand).toEqual([
+      "/usr/local/lib/nemoclaw/dcode-selection-qualify",
+    ]);
     expect(sandboxExecCommands[0]).toContain(
-      `sandbox exec --name ${bootstrapRequest?.sandboxName} --gateway nemoclaw -- /usr/local/bin/dcode identity`,
+      `sandbox exec --name ${bootstrapRequest?.sandboxName} --gateway nemoclaw -- ${result.payload.selectionQualificationCommand?.join(" ")}`,
     );
   } else {
     expect(
@@ -861,17 +899,14 @@ function assertManagedLaunch(
     ).toBe(true);
   }
   expect(createArgs.filter((arg) => arg.startsWith("NEMOCLAW_CORPORATE_CA_B64="))).toEqual([]);
-  expect(profile.proxy).toMatchObject({
-    hostHttpUrl: null,
-    hostHttpsUrl: null,
-    hostNoProxy: [],
+  expect(desiredState.proxy).toMatchObject({
+    hostHttpUrl: HOST_PROXY_ENVIRONMENT.HTTP_PROXY,
+    hostHttpsUrl: HOST_PROXY_ENVIRONMENT.HTTPS_PROXY,
+    hostNoProxy: expect.arrayContaining([HOST_PROXY_ENVIRONMENT.NO_PROXY]),
   });
 
-  const serializedCreate = createArgs.join("\n");
-  expect(serializedCreate.includes("upper-secret")).toBe(agent !== "langchain-deepagents-code");
-  expect(serializedCreate.includes("lower-secret")).toBe(agent !== "langchain-deepagents-code");
   const expectedForwardedProxyEntries =
-    agent === "langchain-deepagents-code" ? [] : Object.entries(AUTHENTICATED_PROXY_ENVIRONMENT);
+    agent === "langchain-deepagents-code" ? [] : Object.entries(HOST_PROXY_ENVIRONMENT);
   for (const [name, value] of expectedForwardedProxyEntries) {
     const forwarded = createArgs.find((argument) => argument.startsWith(`${name}=`));
     const expected =
@@ -910,12 +945,9 @@ function assertManagedLaunch(
     startupProfileContractVersion: MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
     encodedProfile: requiredEncodedProfile,
     startupProfileSha256: createHash("sha256").update(requiredEncodedProfile, "utf8").digest("hex"),
-    credentialProxyReplayRequired: agent !== "langchain-deepagents-code",
+    credentialProxyReplayRequired: false,
     shared: true,
   });
-  const serializedReceipt = JSON.stringify(registration?.workload);
-  expect(serializedReceipt).not.toContain("upper-secret");
-  expect(serializedReceipt).not.toContain("lower-secret");
   expect(
     result.payload.runnerCommands.some((command) =>
       /(?:^|\s)docker(?:\s+buildx)?\s+build(?:\s|$)/u.test(command),

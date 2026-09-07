@@ -50,14 +50,30 @@ const onboardSession: typeof import("../../src/lib/state/onboard-session") = req
 const rebuildResumeSession: typeof import("../../src/lib/actions/sandbox/rebuild-resume-session") = require("../../src/lib/actions/sandbox/rebuild-resume-session");
 const { rewindSessionForRebuildResume } = rebuildResumeSession;
 
+function stubGetSandbox(implementation: typeof registry.getSandbox): void {
+  vi.spyOn(registry, "getSandbox").mockImplementation(implementation);
+}
+
+function stubListSandboxes(implementation: typeof registry.listSandboxes): void {
+  vi.spyOn(registry, "listSandboxes").mockImplementation(implementation);
+}
+
+function stubLoadSession(implementation: typeof onboardSession.loadSession): void {
+  const current = onboardSession.loadSession;
+  const loader = vi.isMockFunction(current) ? current : vi.spyOn(onboardSession, "loadSession");
+  loader.mockImplementation(implementation);
+}
+
 // Force readLiveInference's defaultSandbox check to fail so unit tests that
 // expect null don't depend on whether openshell is on PATH.
 function stubLiveGatewayUntrusted(): void {
-  registry.listSandboxes = () =>
-    ({
-      sandboxes: [{ name: "other-default" }, { name: "another" }],
-      defaultSandbox: "other-default",
-    }) as ReturnType<typeof registry.listSandboxes>;
+  stubListSandboxes(
+    () =>
+      ({
+        sandboxes: [{ name: "other-default" }, { name: "another" }],
+        defaultSandbox: "other-default",
+      }) as ReturnType<typeof registry.listSandboxes>,
+  );
 }
 
 describe("providerNameToOptionKey", () => {
@@ -95,22 +111,17 @@ describe("providerNameToOptionKey", () => {
 });
 
 describe("readRecordedProvider", () => {
-  const originalGetSandbox = registry.getSandbox;
-  const originalListSandboxes = registry.listSandboxes;
-  const originalLoadSession = onboardSession.loadSession;
   afterEach(() => {
-    registry.getSandbox = originalGetSandbox;
-    registry.listSandboxes = originalListSandboxes;
-    onboardSession.loadSession = originalLoadSession;
     vi.restoreAllMocks();
   });
 
   it("returns the provider stored in sandboxes.json", () => {
-    registry.getSandbox = (name: string) =>
+    stubGetSandbox((name: string) =>
       name === "spark-1"
         ? ({ name, provider: "ollama-local" } as ReturnType<typeof registry.getSandbox>)
-        : null;
-    onboardSession.loadSession = () => null;
+        : null,
+    );
+    stubLoadSession(() => null);
     stubLiveGatewayUntrusted();
     expect(readRecordedProvider("spark-1")).toBe("ollama-local");
   });
@@ -119,40 +130,49 @@ describe("readRecordedProvider", () => {
     // Simulates the #2728 rebuild flow: registry.removeSandbox has already
     // run, so getSandbox returns null. The session was enriched before the
     // destroy and still carries the previous provider.
-    registry.getSandbox = () => null;
-    onboardSession.loadSession = () =>
-      ({
-        sandboxName: "spark-1",
-        provider: "ollama-local",
-        model: "qwen2.5:14b",
-      }) as ReturnType<typeof onboardSession.loadSession>;
+    stubGetSandbox(() => null);
+    stubLoadSession(
+      () =>
+        ({
+          sandboxName: "spark-1",
+          provider: "ollama-local",
+          model: "qwen2.5:14b",
+        }) as ReturnType<typeof onboardSession.loadSession>,
+    );
     stubLiveGatewayUntrusted();
     expect(readRecordedProvider("spark-1")).toBe("ollama-local");
   });
 
   it("ignores a session that belongs to a different sandbox", () => {
-    registry.getSandbox = () => null;
-    onboardSession.loadSession = () =>
-      ({
-        sandboxName: "other-sandbox",
-        provider: "ollama-local",
-      }) as ReturnType<typeof onboardSession.loadSession>;
+    stubGetSandbox(() => null);
+    stubLoadSession(
+      () =>
+        ({
+          sandboxName: "other-sandbox",
+          provider: "ollama-local",
+        }) as ReturnType<typeof onboardSession.loadSession>,
+    );
     stubLiveGatewayUntrusted();
     expect(readRecordedProvider("spark-1")).toBeNull();
   });
 
   it("returns null when registry, session, and live gateway all yield nothing", () => {
-    registry.getSandbox = () => null;
-    onboardSession.loadSession = () => null;
+    stubGetSandbox(() => null);
+    stubLoadSession(() => null);
     stubLiveGatewayUntrusted();
     expect(readRecordedProvider("missing")).toBeNull();
   });
 
   it("returns null when registry entry has no provider and session has none either", () => {
-    registry.getSandbox = () =>
-      ({ name: "spark-1", provider: null }) as ReturnType<typeof registry.getSandbox>;
-    onboardSession.loadSession = () =>
-      ({ sandboxName: "spark-1", provider: null }) as ReturnType<typeof onboardSession.loadSession>;
+    stubGetSandbox(
+      () => ({ name: "spark-1", provider: null }) as ReturnType<typeof registry.getSandbox>,
+    );
+    stubLoadSession(
+      () =>
+        ({ sandboxName: "spark-1", provider: null }) as ReturnType<
+          typeof onboardSession.loadSession
+        >,
+    );
     stubLiveGatewayUntrusted();
     expect(readRecordedProvider("spark-1")).toBeNull();
   });
@@ -164,16 +184,16 @@ describe("readRecordedProvider", () => {
   });
 
   it("fails closed instead of trusting session state when the registry read throws (#6630)", () => {
-    registry.getSandbox = () => {
+    stubGetSandbox(() => {
       throw new Error("registry unreadable");
-    };
+    });
     const loadSession = vi.fn(
       () =>
         ({ sandboxName: "spark-1", provider: "ollama-local" }) as ReturnType<
           typeof onboardSession.loadSession
         >,
     );
-    onboardSession.loadSession = loadSession;
+    stubLoadSession(loadSession);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     stubLiveGatewayUntrusted();
 
@@ -183,15 +203,15 @@ describe("readRecordedProvider", () => {
   });
 
   it("returns null when registry, session, and live-gateway lookups all throw", () => {
-    registry.getSandbox = () => {
+    stubGetSandbox(() => {
       throw new Error("registry unreadable");
-    };
-    onboardSession.loadSession = () => {
+    });
+    stubLoadSession(() => {
       throw new Error("session unreadable");
-    };
-    registry.listSandboxes = () => {
+    });
+    stubListSandboxes(() => {
       throw new Error("registry list unreadable");
-    };
+    });
     expect(readRecordedProvider("spark-1")).toBeNull();
   });
 });
@@ -282,50 +302,50 @@ describe("rebuild resume session normalization", () => {
 });
 
 describe("readRecordedModel", () => {
-  const originalGetSandbox = registry.getSandbox;
-  const originalListSandboxes = registry.listSandboxes;
-  const originalLoadSession = onboardSession.loadSession;
   afterEach(() => {
-    registry.getSandbox = originalGetSandbox;
-    registry.listSandboxes = originalListSandboxes;
-    onboardSession.loadSession = originalLoadSession;
+    vi.restoreAllMocks();
   });
 
   it("returns the model stored in sandboxes.json", () => {
-    registry.getSandbox = (name: string) =>
+    stubGetSandbox((name: string) =>
       name === "spark-1"
         ? ({ name, model: "qwen2.5:14b" } as ReturnType<typeof registry.getSandbox>)
-        : null;
-    onboardSession.loadSession = () => null;
+        : null,
+    );
+    stubLoadSession(() => null);
     stubLiveGatewayUntrusted();
     expect(readRecordedModel("spark-1")).toBe("qwen2.5:14b");
   });
 
   it("falls back to the session when the registry entry is gone (rebuild path)", () => {
-    registry.getSandbox = () => null;
-    onboardSession.loadSession = () =>
-      ({
-        sandboxName: "spark-1",
-        model: "qwen2.5:14b",
-      }) as ReturnType<typeof onboardSession.loadSession>;
+    stubGetSandbox(() => null);
+    stubLoadSession(
+      () =>
+        ({
+          sandboxName: "spark-1",
+          model: "qwen2.5:14b",
+        }) as ReturnType<typeof onboardSession.loadSession>,
+    );
     stubLiveGatewayUntrusted();
     expect(readRecordedModel("spark-1")).toBe("qwen2.5:14b");
   });
 
   it("ignores a session that belongs to a different sandbox", () => {
-    registry.getSandbox = () => null;
-    onboardSession.loadSession = () =>
-      ({
-        sandboxName: "other-sandbox",
-        model: "qwen2.5:14b",
-      }) as ReturnType<typeof onboardSession.loadSession>;
+    stubGetSandbox(() => null);
+    stubLoadSession(
+      () =>
+        ({
+          sandboxName: "other-sandbox",
+          model: "qwen2.5:14b",
+        }) as ReturnType<typeof onboardSession.loadSession>,
+    );
     stubLiveGatewayUntrusted();
     expect(readRecordedModel("spark-1")).toBeNull();
   });
 
   it("returns null when registry, session, and live gateway all yield nothing", () => {
-    registry.getSandbox = () => null;
-    onboardSession.loadSession = () => null;
+    stubGetSandbox(() => null);
+    stubLoadSession(() => null);
     stubLiveGatewayUntrusted();
     expect(readRecordedModel("missing")).toBeNull();
   });
@@ -338,53 +358,58 @@ describe("readRecordedModel", () => {
 });
 
 describe("readRecordedNimContainer", () => {
-  const originalGetSandbox = registry.getSandbox;
-  const originalLoadSession = onboardSession.loadSession;
   afterEach(() => {
-    registry.getSandbox = originalGetSandbox;
-    onboardSession.loadSession = originalLoadSession;
+    vi.restoreAllMocks();
   });
 
   it("returns the nimContainer stored in sandboxes.json", () => {
-    registry.getSandbox = (name: string) =>
+    stubGetSandbox((name: string) =>
       name === "spark-1"
         ? ({
             name,
             provider: "vllm-local",
             nimContainer: "nemoclaw-nim-foo",
           } as ReturnType<typeof registry.getSandbox>)
-        : null;
-    onboardSession.loadSession = () => null;
+        : null,
+    );
+    stubLoadSession(() => null);
     expect(readRecordedNimContainer("spark-1")).toBe("nemoclaw-nim-foo");
   });
 
   it("falls back to the session for the rebuild path", () => {
-    registry.getSandbox = () => null;
-    onboardSession.loadSession = () =>
-      ({
-        sandboxName: "spark-1",
-        nimContainer: "nemoclaw-nim-bar",
-      }) as ReturnType<typeof onboardSession.loadSession>;
+    stubGetSandbox(() => null);
+    stubLoadSession(
+      () =>
+        ({
+          sandboxName: "spark-1",
+          nimContainer: "nemoclaw-nim-bar",
+        }) as ReturnType<typeof onboardSession.loadSession>,
+    );
     expect(readRecordedNimContainer("spark-1")).toBe("nemoclaw-nim-bar");
   });
 
   it("returns null when neither registry nor session has a nimContainer", () => {
-    registry.getSandbox = () =>
-      ({ name: "spark-1", nimContainer: null }) as ReturnType<typeof registry.getSandbox>;
-    onboardSession.loadSession = () =>
-      ({ sandboxName: "spark-1", nimContainer: null }) as ReturnType<
-        typeof onboardSession.loadSession
-      >;
+    stubGetSandbox(
+      () => ({ name: "spark-1", nimContainer: null }) as ReturnType<typeof registry.getSandbox>,
+    );
+    stubLoadSession(
+      () =>
+        ({ sandboxName: "spark-1", nimContainer: null }) as ReturnType<
+          typeof onboardSession.loadSession
+        >,
+    );
     expect(readRecordedNimContainer("spark-1")).toBeNull();
   });
 
   it("ignores a session that belongs to a different sandbox", () => {
-    registry.getSandbox = () => null;
-    onboardSession.loadSession = () =>
-      ({
-        sandboxName: "other-sandbox",
-        nimContainer: "nemoclaw-nim-foo",
-      }) as ReturnType<typeof onboardSession.loadSession>;
+    stubGetSandbox(() => null);
+    stubLoadSession(
+      () =>
+        ({
+          sandboxName: "other-sandbox",
+          nimContainer: "nemoclaw-nim-foo",
+        }) as ReturnType<typeof onboardSession.loadSession>,
+    );
     expect(readRecordedNimContainer("spark-1")).toBeNull();
   });
 
@@ -396,36 +421,39 @@ describe("readRecordedNimContainer", () => {
 });
 
 describe("readRecordedEndpointUrl", () => {
-  const originalGetSandbox = registry.getSandbox;
-  const originalLoadSession = onboardSession.loadSession;
   afterEach(() => {
-    registry.getSandbox = originalGetSandbox;
-    onboardSession.loadSession = originalLoadSession;
+    vi.restoreAllMocks();
   });
 
   it("returns the endpoint URL from a matching session", () => {
-    registry.getSandbox = () => null;
-    onboardSession.loadSession = () =>
-      ({
-        sandboxName: "spark-1",
-        endpointUrl: "https://compatible.example/v1",
-      }) as ReturnType<typeof onboardSession.loadSession>;
+    stubGetSandbox(() => null);
+    stubLoadSession(
+      () =>
+        ({
+          sandboxName: "spark-1",
+          endpointUrl: "https://compatible.example/v1",
+        }) as ReturnType<typeof onboardSession.loadSession>,
+    );
     expect(readRecordedEndpointUrl("spark-1")).toBe("https://compatible.example/v1");
   });
 
   it("ignores unrelated or missing session endpoint URLs", () => {
-    registry.getSandbox = () => null;
-    onboardSession.loadSession = () =>
-      ({
-        sandboxName: "other-sandbox",
-        endpointUrl: "https://compatible.example/v1",
-      }) as ReturnType<typeof onboardSession.loadSession>;
+    stubGetSandbox(() => null);
+    stubLoadSession(
+      () =>
+        ({
+          sandboxName: "other-sandbox",
+          endpointUrl: "https://compatible.example/v1",
+        }) as ReturnType<typeof onboardSession.loadSession>,
+    );
     expect(readRecordedEndpointUrl("spark-1")).toBeNull();
 
-    onboardSession.loadSession = () =>
-      ({ sandboxName: "spark-1", endpointUrl: null }) as ReturnType<
-        typeof onboardSession.loadSession
-      >;
+    stubLoadSession(
+      () =>
+        ({ sandboxName: "spark-1", endpointUrl: null }) as ReturnType<
+          typeof onboardSession.loadSession
+        >,
+    );
     expect(readRecordedEndpointUrl("spark-1")).toBeNull();
   });
 });

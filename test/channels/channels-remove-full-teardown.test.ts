@@ -1,30 +1,42 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Regression test for #3998 — `nemoclaw <sandbox> channels remove <channel>`
-// must (1) remove the channel preset from the live OpenShell policy, (2) wipe the channel's durable
-// state inside the sandbox so the rebuild's state_dirs backup does not
-// restore stale auth files, and (3) refuse to proceed to rebuild when the
-// in-sandbox cleanup for a QR-paired channel fails — otherwise the backup
-// would re-capture the auth blob and the channel would reconnect after
-// the rebuild.
+// Regression test for #3998. Channel removal must clear durable QR-pairing state before it
+// changes policy or persists the removal tombstone. These integration tests use real installed
+// harness-package receipts and the isolated Vitest registry. Only OpenShell/process boundaries
+// are replaced, so package messaging authority and registry persistence remain production code.
 
-import assert from "node:assert/strict";
-import { type SpawnSyncReturns, spawnSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { describe, it } from "vitest";
 
-import type { MessagingAgentId } from "../../src/lib/messaging";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type MockInstance,
+  vi,
+} from "vitest";
+
+import { removeSandboxChannel } from "../../src/lib/actions/sandbox/policy-channel";
+import { policyChannelDependencies } from "../../src/lib/actions/sandbox/policy-channel-dependencies";
+import * as processRecovery from "../../src/lib/actions/sandbox/process-recovery";
+import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/types";
+import * as gatewayRuntime from "../../src/lib/gateway-runtime-action";
+import type { MessagingAgentId, SandboxMessagingPlan } from "../../src/lib/messaging";
+import * as policies from "../../src/lib/policy";
+import * as registry from "../../src/lib/state/registry";
+import type { SandboxEntry } from "../../src/lib/state/registry/types";
+import {
+  createHarnessPackageFixture,
+  type HarnessPackageFixture,
+} from "../helpers/harness-packages";
+import { restoreEnv } from "../helpers/env-test-helpers";
 import { makeMessagingPlan } from "../helpers/messaging-plan-fixtures";
 
-const repoRoot = path.join(import.meta.dirname, "../..");
-
-// Strip messaging-channel env vars from the parent process before spawning
-// the test subprocess so local/CI ambient values (e.g. TELEGRAM_BOT_TOKEN
-// in a developer shell) cannot perturb the channel cleanup paths the test
-// is asserting against.
+const SANDBOX_NAME = "test-sb";
 const MESSAGING_ENV_PREFIXES = [
   "TELEGRAM_",
   "DISCORD_",
@@ -34,319 +46,281 @@ const MESSAGING_ENV_PREFIXES = [
   "WHATSAPP_",
 ];
 
-function buildCleanEnv(extraEnv: Record<string, string>, home: string): NodeJS.ProcessEnv {
-  const filtered: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (MESSAGING_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) continue;
-    filtered[key] = value;
-  }
+type AgentUnderTest = Extract<MessagingAgentId, "openclaw" | "hermes">;
+type SandboxCommandResult = {
+  readonly status: number;
+  readonly stdout: string;
+  readonly stderr: string;
+};
+type StoppedCleanupResult =
+  | { readonly cleared: true }
+  | {
+      readonly cleared: false;
+      readonly failure: string;
+      readonly cleanupHelperName?: string;
+    };
+
+let packageFixtures: HarnessPackageFixture[] = [];
+let packageIdentities: Record<AgentUnderTest, HarnessPackageIdentity>;
+let previousNonInteractive: string | undefined;
+let removedMessagingEnvironment = new Map<string, string>();
+
+let exitSpy: MockInstance;
+let logSpy: MockInstance;
+let errorSpy: MockInstance;
+let listPresetsSpy: MockInstance;
+let getAppliedPresetsSpy: MockInstance;
+let removePresetSpy: MockInstance;
+let sandboxExecSpy: MockInstance;
+let sandboxSshSpy: MockInstance;
+let stoppedCleanupSpy: MockInstance;
+
+function buildStoredMessagingPlan(
+  agent: AgentUnderTest,
+  channelInRegistry: string,
+): SandboxMessagingPlan {
+  const plan = makeMessagingPlan({
+    sandboxName: SANDBOX_NAME,
+    agent,
+    channels: channelInRegistry ? [channelInRegistry] : [],
+    ...(channelInRegistry === "wechat" ? { authMode: "host-qr" as const } : {}),
+  });
   return {
-    ...filtered,
-    HOME: home,
-    NEMOCLAW_NON_INTERACTIVE: "1",
-    ...extraEnv,
+    ...plan,
+    channels: plan.channels.map((channel) =>
+      channel.channelId === "wechat"
+        ? {
+            ...channel,
+            inputs: [
+              {
+                channelId: "wechat",
+                inputId: "accountId",
+                kind: "config",
+                required: true,
+                statePath: "wechatConfig.accountId",
+                value: "test-wechat-account",
+              },
+            ],
+          }
+        : channel,
+    ),
   };
 }
 
-function runScript(
-  scriptBody: string,
-  extraEnv: Record<string, string> = {},
-): SpawnSyncReturns<string> {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-3998-"));
-  const scriptPath = path.join(tmpDir, "script.js");
-  fs.writeFileSync(scriptPath, scriptBody);
-  const result = spawnSync(process.execPath, [scriptPath], {
-    cwd: repoRoot,
-    encoding: "utf-8",
-    env: buildCleanEnv(extraEnv, tmpDir),
-    timeout: 15000,
-  });
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-  return result;
-}
-
-function buildPreamble({
+function registerSandboxScenario({
   presetNamesApplied = ["npm", "pypi", "huggingface", "brew", "whatsapp"],
-  sandboxAgent = "openclaw",
+  agent = "openclaw",
   channelInRegistry = "whatsapp",
-  sandboxExecResult = { status: 0, stdout: "NEMOCLAW_CHANNEL_CLEAR_OK", stderr: "" },
-  sshFallbackResult = null as { status: number; stdout: string; stderr: string } | null,
+  receiptBacked = true,
+  sandboxExecResult = {
+    status: 0,
+    stdout: "NEMOCLAW_CHANNEL_CLEAR_OK",
+    stderr: "",
+  } as SandboxCommandResult | null,
+  sshFallbackResult = null as SandboxCommandResult | null,
   stoppedDockerCleanupResult = {
     cleared: false,
     failure: "state-resource-unavailable",
-  } as { cleared: true } | { cleared: false; failure: string; cleanupHelperName?: string },
+  } as StoppedCleanupResult,
 }: {
-  presetNamesApplied?: string[];
-  sandboxAgent?: MessagingAgentId;
-  channelInRegistry?: string;
-  sandboxExecResult?: { status: number; stdout: string; stderr: string } | null;
-  sshFallbackResult?: { status: number; stdout: string; stderr: string } | null;
-  stoppedDockerCleanupResult?:
-    | { cleared: true }
-    | { cleared: false; failure: string; cleanupHelperName?: string };
-} = {}): string {
-  const j = (p: string) =>
-    JSON.stringify(path.join(repoRoot, "src", "lib", p.replace(/\.js$/, ".ts")));
-  const messagingPlanLiteral = () => {
-    const plan = makeMessagingPlan({
-      sandboxName: "test-sb",
-      agent: sandboxAgent,
-      channels: channelInRegistry ? [channelInRegistry] : [],
-    });
-    return JSON.stringify({
-      ...plan,
-      channels: plan.channels.map((channel) =>
-        channel.channelId === "wechat"
-          ? {
-              ...channel,
-              inputs: [
-                {
-                  channelId: "wechat",
-                  inputId: "accountId",
-                  kind: "config",
-                  required: true,
-                  statePath: "wechatConfig.accountId",
-                  value: "test-wechat-account",
-                },
-              ],
-            }
-          : channel,
-      ),
-    });
-  };
-  return String.raw`
-const resolver = require(${j("adapters/openshell/resolve.js")});
-resolver.resolveOpenshell = () => "/fake/openshell";
+  readonly presetNamesApplied?: readonly string[];
+  readonly agent?: AgentUnderTest;
+  readonly channelInRegistry?: string;
+  readonly receiptBacked?: boolean;
+  readonly sandboxExecResult?: SandboxCommandResult | null;
+  readonly sshFallbackResult?: SandboxCommandResult | null;
+  readonly stoppedDockerCleanupResult?: StoppedCleanupResult;
+} = {}): SandboxEntry {
+  listPresetsSpy.mockReturnValue(
+    presetNamesApplied.map((name) => ({ file: `${name}.yaml`, name, description: "test preset" })),
+  );
+  getAppliedPresetsSpy.mockReturnValue([...presetNamesApplied]);
+  sandboxExecSpy.mockReturnValue(sandboxExecResult);
+  sandboxSshSpy.mockReturnValue(sshFallbackResult);
+  stoppedCleanupSpy.mockReturnValue(stoppedDockerCleanupResult);
 
-const runner = require(${j("runner.js")});
-runner.run = () => ({ status: 0, stdout: "", stderr: "" });
-runner.runCapture = () => "";
-
-const adapterRuntime = require(${j("adapters/openshell/runtime.js")});
-adapterRuntime.runOpenshell = () => ({ status: 0, stdout: "", stderr: "" });
-
-const processRecovery = require(${j("actions/sandbox/process-recovery.js")});
-const sandboxExecCalls = [];
-const sandboxSshCalls = [];
-processRecovery.executeSandboxExecCommand = (sandboxName, command) => {
-  sandboxExecCalls.push({ sandboxName, command });
-  return ${JSON.stringify(sandboxExecResult)};
-};
-processRecovery.executeSandboxCommand = (sandboxName, command) => {
-  sandboxSshCalls.push({ sandboxName, command });
-  return ${JSON.stringify(sshFallbackResult)};
-};
-
-const gatewayRuntime = require(${j("gateway-runtime-action.js")});
-gatewayRuntime.recoverNamedGatewayRuntime = async () => ({ recovered: true });
-
-const credentials = require(${j("credentials/store.js")});
-credentials.getCredential = () => null;
-credentials.saveCredential = () => true;
-credentials.deleteCredential = () => true;
-credentials.prompt = async (msg) => { throw new Error("unexpected prompt: " + msg); };
-
-const onboard = require(${j("onboard.js")});
-onboard.isNonInteractive = () => true;
-
-const onboardSession = require(${j("state/onboard-session.js")});
-const sessionStore = {
-  sandboxName: "test-sb",
-  resumable: false,
-  status: "complete",
-  agent: ${JSON.stringify(sandboxAgent)},
-  provider: null,
-  model: null,
-  endpointUrl: null,
-  credentialEnv: null,
-  hermesAuthMethod: null,
-  preferredInferenceApi: null,
-  nimContainer: null,
-  routerPid: null,
-  routerCredentialHash: null,
-  messagingPlan: ${messagingPlanLiteral()},
-  hermesToolGateways: [],
-  wechatConfig: null,
-};
-onboardSession.loadSession = () => sessionStore;
-onboardSession.updateSession = (mutate) => { mutate(sessionStore); };
-
-const registry = require(${j("state/registry.js")});
-const registryUpdates = [];
-registry.getSandbox = () => ({
-  name: "test-sb",
-  agent: ${JSON.stringify(sandboxAgent)},
-  messaging: { schemaVersion: 1, plan: ${messagingPlanLiteral()} },
-});
-registry.updateSandbox = (name, updates) => {
-  registryUpdates.push({ name, updates });
-  return true;
-};
-
-const policies = require(${j("policy/index.js")});
-const removedPresets = [];
-policies.listPresets = () => ${JSON.stringify(presetNamesApplied.map((name) => ({ name })))};
-policies.getAppliedPresets = () => ${JSON.stringify(presetNamesApplied)};
-policies.removePreset = (sandboxName, presetName) => {
-  removedPresets.push({ sandboxName, presetName });
-  return true;
-};
-
-const callOrder = [];
-const stoppedDockerCleanupCalls = [];
-const policyChannelDeps = require(${j("actions/sandbox/policy-channel-dependencies.js")});
-policyChannelDeps.policyChannelDependencies.clearStoppedSandboxStateRoots = (sandboxName, paths) => {
-  stoppedDockerCleanupCalls.push({ sandboxName, paths });
-  return ${JSON.stringify(stoppedDockerCleanupResult)};
-};
-const origLog = console.log;
-console.log = (...args) => {
-  const line = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
-  if (line.includes("Change queued")) callOrder.push("promptAndRebuild");
-  if (line.includes("Cleared in-sandbox")) callOrder.push("clearedSandboxState");
-  origLog.call(console, ...args);
-};
-const origExit = process.exit;
-let exitCode = null;
-process.exit = (code) => {
-  if (exitCode === null) exitCode = code;
-  throw new Error("__PROCESS_EXIT__:" + code);
-};
-
-const channelModule = require(${j("actions/sandbox/policy-channel.js")});
-
-module.exports = {
-  channelModule,
-  sandboxExecCalls,
-  sandboxSshCalls,
-  removedPresets,
-  registryUpdates,
-  sessionStore,
-  callOrder,
-  stoppedDockerCleanupCalls,
-  getExitCode: () => exitCode,
-};
-`;
+  registry.registerSandbox({
+    name: SANDBOX_NAME,
+    agent,
+    ...(receiptBacked ? { harnessPackage: packageIdentities[agent] } : {}),
+    messaging: {
+      schemaVersion: 1,
+      plan: buildStoredMessagingPlan(agent, channelInRegistry),
+    },
+  });
+  const persisted = registry.getSandbox(SANDBOX_NAME);
+  expect(persisted, "sandbox removal fixture was not persisted").not.toBeNull();
+  return persisted!;
 }
 
-describe("channels remove full teardown (#3998)", () => {
-  it("clears both OpenClaw WeChat state generations before rebuild", () => {
-    const script = `${buildPreamble({
-      presetNamesApplied: ["npm", "pypi", "wechat"],
-      sandboxAgent: "openclaw",
-      channelInRegistry: "wechat",
-    })}
-const ctx = module.exports;
-(async () => {
-  try {
-    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "wechat" });
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({
-      sandboxExecCalls: ctx.sandboxExecCalls,
-      callOrder: ctx.callOrder,
-      exitCode: ctx.getExitCode(),
-    }) + "\\n");
-  } catch (err) {
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
-  }
-})();
-`;
-    const result = runScript(script);
-    assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
-    const marker = result.stdout.lastIndexOf("__RESULT__");
-    assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
-    const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
-    assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
-    assert.equal(payload.exitCode, null);
+function expectCleanupBeforeQueuedRebuild(): void {
+  const lines = logSpy.mock.calls.map((call) => call.map(String).join(" "));
+  const cleanupIndex = lines.findIndex((line) => line.includes("Cleared in-sandbox"));
+  const queuedRebuildIndex = lines.findIndex((line) => line.includes("Change queued"));
+  expect(cleanupIndex).toBeGreaterThanOrEqual(0);
+  expect(queuedRebuildIndex).toBeGreaterThan(cleanupIndex);
+}
 
-    const cleanup = payload.sandboxExecCalls.find((call: { command: string }) =>
-      call.command.startsWith("rm -rf"),
-    );
-    assert.ok(cleanup, "WeChat removal must clear its managed state");
-    assert.ok(cleanup.command.includes("/sandbox/.openclaw/wechat"));
-    assert.ok(cleanup.command.includes("/sandbox/.openclaw/openclaw-weixin"));
-    assert.ok(
-      payload.callOrder.indexOf("clearedSandboxState") <
-        payload.callOrder.indexOf("promptAndRebuild"),
-      "WeChat account state must be cleared before rebuild",
-    );
+function expectRemovedPreset(channelId: string): void {
+  expect(removePresetSpy).toHaveBeenCalledTimes(1);
+  expect(removePresetSpy).toHaveBeenCalledWith(SANDBOX_NAME, channelId);
+}
+
+function registeredMessagingChannels(): SandboxMessagingPlan["channels"] {
+  return registry.getSandbox(SANDBOX_NAME)?.messaging?.plan.channels ?? [];
+}
+
+beforeAll(() => {
+  const home = process.env.HOME;
+  expect(home, "channel removal integration tests require an isolated HOME").toBeTruthy();
+  expect(path.isAbsolute(home!), "channel removal test HOME must be absolute").toBe(true);
+  const fixtureParent = path.join(home!, "channel-removal-packages");
+  const storeRoot = path.join(home!, ".nemoclaw", "harnesses");
+
+  const openclawFixture = createHarnessPackageFixture({
+    fixtureParent,
+    storeRoot,
+    messaging: {
+      packageId: "openclaw",
+      channelIds: ["telegram", "wechat", "whatsapp"],
+    },
+  });
+  const hermesFixture = createHarnessPackageFixture({
+    fixtureParent,
+    storeRoot,
+    messaging: {
+      packageId: "hermes",
+      channelIds: ["telegram", "whatsapp"],
+    },
+  });
+  packageFixtures = [openclawFixture, hermesFixture];
+  packageIdentities = {
+    openclaw: openclawFixture.install("openclaw").identity,
+    hermes: hermesFixture.install("hermes").identity,
+  };
+});
+
+beforeEach(() => {
+  registry.clearAll();
+  previousNonInteractive = process.env.NEMOCLAW_NON_INTERACTIVE;
+  process.env.NEMOCLAW_NON_INTERACTIVE = "1";
+  removedMessagingEnvironment = new Map(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined &&
+        MESSAGING_ENV_PREFIXES.some((prefix) => entry[0].startsWith(prefix)),
+    ),
+  );
+  for (const key of removedMessagingEnvironment.keys()) delete process.env[key];
+
+  exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number | string | null) => {
+    throw new Error(`process.exit(${code ?? 0})`);
+  }) as never);
+  logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  listPresetsSpy = vi.spyOn(policies, "listPresets");
+  getAppliedPresetsSpy = vi.spyOn(policies, "getAppliedPresets");
+  removePresetSpy = vi.spyOn(policies, "removePreset").mockReturnValue(true);
+  sandboxExecSpy = vi.spyOn(processRecovery, "executeSandboxExecCommand");
+  sandboxSshSpy = vi.spyOn(processRecovery, "executeSandboxCommand");
+  stoppedCleanupSpy = vi.spyOn(policyChannelDependencies, "clearStoppedSandboxStateRoots");
+  vi.spyOn(policyChannelDependencies, "runOpenshell").mockReturnValue({
+    status: 0,
+    stdout: "",
+    stderr: "",
+  } as never);
+  vi.spyOn(policyChannelDependencies, "runGatewayOpenshell").mockReturnValue({
+    status: 0,
+    stdout: "",
+    stderr: "",
+  } as never);
+  vi.spyOn(policyChannelDependencies, "deleteMessagingProviderWithRecovery").mockReturnValue({
+    ok: true,
+    status: 0,
+    stdout: "",
+    stderr: "",
+  } as never);
+  vi.spyOn(gatewayRuntime, "recoverNamedGatewayRuntime").mockResolvedValue({
+    recovered: true,
+    attempted: false,
+  } as never);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  restoreEnv("NEMOCLAW_NON_INTERACTIVE", previousNonInteractive);
+  const currentMessagingEnvironment = Object.keys(process.env).filter((key) =>
+    MESSAGING_ENV_PREFIXES.some((prefix) => key.startsWith(prefix)),
+  );
+  for (const key of currentMessagingEnvironment) delete process.env[key];
+  Object.assign(process.env, Object.fromEntries(removedMessagingEnvironment));
+  registry.clearAll();
+});
+
+afterAll(() => {
+  for (const fixture of packageFixtures) fixture.cleanup();
+});
+
+describe.sequential("channels remove full teardown (#3998)", () => {
+  it("clears both OpenClaw WeChat state generations before queuing rebuild", async () => {
+    registerSandboxScenario({
+      presetNamesApplied: ["npm", "pypi", "wechat"],
+      agent: "openclaw",
+      channelInRegistry: "wechat",
+    });
+
+    await expect(
+      removeSandboxChannel(SANDBOX_NAME, { channel: "wechat" }),
+    ).resolves.toBeUndefined();
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    const cleanupCommand = String(sandboxExecSpy.mock.calls[0]?.[1] ?? "");
+    expect(cleanupCommand).toContain("/sandbox/.openclaw/wechat");
+    expect(cleanupCommand).toContain("/sandbox/.openclaw/openclaw-weixin");
+    expectCleanupBeforeQueuedRebuild();
   });
 
-  it("recovers WeChat cleanup from its stopped Docker volume", () => {
-    const script = `${buildPreamble({
+  it("recovers WeChat cleanup from its stopped provider state resource", async () => {
+    registerSandboxScenario({
       presetNamesApplied: ["npm", "pypi", "wechat"],
-      sandboxAgent: "openclaw",
+      agent: "openclaw",
       channelInRegistry: "wechat",
       sandboxExecResult: { status: 1, stdout: "", stderr: "startup failed" },
       sshFallbackResult: { status: 255, stdout: "", stderr: "sandbox stopped" },
       stoppedDockerCleanupResult: { cleared: true },
-    })}
-const ctx = module.exports;
-(async () => {
-  try {
-    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "wechat" });
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({
-      stoppedDockerCleanupCalls: ctx.stoppedDockerCleanupCalls,
-      removedPresets: ctx.removedPresets,
-      registryUpdates: ctx.registryUpdates,
-      exitCode: ctx.getExitCode(),
-    }) + "\\n");
-  } catch (err) {
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
-  }
-})();
-`;
-    const result = runScript(script);
-    assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
-    const marker = result.stdout.lastIndexOf("__RESULT__");
-    assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
-    const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
-    assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
-    assert.equal(payload.exitCode, null);
-    assert.deepEqual(payload.stoppedDockerCleanupCalls, [
-      {
-        sandboxName: "test-sb",
-        paths: ["/sandbox/.openclaw/wechat", "/sandbox/.openclaw/openclaw-weixin"],
-      },
+    });
+
+    await expect(
+      removeSandboxChannel(SANDBOX_NAME, { channel: "wechat" }),
+    ).resolves.toBeUndefined();
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(stoppedCleanupSpy).toHaveBeenCalledWith(SANDBOX_NAME, [
+      "/sandbox/.openclaw/wechat",
+      "/sandbox/.openclaw/openclaw-weixin",
     ]);
-    assert.deepEqual(payload.removedPresets, [{ sandboxName: "test-sb", presetName: "wechat" }]);
-    assert.ok(
-      payload.registryUpdates.some((update: { updates?: { messaging?: { plan?: unknown } } }) =>
-        JSON.stringify(update.updates?.messaging?.plan).includes('"pendingRemoval":true'),
-      ),
-      "WeChat removal must retain a retryable tombstone until rebuild",
-    );
+    expectRemovedPreset("wechat");
+    expect(registeredMessagingChannels()).toEqual([
+      expect.objectContaining({ channelId: "wechat", pendingRemoval: true }),
+    ]);
   });
 
-  it("recovers stopped WeChat residue after logical teardown already completed", () => {
-    const script = `${buildPreamble({
+  it("recovers stopped WeChat residue after logical teardown already completed", async () => {
+    registerSandboxScenario({
       presetNamesApplied: ["npm", "pypi"],
-      sandboxAgent: "openclaw",
+      agent: "openclaw",
       channelInRegistry: "telegram",
       sandboxExecResult: { status: 1, stdout: "", stderr: "sandbox stopped" },
       sshFallbackResult: { status: 255, stdout: "", stderr: "sandbox stopped" },
       stoppedDockerCleanupResult: { cleared: true },
-    })}
-const ctx = module.exports;
-(async () => {
-  try {
-    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "wechat" });
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({
-      stoppedDockerCleanupCalls: ctx.stoppedDockerCleanupCalls,
-      exitCode: ctx.getExitCode(),
-    }) + "\\n");
-  } catch (err) {
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
-  }
-})();
-`;
-    const result = runScript(script);
-    assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
-    const marker = result.stdout.lastIndexOf("__RESULT__");
-    assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
-    const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
-    assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
-    assert.equal(payload.exitCode, null);
-    assert.equal(payload.stoppedDockerCleanupCalls.length, 1);
+    });
+
+    await expect(
+      removeSandboxChannel(SANDBOX_NAME, { channel: "wechat" }),
+    ).resolves.toBeUndefined();
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(stoppedCleanupSpy).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -388,360 +362,150 @@ const ctx = module.exports;
     },
   ] as const)(
     "retains WeChat state and reports recovery guidance for $failure",
-    ({ cleanup, failure, guidance }) => {
-      const script = `${buildPreamble({
+    async ({ cleanup, failure, guidance }) => {
+      const original = registerSandboxScenario({
         presetNamesApplied: ["npm", "pypi", "wechat"],
-        sandboxAgent: "openclaw",
+        agent: "openclaw",
         channelInRegistry: "wechat",
         sandboxExecResult: { status: 1, stdout: "", stderr: "sandbox stopped" },
         sshFallbackResult: { status: 255, stdout: "", stderr: "sandbox stopped" },
         stoppedDockerCleanupResult: cleanup,
-      })}
-const ctx = module.exports;
-(async () => {
-  const dumpState = (caught) => ({
-    caught,
-    stoppedDockerCleanupCalls: ctx.stoppedDockerCleanupCalls,
-    removedPresets: ctx.removedPresets,
-    registryUpdates: ctx.registryUpdates,
-    callOrder: ctx.callOrder,
-    exitCode: ctx.getExitCode(),
-  });
-  try {
-    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "wechat" });
-    process.stdout.write("\\n__RESULT__" + JSON.stringify(dumpState(null)) + "\\n");
-  } catch (err) {
-    process.stdout.write("\\n__RESULT__" + JSON.stringify(dumpState(err.message)) + "\\n");
-  }
-})();
-`;
-      const result = runScript(script);
-      assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
-      const marker = result.stdout.lastIndexOf("__RESULT__");
-      assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
-      const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
+      });
 
-      assert.match(payload.caught, /^__PROCESS_EXIT__:1$/);
-      assert.equal(payload.exitCode, 1);
-      assert.equal(payload.stoppedDockerCleanupCalls.length, 1);
-      assert.deepEqual(payload.removedPresets, []);
-      assert.deepEqual(payload.registryUpdates, []);
-      assert.ok(!payload.callOrder.includes("promptAndRebuild"));
-      assert.ok(result.stderr.includes(`Stopped-runtime cleanup failed (${failure}).`));
-      assert.ok(result.stderr.includes(guidance));
+      await expect(removeSandboxChannel(SANDBOX_NAME, { channel: "wechat" })).rejects.toThrow(
+        "process.exit(1)",
+      );
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(stoppedCleanupSpy).toHaveBeenCalledTimes(1);
+      expect(removePresetSpy).not.toHaveBeenCalled();
+      expect(registry.getSandbox(SANDBOX_NAME)).toEqual(original);
+      expect(logSpy.mock.calls.flat().map(String)).not.toContainEqual(
+        expect.stringContaining("Change queued"),
+      );
+      const diagnostics = errorSpy.mock.calls.flat().map(String).join("\n");
+      expect(diagnostics).toContain(`Stopped-runtime cleanup failed (${failure}).`);
+      expect(diagnostics).toContain(guidance);
     },
   );
 
   it.each(["openclaw", "hermes"] as const)(
-    "removes the live '%s' channel policy and clears the in-sandbox whatsapp state dir",
-    (sandboxAgent) => {
-      const script = `${buildPreamble({ sandboxAgent })}
-const ctx = module.exports;
-(async () => {
-  try {
-    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "whatsapp" });
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({
-      sandboxExecCalls: ctx.sandboxExecCalls,
-      removedPresets: ctx.removedPresets,
-      callOrder: ctx.callOrder,
-      exitCode: ctx.getExitCode(),
-    }) + "\\n");
-  } catch (err) {
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
-  }
-})();
-`;
-      const result = runScript(script);
-      assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
-      const marker = result.stdout.lastIndexOf("__RESULT__");
-      assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
-      const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
-      assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
-      assert.equal(
-        payload.exitCode,
-        null,
-        `must not exit on success path; got exitCode=${payload.exitCode}`,
-      );
+    "removes the live '%s' policy and clears every package-declared WhatsApp state path",
+    async (agent) => {
+      registerSandboxScenario({ agent });
 
-      assert.deepEqual(
-        payload.removedPresets,
-        [{ sandboxName: "test-sb", presetName: "whatsapp" }],
-        `expected one removePreset('whatsapp') call; got ${JSON.stringify(payload.removedPresets)}`,
-      );
+      await expect(
+        removeSandboxChannel(SANDBOX_NAME, { channel: "whatsapp" }),
+      ).resolves.toBeUndefined();
 
-      const cleanupCalls = payload.sandboxExecCalls.filter((c: { command: string }) =>
-        c.command.startsWith("rm -rf"),
-      );
-      assert.equal(
-        cleanupCalls.length,
-        1,
-        `expected one rm -rf sandbox-exec call; got ${cleanupCalls.length}`,
-      );
+      expect(exitSpy).not.toHaveBeenCalled();
+      expectRemovedPreset("whatsapp");
+      const cleanupCommand = String(sandboxExecSpy.mock.calls[0]?.[1] ?? "");
       const expectedPath =
-        sandboxAgent === "openclaw"
+        agent === "openclaw"
           ? "/sandbox/.openclaw/whatsapp"
           : "/sandbox/.hermes/platforms/whatsapp";
-      assert.ok(
-        cleanupCalls[0].command.includes(expectedPath),
-        `expected cleanup to target '${expectedPath}'; got ${cleanupCalls[0].command}`,
+      expect(cleanupCommand).toContain(expectedPath);
+      expect(cleanupCommand.includes(`/sandbox/.${agent}/profiles/dashboard-home`)).toBe(
+        agent === "hermes",
       );
-      const dashboardPath = `/sandbox/.${sandboxAgent}/profiles/dashboard-home`;
-      assert.equal(
-        cleanupCalls[0].command.includes(dashboardPath),
-        sandboxAgent === "hermes",
-        `${sandboxAgent} Dashboard cleanup selection was incorrect; got ${cleanupCalls[0].command}`,
-      );
-
-      const rebuildIdx = payload.callOrder.indexOf("promptAndRebuild");
-      const clearIdx = payload.callOrder.indexOf("clearedSandboxState");
-      assert.ok(
-        rebuildIdx >= 0,
-        `promptAndRebuild was never called: ${JSON.stringify(payload.callOrder)}`,
-      );
-      assert.ok(
-        clearIdx >= 0,
-        `clearedSandboxState marker was never logged: ${JSON.stringify(payload.callOrder)}`,
-      );
-      assert.ok(
-        clearIdx < rebuildIdx,
-        `sandbox state must be cleared before rebuild so the backup excludes the auth files: ${JSON.stringify(payload.callOrder)}`,
-      );
+      expectCleanupBeforeQueuedRebuild();
     },
   );
 
-  it("falls back to SSH when sandbox-exec wrapper does not return the sentinel", () => {
-    const script = `${buildPreamble({
-      sandboxAgent: "openclaw",
+  it("falls back to SSH when sandbox-exec does not return the cleanup sentinel", async () => {
+    registerSandboxScenario({
       sandboxExecResult: null,
       sshFallbackResult: { status: 0, stdout: "NEMOCLAW_CHANNEL_CLEAR_OK", stderr: "" },
-    })}
-const ctx = module.exports;
-(async () => {
-  try {
-    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "whatsapp" });
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({
-      sandboxExecCalls: ctx.sandboxExecCalls,
-      sandboxSshCalls: ctx.sandboxSshCalls,
-      removedPresets: ctx.removedPresets,
-      callOrder: ctx.callOrder,
-      exitCode: ctx.getExitCode(),
-    }) + "\\n");
-  } catch (err) {
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
-  }
-})();
-`;
-    const result = runScript(script);
-    assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
-    const marker = result.stdout.lastIndexOf("__RESULT__");
-    assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
-    const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
-    assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
+    });
 
-    assert.equal(
-      payload.exitCode,
-      null,
-      `must not exit when SSH fallback recovers; got exitCode=${payload.exitCode}`,
-    );
-    assert.equal(payload.sandboxExecCalls.length, 1, "exec attempt must run first");
-    assert.equal(
-      payload.sandboxSshCalls.length,
-      1,
-      "SSH fallback must run once when exec returns null",
-    );
-    assert.deepEqual(
-      payload.removedPresets,
-      [{ sandboxName: "test-sb", presetName: "whatsapp" }],
-      "remove flow must continue after SSH-recovered cleanup",
-    );
-    assert.ok(
-      payload.callOrder.includes("promptAndRebuild"),
-      `rebuild must be queued after SSH-recovered cleanup; callOrder=${JSON.stringify(payload.callOrder)}`,
+    await expect(
+      removeSandboxChannel(SANDBOX_NAME, { channel: "whatsapp" }),
+    ).resolves.toBeUndefined();
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(sandboxExecSpy).toHaveBeenCalledTimes(1);
+    expect(sandboxSshSpy).toHaveBeenCalledTimes(1);
+    expectRemovedPreset("whatsapp");
+    expect(logSpy.mock.calls.flat().map(String)).toContainEqual(
+      expect.stringContaining("Change queued"),
     );
   });
 
-  it("aborts before rebuild when both exec and SSH cleanup fail for a QR channel", () => {
-    const script = `${buildPreamble({
-      sandboxAgent: "openclaw",
+  it("aborts before policy and registry changes when both QR cleanup transports fail", async () => {
+    const original = registerSandboxScenario({
       sandboxExecResult: { status: 1, stdout: "", stderr: "sandbox is not running" },
-      sshFallbackResult: { status: 255, stdout: "", stderr: "ssh: connect to host ... failed" },
-    })}
-const ctx = module.exports;
-(async () => {
-  const dumpState = () => ({
-    sandboxExecCalls: ctx.sandboxExecCalls,
-    sandboxSshCalls: ctx.sandboxSshCalls,
-    removedPresets: ctx.removedPresets,
-    registryUpdates: ctx.registryUpdates,
-    callOrder: ctx.callOrder,
-    exitCode: ctx.getExitCode(),
-  });
-  try {
-    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "whatsapp" });
-    process.stdout.write("\\n__RESULT__" + JSON.stringify(dumpState()) + "\\n");
-  } catch (err) {
-    if (typeof err.message === "string" && err.message.startsWith("__PROCESS_EXIT__")) {
-      process.stdout.write("\\n__RESULT__" + JSON.stringify(dumpState()) + "\\n");
-      return;
-    }
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
-  }
-})();
-`;
-    const result = runScript(script);
-    assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
-    const marker = result.stdout.lastIndexOf("__RESULT__");
-    assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
-    const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
-    assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
+      sshFallbackResult: {
+        status: 255,
+        stdout: "",
+        stderr: "ssh: connect to host failed",
+      },
+    });
 
-    assert.equal(payload.exitCode, 1, "QR channel cleanup failure must exit non-zero");
-    assert.ok(
-      !payload.callOrder.includes("promptAndRebuild"),
-      `rebuild must NOT be queued on cleanup failure; callOrder=${JSON.stringify(payload.callOrder)}`,
+    await expect(removeSandboxChannel(SANDBOX_NAME, { channel: "whatsapp" })).rejects.toThrow(
+      "process.exit(1)",
     );
-    assert.deepEqual(
-      payload.removedPresets,
-      [],
-      "policy preset must NOT be un-applied when we bail early on cleanup failure",
-    );
-    assert.deepEqual(
-      payload.registryUpdates,
-      [],
-      "registry must NOT be mutated when we bail early on cleanup failure",
-    );
-    const cleanupCalls = payload.sandboxExecCalls.filter((c: { command: string }) =>
-      c.command.startsWith("rm -rf"),
-    );
-    assert.equal(cleanupCalls.length, 1, "expected the rm -rf attempt that failed");
-    assert.equal(
-      payload.sandboxSshCalls.length,
-      1,
-      `SSH fallback must be attempted before aborting; sandboxSshCalls=${JSON.stringify(payload.sandboxSshCalls)}`,
-    );
-    assert.ok(
-      payload.sandboxSshCalls[0].command.startsWith("rm -rf"),
-      `SSH fallback must invoke the rm -rf cleanup; got ${payload.sandboxSshCalls[0].command}`,
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(sandboxExecSpy).toHaveBeenCalledTimes(1);
+    expect(sandboxSshSpy).toHaveBeenCalledTimes(1);
+    expect(String(sandboxSshSpy.mock.calls[0]?.[1] ?? "")).toContain("rm -rf");
+    expect(removePresetSpy).not.toHaveBeenCalled();
+    expect(registry.getSandbox(SANDBOX_NAME)).toEqual(original);
+    expect(logSpy.mock.calls.flat().map(String)).not.toContainEqual(
+      expect.stringContaining("Change queued"),
     );
   });
 
-  it("does not abort when removing a never-configured QR channel even if sandbox is unreachable", () => {
-    const script = `${buildPreamble({
+  it("keeps a never-configured QR removal inert for a legacy no-receipt sandbox", async () => {
+    registerSandboxScenario({
       presetNamesApplied: ["npm", "pypi"],
-      sandboxAgent: "openclaw",
+      agent: "openclaw",
       channelInRegistry: "telegram",
+      receiptBacked: false,
       sandboxExecResult: { status: 1, stdout: "", stderr: "sandbox is not running" },
-      sshFallbackResult: { status: 255, stdout: "", stderr: "ssh: connect to host ... failed" },
-    })}
-const ctx = module.exports;
-(async () => {
-  try {
-    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "whatsapp" });
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({
-      sandboxExecCalls: ctx.sandboxExecCalls,
-      sandboxSshCalls: ctx.sandboxSshCalls,
-      callOrder: ctx.callOrder,
-      exitCode: ctx.getExitCode(),
-    }) + "\\n");
-  } catch (err) {
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
-  }
-})();
-`;
-    const result = runScript(script);
-    assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
-    const marker = result.stdout.lastIndexOf("__RESULT__");
-    assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
-    const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
-    assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
+      sshFallbackResult: {
+        status: 255,
+        stdout: "",
+        stderr: "ssh: connect to host failed",
+      },
+    });
 
-    assert.equal(
-      payload.exitCode,
-      null,
-      "must remain a no-op when registry shows no channel residue",
-    );
-    assert.equal(
-      payload.sandboxExecCalls.length,
-      0,
-      `sandbox-exec cleanup must NOT run when channel was never configured; got ${JSON.stringify(payload.sandboxExecCalls)}`,
-    );
-    assert.equal(
-      payload.sandboxSshCalls.length,
-      0,
-      "SSH fallback must NOT run when channel was never configured",
-    );
-    assert.ok(
-      payload.callOrder.includes("promptAndRebuild"),
-      `rebuild prompt must still fire on the no-op remove path; callOrder=${JSON.stringify(payload.callOrder)}`,
+    await expect(
+      removeSandboxChannel(SANDBOX_NAME, { channel: "whatsapp" }),
+    ).resolves.toBeUndefined();
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(sandboxExecSpy).not.toHaveBeenCalled();
+    expect(sandboxSshSpy).not.toHaveBeenCalled();
+    expect(logSpy.mock.calls.flat().map(String)).toContainEqual(
+      expect.stringContaining("Change queued"),
     );
   });
 
-  it("removes the live preset and messaging plan entry for a token-based channel", () => {
-    const script = `${buildPreamble({
+  it("removes the live preset and persists a token-channel removal tombstone", async () => {
+    registerSandboxScenario({
       presetNamesApplied: ["npm", "pypi", "telegram", "brew"],
-      sandboxAgent: "openclaw",
+      agent: "openclaw",
       channelInRegistry: "telegram",
-    })}
-const ctx = module.exports;
-(async () => {
-  try {
-    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "telegram" });
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({
-      removedPresets: ctx.removedPresets,
-      registryUpdates: ctx.registryUpdates,
-    }) + "\\n");
-  } catch (err) {
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
-  }
-})();
-`;
-    const result = runScript(script, { TELEGRAM_BOT_TOKEN: "stub" });
-    assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
-    const marker = result.stdout.lastIndexOf("__RESULT__");
-    assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
-    const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
-    assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
+    });
+    process.env.TELEGRAM_BOT_TOKEN = "stub";
 
-    assert.deepEqual(
-      payload.removedPresets,
-      [{ sandboxName: "test-sb", presetName: "telegram" }],
-      "the command must remove the channel preset from the live OpenShell policy",
-    );
+    await expect(
+      removeSandboxChannel(SANDBOX_NAME, { channel: "telegram" }),
+    ).resolves.toBeUndefined();
 
-    const messagingPlanUpdate = payload.registryUpdates.findLast(
-      (u: { updates: { messaging?: { plan?: { channels?: Array<{ channelId: string }> } } } }) =>
-        u.updates.messaging?.plan,
-    );
-    assert.ok(
-      messagingPlanUpdate,
-      `expected an updateSandbox call that writes messaging.plan; got ${JSON.stringify(payload.registryUpdates)}`,
-    );
-    assert.deepEqual(
-      messagingPlanUpdate.updates.messaging.plan.channels.map(
-        (channel: {
-          channelId: string;
-          active: boolean;
-          selected: boolean;
-          configured: boolean;
-          disabled: boolean;
-        }) => ({
-          channelId: channel.channelId,
-          active: channel.active,
-          selected: channel.selected,
-          configured: channel.configured,
-          disabled: channel.disabled,
-        }),
-      ),
-      [
-        {
-          channelId: "telegram",
-          active: false,
-          selected: false,
-          configured: false,
-          disabled: true,
-        },
-      ],
-      "messaging.plan must retain only the pending Telegram config tombstone until rebuild",
-    );
+    expect(exitSpy).not.toHaveBeenCalled();
+    expectRemovedPreset("telegram");
+    expect(registeredMessagingChannels()).toEqual([
+      expect.objectContaining({
+        channelId: "telegram",
+        active: false,
+        selected: false,
+        configured: false,
+        disabled: true,
+        pendingRemoval: true,
+      }),
+    ]);
   });
 });

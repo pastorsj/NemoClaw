@@ -63,6 +63,7 @@ function runConfigureWebSearch(spec: { status: string; body: string; apiKey: str
   const scriptPath = path.join(tmpDir, "configure-web-search.js");
   const outputPath = path.join(tmpDir, "outcome.json");
   const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
+  const agentDefsPath = JSON.stringify(path.join(repoRoot, "src", "lib", "agent", "defs.ts"));
   const outputPathLiteral = JSON.stringify(outputPath);
 
   setupBraveCurlShim(fakeBin, {
@@ -74,6 +75,8 @@ function runConfigureWebSearch(spec: { status: string; body: string; apiKey: str
   const script = String.raw`
 const fs = require("node:fs");
 const { configureWebSearch } = require(${onboardPath});
+const { loadAgent } = require(${agentDefsPath});
+const selectedAgent = loadAgent("openclaw");
 
 const exitCalls = [];
 const logs = [];
@@ -100,7 +103,13 @@ function restore() {
 (async () => {
   let result = null;
   try {
-    result = await configureWebSearch(null);
+    result = await configureWebSearch(
+      null,
+      selectedAgent,
+      null,
+      selectedAgent.packageRoot,
+      true,
+    );
   } finally {
     restore();
   }
@@ -162,6 +171,7 @@ function runInteractiveConfigureWebSearch(spec: { answers: string[] }): {
   const credentialsPath = JSON.stringify(
     path.join(repoRoot, "src", "lib", "credentials", "store.ts"),
   );
+  const agentDefsPath = JSON.stringify(path.join(repoRoot, "src", "lib", "agent", "defs.ts"));
   const outputPathLiteral = JSON.stringify(outputPath);
 
   setupBraveCurlShim(fakeBin, { status: "200", body: '{"web":{"results":[]}}' });
@@ -202,6 +212,8 @@ credentials.saveCredential = (key, value) => {
 };
 
 const { configureWebSearch } = require(${onboardPath});
+const { loadAgent } = require(${agentDefsPath});
+const selectedAgent = loadAgent("openclaw");
 const originalExit = process.exit;
 const originalLog = console.log;
 const originalError = console.error;
@@ -226,7 +238,13 @@ function writePayload(payload) {
 
 (async () => {
   try {
-    const result = await configureWebSearch(null);
+    const result = await configureWebSearch(
+      null,
+      selectedAgent,
+      null,
+      selectedAgent.packageRoot,
+      true,
+    );
     writePayload({ outcome: "completed", result });
   } catch (error) {
     if (error && error.exitCode !== undefined) {
@@ -306,7 +324,14 @@ const { configureWebSearch } = require(${onboardPath});
 const { loadAgent } = require(${agentDefsPath});
 
 (async () => {
-  const result = await configureWebSearch(null, loadAgent("hermes"));
+  const selectedAgent = loadAgent("hermes");
+  const result = await configureWebSearch(
+    null,
+    selectedAgent,
+    null,
+    selectedAgent.packageRoot,
+    true,
+  );
   console.log(JSON.stringify({ result, promptCalls }));
 })().catch((error) => {
   console.error(error);
@@ -344,6 +369,7 @@ const { loadAgent } = require(${agentDefsPath});
     const credentialsPath = JSON.stringify(
       path.join(repoRoot, "src", "lib", "credentials", "store.ts"),
     );
+    const agentDefsPath = JSON.stringify(path.join(repoRoot, "src", "lib", "agent", "defs.ts"));
     setupBraveCurlShim(fakeBin, { status: "200", body: '{"web":{"results":[]}}' });
     fs.writeFileSync(
       scriptPath,
@@ -365,8 +391,16 @@ delete process.env.TAVILY_API_KEY;
 process.env.NEMOCLAW_NON_INTERACTIVE = "1";
 process.env.NEMOCLAW_WEB_SEARCH_PROVIDER = "brave";
 const { configureWebSearch } = require(${onboardPath});
+const { loadAgent } = require(${agentDefsPath});
+const selectedAgent = loadAgent("openclaw");
 (async () => {
-  const result = await configureWebSearch(null);
+  const result = await configureWebSearch(
+    null,
+    selectedAgent,
+    null,
+    selectedAgent.packageRoot,
+    true,
+  );
   fs.writeFileSync(${JSON.stringify(outputPath)}, JSON.stringify({ result, braveKey: process.env.BRAVE_API_KEY || null }));
 })().catch((error) => {
   console.error(error);

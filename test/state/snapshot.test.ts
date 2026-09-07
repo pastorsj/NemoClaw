@@ -774,10 +774,7 @@ process.exit(0);
         .map((line) => JSON.parse(line).cmd as string);
       const cleanupCommand = loggedCommands.find((cmd) => cmd.includes("rm -rf"));
       expect(cleanupCommand).not.toContain("/sandbox/.openclaw/workspace");
-      expect(cleanupCommand).not.toContain("rm -rf -- /sandbox/.openclaw/extensions");
-      expect(cleanupCommand).toContain("/sandbox/.openclaw/extensions");
-      expect(cleanupCommand).toContain("! -name 'nemoclaw'");
-      expect(cleanupCommand).toContain("! -name 'openclaw-weixin'");
+      expect(cleanupCommand).toContain("rm -rf -- '/sandbox/.openclaw/extensions'");
       expect(cleanupCommand).not.toContain("/sandbox/.openclaw/agents");
     } finally {
       if (oldOpenshell === undefined) {

@@ -35,7 +35,9 @@ if (process.env.NEMOCLAW_TEST_FORWARD_SERVICE_FIXTURE === "1") {
       return loaded;
     }
     if (
-      resolved.includes(`${path.sep}adapters${path.sep}openshell${path.sep}local-forward-listener.`) &&
+      resolved.includes(
+        `${path.sep}adapters${path.sep}openshell${path.sep}local-forward-listener.`,
+      ) &&
       typeof loaded?.probeLocalForwardListener === "function"
     ) {
       loaded.probeLocalForwardListener = () => {
@@ -405,7 +407,8 @@ const PROCESS_HARNESS_PACKAGE_SOURCE = Object.freeze({
     sourceRevision: "e".repeat(40),
   }),
 });
-const processHarnessPackages = new Map();
+const processHarnessPackagesByHome = new Map();
+let resolvePinnedHarnessPackageFromStore = null;
 const ONBOARD_SANDBOX_INSPECT = {
   Id: ONBOARD_SANDBOX_OLD_CONTAINER_ID,
   Image: `sha256:${"c".repeat(64)}`,
@@ -429,28 +432,12 @@ const ONBOARD_SANDBOX_INSPECT = {
   },
 };
 
-function ensurePrivateDirectory(directory) {
-  const fs = require("node:fs");
-  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  fs.chmodSync(directory, 0o700);
-}
-
-function copyProcessHarnessPackageFile(packageRoot, sourceRelativePath, targetRelativePath) {
-  const fs = require("node:fs");
-  const repositoryRoot = path.resolve(__dirname, "../..");
-  const source = path.join(repositoryRoot, ...sourceRelativePath.split("/"));
-  const target = path.join(packageRoot, ...targetRelativePath.split("/"));
-  ensurePrivateDirectory(path.dirname(target));
-  fs.writeFileSync(target, fs.readFileSync(source), { mode: 0o600 });
-  fs.chmodSync(target, 0o600);
-}
-
 /**
- * Install one small package boundary with the real agent manifest for process-level onboarding.
- * Package-store tests own filesystem integrity. These higher-level tests keep an exact process-local
- * identity so unrelated macOS temporary-directory activity cannot invalidate package ancestry.
+ * Install one complete built package through the same receipt-backed boundary used in production.
+ * The source build is immutable, while the explicit HOME-scoped store keeps parallel process tests
+ * isolated and lets every later adapter read revalidate the exact object named by its receipt.
  */
-function installOnboardProcessHarnessPackage(agentName = "openclaw") {
+function installOnboardProcessHarnessPackage(agentName = "openclaw", options = {}) {
   const displayName = PROCESS_HARNESS_PACKAGE_DISPLAY_NAMES[agentName];
   if (typeof displayName !== "string") {
     throw new Error(`Unsupported onboarding process harness fixture '${agentName}'`);
@@ -459,98 +446,126 @@ function installOnboardProcessHarnessPackage(agentName = "openclaw") {
   const configuredHome = process.env.HOME;
   if (!configuredHome) throw new Error("Onboarding process harness fixture requires HOME");
   const home = fs.realpathSync(configuredHome);
-  const sourceParent = path.join(home, ".nemoclaw-process-harness-sources");
-  const packageRoot = path.join(sourceParent, `nemoclaw-${agentName}`);
-  const packageSourceRoot = `packages/nemoclaw-${agentName}`;
-  ensurePrivateDirectory(sourceParent);
-  if (!fs.existsSync(packageRoot)) {
-    ensurePrivateDirectory(packageRoot);
-    const envelope = {
-      schemaVersion: 1,
-      kind: "agent-runtime",
-      id: agentName,
-      displayName,
-      packageVersion: "0.1.0-process-fixture",
-      minimumNemoClawVersion: "0.0.113",
-      maximumNemoClawVersionExclusive: "0.0.121",
-      manifest: "manifest.yaml",
-    };
-    fs.writeFileSync(
-      path.join(packageRoot, "nemoclaw-package.json"),
-      `${JSON.stringify(envelope)}\n`,
-      { mode: 0o600 },
-    );
-    copyProcessHarnessPackageFile(
-      packageRoot,
-      `${packageSourceRoot}/manifest.yaml`,
-      "manifest.yaml",
-    );
-    for (const asset of [
-      "Dockerfile",
-      "Dockerfile.base",
-      "policy-additions.yaml",
-      "policy-permissive.yaml",
-      "start.sh",
-    ]) {
-      const sourceRelativePath = `${packageSourceRoot}/${asset}`;
-      if (fs.existsSync(path.join(path.resolve(__dirname, "../.."), sourceRelativePath))) {
-        copyProcessHarnessPackageFile(packageRoot, sourceRelativePath, asset);
-      }
-    }
+  // macOS exposes the temporary directory through /var, which is a symlink to
+  // /private/var. Production package authority rejects symlinked ancestors, so
+  // keep the operation environment on the same canonical HOME used to install
+  // the immutable fixture package.
+  process.env.HOME = home;
+  const builtPackageRoot = path.resolve(__dirname, "../../dist/harnesses", `nemoclaw-${agentName}`);
+  if (!fs.existsSync(builtPackageRoot)) {
+    throw new Error("Onboarding process harness fixtures require built harness packages");
   }
-
   const packageStore = require(
     path.resolve(__dirname, "../../src/lib/agent-runtime/package/store.ts"),
   );
-  const { parseHarnessPackageManifest } = require(
-    path.resolve(__dirname, "../../src/lib/agent-runtime/package/manifest.ts"),
-  );
-  const packageManifest = parseHarnessPackageManifest(packageRoot);
-  const { buildAgentDefinition } = require(
-    path.resolve(__dirname, "../../src/lib/agent-runtime/manifest-loader.ts"),
-  );
-  const agentDefinition = buildAgentDefinition({
-    manifest: packageManifest.manifest,
-    manifestPath: packageManifest.manifestPath,
-    packageRoot: packageManifest.packageRoot,
+  const storeRoot = packageStore.getHarnessPackageStoreRoot(home);
+  let packagesForHome = processHarnessPackagesByHome.get(home);
+  if (!packagesForHome) {
+    packagesForHome = new Map();
+    processHarnessPackagesByHome.set(home, packagesForHome);
+  }
+  let fixturePackage = packagesForHome.get(agentName);
+  if (!fixturePackage) {
+    let packageRoot = builtPackageRoot;
+    const publication = options.managedImagePublication;
+    if (publication) {
+      const sourceParent = path.join(home, ".nemoclaw-process-package-sources");
+      fs.mkdirSync(sourceParent, { recursive: true, mode: 0o700 });
+      packageRoot = path.join(sourceParent, `nemoclaw-${agentName}`);
+      fs.cpSync(builtPackageRoot, packageRoot, { recursive: true });
+      const manifestPath = path.join(packageRoot, "manifest.yaml");
+      const manifest = fs.readFileSync(manifestPath, "utf8");
+      const managedImageMarker = "\nmanaged_image:";
+      const managedImageStart = manifest.indexOf(managedImageMarker);
+      const nextTopLevelField = manifest
+        .slice(managedImageStart + managedImageMarker.length)
+        .match(/\n(?=[a-z][a-z0-9_]*:)/);
+      if (managedImageStart < 0 || !nextTopLevelField || nextTopLevelField.index === undefined) {
+        throw new Error("Onboarding process fixture could not locate managed image declaration");
+      }
+      const publicationOffset =
+        managedImageStart + managedImageMarker.length + nextTopLevelField.index;
+      const publicationYaml = [
+        "  publication:",
+        "    source:",
+        `      repository: ${JSON.stringify(publication.source.repository)}`,
+        `      revision: ${publication.source.revision}`,
+        `      release: ${publication.source.release}`,
+        `      cohort: ${publication.source.cohort}`,
+        "    digests:",
+        `      linux/amd64: ${publication.digest}`,
+        `      linux/arm64: ${publication.digest}`,
+      ].join("\n");
+      fs.chmodSync(manifestPath, 0o600);
+      fs.writeFileSync(
+        manifestPath,
+        `${manifest.slice(0, publicationOffset)}\n${publicationYaml}${manifest.slice(publicationOffset)}`,
+      );
+    }
+    const { installHarnessPackage } = require(
+      path.resolve(__dirname, "../../src/lib/agent-runtime/package/install.ts"),
+    );
+    const installed = installHarnessPackage(
+      { packageRoot, sourceIdentity: PROCESS_HARNESS_PACKAGE_SOURCE },
+      { storeRoot },
+    );
+    const { buildAgentDefinition } = require(
+      path.resolve(__dirname, "../../src/lib/agent-runtime/manifest-loader.ts"),
+    );
+    const agentDefinition = buildAgentDefinition({
+      manifest: installed.packageManifest.manifest,
+      manifestPath: installed.packageManifest.manifestPath,
+      packageRoot: installed.packageRoot,
+    });
+    fixturePackage = Object.freeze({
+      ...installed,
+      agentDefinition,
+      managedImagePublication: publication || null,
+    });
+    packagesForHome.set(agentName, fixturePackage);
+  } else if (
+    JSON.stringify(fixturePackage.managedImagePublication) !==
+    JSON.stringify(options.managedImagePublication || null)
+  ) {
+    throw new Error("Onboarding process harness fixture package variant changed within one HOME");
+  }
+  if (resolvePinnedHarnessPackageFromStore === null) {
+    resolvePinnedHarnessPackageFromStore = packageStore.resolvePinnedHarnessPackage;
+    packageStore.resolvePinnedHarnessPackage = (requestedIdentity, options = {}) => {
+      if (options.storeRoot !== undefined) {
+        return resolvePinnedHarnessPackageFromStore(requestedIdentity, options);
+      }
+      const currentHome = fs.realpathSync(process.env.HOME);
+      const selected = processHarnessPackagesByHome.get(currentHome)?.get(requestedIdentity?.id);
+      const selectsFixtureStore =
+        selected &&
+        selected.identity.kind === requestedIdentity?.kind &&
+        selected.identity.id === requestedIdentity?.id &&
+        selected.identity.packageVersion === requestedIdentity?.packageVersion &&
+        selected.identity.contentDigest === requestedIdentity?.contentDigest;
+      return resolvePinnedHarnessPackageFromStore(requestedIdentity, {
+        ...options,
+        ...(selectsFixtureStore
+          ? { storeRoot: packageStore.getHarnessPackageStoreRoot(currentHome) }
+          : {}),
+      });
+    };
+  }
+  const installed = packageStore.resolvePinnedHarnessPackage(fixturePackage.identity, {
+    storeRoot,
+    getBuildIdentity: () => PROCESS_HARNESS_PACKAGE_SOURCE.nemoclawBuildIdentity,
   });
-  const contentDigest = require("node:crypto")
-    .createHash("sha256")
-    .update(`nemoclaw-onboard-process-fixture:${agentName}:v1`)
-    .digest("hex");
-  const identity = Object.freeze({
-    kind: packageManifest.envelope.kind,
-    id: packageManifest.envelope.id,
-    packageVersion: packageManifest.envelope.packageVersion,
-    contentDigest,
-  });
-  const installed = Object.freeze({
-    state: "installed",
-    identity,
-    agentDefinition,
-    receipt: Object.freeze({
-      schemaVersion: 1,
-      identity,
-      sourceIdentity: PROCESS_HARNESS_PACKAGE_SOURCE,
-      installedAt: "2026-08-25T00:00:00.000Z",
-    }),
-    packageRoot,
-    packageManifest,
-  });
-  processHarnessPackages.set(`${identity.id}\0${identity.contentDigest}`, installed);
+  if (installed.packageRoot !== fixturePackage.packageRoot) {
+    throw new packageStore.HarnessPackageStoreIntegrityError();
+  }
   const packageCatalog = require(
     path.resolve(__dirname, "../../src/lib/agent-runtime/package/catalog.ts"),
   );
   packageCatalog.listHarnessPackageInventory = () => {
-    const packagesById = new Map(
-      [...processHarnessPackages.values()].map((fixturePackage) => [
-        fixturePackage.identity.id,
-        fixturePackage,
-      ]),
-    );
-    const fixturePackages = [...packagesById.values()].sort((left, right) =>
-      left.identity.id.localeCompare(right.identity.id),
-    );
+    const currentHome = fs.realpathSync(process.env.HOME);
+    const fixturePackages = [
+      ...(processHarnessPackagesByHome.get(currentHome)?.values() ?? []),
+    ].sort((left, right) => left.identity.id.localeCompare(right.identity.id));
     return Object.freeze({
       available: Object.freeze(
         fixturePackages.map((fixturePackage) =>
@@ -587,31 +602,15 @@ function installOnboardProcessHarnessPackage(agentName = "openclaw") {
       ),
     });
   };
-  packageStore.resolvePinnedHarnessPackage = (requestedIdentity) => {
-    const key = `${requestedIdentity?.id ?? ""}\0${requestedIdentity?.contentDigest ?? ""}`;
-    const fixturePackage = processHarnessPackages.get(key);
-    if (
-      !fixturePackage ||
-      JSON.stringify(fixturePackage.identity) !== JSON.stringify(requestedIdentity)
-    ) {
-      throw new packageStore.HarnessPackageStoreIntegrityError();
-    }
-    return fixturePackage;
-  };
-  const recordedAgent = agentName === "openclaw" ? null : agentName;
-  const { resolveSandboxAgent } = require(
-    path.resolve(__dirname, "../../src/lib/onboard/sandbox-agent.ts"),
-  );
-  const resolved = resolveSandboxAgent({
-    agent: recordedAgent,
-    harnessPackage: installed.identity,
-  });
+  // Receipt-backed packages persist the manifest id. The null OpenClaw
+  // sentinel belongs only to the historical no-receipt compatibility lane.
+  const recordedAgent = agentName;
   return Object.freeze({
     agentName,
     recordedAgent,
     harnessPackage: installed.identity,
     harnessPackageMigration: null,
-    agentDefinition: resolved.definition,
+    agentDefinition: fixturePackage.agentDefinition,
     registryAuthority: Object.freeze({
       agent: recordedAgent,
       harnessPackage: installed.identity,
@@ -698,8 +697,12 @@ function mockSandboxExecCurl(command, options = {}) {
     return null;
   }
 
-  if (normalized.includes("/health") || normalized.includes("%{http_code}")) {
+  if (normalized.includes("%{http_code}")) {
     return options.dashboardHealthCode || "200";
+  }
+
+  if (normalized.includes("/health")) {
+    return options.defaultCurlOutput || "ok";
   }
 
   if (hasOwn(options, "defaultCurlOutput")) {
@@ -713,6 +716,20 @@ function mockOnboardRunCapture(command, options = {}) {
   // The companion runner seam models the exact post-commit Docker proof. Install
   // it lazily after each scenario has replaced runner.run with its local recorder.
   mockDockerSandboxLifecycleReleaseFromRunner();
+  const commandArgs = Array.isArray(command)
+    ? command.map(String)
+    : normalizeCommand(command).split(/\s+/u);
+  const qualificationCommand = commandArgs.indexOf(
+    "/usr/local/lib/nemoclaw/dcode-selection-qualify",
+  );
+  const qualificationNonce = commandArgs.at(-1) ?? "";
+  if (
+    qualificationCommand >= 0 &&
+    qualificationCommand === commandArgs.length - 3 &&
+    /^[a-f0-9]{64}$/u.test(qualificationNonce)
+  ) {
+    return `__NEMOCLAW_SELECTION_QUALIFIED__=${qualificationNonce}`;
+  }
   const normalized = normalizeCommand(command);
   if (
     normalized.startsWith("docker ps -a --no-trunc ") &&
@@ -1016,6 +1033,7 @@ function installVerifiedSandboxCreateFixture(registry, options) {
   const gatewayName = options.gatewayName || "nemoclaw";
   const gatewayPort = options.gatewayPort || 8080;
   mockStructuredOpenShellCaptureFromRunner({ gatewayName, gatewayPort, sandboxName });
+  mockStandaloneGatewayTeardownAuthority();
   const sessionId = options.sessionId || "integration-fixture-session";
   const agentName = options.agentName || "openclaw";
   const installedHarness = hasOwn(options, "harnessPackage")
@@ -1057,7 +1075,11 @@ function installVerifiedSandboxCreateFixture(registry, options) {
   let pendingCheckpoint = null;
   let pendingEntry = null;
   let publishedEntry = null;
-  let sourceEntry = options.getSandbox ? options.getSandbox(sandboxName) : null;
+  let sourceEntry = hasOwn(options, "sourceEntry")
+    ? structuredClone(options.sourceEntry)
+    : options.getSandbox
+      ? options.getSandbox(sandboxName)
+      : null;
   if (
     sourceEntry &&
     harnessPackage &&
@@ -1193,6 +1215,15 @@ function installVerifiedSandboxCreateFixture(registry, options) {
         harnessPackage,
         harnessPackageMigration,
       });
+      if (options.portableRuntimeAuthority) {
+        const checkpointMigration = require(
+          path.resolve(__dirname, "../../src/lib/state/onboard-checkpoint-migrate.ts"),
+        );
+        session.checkpoint = checkpointMigration.deriveCheckpointFromSession(session, {
+          profile: "portable",
+          runtimeAuthority: options.portableRuntimeAuthority,
+        });
+      }
       const sourceIdentity =
         currentEntry?.lifecycleLiveIdentityFingerprint ||
         (options.sourceSandboxId
@@ -1451,10 +1482,12 @@ function mockDockerSandboxLifecycleReleaseFromRunner() {
     ) {
       return "true\n";
     }
-    if (state.replacementRestarted && normalized.includes("sandbox list")) {
+    const isLifecycleStatusList =
+      normalized.includes("sandbox list") && !normalized.includes("--selector");
+    if (state.replacementRestarted && isLifecycleStatusList) {
       return "my-assistant  2026-08-27  Ready\n";
     }
-    if (state.lifecycleStopped && normalized.includes("sandbox list")) {
+    if (state.lifecycleStopped && isLifecycleStatusList) {
       return "my-assistant  2026-08-27  Stopped\n";
     }
     return null;
@@ -1502,6 +1535,15 @@ function mockDockerSandboxLifecycleReleaseFromRunner() {
     wrappedRunCapture.__nemoclawDockerLifecycleFixture = true;
     runner.runCapture = wrappedRunCapture;
   }
+}
+
+function resetDockerSandboxLifecycleFixture() {
+  const runner = require(path.resolve(__dirname, "../../src/lib/runner.ts"));
+  const state = runner.run.__nemoclawDockerLifecycleState;
+  if (!state) return;
+  state.finalCommitReleased = false;
+  state.lifecycleStopped = false;
+  state.replacementRestarted = false;
 }
 
 function mockFreshOpenClawPluginDiscovery() {
@@ -1724,6 +1766,7 @@ module.exports = {
   createStatefulMessagingProviderRunner,
   isOpenClawSecurityInventoryProbe,
   mockDockerSandboxLifecycleReleaseFromRunner,
+  resetDockerSandboxLifecycleFixture,
   mockFreshOpenClawPluginDiscovery,
   createCreatedSandboxFixture,
   mockStructuredOpenShellCaptureFromRunner,

@@ -56,7 +56,9 @@ function createInferenceRouteStatusSetup(options: {
       "    *) shift ;;",
       "  esac",
       "done",
-      'if [ -n "$out" ]; then printf "{}" > "$out"; fi',
+      `if [ -n "$out" ]; then printf '%s' ${JSON.stringify(
+        JSON.stringify({ choices: [{ message: { role: "assistant", content: "OK" } }] }),
+      )} > "$out"; fi`,
       `printf ${JSON.stringify(options.upstreamHttpStatus ?? "200")}`,
       `exit ${String(options.upstreamExit ?? 0)}`,
     ].join("\n"),
@@ -239,6 +241,7 @@ describe("CLI sandbox status JSON output", testTimeoutOptions(20_000), () => {
 
     const result = runWithEnv(`${sandboxName} status --json`, {
       HOME: home,
+      NVIDIA_INFERENCE_API_KEY: "fixture-nvidia-key",
       PATH: `${localBin}:${process.env.PATH || ""}`,
     });
 
@@ -264,6 +267,9 @@ describe("CLI sandbox status JSON output", testTimeoutOptions(20_000), () => {
 
     const result = runWithEnv(`${sandboxName} status --json`, {
       HOME: home,
+      NGC_API_KEY: undefined,
+      NVIDIA_API_KEY: undefined,
+      NVIDIA_INFERENCE_API_KEY: undefined,
       PATH: `${localBin}:${process.env.PATH || ""}`,
     });
 

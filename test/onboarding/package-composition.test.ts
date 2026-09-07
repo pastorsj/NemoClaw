@@ -25,6 +25,11 @@ import { selectOnboardHarnessPackage } from "../../src/lib/onboard/package-selec
 import { resolveSandboxAgent } from "../../src/lib/onboard/sandbox-agent";
 import { resolveSandboxWorkloadSource } from "../../src/lib/onboard/workload/source";
 import type { SandboxEntry } from "../../src/lib/state/registry/types";
+import {
+  TEST_CONFIG_ADAPTER_SOURCE,
+  TEST_MESSAGING_ADAPTER_SOURCE,
+  TEST_STARTUP_ADAPTER_SOURCE,
+} from "../helpers/adapter-fixtures";
 
 const PACKAGE_ID = "future-terminal";
 const PACKAGE_ALIAS = "future";
@@ -124,6 +129,10 @@ function writeFutureAuthoringPackage(): void {
       "  reason: This package does not expose MCP.",
       "messaging:",
       "  support: disabled",
+      "policy:",
+      "  owned_presets: []",
+      "  automatic_presets: []",
+      "  baseline_exclusion_impacts: {}",
       "",
     ].join("\n"),
   );
@@ -135,30 +144,9 @@ function writeFutureAuthoringPackage(): void {
   writeAuthoringPackageFile("start.sh", "#!/bin/sh\nexec future-terminal\n", 0o700);
   writeAuthoringPackageFile("policy-additions.yaml", "version: 1\nnetwork_policies: {}\n");
   writeAuthoringPackageFile("fabric/future.fabric-adapter.json", '{"adapter":"future-terminal"}\n');
-  writeAuthoringPackageFile(
-    "host/config-adapter.cts",
-    [
-      '"use strict";',
-      "module.exports = {",
-      "  prepareConfigUpdate() {",
-      '    return { kind: "immutable", reason: "The fixture configuration is immutable." };',
-      "  },",
-      "};",
-      "",
-    ].join("\n"),
-  );
-  writeAuthoringPackageFile(
-    "host/messaging-adapter.cts",
-    [
-      '"use strict";',
-      "module.exports = {",
-      "  describeMessagingIntegration() {",
-      '    return { kind: "disabled", packageId: "future-terminal", reason: "Messaging is disabled." };',
-      "  },",
-      "};",
-      "",
-    ].join("\n"),
-  );
+  writeAuthoringPackageFile("host/config-adapter.cts", TEST_CONFIG_ADAPTER_SOURCE);
+  writeAuthoringPackageFile("host/messaging-adapter.cts", TEST_MESSAGING_ADAPTER_SOURCE);
+  writeAuthoringPackageFile("host/startup-adapter.cts", TEST_STARTUP_ADAPTER_SOURCE);
 }
 
 beforeEach(() => {

@@ -19,6 +19,12 @@ export function writeOkOpenshell(
   );
   writeExecutable(
     path.join(fakeBin, "ssh"),
-    "#!/usr/bin/env bash\nprintf '%s\\n' '{\"version\":1,\"installRecords\":{}}'\n",
+    `#!/usr/bin/env bash
+if [[ "$*" = *"inspect-managed-extensions"* ]]; then
+  printf '%s\\n' '{"schemaVersion":1,"extensions":[]}'
+else
+  printf '%s\\n' '{"version":1,"installRecords":{},"loadPaths":[]}'
+fi
+`,
   );
 }

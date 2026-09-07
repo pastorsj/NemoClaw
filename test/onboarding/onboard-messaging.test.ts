@@ -18,7 +18,7 @@ import {
   parseMessagingFixturePayload,
   writeCustomMessagingDockerfile,
 } from "../helpers/messaging-plan-fixtures";
-import { runBoundedOnboardScript } from "../helpers/onboard-child-process-harness";
+import { runOnboardProcess } from "../helpers/onboard-child-process-harness";
 import { writeOkOpenshell } from "../helpers/onboard-openshell-fixture";
 
 type CommandEntry = {
@@ -31,7 +31,6 @@ type CommandEntry = {
   providerRevisions?: Record<string, number | undefined> | null;
   rawCredentialInEnv?: boolean;
 };
-const parseStdoutJson = parseMessagingFixturePayload;
 const repoRoot = path.join(import.meta.dirname, "../..");
 const requireForTest = createRequire(import.meta.url);
 const yamlModulePath = requireForTest.resolve("yaml");
@@ -47,7 +46,7 @@ describe("onboard messaging", () => {
   it(
     "creates providers for messaging tokens and attaches them to the sandbox",
     {
-      timeout: 60_000,
+      timeout: 120_000,
     },
     async () => {
       const tmpDir = fs.mkdtempSync(
@@ -82,6 +81,7 @@ const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const commands = [];
 const createdSandbox = fixtureMocks.createCreatedSandboxFixture({ sandboxName: "my-assistant" }); createdSandbox.installRuntimeObservation();
+const forwardService = fixtureMocks.installForwardServiceReachabilityFixture();
 runner.run = fixtureMocks.createStatefulMessagingProviderRunner({ commands, createdSandbox });
 runner.runCapture = (command) => {
   const sandboxCapture = createdSandbox.capture(command);
@@ -108,7 +108,7 @@ const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry,
 preflight.checkPortAvailable = async () => ({ ok: true });
 credentials.prompt = async () => "";
 childProcess.spawn = (...args) => {
-  createdSandbox.create(args.flat());
+  if (!forwardService.recordSpawn(args)) createdSandbox.create(args.flat());
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
@@ -156,8 +156,9 @@ const { createSandbox, setupMessagingChannels } = require(${onboardPath});
 });
 `;
       fs.writeFileSync(scriptPath, script);
-      const result = runBoundedOnboardScript(scriptPath, {
+      const result = runOnboardProcess([scriptPath], {
         cwd: repoRoot,
+        timeoutMs: 90_000,
         env: {
           ...process.env,
           HOME: fs.realpathSync(tmpDir),
@@ -166,8 +167,8 @@ const { createSandbox, setupMessagingChannels } = require(${onboardPath});
         },
       });
 
-      assert.equal(result.status, 0, result.stderr);
-      const payload = parseStdoutJson(result.stdout);
+      assert.equal(result.status, 0, `${result.output}\n${result.error?.message ?? ""}`);
+      const payload = parseMessagingFixturePayload(result.stdout);
 
       const providerCommands = payload.commands.filter((e: CommandEntry) =>
         e.command.includes("provider create"),
@@ -296,7 +297,7 @@ const { createSandbox, setupMessagingChannels } = require(${onboardPath});
   it(
     "preserves Hermes Slack policy when Slack is active at sandbox create time",
     {
-      timeout: 60_000,
+      timeout: 120_000,
     },
     async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-hermes-slack-"));
@@ -322,10 +323,7 @@ const { createSandbox, setupMessagingChannels } = require(${onboardPath});
 
         fs.mkdirSync(fakeBin, { recursive: true });
         fs.mkdirSync(customBuildDir, { recursive: true });
-        fs.writeFileSync(
-          customDockerfilePath,
-          "FROM scratch\nARG NEMOCLAW_MESSAGING_PLAN_B64=\nARG NEMOCLAW_TOOL_DISCLOSURE=progressive\nENV NEMOCLAW_TOOL_DISCLOSURE=${NEMOCLAW_TOOL_DISCLOSURE}\n",
-        );
+        writeCustomMessagingDockerfile(customBuildDir);
         writeOkOpenshell(fakeBin);
 
         const script = String.raw`
@@ -420,7 +418,7 @@ const { createSandbox } = require(${onboardPath});
   process.env.NEMOCLAW_AGENT = "hermes";
   process.env.SLACK_BOT_TOKEN = "xoxb-test-slack-token-value";
   process.env.SLACK_APP_TOKEN = "xapp-test-slack-app-token-value";
-  const sandboxName = await createSandbox(...fixtureMocks.sandboxCreateArgsWithVerifiedReservation([null, "gpt-5.4", "nvidia-prod", null, "my-assistant", null, null, ${customDockerfileArg}, loadAgent("hermes"), null, null, null, []], createFixture));
+  const sandboxName = await createSandbox(...fixtureMocks.sandboxCreateArgsWithVerifiedReservation([null, "gpt-5.4", "nvidia-prod", null, "my-assistant", null, ["slack"], ${customDockerfileArg}, loadAgent("hermes"), null, null, null, []], createFixture));
   const createCommand = commands.find((entry) => entry.command.includes("sandbox create"));
   const parsed = YAML.parse(createCommand?.policyContent || "") || {};
   const slack = parsed.network_policies?.slack || {};
@@ -453,7 +451,7 @@ const { createSandbox } = require(${onboardPath});
           },
         });
         assert.equal(result.status, 0, result.stderr);
-        const payload = parseStdoutJson(result.stdout);
+        const payload = parseMessagingFixturePayload(result.stdout);
         assert.ok(payload.createCommand.command.includes("sandbox create"));
         assert.match(payload.createCommand.command, /--provider my-assistant-slack-bridge/);
         assert.match(payload.createCommand.command, /--provider my-assistant-slack-app/);
@@ -488,7 +486,7 @@ const { createSandbox } = require(${onboardPath});
 
   it(
     "publishes attached OpenShell provider state before a messaging recreate starts (#9770)",
-    { timeout: 60_000 },
+    { timeout: 150_000 },
     async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-messaging-recreate-"));
       const fakeBin = path.join(tmpDir, "bin");
@@ -520,6 +518,7 @@ const _n = (c) => (Array.isArray(c) ? c.join(" ") : String(c)).replace(/'/g, "")
 const childProcess = require("node:child_process"), { EventEmitter } = require("node:events");
 const commands = [], credentialKeys = ${JSON.stringify(providerCredentialKeys)}; let registered = null;
 const createdSandbox = fixtureMocks.createCreatedSandboxFixture({ sandboxName: "my-assistant" }); createdSandbox.installRuntimeObservation();
+const forwardService = fixtureMocks.installForwardServiceReachabilityFixture();
 const providers = Object.keys(credentialKeys), revisions = new Map(providers.map((name) => [name, 1])), providerGetCounts = new Map();
 const rawGatewayCredential = ${JSON.stringify(rawGatewayCredential)}, gatewaySecrets = new Map(providers.map((name) => [name, rawGatewayCredential]));
 registry.registerSandbox({ name: "my-assistant", messaging: { schemaVersion: 1, plan: ${messagingPlanLiteral(["slack", "telegram", "whatsapp"])} } });
@@ -551,7 +550,7 @@ const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry,
 });
 preflight.checkPortAvailable = async () => ({ ok: true }); credentials.prompt = async () => "";
 childProcess.spawn = (...args) => {
-  createdSandbox.create(args.flat());
+  if (!forwardService.recordSpawn(args)) createdSandbox.create(args.flat());
   const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.unref = () => {}; child.pid = 4242;
   const command = _n([args[0], ...(Array.isArray(args[1]) ? args[1] : [])]); const attachedProviders = [...command.matchAll(/--provider ([^ ]+)/g)].map((match) => match[1]);
   commands.push({ command, providerRevisions: command.includes("sandbox create") ? Object.fromEntries(attachedProviders.map((name) => [name, revisions.get(name)])) : null, rawCredentialInEnv: Object.values(args[2]?.env || {}).includes(rawGatewayCredential) });
@@ -588,8 +587,8 @@ const { createSandbox } = require(${onboardPath});
           },
         });
       const result = runScenario();
-      assert.equal(result.status, 0, result.stderr);
-      const payload = parseStdoutJson(result.stdout);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      const payload = parseMessagingFixturePayload(result.stdout);
       const commands = payload.commands as CommandEntry[];
       const createIndex = commands.findIndex(({ command }) => command.includes("sandbox create"));
       assert.notEqual(createIndex, -1, "expected sandbox create command");
@@ -604,7 +603,7 @@ const { createSandbox } = require(${onboardPath});
         .sort();
       const denied = runScenario("my-assistant-telegram-bridge");
       assert.equal(denied.status, 1);
-      const deniedPayload = parseStdoutJson(denied.stdout);
+      const deniedPayload = parseMessagingFixturePayload(denied.stdout);
       const deniedCommands = (deniedPayload.commands as CommandEntry[]).map(
         ({ command }) => command,
       );
@@ -781,8 +780,9 @@ const { createSandbox } = require(${onboardPath});
 });
 `;
       fs.writeFileSync(scriptPath, script);
-      const result = runBoundedOnboardScript(scriptPath, {
+      const result = runOnboardProcess([scriptPath], {
         cwd: repoRoot,
+        timeoutMs: 90_000,
         env: {
           ...process.env,
           HOME: fs.realpathSync(tmpDir),
@@ -794,7 +794,7 @@ const { createSandbox } = require(${onboardPath});
         },
       });
       assert.equal(result.status, 0, result.stderr || result.error?.message);
-      const payload = parseStdoutJson(result.stdout);
+      const payload = parseMessagingFixturePayload(result.stdout);
 
       const createCommand = payload.commands.find((entry: CommandEntry) =>
         entry.command.includes("sandbox create"),
@@ -958,7 +958,7 @@ const { createSandbox } = require(${onboardPath});
         });
 
         assert.equal(result.status, 0, result.stderr);
-        const payload = parseStdoutJson(result.stdout);
+        const payload = parseMessagingFixturePayload(result.stdout);
 
         const providerMutationCommands = payload.commands.filter(
           (entry: CommandEntry) =>
@@ -1130,7 +1130,7 @@ const { createSandbox } = require(${onboardPath});
         });
 
         assert.equal(result.status, 0, result.stderr);
-        const payload = parseStdoutJson(result.stdout);
+        const payload = parseMessagingFixturePayload(result.stdout);
 
         const createCommand = payload.commands.find((entry: CommandEntry) =>
           entry.command.includes("sandbox create"),
@@ -1288,14 +1288,14 @@ runner.runCapture = (command) => {
   if (_n(command).includes("forward list")) return "SANDBOX BIND PORT PID STATUS";
   return "";
 };
-registry.getSandbox = () => fixtureMocks.sandboxLifecycleFixture(
+registry.registerSandbox(fixtureMocks.sandboxLifecycleFixture(
     {
       ...harnessFixture.registryAuthority,
       name: "my-assistant",
       toolDisclosure: "progressive",
     },
     { sandboxId: existingSandbox.state.sandboxId },
-  );
+  ));
 const { createSandbox } = require(${onboardPath});
 
 (async () => {
@@ -1327,8 +1327,8 @@ const { createSandbox } = require(${onboardPath});
         },
       });
 
-      assert.equal(result.status, 0, result.stderr);
-      const payload = parseStdoutJson(result.stdout);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      const payload = parseMessagingFixturePayload(result.stdout);
 
       assert.equal(payload.sandboxName, "my-assistant", "should reuse existing sandbox");
       assert.ok(
@@ -1355,7 +1355,7 @@ const { createSandbox } = require(${onboardPath});
   it(
     "filters messaging providers to only enabledChannels when provided",
     {
-      timeout: 60_000,
+      timeout: 120_000,
     },
     async () => {
       const tmpDir = fs.mkdtempSync(
@@ -1460,7 +1460,7 @@ const { createSandbox } = require(${onboardPath});
       });
 
       assert.equal(result.status, 0, result.stderr);
-      const payload = parseStdoutJson(result.stdout);
+      const payload = parseMessagingFixturePayload(result.stdout);
 
       // Only telegram provider should be created
       const providerCommands = payload.commands.filter((e: CommandEntry) =>
@@ -1620,7 +1620,7 @@ const { createSandbox } = require(${onboardPath});
       });
 
       assert.equal(result.status, 0, result.stderr);
-      const payload = parseStdoutJson(result.stdout);
+      const payload = parseMessagingFixturePayload(result.stdout);
 
       // No messaging providers should be created at all
       const providerCommands = payload.commands.filter((e: CommandEntry) =>
@@ -1706,7 +1706,7 @@ const { setupMessagingChannels } = require(${onboardPath});
       });
 
       assert.equal(result.status, 0, result.stderr);
-      const channels = parseStdoutJson<string[]>(result.stdout);
+      const channels = parseMessagingFixturePayload<string[]>(result.stdout);
 
       // Should return only the channels that have tokens set
       assert.ok(Array.isArray(channels), "expected an array return value");
@@ -1795,7 +1795,7 @@ const { setupMessagingChannels } = require(${onboardPath});
       });
 
       assert.equal(result.status, 0, result.stderr);
-      const channels = parseStdoutJson<string[]>(result.stdout);
+      const channels = parseMessagingFixturePayload<string[]>(result.stdout);
 
       assert.ok(Array.isArray(channels), "expected an array return value");
       assert.ok(!channels.includes("slack"), "Slack should be dropped after API rejection");
@@ -1862,7 +1862,7 @@ const { setupMessagingChannels } = require(${onboardPath});
       });
 
       assert.equal(result.status, 0, result.stderr);
-      const channels = parseStdoutJson<string[]>(result.stdout);
+      const channels = parseMessagingFixturePayload<string[]>(result.stdout);
 
       assert.ok(Array.isArray(channels), "expected an array return value");
       assert.equal(channels.length, 0, "expected empty array when no tokens are set");

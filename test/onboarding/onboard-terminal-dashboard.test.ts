@@ -57,14 +57,9 @@ const registry = require(${registryPath});
 const scenario = ${JSON.stringify(scenario)};
 const sandboxName = "deepagents-box";
 const fixtureMocks = require(${onboardScriptMocksPath});
-const harnessFixture = scenario === "reuse"
-  ? fixtureMocks.installHarnessRouteFixture({
-      agentName: "langchain-deepagents-code",
-      sandboxName,
-      provider: "nvidia-prod",
-      model: "gpt-5.4",
-    })
-  : fixtureMocks.installOnboardProcessHarnessPackage("langchain-deepagents-code");
+const harnessFixture = fixtureMocks.installOnboardProcessHarnessPackage(
+  "langchain-deepagents-code",
+);
 const agentDefs = require(${agentDefsPath});
 const agentOnboard = require(${agentOnboardPath});
 const dockerGpuSandboxCreate = require(${dockerGpuSandboxCreatePath});
@@ -124,7 +119,23 @@ agentOnboard.createAgentSandbox = () => {
   const stagedDockerfile = path.join(buildCtx, "Dockerfile");
   fs.writeFileSync(
     stagedDockerfile,
-    "FROM scratch\nARG NEMOCLAW_DCODE_AUTO_APPROVAL=disabled\nCMD [\"/bin/sh\"]\n",
+    [
+      "FROM scratch",
+      "ARG NEMOCLAW_DCODE_AUTO_APPROVAL=disabled",
+      "ARG NEMOCLAW_INFERENCE_API=openai-completions",
+      "ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1",
+      "ARG NEMOCLAW_INFERENCE_PROVIDER_ID=inference",
+      "ARG NEMOCLAW_MODEL=nvidia/test",
+      "ARG NEMOCLAW_PROXY_HOST=10.200.0.1",
+      "ARG NEMOCLAW_PROXY_PORT=3128",
+      "ARG NEMOCLAW_REASONING_EFFORT=",
+      "ARG NEMOCLAW_TOOL_DISCLOSURE=progressive",
+      "ARG NEMOCLAW_UPSTREAM_ENDPOINT_URL=",
+      "ARG NEMOCLAW_UPSTREAM_PROVIDER=nvidia",
+      "ARG NEMOCLAW_BUILD_ID=default",
+      'CMD ["/bin/sh"]',
+      "",
+    ].join("\n"),
   );
   return { buildCtx, stagedDockerfile };
 };
@@ -151,11 +162,9 @@ runner.runCapture = (command) => {
   if (sandboxCapture !== null) return sandboxCapture;
   commands.push({ command: normalized, env: null });
   if (
-    normalized.includes(
-      "sandbox exec --name " +
-        sandboxName +
-        " --gateway nemoclaw -- /usr/local/bin/dcode identity",
-    )
+    normalized.includes("sandbox exec") &&
+    normalized.includes(sandboxName) &&
+    normalized.endsWith("/usr/local/bin/dcode identity")
   ) {
     return [
       "Route:    inference",
@@ -165,21 +174,12 @@ runner.runCapture = (command) => {
     ].join("\n");
   }
   if (normalized.includes("forward list")) return "SANDBOX BIND PORT PID STATUS";
+  const mockedCapture = fixtureMocks.mockOnboardRunCapture(command);
+  if (mockedCapture !== null) return mockedCapture;
   return "";
 };
 
-registry.getSandbox = () =>
-  scenario === "reuse"
-    ? fixtureMocks.sandboxLifecycleFixture({
-        name: sandboxName,
-        gpuEnabled: false,
-        agent: "langchain-deepagents-code",
-        harnessPackage: harnessFixture.harnessPackage,
-        dashboardPort: 18789,
-        observabilityEnabled: false,
-        toolDisclosure: "progressive",
-      })
-    : null;
+registry.getSandbox = () => null;
 registry.registerSandbox = (entry) => {
   registerCalls.push(entry);
   return true;
@@ -190,20 +190,34 @@ registry.updateSandbox = (name, updates) => {
 };
 registry.setDefault = () => true;
 registry.removeSandbox = () => true;
-const createFixture =
-  scenario === "create"
-    ? fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
-        sandboxName,
-        agentName: "langchain-deepagents-code",
-        harnessPackage: harnessFixture.harnessPackage,
-        harnessPackageMigration: harnessFixture.harnessPackageMigration,
-        agentDefinition: harnessFixture.agentDefinition,
-        provider: "nvidia-prod",
-        model: "gpt-5.4",
-        registerSandbox: (entry) => registerCalls.push(entry),
-        updateSandbox: (name, updates) => updateCalls.push({ name, updates }),
-      })
+const sourceEntry =
+  scenario === "reuse"
+    ? fixtureMocks.sandboxLifecycleFixture(
+        {
+          name: sandboxName,
+          gpuEnabled: false,
+          agent: "langchain-deepagents-code",
+          harnessPackage: harnessFixture.harnessPackage,
+          approvalMode: "disabled",
+          dashboardPort: 0,
+          observabilityEnabled: false,
+          toolDisclosure: "progressive",
+        },
+        { sandboxId: createdSandbox.state.sandboxId },
+      )
     : null;
+const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
+  sandboxName,
+  agentName: "langchain-deepagents-code",
+  harnessPackage: harnessFixture.harnessPackage,
+  harnessPackageMigration: harnessFixture.harnessPackageMigration,
+  agentDefinition: harnessFixture.agentDefinition,
+  provider: "nvidia-prod",
+  model: "gpt-5.4",
+  getSandbox: () => sourceEntry,
+  registerSandbox: (entry) => registerCalls.push(entry),
+  updateSandbox: (name, updates) => updateCalls.push({ name, updates }),
+});
 
 sandboxCreateStream.streamSandboxCreate = async (command, args, env) => {
   if (scenario === "reuse") throw new Error("unexpected sandbox create");
@@ -235,13 +249,12 @@ const agent = agentDefs.loadAgent("langchain-deepagents-code");
     [],
   ];
   const resultName = await createSandbox(
-    ...(createFixture
-      ? fixtureMocks.sandboxCreateArgsWithVerifiedReservation(createArgs, createFixture)
-      : fixtureMocks.buildHarnessRouteArguments(createArgs, harnessFixture)),
+    ...fixtureMocks.sandboxCreateArgsWithVerifiedReservation(createArgs, createFixture),
   );
   console.log(JSON.stringify({ resultName, commands, registerCalls, updateCalls }));
 })().catch((error) => {
   console.error(error);
+  console.error(JSON.stringify({ commands }));
   process.exit(1);
 });
 `;
@@ -252,7 +265,8 @@ const agent = agentDefs.loadAgent("langchain-deepagents-code");
     encoding: "utf-8",
     env: {
       ...process.env,
-      HOME: tmpDir,
+      HOME: fs.realpathSync(tmpDir),
+      TMPDIR: fs.realpathSync(os.tmpdir()),
       PATH: `${fakeBin}:${process.env.PATH || ""}`,
       NEMOCLAW_NON_INTERACTIVE: "1",
       NEMOCLAW_TEST_MANAGED_IMAGE_CATALOG: "1",
@@ -261,7 +275,7 @@ const agent = agentDefs.loadAgent("langchain-deepagents-code");
     timeout: 30_000,
     killSignal: "SIGKILL",
   });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
   return parseStdoutJson<{
     resultName: string;
     commands: CommandEntry[];

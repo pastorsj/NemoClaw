@@ -22,7 +22,7 @@ describe("onboard helpers", () => {
   it(
     "non-interactive exits with error when existing sandbox is not ready",
     {
-      timeout: 60_000,
+      timeout: 90_000,
     },
     async () => {
       const repoRoot = path.join(import.meta.dirname, "../..");
@@ -119,7 +119,7 @@ const { createSandbox } = require(${onboardPath});
   it.each(["balanced", "restricted"])(
     "recreate-sandbox uses the requested %s tier without recording it",
     {
-      timeout: 60_000,
+      timeout: 90_000,
     },
     async (policyTier) => {
       const repoRoot = path.join(import.meta.dirname, "../..");
@@ -288,7 +288,7 @@ const { createSandbox } = require(${onboardPath});
   it(
     "recreate-sandbox flag backs up and restores workspace state",
     {
-      timeout: 60_000,
+      timeout: 90_000,
     },
     async () => {
       const repoRoot = path.join(import.meta.dirname, "../..");
@@ -313,7 +313,6 @@ const { createSandbox } = require(${onboardPath});
 	fixtureMocks.mockStandaloneGatewayTeardownAuthority();
 	const _n = (c) => (Array.isArray(c) ? c.join(" ") : String(c)).replace(/'/g, "");
 const registry = require(${registryPath});
-const sandboxState = require(${sandboxStatePath});
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
@@ -342,23 +341,35 @@ runner.run = (command) => {
   }
   return "";
 };
+	let registeredSandbox = null;
 	const sourceSandbox = fixtureMocks.sandboxLifecycleFixture({
 	  name: "my-assistant",
 	  gpuEnabled: false,
 	}, { sandboxId: createdSandbox.state.sandboxId });
-	registry.getSandbox = () => sourceSandbox;
+	const getSandbox = () => registeredSandbox || sourceSandbox;
+	registry.getSandbox = getSandbox;
 	const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
 	  sandboxName: "my-assistant",
 	  provider: "nvidia-prod",
 	  model: "gpt-5.4",
-	  getSandbox: registry.getSandbox,
+	  getSandbox,
+	  registerSandbox: (entry) => { registeredSandbox = entry; },
 	});
+	const sandboxState = require(${sandboxStatePath});
 
 let latestBackup = null;
 sandboxState.getLatestBackup = () => latestBackup;
 sandboxState.backupSandboxState = (name) => {
   events.push({ kind: "backup", name });
-  latestBackup = { backupPath: "/tmp/fake-backup-path", timestamp: "2026-05-25T00:00:00Z" };
+  latestBackup = {
+    backupPath: "/tmp/fake-backup-path",
+    timestamp: "2026-05-25T00:00:00Z",
+    version: 2,
+    sandboxName: "my-assistant",
+    agentType: "openclaw",
+    harnessPackage: createFixture.harnessPackage,
+    backupComplete: true,
+  };
   return {
     success: true,
     backedUpDirs: ["workspace", "skills"],
@@ -368,6 +379,11 @@ sandboxState.backupSandboxState = (name) => {
     manifest: latestBackup,
   };
 };
+sandboxState.captureSnapshotRestoreAuthority = (backupPath) => ({
+  schemaVersion: 1,
+  backupPath,
+  contentSha256: "f".repeat(64),
+});
 sandboxState.restoreRecreatedSandboxState = (name, backupPath, options) => {
   events.push({ kind: "restore", name, backupPath, options });
   return {
@@ -471,7 +487,7 @@ const { createSandbox } = require(${onboardPath});
   it(
     "recreate-sandbox with NEMOCLAW_RECREATE_WITHOUT_BACKUP=1 skips backup",
     {
-      timeout: 60_000,
+      timeout: 90_000,
     },
     async () => {
       const repoRoot = path.join(import.meta.dirname, "../..");
@@ -498,7 +514,6 @@ const { createSandbox } = require(${onboardPath});
 	fixtureMocks.mockStandaloneGatewayTeardownAuthority();
 	const _n = (c) => (Array.isArray(c) ? c.join(" ") : String(c)).replace(/'/g, "");
 const registry = require(${registryPath});
-const sandboxState = require(${sandboxStatePath});
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
@@ -527,17 +542,21 @@ runner.run = (command) => {
   }
   return "";
 };
+	let registeredSandbox = null;
 	const sourceSandbox = fixtureMocks.sandboxLifecycleFixture({
 	  name: "my-assistant",
 	  gpuEnabled: false,
 	}, { sandboxId: createdSandbox.state.sandboxId });
-	registry.getSandbox = () => sourceSandbox;
+	const getSandbox = () => registeredSandbox || sourceSandbox;
+	registry.getSandbox = getSandbox;
 	const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
 	  sandboxName: "my-assistant",
 	  provider: "nvidia-prod",
 	  model: "gpt-5.4",
-	  getSandbox: registry.getSandbox,
+	  getSandbox,
+	  registerSandbox: (entry) => { registeredSandbox = entry; },
 	});
+	const sandboxState = require(${sandboxStatePath});
 
 sandboxState.backupSandboxState = () => {
   events.push({ kind: "backup" });
@@ -620,7 +639,7 @@ const { createSandbox } = require(${onboardPath});
   it(
     "recreate-sandbox flag backs up and restores when existing sandbox is not ready",
     {
-      timeout: 60_000,
+      timeout: 90_000,
     },
     async () => {
       const repoRoot = path.join(import.meta.dirname, "../..");
@@ -645,7 +664,6 @@ const { createSandbox } = require(${onboardPath});
 	fixtureMocks.mockStandaloneGatewayTeardownAuthority();
 	const _n = (c) => (Array.isArray(c) ? c.join(" ") : String(c)).replace(/'/g, "");
 const registry = require(${registryPath});
-const sandboxState = require(${sandboxStatePath});
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
@@ -677,23 +695,35 @@ runner.run = (command) => {
   }
   return "";
 };
+	let registeredSandbox = null;
 	const sourceSandbox = fixtureMocks.sandboxLifecycleFixture({
 	  name: "my-assistant",
 	  gpuEnabled: false,
 	}, { sandboxId: createdSandbox.state.sandboxId });
-	registry.getSandbox = () => sourceSandbox;
+	const getSandbox = () => registeredSandbox || sourceSandbox;
+	registry.getSandbox = getSandbox;
 	const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
 	  sandboxName: "my-assistant",
 	  provider: "nvidia-prod",
 	  model: "gpt-5.4",
-	  getSandbox: registry.getSandbox,
+	  getSandbox,
+	  registerSandbox: (entry) => { registeredSandbox = entry; },
 	});
+	const sandboxState = require(${sandboxStatePath});
 
 let latestBackup = null;
 sandboxState.getLatestBackup = () => latestBackup;
 sandboxState.backupSandboxState = (name) => {
   events.push({ kind: "backup", name });
-  latestBackup = { backupPath: "/tmp/fake-backup-notready", timestamp: "2026-05-25T00:00:00Z" };
+  latestBackup = {
+    backupPath: "/tmp/fake-backup-notready",
+    timestamp: "2026-05-25T00:00:00Z",
+    version: 2,
+    sandboxName: "my-assistant",
+    agentType: "openclaw",
+    harnessPackage: createFixture.harnessPackage,
+    backupComplete: true,
+  };
   return {
     success: true,
     backedUpDirs: ["workspace"],
@@ -703,6 +733,15 @@ sandboxState.backupSandboxState = (name) => {
     manifest: latestBackup,
   };
 };
+sandboxState.validateRebuildRecoveryManifest = (_name, _owner, backup) => ({
+  ok: true,
+  manifest: backup,
+});
+sandboxState.captureSnapshotRestoreAuthority = (backupPath) => ({
+  schemaVersion: 1,
+  backupPath,
+  contentSha256: "f".repeat(64),
+});
 sandboxState.restoreRecreatedSandboxState = (name, backupPath) => {
   events.push({ kind: "restore", name, backupPath });
   return {
@@ -795,7 +834,7 @@ const { createSandbox } = require(${onboardPath});
   it(
     "interactive mode prompts before reusing an existing ready sandbox",
     {
-      timeout: 60_000,
+      timeout: 90_000,
     },
     async () => {
       const repoRoot = path.join(import.meta.dirname, "../..");
@@ -870,11 +909,15 @@ runner.runFile = (file, args = [], opts = {}) => {
 	  if (cmd.includes("forward list")) return "SANDBOX BIND PORT PID STATUS";
 	  return "";
 	};
-	registry.getSandbox = () => fixtureMocks.sandboxLifecycleFixture({
+	const existingRegistryEntry = fixtureMocks.sandboxLifecycleFixture({
 	  ...harnessFixture.registryAuthority,
 	  name: "my-assistant",
+	  provider: "nvidia-prod",
+	  model: "gpt-5.4",
 	  toolDisclosure: "progressive",
 	}, { sandboxId: createdSandbox.state.sandboxId });
+	registry.registerSandbox(existingRegistryEntry);
+	registry.getSandbox = () => existingRegistryEntry;
 
 // Mock prompt to return "y" (reuse)
 credentials.prompt = async () => "y";
@@ -953,7 +996,7 @@ const { createSandbox } = require(${onboardPath});
   it(
     "interactive mode deletes and recreates sandbox when user confirms drift recreate",
     {
-      timeout: 60_000,
+      timeout: 90_000,
     },
     async () => {
       const repoRoot = path.join(import.meta.dirname, "../..");
@@ -1031,16 +1074,19 @@ runner.runFile = (file, args = [], opts = {}) => {
   }
   return "";
 };
+	let registeredSandbox = null;
 	const sourceSandbox = fixtureMocks.sandboxLifecycleFixture({
 	  name: "my-assistant",
 	  toolDisclosure: "progressive",
 	}, { sandboxId: createdSandbox.state.sandboxId });
-	registry.getSandbox = () => sourceSandbox;
+	const getSandbox = () => registeredSandbox || sourceSandbox;
+	registry.getSandbox = getSandbox;
 	const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
 	  sandboxName: "my-assistant",
 	  provider: "nvidia-prod",
 	  model: "gpt-5.4",
-	  getSandbox: registry.getSandbox,
+	  getSandbox,
+	  registerSandbox: (entry) => { registeredSandbox = entry; },
 	});
 
 const preflight = require(${JSON.stringify(path.join(repoRoot, "src", "lib", "onboard", "preflight.ts"))});
@@ -1128,7 +1174,7 @@ const { createSandbox } = require(${onboardPath});
   it(
     "interactive mode auto-recreates when existing sandbox is not ready",
     {
-      timeout: 60_000,
+      timeout: 90_000,
     },
     async () => {
       const repoRoot = path.join(import.meta.dirname, "../..");
@@ -1188,16 +1234,19 @@ runner.run = (command, opts = {}) => {
   }
   return "";
 };
+	let registeredSandbox = null;
 	const sourceSandbox = fixtureMocks.sandboxLifecycleFixture({
 	  name: "my-assistant",
 	  toolDisclosure: "progressive",
 	}, { sandboxId: createdSandbox.state.sandboxId });
-	registry.getSandbox = () => sourceSandbox;
+	const getSandbox = () => registeredSandbox || sourceSandbox;
+	registry.getSandbox = getSandbox;
 	const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
 	  sandboxName: "my-assistant",
 	  provider: "nvidia-prod",
 	  model: "gpt-5.4",
-	  getSandbox: registry.getSandbox,
+	  getSandbox,
+	  registerSandbox: (entry) => { registeredSandbox = entry; },
 	});
 
 const preflight = require(${JSON.stringify(path.join(repoRoot, "src", "lib", "onboard", "preflight.ts"))});

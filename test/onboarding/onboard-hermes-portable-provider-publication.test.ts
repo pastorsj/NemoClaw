@@ -65,12 +65,10 @@ let gpuCreateCalls = 0;
 let portableTransactions = 0;
 const portableMode = ${JSON.stringify(mode !== "ordinary-resume")};
 const customDockerfile = process.env.HOME + "/Dockerfile";
-fs.writeFileSync(customDockerfile, [
-  "FROM scratch",
-  "ARG NEMOCLAW_TOOL_DISCLOSURE=progressive",
-  "ENV NEMOCLAW_TOOL_DISCLOSURE=" + "$" + "{NEMOCLAW_TOOL_DISCLOSURE}",
-  "",
-].join("\n"));
+fs.copyFileSync(
+  ${JSON.stringify(path.join(repoRoot, "packages/nemoclaw-langchain-deepagents-code/Dockerfile"))},
+  customDockerfile,
+);
 const sandboxName = "my-assistant";
 const gatewayName = "nemoclaw";
 const createdSandbox = fixtureMocks.createCreatedSandboxFixture({
@@ -109,29 +107,6 @@ registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
 registry.setDefault = () => true;
 registry.removeSandbox = () => true;
-const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
-  sandboxName,
-  gatewayName,
-  agentName: portableMode ? "hermes" : "langchain-deepagents-code",
-  provider: "nvidia-prod",
-  model: "gpt-5.4",
-});
-if (!portableMode) {
-  const getSandbox = registry.getSandbox;
-  registry.getSandbox = (name) => {
-    const entry = getSandbox(name);
-    return entry ? { ...entry, gatewayPort: 8080 } : entry;
-  };
-}
-const registerSandbox = registry.registerSandbox;
-let rejectRegistration = !portableMode;
-registry.registerSandbox = (entry) => {
-  if (rejectRegistration) {
-    rejectRegistration = false;
-    throw new Error("injected registry publication failure");
-  }
-  return registerSandbox(entry);
-};
 
 const portableRuntimeContext = {
   authority: {
@@ -141,11 +116,23 @@ const portableRuntimeContext = {
     uid: typeof process.getuid === "function" ? process.getuid() : 1000,
     homeDir: process.env.HOME,
     configHome: process.env.HOME + "/.config",
-    runtimeDir: process.env.HOME + "/runtime",
-    socketPath: process.env.HOME + "/runtime/podman.sock",
+    runtimeDir: "/run/user/" + String(typeof process.getuid === "function" ? process.getuid() : 1000),
+    socketPath: "/run/user/" + String(typeof process.getuid === "function" ? process.getuid() : 1000) + "/podman/podman.sock",
   },
-  environmentScope: {},
+  environmentScope: portableMode
+    ? require(${modulePath("onboard/session-bootstrap.ts")}).createPortableOnboardEnvironmentScope(
+        process.env,
+        null,
+      )
+    : null,
 };
+if (portableRuntimeContext.environmentScope) {
+  portableRuntimeContext.environmentScope.installRuntime({
+    containersConf:
+      portableRuntimeContext.authority.configHome + "/nemoclaw/portable/containers.conf",
+    socketPath: portableRuntimeContext.authority.socketPath,
+  });
+}
 const dashboardPort = require(dashboardPortId);
 require.cache[dashboardPortId].exports = {
   ...dashboardPort,
@@ -175,10 +162,10 @@ require.cache[sandboxProviderCleanupId].exports = {
   runSandboxProviderPreDeleteCleanup: () => ({ detached: [], failures: [] }),
 };
 const agentOnboard = require(agentOnboardId);
-const createScopedEntryPoints = agentOnboard.createHermesApiPortScopedSandboxEntryPoints;
+const createScopedEntryPoints = agentOnboard.createSecondaryForwardPortScopedSandboxEntryPoints;
 require.cache[agentOnboardId].exports = {
   ...agentOnboard,
-  createHermesApiPortScopedSandboxEntryPoints: (deps) => createScopedEntryPoints({
+  createSecondaryForwardPortScopedSandboxEntryPoints: (deps) => createScopedEntryPoints({
     ...deps,
     resolvePortableRuntimeContext: () => portableRuntimeContext,
   }),
@@ -253,6 +240,31 @@ require.cache[sandboxGpuCreateFlowId].exports = {
   },
 };
 
+const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
+  sandboxName,
+  gatewayName,
+  agentName: portableMode ? "hermes" : "langchain-deepagents-code",
+  provider: "nvidia-prod",
+  model: "gpt-5.4",
+  ...(portableMode ? { portableRuntimeAuthority: portableRuntimeContext.authority } : {}),
+});
+if (!portableMode) {
+  const getSandbox = registry.getSandbox;
+  registry.getSandbox = (name) => {
+    const entry = getSandbox(name);
+    return entry ? { ...entry, gatewayPort: 8080 } : entry;
+  };
+}
+const registerSandbox = registry.registerSandbox;
+let rejectRegistration = !portableMode;
+registry.registerSandbox = (entry) => {
+  if (rejectRegistration) {
+    rejectRegistration = false;
+    throw new Error("injected registry publication failure");
+  }
+  return registerSandbox(entry);
+};
+
 const { createSandbox } = require(${modulePath("onboard.ts")});
 const { loadAgent } = require(${modulePath("agent/defs.ts")});
 const { resolveSandboxCreateIntent } = require(${modulePath("onboard/sandbox-create-intent.ts")});
@@ -268,7 +280,9 @@ const { resolveSandboxGpuConfig } = require(${modulePath("onboard/sandbox-gpu-mo
       ...createArgs[15],
       deferSandboxEffectsUntilIdentityVerification: ${JSON.stringify(mode === "deferred")},
       resolved: resolveSandboxCreateIntent({
-        basePolicyPath: ${JSON.stringify(path.join(repoRoot, "agents/hermes/policy-additions.yaml"))},
+        basePolicyPath: ${JSON.stringify(
+          path.join(repoRoot, "packages/nemoclaw-hermes/policy-additions.yaml"),
+        )},
         sandboxName,
         inferenceProvider: "nvidia-prod",
         channels: [],
@@ -319,9 +333,10 @@ const { resolveSandboxGpuConfig } = require(${modulePath("onboard/sandbox-gpu-mo
     cwd: repoRoot,
     env: {
       ...process.env,
-      HOME: tmpDir,
-      XDG_CONFIG_HOME: path.join(tmpDir, ".config"),
-      XDG_RUNTIME_DIR: path.join(tmpDir, "runtime"),
+      HOME: fs.realpathSync(tmpDir),
+      TMPDIR: fs.realpathSync(os.tmpdir()),
+      XDG_CONFIG_HOME: path.join(fs.realpathSync(tmpDir), ".config"),
+      XDG_RUNTIME_DIR: `/run/user/${String(process.getuid?.() ?? 1000)}`,
       PATH: `${fakeBin}:${process.env.PATH || ""}`,
       NEMOCLAW_EXPERIMENTAL_PROFILE: mode === "ordinary-resume" ? "default" : "portable",
       NEMOCLAW_NON_INTERACTIVE: "1",

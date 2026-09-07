@@ -206,6 +206,9 @@ describe("onboard helpers", () => {
       const preflightPath = JSON.stringify(
         path.join(repoRoot, "src", "lib", "onboard", "preflight.ts"),
       );
+      const fatalRuntimePreflightPath = JSON.stringify(
+        path.join(repoRoot, "src", "lib", "onboard", "fatal-runtime-preflight.ts"),
+      );
       const bridgeDnsPreflightPath = JSON.stringify(
         path.join(repoRoot, "src", "lib", "onboard", "bridge-dns-preflight.ts"),
       );
@@ -213,6 +216,11 @@ describe("onboard helpers", () => {
       fs.mkdirSync(fakeBin, { recursive: true });
       writeOkOpenshell(fakeBin);
       fs.writeFileSync(path.join(fakeBin, "brew"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      fs.writeFileSync(
+        path.join(fakeBin, "docker"),
+        '#!/bin/sh\nif [ "$1" = "info" ]; then printf "%s\\n" \'{"ServerVersion":"29.3.1","OperatingSystem":"Docker Desktop","NCPU":8,"MemTotal":17179869184}\'; elif [ "$1" = "version" ]; then printf "%s\\n" "29.3.1"; fi\nexit 0\n',
+        { mode: 0o755 },
+      );
 
       const script = String.raw`
 const fixtureMocks = require(${onboardScriptMocksPath});
@@ -248,6 +256,21 @@ preflight.assessHost = () => ({
   nvidiaContainerToolkitInstalled: false,
   notes: [],
 });
+const runtimePreflightResult = {
+  gpu: null,
+  host: preflight.assessHost(),
+  readinessReport: {},
+  sandboxGpuConfig: {
+    mode: "0",
+    hostGpuDetected: false,
+    hostGpuPlatform: null,
+    sandboxGpuEnabled: false,
+    sandboxGpuDevice: null,
+    errors: [],
+  },
+};
+const fatalRuntimePreflight = require(${fatalRuntimePreflightPath});
+fatalRuntimePreflight.runReadinessGatedRuntimePreflight = async () => runtimePreflightResult;
 const bridgeDnsPreflight = require(${bridgeDnsPreflightPath});
 bridgeDnsPreflight.assertDockerBridgeAndContainerDnsHealthy = () => {};
 const preflightGatewayAuthority = require(${preflightGatewayAuthorityPath});
@@ -255,19 +278,7 @@ const createPreflightGatewayAuthority =
   preflightGatewayAuthority.createOnboardPreflightGatewayAuthority;
 preflightGatewayAuthority.createOnboardPreflightGatewayAuthority = (deps) => ({
   ...createPreflightGatewayAuthority(deps),
-  runRuntimePreflight: async () => ({
-    gpu: null,
-    host: preflight.assessHost(),
-    readinessReport: {},
-    sandboxGpuConfig: {
-      mode: "0",
-      hostGpuDetected: false,
-      hostGpuPlatform: null,
-      sandboxGpuEnabled: false,
-      sandboxGpuDevice: null,
-      errors: [],
-    },
-  }),
+  runRuntimePreflight: async () => runtimePreflightResult,
   prepareGatewayAuthority: async () => ({
     externallySupervised: false,
     gatewayReuseState: "healthy",
@@ -486,9 +497,9 @@ const { onboard } = require(${onboardPath});
       );
       assert.ok(
         payload.commands.some((entry) =>
-          /inference set -g nemoclaw --no-verify --provider hermes-provider/.test(entry.command),
+          /provider get -g nemoclaw hermes-provider/.test(entry.command),
         ),
-        "resume should reach openshell inference set",
+        `resume should reconcile the selected Hermes provider: ${JSON.stringify(payload.commands)}`,
       );
       assert.ok(!payload.commands.some((entry) => /provider (create|update)/.test(entry.command)));
       assert.equal(

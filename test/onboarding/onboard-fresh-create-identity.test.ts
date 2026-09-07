@@ -176,6 +176,7 @@ describe("fresh create identity", () => {
       const harnessFixture = createHarnessPackageFixture({
         fixtureParent: workDir,
         storeRoot: getHarnessPackageStoreRoot(tmpDir),
+        managedImage: true,
       });
       const selectedHarnessId: "openclaw" | "hermes" =
         agent?.name === "hermes" ? "hermes" : "openclaw";
@@ -211,6 +212,9 @@ describe("fresh create identity", () => {
       const retainedRecoveryPath = JSON.stringify(
         path.join(repoRoot, "src", "lib", "state", "onboard-session.ts"),
       );
+      const onboardCheckpointPath = JSON.stringify(
+        path.join(repoRoot, "src", "lib", "state", "onboard-checkpoint-migrate.ts"),
+      );
       const dockerExecPath = JSON.stringify(
         path.join(repoRoot, "src", "lib", "adapters", "docker", "exec.ts"),
       );
@@ -230,6 +234,7 @@ const credentials = require(${credentialsPath});
 const entryOptions = require(${entryOptionsPath});
 const sandboxAgent = require(${sandboxAgentPath});
 const retainedRecovery = require(${retainedRecoveryPath});
+const onboardCheckpoint = require(${onboardCheckpointPath});
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const dockerExec = require(${dockerExecPath});
@@ -362,6 +367,7 @@ runner.run = (command, opts = {}) => {
 	    agent: agent?.name ?? "openclaw",
 	    harnessPackage,
 	  });
+	  session.checkpoint = onboardCheckpoint.deriveCheckpointFromSession(session);
 	  retainedRecovery.saveSession(session);
 	  registry.save({
 	    defaultSandbox: null,
@@ -430,6 +436,11 @@ runner.run = (command, opts = {}) => {
 	  setDefault: (name) => { registryMutationCalls.push({ operation: "set-default", name }); },
 	  removeSandbox: (name) => { registryMutationCalls.push({ operation: "remove", name }); },
 	});
+fixtureMocks.mockStructuredOpenShellCaptureFromRunner({
+  gatewayName: "nemoclaw-18080",
+  gatewayPort: 18080,
+  sandboxName: "my-assistant",
+});
 if (postCreateRunnerRefusal) {
   const requireCurrentCheckpoint = registry.requireCurrentPendingSandboxCreateIdentity;
   registry.requireCurrentPendingSandboxCreateIdentity = (...args) => {

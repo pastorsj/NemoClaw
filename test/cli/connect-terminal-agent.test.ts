@@ -59,6 +59,7 @@ describe("CLI dispatch for terminal agents", () => {
         '    *"config.toml"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "NEMOCLAW_DEEPAGENTS_CONFIG_OK"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
         '    *"fabric.json"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "NEMOCLAW_FABRIC_CONFIG_OK"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
         '    *"nemoclaw-fabric --version"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
+        '    *"/usr/local/bin/nemoclaw-fabric-run --help"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "NEMOCLAW_FABRIC_RUNNER_OK"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
         '    *"timeout --version"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "timeout (GNU coreutils) 9.0"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
         '    *"NEMOCLAW_DCODE_EMPTY_PROMPT_OK"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "NEMOCLAW_DCODE_EMPTY_PROMPT_OK"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
         "  esac",
@@ -93,6 +94,9 @@ describe("CLI dispatch for terminal agents", () => {
     ).toBe(true);
     expect(
       calls.some((call) => call.includes("nemoclaw-agent-smoke nemoclaw-fabric --version")),
+    ).toBe(true);
+    expect(
+      calls.some((call) => call.includes("nemoclaw-agent-smoke /usr/local/bin/nemoclaw-fabric-run --help")),
     ).toBe(true);
     expect(calls.some((call) => call.includes("nemoclaw-agent-smoke timeout --version"))).toBe(
       true,

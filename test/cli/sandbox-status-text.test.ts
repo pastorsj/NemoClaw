@@ -59,6 +59,7 @@ describe("CLI sandbox status text output", () => {
 
     const r = runWithEnv("alpha status", {
       HOME: home,
+      OPENAI_API_KEY: undefined,
       PATH: `${localBin}:${process.env.PATH || ""}`,
     });
 
@@ -306,6 +307,7 @@ describe("CLI sandbox status text output", () => {
 
     const r = runWithEnv("alpha status", {
       HOME: home,
+      OPENAI_API_KEY: undefined,
       PATH: `${localBin}:${process.env.PATH || ""}`,
     });
 

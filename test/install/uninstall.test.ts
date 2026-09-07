@@ -7,6 +7,7 @@ import { once } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { HarnessStartupSettings } from "@nvidia/nemoclaw-harness-contract";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -23,7 +24,11 @@ import {
 } from "../../src/lib/onboard/docker-driver-gateway-service";
 import { deriveCheckpointFromSession } from "../../src/lib/state/onboard-checkpoint-migrate";
 import { createSession } from "../../src/lib/state/onboard-session";
-import { createHarnessPackageFixture } from "../helpers/harness-packages";
+import {
+  copyRepositoryHarnessPackageFixture,
+  createHarnessPackageFixture,
+  createPackageStartupProfileFixture,
+} from "../helpers/harness-packages";
 
 const UNINSTALL_SCRIPT = path.join(import.meta.dirname, "../..", "uninstall.sh");
 
@@ -45,12 +50,16 @@ describe("uninstall CLI flags", () => {
 case "$*" in
   "gateway list -o json") printf '[{"name":"nemoclaw"}]\\n' ;;
   "gateway info -g nemoclaw") printf 'Gateway: nemoclaw\\n' ;;
-  "sandbox list"|"sandbox list -g nemoclaw") printf 'ordinary-authority Ready\\n' ;;
-  "sandbox ssh-config ordinary-authority") printf 'Host openshell-ordinary-authority.default\\n  HostName 127.0.0.1\\n  User sandbox\\n  Port 2222\\n' ;;
+  "sandbox list"|"sandbox list -g nemoclaw")
+    test -d ${JSON.stringify(path.dirname(sandboxConfigDir))} && printf 'ordinary-authority Ready\\n'
+    ;;
+  "sandbox ssh-config "*) printf 'Host openshell-ordinary-authority.default\\n  HostName 127.0.0.1\\n  User sandbox\\n  Port 2222\\n' ;;
   "sandbox delete "*)
-    printf 'delete\\n' >> ${JSON.stringify(eventLog)}
+    printf 'delete:%s\\n' "$*" >> ${JSON.stringify(eventLog)}
     rm -rf ${JSON.stringify(path.dirname(sandboxConfigDir))}
     ;;
+  "forward list"*) printf 'SANDBOX BIND PORT PID STATUS\\n' ;;
+  "forward delete"*) ;;
   "status") printf 'Status: Connected\\nGateway: nemoclaw\\n' ;;
 esac
 exit 0
@@ -97,6 +106,63 @@ esac
     });
   }
 
+  function managedHermesWorkload(
+    harnessPackage: Parameters<typeof createPackageStartupProfileFixture>[0],
+  ) {
+    const desiredState: HarnessStartupSettings = {
+      configuration: { agent: "hermes", webSearch: { enabled: false, provider: "tavily" } },
+      inference: {
+        routeProvider: "inference",
+        upstreamProvider: "nvidia",
+        model: "meta/llama-3.3-70b-instruct",
+        routedBaseUrl: "http://inference.local/v1",
+        upstreamEndpointUrl: null,
+        api: "openai-completions",
+        primaryModelRef: null,
+        compatibility: null,
+        inputModalities: null,
+      },
+      proxy: {
+        managedHost: "inference.local",
+        managedPort: 80,
+        hostHttpUrl: null,
+        hostHttpsUrl: null,
+        hostNoProxy: [],
+      },
+      dashboard: {
+        agent: "hermes",
+        mode: "disabled",
+        url: "http://127.0.0.1:18789",
+        publicPort: null,
+        internalPort: null,
+        tuiEnabled: false,
+      },
+      tools: { disclosure: "progressive", enabledGateways: [] },
+      messaging: { plan: null },
+      tuning: {
+        contextWindow: 131_072,
+        maxTokens: null,
+        reasoning: null,
+        reasoningEffort: null,
+      },
+      corporateCa: { bundleSha256: null },
+    };
+    const profile = createPackageStartupProfileFixture(harnessPackage, desiredState);
+    return {
+      schemaVersion: 1 as const,
+      kind: "managed-image" as const,
+      reference: `ghcr.io/nvidia/nemoclaw/hermes-sandbox@sha256:${"a".repeat(64)}`,
+      platform: "linux/amd64" as const,
+      release: "v0.0.113",
+      sourceRevision: "b".repeat(40),
+      sourceCohort: "ghrun-123456-1",
+      capabilityContractVersion: 1 as const,
+      startupProfileContractVersion: 1 as const,
+      ...profile,
+      shared: true as const,
+    };
+  }
+
   function seedCompletedDefaultAuthority(
     tmp: string,
     source: "packaged-service" | "standalone" = "standalone",
@@ -127,21 +193,7 @@ esac
     });
     const packageRoot = packageFixture.packageRoots.get(sandbox.agent);
     expect(packageRoot, `Missing harness package fixture for '${sandbox.agent}'`).toBeDefined();
-    fs.copyFileSync(
-      path.join(
-        import.meta.dirname,
-        "../..",
-        "packages",
-        `nemoclaw-${sandbox.agent}`,
-        "manifest.yaml",
-      ),
-      path.join(
-        packageRoot!,
-        "packages",
-        `nemoclaw-${sandbox.agent}`,
-        "manifest.yaml",
-      ),
-    );
+    copyRepositoryHarnessPackageFixture(packageRoot!, sandbox.agent);
     const installedHarness = packageFixture.install(sandbox.agent);
     const session = createSession({
       agent: sandbox.agent,
@@ -172,12 +224,15 @@ esac
             name: sandboxName,
             agent: sandbox.agent === "openclaw" ? null : sandbox.agent,
             dashboardPort: null,
+            ...(sandbox.agent === "hermes" ? { hermesApiPort: 8642 } : {}),
             gatewayName: gateway.gatewayName,
             gatewayPort: gateway.gatewayPort,
             lifecycleGeneration: `${sandboxName}-generation`,
             openshellDriver: "docker",
             harnessPackage: installedHarness.identity,
-            ...(sandbox.workload ? { workload: sandbox.workload } : {}),
+            ...(sandbox.workload
+              ? { workload: managedHermesWorkload(installedHarness.identity) }
+              : {}),
           },
         },
       })}\n`,
@@ -424,7 +479,14 @@ esac
         workspaceDigest,
       );
       expect(output).toContain("Pre-uninstall backup: 1 backed up, 0 failed, 0 skipped");
-      expect(events).toEqual(["backup-complete", "delete"]);
+      // Receipt-backed teardown first runs the package-aware destroy path so
+      // package-owned state is retired, then the uninstaller verifies broad
+      // OpenShell cleanup at the gateway boundary.
+      expect(events).toEqual([
+        "backup-complete",
+        "delete:sandbox delete ordinary-authority",
+        "delete:sandbox delete --all",
+      ]);
       expect(fs.existsSync(path.join(tmp, "sandbox"))).toBe(false);
       expect(output).toMatch(/NemoClaw/);
       expect(output).toMatch(/Claws retracted/);
@@ -505,7 +567,7 @@ esac
         expect(fs.readFileSync(volume.callsPath, "utf8")).toContain(
           `volume rm ${volume.volumeName}`,
         );
-        expect(output).toContain("Removed managed Hermes state volume for 'hermes'.");
+        expect(output).toContain("Removed managed agent state volume for 'hermes'.");
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
       }

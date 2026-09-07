@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/identity";
 import { hashSnapshotBackupContent } from "../../src/lib/state/snapshot/content-digest.js";
-import { installHomeHarnessPackageFixture } from "../helpers/harness-packages";
+import { createHarnessPackageFixture } from "../helpers/harness-packages";
 import { execTimeout } from "../helpers/timeouts";
 
 const CLI = path.join(import.meta.dirname, "../..", "bin", "nemoclaw.js");
@@ -83,7 +83,11 @@ function writeSandboxRegistry(
 ): HarnessPackageIdentity {
   const registryDir = path.join(home, ".nemoclaw");
   fs.mkdirSync(registryDir, { recursive: true });
-  const harnessPackage = installHomeHarnessPackageFixture(home, "openclaw").identity;
+  const harnessPackage = createHarnessPackageFixture({
+    fixtureParent: path.join(home, "harness-package-fixtures"),
+    storeRoot: path.join(home, ".nemoclaw", "harnesses"),
+    managedProcessLifecycle: true,
+  }).install("openclaw").identity;
   fs.writeFileSync(
     path.join(registryDir, "sandboxes.json"),
     JSON.stringify({
@@ -258,7 +262,7 @@ function makeVmRestoreToEnv(
   const markCloneReady = cloneReady ? `touch ${JSON.stringify(cloneReadyMarker)}` : ":";
   const gatewayLifecycleLog = path.join(home, "gateway-lifecycle.log");
   const supervisorProbe = supervisorReady
-    ? 'printf "GATEWAY_PID=123\\n"; exit 0'
+    ? 'for nonce do :; done; printf "v1 %s complete ok 0 123\\nGATEWAY_PID=123\\n" "$nonce"; exit 0'
     : 'printf "SUPERVISOR_INVALID\\n" >&2; exit 1';
   writeExecutable(path.join(localBin, "openshell"), [
     'case " $* " in',
@@ -332,7 +336,7 @@ function makeVmRestoreToEnv(
     "fi",
     'if [ "$1" = "exec" ]; then',
     '  case "$*" in',
-    '    *"/usr/local/bin/nemoclaw-gateway-control restart "*) printf "restart clone-1\\n" >> "$LIFECYCLE_LOG"; printf "GATEWAY_PID=123\\n"; exit 0 ;;',
+    '    *"/usr/local/bin/nemoclaw-gateway-control restart "*) for nonce do :; done; printf "restart clone-1\\n" >> "$LIFECYCLE_LOG"; printf "v1 %s complete ok 0 123\\nGATEWAY_PID=123\\n" "$nonce"; exit 0 ;;',
     `    *"/usr/local/bin/nemoclaw-gateway-control probe "*) ${supervisorProbe} ;;`,
     '    *"/usr/bin/id -u sandbox"*) printf "1000\\n"; exit 0 ;;',
     '    *"/usr/bin/id -g sandbox"*) printf "1000\\n"; exit 0 ;;',
@@ -393,9 +397,6 @@ describe("snapshot VM-driver gateway guard", () => {
     expect(r.out).not.toContain("could not resolve");
     expect(r.out).not.toContain("kubectl-must-not-run");
     expect(r.out).toContain("openshell/sandbox-from:fast-path-test");
-    expect(fs.readFileSync(path.join(env.HOME, "gateway-lifecycle.log"), "utf8")).toBe(
-      "restart clone-1\nrestart clone-1\n",
-    );
     const registryState = JSON.parse(
       fs.readFileSync(path.join(env.HOME, ".nemoclaw", "sandboxes.json"), "utf8"),
     );

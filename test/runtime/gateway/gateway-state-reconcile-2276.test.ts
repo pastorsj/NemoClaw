@@ -18,7 +18,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "vitest";
 import type { HarnessPackageIdentity } from "../../../src/lib/agent-runtime/package/identity";
-import { installHomeHarnessPackageFixture } from "../../helpers/harness-packages";
+import {
+  createHarnessPackageFixture,
+  createPackageStartupProfileFixture,
+} from "../../helpers/harness-packages";
 import { testTimeout } from "../../helpers/timeouts";
 
 const TIMEOUT_MS = testTimeout(60_000);
@@ -69,6 +72,40 @@ let gatewayListener: ReturnType<typeof createServer> | null;
 let openClawPackageIdentity: HarnessPackageIdentity;
 
 function writeDefaultRegistry(gatewayName: string, gatewayPort: number) {
+  const packageStartupProfile = createPackageStartupProfileFixture(openClawPackageIdentity, {
+    configuration: { agent: "openclaw" },
+    inference: {
+      routeProvider: "inference",
+      upstreamProvider: "nvidia-prod",
+      model: "nvidia/nemotron-3-super-120b-a12b",
+      routedBaseUrl: "http://inference.local/v1",
+      upstreamEndpointUrl: null,
+      api: "openai-completions",
+      primaryModelRef: null,
+      compatibility: null,
+      inputModalities: null,
+    },
+    proxy: {
+      managedHost: "inference.local",
+      managedPort: 80,
+      hostHttpUrl: null,
+      hostHttpsUrl: null,
+      hostNoProxy: [],
+    },
+    dashboard: { agent: "openclaw", mode: "disabled" },
+    tools: { disclosure: "progressive", enabledGateways: [] },
+    messaging: { plan: null },
+    tuning: {
+      contextWindow: null,
+      maxTokens: null,
+      reasoning: null,
+      reasoningEffort: null,
+    },
+    corporateCa: { bundleSha256: null },
+  });
+  const managedImagePlatform = process.arch === "arm64" ? "linux/arm64" : "linux/amd64";
+  const managedImageDigest = process.arch === "arm64" ? "2".repeat(64) : "1".repeat(64);
+  const managedImageReference = `example.com/nemoclaw/openclaw@sha256:${managedImageDigest}`;
   fs.writeFileSync(
     path.join(registryDir, "sandboxes.json"),
     JSON.stringify({
@@ -83,9 +120,23 @@ function writeDefaultRegistry(gatewayName: string, gatewayPort: number) {
           gatewayName,
           gatewayPort,
           dashboardPort: 28790,
+          imageTag: managedImageReference,
           fromDockerfile: null,
-          agent: null,
+          agent: "openclaw",
           harnessPackage: openClawPackageIdentity,
+          workload: {
+            schemaVersion: 1,
+            kind: "managed-image",
+            reference: managedImageReference,
+            platform: managedImagePlatform,
+            release: "v0.0.1",
+            sourceRevision: "a".repeat(40),
+            sourceCohort: "integration-fixture",
+            capabilityContractVersion: 1,
+            startupProfileContractVersion: 1,
+            ...packageStartupProfile,
+            shared: true,
+          },
         },
       },
     }),
@@ -100,7 +151,7 @@ function writeDefaultSession(gatewayName: string) {
       version: 1,
       sandboxName: SANDBOX_NAME,
       provider: "nvidia-prod",
-      agent: null,
+      agent: "openclaw",
       harnessPackage: openClawPackageIdentity,
       metadata: { gatewayName, fromDockerfile: null },
     }),
@@ -167,8 +218,8 @@ if (args[0] === "sandbox" && args[1] === "get") {
 }
 
 if (args[0] === "policy" && args[1] === "get") {
-  process.stdout.write("version: 1\\nnetwork_policies:\\n");
-  process.exit(0);
+  process.stderr.write("${SANDBOX_GET_NOT_FOUND}\\n");
+  process.exit(1);
 }
 
 if (args[0] === "sandbox" && args[1] === "list") {
@@ -317,7 +368,24 @@ beforeEach(() => {
 
   fs.mkdirSync(homeLocalBin, { recursive: true });
   fs.mkdirSync(registryDir, { recursive: true });
-  openClawPackageIdentity = installHomeHarnessPackageFixture(tmpDir, "openclaw").identity;
+  openClawPackageIdentity = createHarnessPackageFixture({
+    fixtureParent: path.join(tmpDir, "harness-package-fixtures"),
+    storeRoot: path.join(registryDir, "harnesses"),
+    managedImage: true,
+    agentPolicyAdditionsContent: [
+      "version: 1",
+      "network_policies:",
+      "  fixture:",
+      "    name: fixture",
+      "    endpoints:",
+      "      - host: example.com",
+      "        port: 443",
+      "        access: full",
+      "    binaries:",
+      "      - path: /usr/bin/curl",
+      "",
+    ].join("\n"),
+  }).install("openclaw").identity;
   fs.writeFileSync(installerInvocationsFile, "");
   fs.writeFileSync(dockerInvocationsFile, "");
   fs.writeFileSync(

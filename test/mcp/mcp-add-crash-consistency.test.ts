@@ -8,6 +8,8 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { authorizeMcpHarnessScript } from "../helpers/mcp-authority";
+
 const MATCHING_OPENSHELL = path.resolve("test/fixtures/openshell-v0.0.106");
 
 type CrashBoundary =
@@ -416,7 +418,10 @@ function initializeSandboxRegistry(home: string): void {
     process.execPath,
     [
       "-e",
-      `process.env.HOME = ${JSON.stringify(home)}; const registry = require("./src/lib/state/registry.js"); registry.registerSandbox({ name: "crash-test", agent: "openclaw", gatewayName: "nemoclaw" });`,
+      authorizeMcpHarnessScript(
+        home,
+        `process.env.HOME = ${JSON.stringify(home)}; const registry = require("./src/lib/state/registry.js"); registry.registerSandbox({ name: "crash-test", agent: "openclaw", gatewayName: "nemoclaw" });`,
+      ),
     ],
     {
       cwd: process.cwd(),
@@ -444,7 +449,7 @@ function runAddProcess(
     true,
     forbidRuntimeSelection,
   );
-  return spawnSync(process.execPath, ["-e", script], {
+  return spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
     cwd: process.cwd(),
     encoding: "utf8",
     env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL },
@@ -453,7 +458,7 @@ function runAddProcess(
 }
 
 function spawnScript(home: string, script: string): ChildProcessWithoutNullStreams {
-  return spawn(process.execPath, ["-e", script], {
+  return spawn(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
     cwd: process.cwd(),
     env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL },
     stdio: "pipe",
@@ -644,7 +649,7 @@ bridge.removeMcpBridge("crash-test", "fake").then(
   },
 );
 `;
-  return spawnSync(process.execPath, ["-e", script], {
+  return spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
     cwd: process.cwd(),
     encoding: "utf8",
     env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL },
@@ -709,7 +714,7 @@ bridge.statusMcpBridge("crash-test", "fake").then(
   },
 );
 `;
-  return spawnSync(process.execPath, ["-e", script], {
+  return spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
     cwd: process.cwd(),
     encoding: "utf8",
     env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL },

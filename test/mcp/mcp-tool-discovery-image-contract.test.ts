@@ -14,7 +14,7 @@ const repoRoot = path.join(import.meta.dirname, "../..");
 const runtimeRoot = "/usr/local/lib/nemoclaw/mcp-tool-discovery-runtime";
 const managedStartupRuntimeBundle = "managed-startup-image-runtime.bundle";
 const reviewedRuntimeHashOverrides: Readonly<Record<string, string>> = {
-  [managedStartupRuntimeBundle]: "e5f26b1622c990936f683655c2166209647c63c667a0b5f04288511bca6ed5ed",
+  [managedStartupRuntimeBundle]: "1ad375bdb192550492a3318ee0ada33a3d3ffb50aeceaa4555e44126b9224564",
 };
 const dockerfiles = [
   "packages/nemoclaw-openclaw/Dockerfile",
@@ -139,7 +139,7 @@ describe("MCP tool discovery image contract", () => {
 
   it.each([
     {
-      archiveCount: 85,
+      archiveCount: 87,
       label: "NemoClaw CLI",
       lockfile: "packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json",
       seedDirectory: "tools/mcp-tool-discovery-runtime/npm-cache-seed",
@@ -266,13 +266,12 @@ describe("MCP tool discovery image contract", () => {
     }
   });
 
-  it("accepts Pi only in the refreshed reviewed managed startup runtime", () => {
+  it("accepts Pi through the harness-agnostic reviewed managed startup runtime", () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-managed-startup-runtime-"));
     const bundlePath = path.join(
       repoRoot,
       "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/managed-startup-image-runtime.bundle",
     );
-    const staleBundlePath = path.join(fixture, "stale-managed-startup-image-runtime.cjs");
     const completionFile = path.join(fixture, "managed-bootstrap-completion.json");
     const startupCompletionFile = path.join(fixture, "managed-startup-complete.json");
     const runtimeEnvironmentFile = path.join(fixture, "managed-startup-runtime.env");
@@ -337,13 +336,6 @@ describe("MCP tool discovery image contract", () => {
         { mode: 0o444 },
       );
       fs.writeFileSync(runtimeEnvironmentFile, runtimeEnvironment, { mode: 0o444 });
-      const reviewedAgentRegistry = '["openclaw","hermes","langchain-deepagents-code","pi"]';
-      const staleAgentRegistry = '["openclaw","hermes","langchain-deepagents-code"]';
-      const reviewedBundle = fs.readFileSync(bundlePath, "utf8");
-      fs.writeFileSync(
-        staleBundlePath,
-        reviewedBundle.replace(reviewedAgentRegistry, staleAgentRegistry),
-      );
       const expectedReceipt = JSON.stringify({
         agent: "pi",
         bootstrapIdentity,
@@ -372,11 +364,6 @@ describe("MCP tool discovery image contract", () => {
         agent: "pi",
         profileFingerprint,
         transactionPending: false,
-      });
-      expect(verifyBundle(staleBundlePath)).toMatchObject({
-        status: 1,
-        stdout: "",
-        stderr: "Managed bootstrap envelope is invalid: image completion schema is invalid\n",
       });
     } finally {
       fs.rmSync(fixture, { force: true, recursive: true });

@@ -8,11 +8,15 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loadAgent, type AgentMcpAdapter } from "../../src/lib/agent/defs";
 import type { McpBridgeEntry } from "../../src/lib/state/registry";
+import {
+  prepareMcpHarnessPackageAuthority,
+  type McpHarnessPackageAuthority,
+} from "../helpers/mcp-authority";
 import { findObservedCredentialRevision } from "../helpers/mcp-provider-revision";
 import { mockManagedEndpointlessProviderProfileRun } from "../helpers/onboard-script-mocks.cjs";
 
 const testState = vi.hoisted(() => {
-  const home = `/tmp/nemoclaw-mcp-destroy-${process.pid}-${Date.now()}`;
+  const home = `${process.cwd()}/node_modules/.cache/nemoclaw-mcp-destroy-${process.pid}-${Date.now()}`;
   const originalEnv = {
     GITHUB_TOKEN: process.env.GITHUB_TOKEN,
     HOME: process.env.HOME,
@@ -53,6 +57,7 @@ const testState = vi.hoisted(() => {
     runtimeSelection: { gatewayName: "nemoclaw", workspace: "default" },
     stopNimContainer: vi.fn(),
     stopNimContainerByName: vi.fn(),
+    teardownSandboxDashboardForward: vi.fn(() => true),
     warnUnpreservedUserManagedFiles: vi.fn(),
   };
 });
@@ -65,15 +70,12 @@ vi.mock("../../src/lib/adapters/dns/resolve", () => ({
   resolveHostAddresses: testState.resolveHostAddresses,
 }));
 
-vi.mock(
-  "../../src/lib/actions/sandbox/mcp-bridge-provider-inspection",
-  async (importOriginal) => ({
-    ...(await importOriginal<
-      typeof import("../../src/lib/actions/sandbox/mcp-bridge-provider-inspection")
-    >()),
-    getMcpProviderInspectionRuntimeSelection: () => testState.runtimeSelection,
-  }),
-);
+vi.mock("../../src/lib/actions/sandbox/mcp-bridge-provider-inspection", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("../../src/lib/actions/sandbox/mcp-bridge-provider-inspection")
+  >()),
+  getMcpProviderInspectionRuntimeSelection: () => testState.runtimeSelection,
+}));
 
 vi.mock("../../src/lib/adapters/openshell/runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/lib/adapters/openshell/runtime")>()),
@@ -102,9 +104,19 @@ vi.mock("../../src/lib/actions/sandbox/process-recovery", () => ({
   executeSandboxExecCommand: testState.executeSandboxExecCommand,
 }));
 
+vi.mock("../../src/lib/actions/sandbox/transport/command-execution", () => ({
+  executeSandboxCommand: testState.executeSandboxCommand,
+  executeSandboxExecCommand: testState.executeSandboxExecCommand,
+}));
+
 vi.mock("../../src/lib/actions/sandbox/rebuild-flow-helpers", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/lib/actions/sandbox/rebuild-flow-helpers")>()),
   warnUnpreservedUserManagedFiles: testState.warnUnpreservedUserManagedFiles,
+}));
+
+vi.mock("../../src/lib/actions/sandbox/forward-recovery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/actions/sandbox/forward-recovery")>()),
+  teardownSandboxDashboardForward: testState.teardownSandboxDashboardForward,
 }));
 
 vi.mock("../../src/lib/inference/nim", () => ({
@@ -115,9 +127,19 @@ vi.mock("../../src/lib/inference/nim", () => ({
 import * as bridge from "../../src/lib/actions/sandbox/mcp-bridge";
 import { runRebuildDestroyPhase } from "../../src/lib/actions/sandbox/rebuild-destroy-phase";
 import type { RebuildRecreateJournal } from "../../src/lib/actions/sandbox/rebuild-recreate-journal";
-import * as registry from "../../src/lib/state/registry";
+import * as registryModule from "../../src/lib/state/registry";
 
 const openClawAgentDefinition = loadAgent("openclaw");
+let mcpHarnessPackageAuthority: McpHarnessPackageAuthority;
+const registry = {
+  ...registryModule,
+  registerSandbox(entry: Parameters<typeof registryModule.registerSandbox>[0]) {
+    return registryModule.registerSandbox({
+      ...entry,
+      ...mcpHarnessPackageAuthority.registryAuthority,
+    });
+  },
+};
 
 function stubRecreateJournal(): RebuildRecreateJournal {
   return {
@@ -136,7 +158,7 @@ function stubRecreateJournal(): RebuildRecreateJournal {
     },
     targetGeneration: "generation-1",
     targetIntentFingerprint: "intent-1",
-    harnessPackage: null,
+    ...mcpHarnessPackageAuthority.journalAuthority,
     beginDelete: vi.fn(() => "source" as const),
     confirmDeleted: vi.fn(),
     completeAcceptedTarget: vi.fn(),
@@ -214,7 +236,8 @@ function registerAlphaGithubBridge(): void {
 }
 beforeEach(() => {
   fs.rmSync(testState.home, { recursive: true, force: true });
-  process.env.HOME = testState.home;
+  mcpHarnessPackageAuthority = prepareMcpHarnessPackageAuthority(testState.home);
+  process.env.HOME = mcpHarnessPackageAuthority.home;
   process.env.NEMOCLAW_OPENSHELL_BIN = MATCHING_OPENSHELL;
   delete process.env.GITHUB_TOKEN;
   delete process.env.SLACK_TOKEN;
@@ -996,10 +1019,10 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
     });
     const onDeleted = vi.fn();
 
-      const result = await runRebuildDestroyPhase({
-        ...stubRebuildDestroyPhaseInput(),
-        sandboxEntry: before ?? { name: "alpha", agent: "openclaw" },
-        onDeleted,
+    const result = await runRebuildDestroyPhase({
+      ...stubRebuildDestroyPhaseInput(),
+      sandboxEntry: before ?? { name: "alpha", agent: "openclaw" },
+      onDeleted,
     });
 
     expect(result?.entries).toEqual([bridgeEntries.github]);
@@ -1066,10 +1089,10 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
     const onDeleted = vi.fn();
 
     await expect(
-        runRebuildDestroyPhase({
-          ...stubRebuildDestroyPhaseInput(),
-          sandboxEntry: beforeRegistry ?? { name: "alpha", agent: "openclaw" },
-          onDeleted,
+      runRebuildDestroyPhase({
+        ...stubRebuildDestroyPhaseInput(),
+        sandboxEntry: beforeRegistry ?? { name: "alpha", agent: "openclaw" },
+        onDeleted,
       }),
     ).rejects.toThrow("Failed to delete sandbox.");
 
@@ -1189,7 +1212,7 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
       testState.calls.some((call) => /^provider (create|update) .*--credential/.test(call)),
     ).toBe(false);
     expect(testState.policyApplyCalls).toBe(2);
-    expect(testState.adapterCalls).toContain("command -v mcporter");
+    expect(testState.adapterCalls.some((call) => call.includes("'config' 'add'"))).toBe(true);
     expect(
       testState.adapterCalls.some((call) => call.includes("openshell:resolve:env:GITHUB_TOKEN")),
     ).toBe(true);

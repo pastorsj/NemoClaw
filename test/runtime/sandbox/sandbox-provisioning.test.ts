@@ -141,6 +141,7 @@ function runOpenclawRepairLayoutCase(legacy: boolean) {
   const dirsAfterCleanup = [".", ...listRelativeEntries(openclawDir, "directory")];
   const filesAfterCleanup = listRelativeEntries(openclawDir, "file");
   fs.writeFileSync(path.join(openclawDir, "openclaw.json"), "{}\n");
+  fs.writeFileSync(path.join(openclawDir, "fabric.json"), "{}\n");
   const permission = runLoggedDockerShell(rewrite(permissionBlock), tmp, functionDefs);
   const markerExistsAfterPermission = fs.existsSync(marker);
 
@@ -788,6 +789,7 @@ describe("sandbox provisioning: unified .openclaw layout (#2227)", () => {
       "cron",
       "devices",
       "extensions",
+      "fabric-artifacts",
       "flows",
       "hooks",
       "identity",
@@ -810,9 +812,10 @@ describe("sandbox provisioning: unified .openclaw layout (#2227)", () => {
       `chown sandbox:sandbox ${modern.openclawDir} ${path.join(
         modern.openclawDir,
         "openclaw.json",
-      )} ${modern.pluginRuntimeDeps}`,
+      )} ${path.join(modern.openclawDir, "fabric.json")} ${modern.pluginRuntimeDeps}`,
       `chmod 2770 ${modern.openclawDir} ${modern.pluginRuntimeDeps}`,
       `chmod 660 ${path.join(modern.openclawDir, "openclaw.json")}`,
+      `chmod 600 ${path.join(modern.openclawDir, "fabric.json")}`,
     ]);
 
     const legacy = runOpenclawRepairLayoutCase(true);

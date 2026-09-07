@@ -22,14 +22,8 @@ describe("onboard managed MCP recreation redirect", () => {
     const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
     const runnerPath = JSON.stringify(path.join(repoRoot, "src", "lib", "runner.ts"));
     const registryPath = JSON.stringify(path.join(repoRoot, "src", "lib", "state", "registry.ts"));
-    const dcodePackageRoot = path.join(
-      repoRoot,
-      "packages",
-      "nemoclaw-langchain-deepagents-code",
-    );
-    const dcodePolicyPath = JSON.stringify(
-      path.join(dcodePackageRoot, "policy-additions.yaml"),
-    );
+    const dcodePackageRoot = path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code");
+    const dcodePolicyPath = JSON.stringify(path.join(dcodePackageRoot, "policy-additions.yaml"));
     const mocksPath = JSON.stringify(
       path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
     );
@@ -56,7 +50,7 @@ runner.runCapture = (command) => {
   const mocked = require(${mocksPath}).mockOnboardRunCapture(command, { defaultCurlOutput: "ok" });
   return mocked === null ? "" : mocked;
 };
-registry.getSandbox = () => fixtureMocks.sandboxLifecycleFixture({
+const existingRegistryEntry = fixtureMocks.sandboxLifecycleFixture({
   ...harnessFixture.registryAuthority,
   name: "alpha",
   model: "model",
@@ -78,6 +72,8 @@ registry.getSandbox = () => fixtureMocks.sandboxLifecycleFixture({
     }
   }
 }, { sandboxId: existingSandbox.state.sandboxId });
+registry.save({ defaultSandbox: null, sandboxes: { alpha: existingRegistryEntry } });
+registry.getSandbox = () => existingRegistryEntry;
 registry.getDefault = () => null;
 const { createSandbox } = require(${onboardPath});
 createSandbox(

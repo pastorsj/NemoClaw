@@ -1,13 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { HarnessProviderAuthCapability } from "@nvidia/nemoclaw-harness-contract";
+import type {
+  HarnessProviderAuthCapability,
+  HarnessStartupJsonObject,
+  HarnessStartupSettings,
+} from "@nvidia/nemoclaw-harness-contract";
 
+import { encodeManagedStartupDurableProfile } from "../../src/lib/onboard/managed-startup/profile";
 import { installHarnessPackage } from "../../src/lib/agent-runtime/package/install";
 import type { BundledHarnessPackageSourceIdentity } from "../../src/lib/agent-runtime/package/receipt";
 import type { InstalledHarnessPackage } from "../../src/lib/agent-runtime/package/store";
+import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/types";
+import type { SandboxPackageStartupProfileReceipt } from "../../src/lib/state/registry/types";
 import { TEST_CONFIG_ADAPTER_SOURCE, TEST_STARTUP_ADAPTER_SOURCE } from "./adapter-fixtures";
 
 const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../..");
@@ -68,6 +76,7 @@ interface HarnessPackageFixtureDeclaration {
 
 export type HarnessPackageFixtureId = (typeof HARNESS_PACKAGE_FIXTURES)[number]["id"];
 export type McpHarnessPackageFixtureId = Exclude<HarnessPackageFixtureId, "future-harness" | "pi">;
+export type RepositoryHarnessPackageFixtureId = Exclude<HarnessPackageFixtureId, "future-harness">;
 
 type ManagedProviderAuthCapability = Extract<
   HarnessProviderAuthCapability,
@@ -100,6 +109,10 @@ export interface HarnessPackageFixtureOptions {
   readonly webSearchProviders?: readonly ("brave" | "tavily")[];
   /** Optional package-owned provider authentication used by receipt tests. */
   readonly providerAuth?: HarnessPackageProviderAuthFixture;
+  /** Declare the minimal managed-image surface required by startup-path fixtures. */
+  readonly managedImage?: boolean;
+  /** Declare package-owned process lifecycle support for gateway recovery fixtures. */
+  readonly managedProcessLifecycle?: boolean;
 }
 
 export interface HarnessPackageFixture {
@@ -189,6 +202,76 @@ function writePrivateFile(root: string, relativePath: string, contents: string):
   fs.chmodSync(target, 0o600);
 }
 
+function copyRepositoryFixtureDirectory(
+  repositoryPackageRoot: string,
+  packageRoot: string,
+  relativeDirectory: string,
+): void {
+  const sourceDirectory = path.join(repositoryPackageRoot, relativeDirectory);
+  if (!fs.existsSync(sourceDirectory)) return;
+  for (const entry of fs.readdirSync(sourceDirectory, { withFileTypes: true })) {
+    const relativePath = path.posix.join(relativeDirectory, entry.name);
+    if (entry.isDirectory()) {
+      copyRepositoryFixtureDirectory(repositoryPackageRoot, packageRoot, relativePath);
+    } else if (entry.isFile()) {
+      writePrivateFile(
+        packageRoot,
+        relativePath,
+        fs.readFileSync(path.join(repositoryPackageRoot, relativePath), "utf8"),
+      );
+    }
+  }
+}
+
+/** Replace a synthetic package body with the checked-in package contract at the same root. */
+export function copyRepositoryHarnessPackageFixture(
+  packageRoot: string,
+  id: RepositoryHarnessPackageFixtureId,
+): void {
+  const repositoryPackageRoot = path.join(REPOSITORY_ROOT, "packages", `nemoclaw-${id}`);
+  for (const relativePath of ["manifest.yaml", "policy-additions.yaml"]) {
+    writePrivateFile(
+      packageRoot,
+      relativePath,
+      fs.readFileSync(path.join(repositoryPackageRoot, relativePath), "utf8"),
+    );
+  }
+  const hostAdapters = fs
+    .readdirSync(path.join(repositoryPackageRoot, "host"), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".cts"));
+  for (const adapter of hostAdapters) {
+    writePrivateFile(
+      packageRoot,
+      `host/${adapter.name}`,
+      fs.readFileSync(path.join(repositoryPackageRoot, "host", adapter.name), "utf8"),
+    );
+  }
+  for (const relativeDirectory of ["messaging", "policies", "provider-profiles"]) {
+    copyRepositoryFixtureDirectory(repositoryPackageRoot, packageRoot, relativeDirectory);
+  }
+}
+
+/** Encode the exact receipt-backed startup state used by a synthetic registry row. */
+export function createPackageStartupProfileFixture(
+  harnessPackage: HarnessPackageIdentity,
+  desiredState: HarnessStartupSettings,
+): SandboxPackageStartupProfileReceipt {
+  const encodedProfile = encodeManagedStartupDurableProfile({
+    schemaVersion: 1,
+    profileKind: "package",
+    agent: harnessPackage.id,
+    harnessPackage,
+    desiredState,
+    packageConfig: { settings: desiredState as unknown as HarnessStartupJsonObject },
+    corporateCa: desiredState.corporateCa,
+  });
+  return Object.freeze({
+    encodedProfile,
+    startupProfileSha256: createHash("sha256").update(encodedProfile, "utf8").digest("hex"),
+    credentialProxyReplayRequired: false,
+  });
+}
+
 function fixtureManifest(
   declaration: HarnessPackageFixtureDeclaration,
   agentExpectedVersion?: string,
@@ -196,6 +279,8 @@ function fixtureManifest(
   postRestoreMutableConfig?: "repair" | "verify",
   webSearchProviders: readonly ("brave" | "tavily")[] = [],
   providerAuth?: ManagedProviderAuthCapability,
+  managedImage = false,
+  managedProcessLifecycle = false,
 ): string {
   const terminalCommand =
     declaration.id === "langchain-deepagents-code"
@@ -210,8 +295,12 @@ function fixtureManifest(
         "  kind: gateway",
         `  interactive_command: ${declaration.id}`,
         "  process_lifecycle:",
-        "    support: unsupported",
-        "    reason: This fixture does not manage a gateway process.",
+        ...(managedProcessLifecycle
+          ? ["    support: managed", "    command: [/usr/local/bin/nemoclaw-gateway-control]"]
+          : [
+              "    support: unsupported",
+              "    reason: This fixture does not manage a gateway process.",
+            ]),
         `gateway_command: ${declaration.id} gateway run`,
         "health_probe:",
         "  url: http://127.0.0.1:19090/health",
@@ -254,8 +343,34 @@ function fixtureManifest(
     "onboarding:",
     `  default: ${declaration.defaultChoice ? "true" : "false"}`,
     `  sandbox_name: ${declaration.id === "openclaw" ? "my-assistant" : declaration.id}`,
+    ...(managedImage
+      ? ["sandbox_create:", "  generated_image_build: local-buildkit-required"]
+      : []),
     `binary_path: ${declaration.id}`,
     ...(agentExpectedVersion ? [`expected_version: ${JSON.stringify(agentExpectedVersion)}`] : []),
+    ...(managedImage
+      ? [
+          "managed_image:",
+          `  repository: example.com/nemoclaw/${declaration.id}`,
+          "  architectures:",
+          "    - linux/amd64",
+          "    - linux/arm64",
+          "  runtime_identity:",
+          "    uid: 1000",
+          "    gid: 1000",
+          "    workdir: /sandbox",
+          "  startup_profile_environment: []",
+          "  publication:",
+          "    source:",
+          "      repository: NVIDIA/NemoClaw",
+          `      revision: ${"a".repeat(40)}`,
+          "      release: v0.0.1",
+          "      cohort: integration-fixture",
+          "    digests:",
+          `      linux/amd64: sha256:${"1".repeat(64)}`,
+          `      linux/arm64: sha256:${"2".repeat(64)}`,
+        ]
+      : []),
     ...terminalRuntime,
     "config:",
     `  dir: /sandbox/.${declaration.id}`,
@@ -343,6 +458,8 @@ function writePackageArtifact(input: {
   readonly postRestoreMutableConfig?: "repair" | "verify";
   readonly webSearchProviders?: readonly ("brave" | "tavily")[];
   readonly providerAuth?: HarnessPackageProviderAuthFixture;
+  readonly managedImage?: boolean;
+  readonly managedProcessLifecycle?: boolean;
 }): string {
   const providerAuth =
     input.providerAuth?.packageId === input.declaration.id
@@ -375,6 +492,8 @@ function writePackageArtifact(input: {
       input.postRestoreMutableConfig,
       input.webSearchProviders,
       providerAuth,
+      input.managedImage,
+      input.managedProcessLifecycle,
     ),
   );
   const packageDirectory = path.posix.dirname(input.declaration.manifestPath);
@@ -570,6 +689,8 @@ export function createHarnessPackageFixture(
         postRestoreMutableConfig: options.postRestoreMutableConfig,
         webSearchProviders: options.webSearchProviders,
         providerAuth: options.providerAuth,
+        managedImage: options.managedImage,
+        managedProcessLifecycle: options.managedProcessLifecycle,
       });
       return [declaration.id, packageRoot] as const;
     }),
@@ -606,6 +727,8 @@ export function createHarnessPackageFixture(
       postRestoreMutableConfig: options.postRestoreMutableConfig,
       webSearchProviders: options.webSearchProviders,
       providerAuth: options.providerAuth,
+      managedImage: options.managedImage,
+      managedProcessLifecycle: options.managedProcessLifecycle,
     });
     return installHarnessPackage({ packageRoot, sourceIdentity: SOURCE_IDENTITY }, { storeRoot });
   }
@@ -643,6 +766,8 @@ export function createHarnessPackageFixture(
       postRestoreMutableConfig: options.postRestoreMutableConfig,
       webSearchProviders: options.webSearchProviders,
       providerAuth: options.providerAuth,
+      managedImage: options.managedImage,
+      managedProcessLifecycle: options.managedProcessLifecycle,
     });
     return installHarnessPackage(
       { packageRoot, expectedId: input.id, sourceIdentity: { kind: "local" } },
@@ -764,35 +889,8 @@ export function installHomeOpenClawRestorePackageFixture(home: string): Installe
   const canonicalHome = fs.realpathSync(home);
   const sourceRoot = path.join(canonicalHome, "openclaw-restore-package");
   const packageRoot = path.join(sourceRoot, "packages", "nemoclaw-openclaw");
-  const repositoryPackageRoot = path.join(
-    import.meta.dirname,
-    "../..",
-    "packages",
-    "nemoclaw-openclaw",
-  );
   privateDirectory(path.join(packageRoot, "host"));
-  fs.copyFileSync(
-    path.join(repositoryPackageRoot, "manifest.yaml"),
-    path.join(packageRoot, "manifest.yaml"),
-  );
-  fs.copyFileSync(
-    path.join(repositoryPackageRoot, "host", "restore-adapter.cts"),
-    path.join(packageRoot, "host", "restore-adapter.cts"),
-  );
-  fs.copyFileSync(
-    path.join(repositoryPackageRoot, "host", "messaging-adapter.cts"),
-    path.join(packageRoot, "host", "messaging-adapter.cts"),
-  );
-  for (const relativePath of ["messaging/profile.json", "provider-profiles/googlechat.yaml"]) {
-    fs.mkdirSync(path.dirname(path.join(packageRoot, relativePath)), {
-      recursive: true,
-      mode: 0o700,
-    });
-    fs.copyFileSync(
-      path.join(repositoryPackageRoot, relativePath),
-      path.join(packageRoot, relativePath),
-    );
-  }
+  copyRepositoryHarnessPackageFixture(packageRoot, "openclaw");
   writePrivateFile(
     sourceRoot,
     "nemoclaw-package.json",

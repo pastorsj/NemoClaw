@@ -423,7 +423,7 @@ with tempfile.TemporaryDirectory() as root:
             "script": script,
             "arguments": arguments,
         })
-        control._validate_runtime_environment = lambda script, environment, runtime_identity="current": preflight_steps.append({
+        control._validate_managed_gateway_environment = lambda script, environment: preflight_steps.append({
             "script": script,
             "arguments": ["runtime-env"],
             "runtime_port": environment.get("NEMOCLAW_DASHBOARD_PORT"),

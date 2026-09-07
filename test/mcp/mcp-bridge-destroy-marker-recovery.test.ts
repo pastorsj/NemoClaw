@@ -16,6 +16,8 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { authorizeMcpHarnessScript } from "../helpers/mcp-authority";
+
 const sourceRequireHook = path.resolve("test/helpers/onboard-script-mocks.cjs");
 const sourceNodeOptions = [process.env.NODE_OPTIONS, `--require=${sourceRequireHook}`]
   .filter(Boolean)
@@ -51,11 +53,15 @@ providerInspection.getMcpProviderInspectionRuntimeSelection = () => ({
   workspace: "default",
 });
 `;
-  const result = spawnSync(process.execPath, ["-e", `${runtimeSelectionSetup}\n${script}`], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-    env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
-  });
+  const result = spawnSync(
+    process.execPath,
+    ["-e", authorizeMcpHarnessScript(home, `${runtimeSelectionSetup}\n${script}`)],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+    },
+  );
   return { status: result.status, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 
@@ -477,18 +483,16 @@ bridge.removeMcpBridge("deleted-sandbox", "github", { force: true }).then(
 
   it("PRESERVES the prepared marker when the --force removal itself fails (durable retry state)", async () => {
     const home = createTempHome("nemoclaw-force-fail-preserve-");
-    // Deterministically fail the removal at the gateway-selection step (before
-    // any provider/openshell work) by stubbing ensureSandboxGatewaySelected to
+    // Deterministically fail the removal at the gateway-recovery step (before
+    // any provider/openshell work) by stubbing recoverNamedGatewayRuntime to
     // throw. Because the prepared marker is cleared only AFTER a successful
     // removal, it must survive this failure — the #6376 blocker was that the
     // earlier code cleared markers up front and lost the retry state.
     const script = `
 process.env.HOME = ${JSON.stringify(home)};
 const registry = require("./src/lib/state/registry.js");
-const state = require("./src/lib/actions/sandbox/mcp-bridge-state.js");
-// CJS interop: mcp-bridge-remove calls this via the module object, so the
-// override is observed at call time.
-state.ensureSandboxGatewaySelected = async () => {
+const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
+gatewayRuntime.recoverNamedGatewayRuntime = async () => {
   throw new Error("gateway unavailable (injected)");
 };
 registry.registerSandbox({

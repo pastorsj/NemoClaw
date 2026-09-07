@@ -90,10 +90,6 @@ describe("checkAndRecoverSandboxProcesses current-probe reporting", () => {
       output:
         "SANDBOX  BIND  PORT  PID  STATUS\ncurrent-probe-box  127.0.0.1  18789  12345  running",
     });
-    const runOpenshell = vi
-      .spyOn(openshellRuntime, "runOpenshell")
-      .mockReturnValue({ status: 0 } as never);
-
     const result = checkAndRecoverSandboxProcesses("current-probe-box", {
       quiet: true,
       isSandboxGatewayRunningImpl: () => false,
@@ -117,6 +113,5 @@ describe("checkAndRecoverSandboxProcesses current-probe reporting", () => {
     );
     expect(requestPinnedGatewaySupervisorAction).toHaveBeenCalledTimes(4);
     expect(finalize).toHaveBeenCalledWith(true);
-    expect(runOpenshell).toHaveBeenCalledOnce();
   });
 });

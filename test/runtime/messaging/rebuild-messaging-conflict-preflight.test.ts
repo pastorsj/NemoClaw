@@ -12,12 +12,21 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { HarnessStartupSettings } from "@nvidia/nemoclaw-harness-contract";
 import { afterEach, describe, expect, it } from "vitest";
 import type { HarnessPackageIdentity } from "../../../src/lib/agent-runtime/package/identity";
-import { installHomeHarnessPackageFixture } from "../../helpers/harness-packages";
+import { findChannelConflictsFromPlan } from "../../../src/lib/messaging/applier";
+import { hydrateMessagingRegistryEntriesForAuthority } from "../../../src/lib/state/registry/messaging-authority";
+import {
+  createPackageStartupProfileFixture,
+  installHomeOpenClawRestorePackageFixture,
+} from "../../helpers/harness-packages";
 
 const REPO_ROOT = path.join(import.meta.dirname, "../../..");
 const NODE_BIN = path.dirname(process.execPath);
+const DOCKER_OPERATING_SYSTEM =
+  ({ darwin: "Docker Desktop" } as Partial<Record<NodeJS.Platform, string>>)[process.platform] ??
+  "Docker Engine";
 const tmpFixtures: string[] = [];
 
 afterEach(() => {
@@ -49,7 +58,34 @@ function teamsPlan(sandboxName: string, credentialHash: string) {
         selected: true,
         configured: true,
         disabled: false,
-        inputs: [],
+        inputs: [
+          {
+            channelId: "teams",
+            inputId: "appId",
+            kind: "config",
+            required: true,
+            sourceEnv: "MSTEAMS_APP_ID",
+            statePath: "teamsConfig.appId",
+            value: "00000000-0000-0000-0000-000000000001",
+          },
+          {
+            channelId: "teams",
+            inputId: "clientSecret",
+            kind: "secret",
+            required: true,
+            sourceEnv: "MSTEAMS_APP_PASSWORD",
+            credentialAvailable: true,
+          },
+          {
+            channelId: "teams",
+            inputId: "tenantId",
+            kind: "config",
+            required: true,
+            sourceEnv: "MSTEAMS_TENANT_ID",
+            statePath: "teamsConfig.tenantId",
+            value: "00000000-0000-0000-0000-000000000002",
+          },
+        ],
         hooks: [],
       },
     ],
@@ -57,7 +93,11 @@ function teamsPlan(sandboxName: string, credentialHash: string) {
     credentialBindings: [
       {
         channelId: "teams",
+        credentialId: "teamsClientSecret",
+        sourceInput: "clientSecret",
+        providerName: `${sandboxName}-teams-bridge`,
         providerEnvKey: "MSTEAMS_APP_PASSWORD",
+        placeholder: "openshell:resolve:env:MSTEAMS_APP_PASSWORD",
         credentialAvailable: true,
         credentialHash,
       },
@@ -70,7 +110,11 @@ function teamsPlan(sandboxName: string, credentialHash: string) {
   };
 }
 
-function completeSession(sandboxName: string, harnessPackage: HarnessPackageIdentity) {
+function completeSession(
+  sandboxName: string,
+  harnessPackage: HarnessPackageIdentity,
+  gatewayName: string,
+) {
   const step = { status: "complete", startedAt: null, completedAt: null, error: null };
   return {
     version: 1,
@@ -95,7 +139,7 @@ function completeSession(sandboxName: string, harnessPackage: HarnessPackageIden
     nimContainer: null,
     webSearchConfig: null,
     messagingPlan: null,
-    metadata: { gatewayName: "nemoclaw", fromDockerfile: null },
+    metadata: { gatewayName, fromDockerfile: null },
     steps: {
       preflight: step,
       gateway: step,
@@ -116,38 +160,102 @@ function createConflictFixture() {
   tmpFixtures.push(tmpDir);
   const nemoclawDir = path.join(tmpDir, ".nemoclaw");
   fs.mkdirSync(nemoclawDir, { recursive: true, mode: 0o700 });
-  const harnessPackage = installHomeHarnessPackageFixture(tmpDir, "openclaw").identity;
+  const harnessPackage = installHomeOpenClawRestorePackageFixture(tmpDir).identity;
+  const portProbe = spawnSync(
+    process.execPath,
+    [
+      "-e",
+      "const net=require('node:net');const server=net.createServer();server.listen(0,'127.0.0.1',()=>{console.log(server.address().port);server.close();});",
+    ],
+    { encoding: "utf8" },
+  );
+  const gatewayPort = Number(portProbe.stdout.trim());
+  expect(portProbe.status).toBe(0);
+  expect(gatewayPort).toBeGreaterThan(0);
+  const gatewayName = `nemoclaw-${String(gatewayPort)}`;
 
-  const sandboxEntry = (name: string) => ({
-    name,
-    model: "meta/llama-3.3-70b-instruct",
-    provider: "nvidia-prod",
-    gpuEnabled: false,
-    sandboxGpuMode: "0",
-    gatewayName: "nemoclaw",
-    gatewayPort: 8080,
-    dashboardPort: 18789,
-    fromDockerfile: null,
-    agent: null,
-    harnessPackage,
-    messaging: { schemaVersion: 1, plan: teamsPlan(name, "shared-teams-hash") },
-  });
+  const sandboxEntry = (name: string) => {
+    const plan = teamsPlan(name, "shared-teams-hash");
+    const desiredState: HarnessStartupSettings = {
+      configuration: { agent: "openclaw" },
+      inference: {
+        routeProvider: "inference",
+        upstreamProvider: "nvidia-prod",
+        model: "meta/llama-3.3-70b-instruct",
+        routedBaseUrl: "http://inference.local/v1",
+        upstreamEndpointUrl: null,
+        api: "openai-completions",
+        primaryModelRef: null,
+        compatibility: null,
+        inputModalities: null,
+      },
+      proxy: {
+        managedHost: "inference.local",
+        managedPort: 80,
+        hostHttpUrl: null,
+        hostHttpsUrl: null,
+        hostNoProxy: [],
+      },
+      dashboard: { agent: "openclaw", mode: "disabled" },
+      tools: { disclosure: "progressive", enabledGateways: [] },
+      messaging: { plan: null },
+      tuning: {
+        contextWindow: null,
+        maxTokens: null,
+        reasoning: null,
+        reasoningEffort: null,
+      },
+      corporateCa: { bundleSha256: null },
+    };
+    return {
+      name,
+      model: "meta/llama-3.3-70b-instruct",
+      provider: "nvidia-prod",
+      gpuEnabled: false,
+      sandboxGpuMode: "0",
+      gatewayName,
+      gatewayPort,
+      dashboardPort: 18789,
+      fromDockerfile: null,
+      agent: null,
+      harnessPackage,
+      workload: {
+        schemaVersion: 1,
+        kind: "legacy-dockerfile",
+        reference: null,
+        packageStartupProfile: createPackageStartupProfileFixture(harnessPackage, desiredState),
+        shared: false,
+      },
+      messaging: { schemaVersion: 1, plan },
+    };
+  };
+
+  const registryEntries = {
+    "my-assistant": sandboxEntry("my-assistant"),
+    hermes: sandboxEntry("hermes"),
+  };
+  const hydratedEntries = hydrateMessagingRegistryEntriesForAuthority(
+    Object.values(registryEntries),
+    { packageStore: { storeRoot: path.join(nemoclawDir, "harnesses") } },
+  );
+  expect(
+    findChannelConflictsFromPlan("my-assistant", registryEntries["my-assistant"].messaging.plan, {
+      listSandboxes: () => ({ sandboxes: hydratedEntries }),
+    }),
+  ).toContainEqual({ channel: "teams", sandbox: "hermes", reason: "matching-token" });
 
   fs.writeFileSync(
     path.join(nemoclawDir, "sandboxes.json"),
     JSON.stringify({
       defaultSandbox: "my-assistant",
-      sandboxes: {
-        "my-assistant": sandboxEntry("my-assistant"),
-        hermes: sandboxEntry("hermes"),
-      },
+      sandboxes: registryEntries,
     }),
     { mode: 0o600 },
   );
 
   fs.writeFileSync(
     path.join(nemoclawDir, "onboard-session.json"),
-    JSON.stringify(completeSession("my-assistant", harnessPackage)),
+    JSON.stringify(completeSession("my-assistant", harnessPackage, gatewayName)),
     { mode: 0o600 },
   );
 
@@ -164,11 +272,12 @@ function createConflictFixture() {
     path.join(tmpDir, "openshell"),
     `#!/usr/bin/env node
 const a = process.argv.slice(2);
+if (a[0]==="-V" || a[0]==="--version")          { process.stdout.write("openshell 0.0.106\\n"); process.exit(0); }
 if (a[0]==="sandbox" && a[1]==="list")       { process.stdout.write("my-assistant\\n"); process.exit(0); }
 if (a[0]==="sandbox" && a[1]==="ssh-config") { process.stdout.write("${sshConfig}\\n"); process.exit(0); }
 if (a[0]==="sandbox" && a[1]==="delete")     { process.exit(0); }
-if (a[0]==="status")                         { process.stdout.write("Status: Connected\\nGateway: nemoclaw\\n"); process.exit(0); }
-if (a[0]==="gateway" && a[1]==="info")       { process.stdout.write("Gateway: nemoclaw\\n"); process.exit(0); }
+if (a[0]==="status")                         { process.stderr.write("No active gateway\\n"); process.exit(1); }
+if (a[0]==="gateway" && a[1]==="info")       { process.stderr.write("No gateway metadata found\\n"); process.exit(1); }
 if (a[0]==="gateway" && a[1]==="select")     { process.exit(0); }
 if (a[0]==="inference" && a[1]==="get")      { process.stdout.write('{"provider":"nvidia-prod","model":"meta/llama-3.3-70b-instruct"}\\n'); process.exit(0); }
 if (a[0]==="inference")                      { process.exit(0); }
@@ -179,19 +288,32 @@ process.exit(0);
 `,
     { mode: 0o755 },
   );
+  const openshellVersionStub =
+    "#!/usr/bin/env node\nprocess.stdout.write('openshell 0.0.106\\n');\n";
+  fs.writeFileSync(path.join(tmpDir, "openshell-gateway"), openshellVersionStub, { mode: 0o755 });
+  fs.writeFileSync(path.join(tmpDir, "openshell-sandbox"), openshellVersionStub, { mode: 0o755 });
 
   // No active SSH sessions.
   fs.writeFileSync(path.join(tmpDir, "ps"), "#!/usr/bin/env node\nprocess.exit(0);\n", {
     mode: 0o755,
   });
 
-  // Docker / ssh should never be invoked: the conflict aborts before backup,
-  // base-image build, or delete. Failing loudly here would surface any
-  // ordering regression that let the rebuild proceed past the preflight.
+  // Host readiness may inspect Docker before messaging conflict detection, but
+  // it must not build an image or otherwise mutate state before that conflict.
   fs.writeFileSync(
     path.join(tmpDir, "docker"),
     `#!/usr/bin/env node
-process.stderr.write("docker must not run before the conflict preflight: " + process.argv.slice(2).join(" ") + "\\n");
+const a = process.argv.slice(2);
+if (a[0] === "info") {
+  process.stdout.write(JSON.stringify({ServerVersion:"27.0.0", OperatingSystem:${JSON.stringify(DOCKER_OPERATING_SYSTEM)}, NCPU:8, MemTotal:17179869184}) + "\\n");
+  process.exit(0);
+}
+if (a[0] === "run") {
+  if (a.includes("nslookup")) process.stdout.write("Server: 127.0.0.11\\n** server can't find nemoclaw.invalid: NXDOMAIN\\n");
+  process.exit(0);
+}
+if (a[0] === "ps" || a[0] === "inspect") process.exit(0);
+process.stderr.write("docker mutation must not run before the conflict preflight: " + a.join(" ") + "\\n");
 process.exit(17);
 `,
     { mode: 0o755 },
@@ -254,7 +376,7 @@ describe("rebuild messaging credential conflict preflight (#5954)", () => {
       // Nothing destructive ran: the sandbox is untouched and still registered.
       expect(output).not.toContain("Backing up sandbox state");
       expect(output).not.toContain("Old sandbox deleted");
-      expect(output).not.toContain("must not run before the conflict preflight");
+      expect(output).not.toContain("mutation must not run before the conflict preflight");
       expect(registryHasSandbox(f.nemoclawDir, "my-assistant")).toBe(true);
     },
   );
