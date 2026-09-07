@@ -12,6 +12,7 @@ import {
   removeMcpBridge,
   restartMcpBridge,
   resolveCredentialEnv,
+  updateMcpBridgeDenyTools,
 } from "./mcp-bridge";
 
 describe("MCP input runtime boundaries", () => {
@@ -28,6 +29,7 @@ describe("MCP input runtime boundaries", () => {
         }),
       () => removeMcpBridge(sandboxName, "github"),
       () => restartMcpBridge(sandboxName, "github"),
+      () => updateMcpBridgeDenyTools(sandboxName, "github", ["delete_*"]),
     ];
 
     await Promise.all(

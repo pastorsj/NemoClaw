@@ -124,6 +124,11 @@ export const CHECKS: readonly CheckCommand[] = [
     args: ["scripts/checks/test-registration-boundary.mts"],
   },
   {
+    name: "test-ownership",
+    command: TSX,
+    args: ["scripts/checks/test-ownership.mts"],
+  },
+  {
     name: "growth-guardrails-workflow-boundary",
     command: TSX,
     args: ["scripts/checks/growth-guardrails-workflow-boundary.mts"],

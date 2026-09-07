@@ -608,6 +608,81 @@ describe("receipt-backed channel policy preparation", () => {
     expect(gatewayRecovery).not.toHaveBeenCalled();
     expect(registryUpdate).not.toHaveBeenCalled();
   });
+
+  it("retains exact target policy authority across a future package stop and start", () => {
+    writePackagePreset("future-target", {
+      future_primary: policyValue("target.example.com"),
+    });
+    authority = packageAuthority(packageAgent(["future-target"]));
+    const exactPolicy = resolvedContent({
+      future_primary: policyValue("target.example.com"),
+    });
+    policyContext = contextWithPolicy(exactPolicy);
+    const manifest = channelManifest("future-chat", [
+      { name: "future-target", policyKeys: ["future_primary"] },
+    ]);
+    const entry: SandboxMessagingNetworkPolicyEntryPlan = {
+      channelId: "future-chat",
+      presetName: "future-target",
+      policyKeys: ["future_primary"],
+      source: "manifest",
+    };
+    const activePlan = messagingPlan([entry]);
+    const disabledPlan: SandboxMessagingPlan = {
+      ...activePlan,
+      workflow: "stop-channel",
+      channels: activePlan.channels.map((channel) => ({
+        ...channel,
+        active: false,
+        disabled: true,
+      })),
+      disabledChannels: ["future-chat"],
+    };
+
+    vi.mocked(registry.getHydratedMessagingPlanFromEntry).mockReturnValue(activePlan);
+    expect(() =>
+      preparePackageChannelPolicy({
+        allowedCredentialProviderNames: new Set(),
+        authority,
+        availableChannels: [manifest],
+        channelId: "future-chat",
+        disclose: false,
+        includeCredentialBindings: true,
+        sandboxName,
+        workflow: "stop-channel",
+      }),
+    ).not.toThrow();
+
+    vi.mocked(registry.getHydratedMessagingPlanFromEntry).mockReturnValue(disabledPlan);
+    expect(() =>
+      preparePackageChannelPolicy({
+        allowedCredentialProviderNames: new Set(),
+        authority,
+        availableChannels: [manifest],
+        channelId: "future-chat",
+        disclose: true,
+        includeCredentialBindings: true,
+        sandboxName,
+        workflow: "start-channel",
+      }),
+    ).not.toThrow();
+
+    policyContext = contextWithPolicy(
+      resolvedContent({ future_primary: policyValue("foreign.example.com") }),
+    );
+    expect(() =>
+      preparePackageChannelPolicy({
+        allowedCredentialProviderNames: new Set(),
+        authority,
+        availableChannels: [manifest],
+        channelId: "future-chat",
+        disclose: true,
+        includeCredentialBindings: true,
+        sandboxName,
+        workflow: "start-channel",
+      }),
+    ).toThrow("policy key 'future_primary' conflicts with live policy state");
+  });
 });
 
 describe("receipt-backed channel policy mutation", () => {
@@ -1175,7 +1250,7 @@ describe("receipt-backed add rollback", () => {
         ).mockReturnValue("f".repeat(64));
         const providerUpsert = vi
           .spyOn(policyChannelDependencies, "upsertMessagingProviders")
-          .mockImplementation((_definitions, _gatewayName, options) => {
+          .mockImplementation(async (_definitions, _gatewayName, options) => {
             options?.recordMutationReceipt?.({
               createdProviderNames: [],
               mutatedProviderNames: [],

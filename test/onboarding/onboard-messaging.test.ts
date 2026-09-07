@@ -95,7 +95,7 @@ runner.runCapture = (command) => {
     if (mockedCapture !== null) return mockedCapture;
   }
   return "";
-}; require(${onboardScriptMocksPath}).mockDockerSandboxLifecycleReleaseFromRunner();
+}; require(${onboardScriptMocksPath}).mockIsolatedDockerSandboxLifecycleFromRunner();
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
 registry.setDefault = () => true;
@@ -366,7 +366,7 @@ runner.runCapture = (command) => {
     if (mockedCapture !== null) return mockedCapture;
   }
   return "";
-}; require(${onboardScriptMocksPath}).mockDockerSandboxLifecycleReleaseFromRunner();
+}; require(${onboardScriptMocksPath}).mockIsolatedDockerSandboxLifecycleFromRunner();
 registry.registerSandbox = (entry) => {
   registeredSandbox = entry;
   return true;
@@ -539,7 +539,7 @@ runner.runCapture = (command) => {
   if (mockedCapture !== null) return mockedCapture;
   if (_n(command).includes("forward list")) return "SANDBOX BIND PORT PID STATUS";
   return "";
-}; require(${onboardScriptMocksPath}).mockDockerSandboxLifecycleReleaseFromRunner();
+}; require(${onboardScriptMocksPath}).mockIsolatedDockerSandboxLifecycleFromRunner();
 registry.registerSandbox = (entry) => { registered = entry; return true; }; registry.updateSandbox = () => true; registry.setDefault = () => true; registry.removeSandbox = () => true;
 const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
   sandboxName: "my-assistant",
@@ -649,7 +649,7 @@ const { createSandbox } = require(${onboardPath});
       assert.deepEqual(deniedPayload.temporaryCreateSources, []);
       assert.match(
         deniedPayload.error,
-        /Could not inspect messaging provider 'my-assistant-telegram-bridge' before sandbox creation: transport unavailable/,
+        /Could not inspect messaging provider 'my-assistant-telegram-bridge': transport unavailable/,
       );
       const combinedOutput = result.stdout + result.stderr + denied.stdout + denied.stderr;
       assert.equal(
@@ -722,7 +722,7 @@ runner.runCapture = (command) => {
   }
   if (_n(command).includes("forward list")) return "SANDBOX BIND PORT PID STATUS";
   return "";
-}; require(${onboardScriptMocksPath}).mockDockerSandboxLifecycleReleaseFromRunner();
+}; require(${onboardScriptMocksPath}).mockIsolatedDockerSandboxLifecycleFromRunner();
 registry.registerSandbox = (entry) => {
   registerCalls.push(entry);
   return true;
@@ -883,7 +883,7 @@ runner.runCapture = (command) => {
   }
   if (_n(command).includes("forward list")) return "SANDBOX BIND PORT PID STATUS";
   return "";
-}; require(${onboardScriptMocksPath}).mockDockerSandboxLifecycleReleaseFromRunner();
+}; require(${onboardScriptMocksPath}).mockIsolatedDockerSandboxLifecycleFromRunner();
 registry.registerSandbox = (entry) => {
   registerCalls.push(entry);
   return true;
@@ -1054,7 +1054,7 @@ runner.runCapture = (command) => {
   }
   if (_n(command).includes("forward list")) return "SANDBOX BIND PORT PID STATUS";
   return "";
-}; require(${onboardScriptMocksPath}).mockDockerSandboxLifecycleReleaseFromRunner();
+}; require(${onboardScriptMocksPath}).mockIsolatedDockerSandboxLifecycleFromRunner();
 registry.registerSandbox = (entry) => {
   registerCalls.push(entry);
   return true;
@@ -1199,7 +1199,7 @@ runner.runCapture = (command) => {
   if (_n(command).includes("sandbox get")) return "";
   if (_n(command).includes("sandbox list")) return "";
   return "";
-}; require(${onboardScriptMocksPath}).mockDockerSandboxLifecycleReleaseFromRunner();
+}; require(${onboardScriptMocksPath}).mockIsolatedDockerSandboxLifecycleFromRunner();
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
 registry.setDefault = () => true;
@@ -1403,7 +1403,7 @@ runner.runCapture = (command) => {
   }
   if (_n(command).includes("forward list")) return "SANDBOX BIND PORT PID STATUS";
   return "";
-}; require(${onboardScriptMocksPath}).mockDockerSandboxLifecycleReleaseFromRunner();
+}; require(${onboardScriptMocksPath}).mockIsolatedDockerSandboxLifecycleFromRunner();
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
 registry.setDefault = () => true;
@@ -1544,7 +1544,7 @@ runner.runCapture = (command) => {
   }
   if (_n(command).includes("forward list")) return "SANDBOX BIND PORT PID STATUS";
   return "";
-}; require(${onboardScriptMocksPath}).mockDockerSandboxLifecycleReleaseFromRunner();
+}; require(${onboardScriptMocksPath}).mockIsolatedDockerSandboxLifecycleFromRunner();
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
 registry.setDefault = () => true;

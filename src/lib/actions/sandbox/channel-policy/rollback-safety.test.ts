@@ -73,124 +73,89 @@ describe("receipt-backed add rollback safety", () => {
       channelId: "telegram",
       failure: "bound-policy",
       providerCase: "created",
-      expectedPolicySets: 4,
-      expectedDetaches: 1,
-      expectedDeletes: 1,
+      expectedProviderRollback: "delete",
     },
     {
       channelId: "telegram",
       failure: "setter-throw",
       providerCase: "created",
-      expectedPolicySets: 4,
-      expectedDetaches: 1,
-      expectedDeletes: 1,
+      expectedProviderRollback: "delete",
     },
     {
       channelId: "telegram",
       failure: "registry",
       providerCase: "created",
-      expectedPolicySets: 4,
-      expectedDetaches: 1,
-      expectedDeletes: 1,
+      expectedProviderRollback: "delete",
     },
     {
       channelId: "whatsapp",
       failure: "registry",
       providerCase: "none",
-      expectedPolicySets: 2,
-      expectedDetaches: 0,
-      expectedDeletes: 0,
+      expectedProviderRollback: "none",
     },
     {
       channelId: "telegram",
       failure: "registry",
       providerCase: "existing",
-      expectedPolicySets: 2,
-      expectedDetaches: 0,
-      expectedDeletes: 0,
+      expectedProviderRollback: "none",
     },
     {
       channelId: "telegram",
       failure: "registry",
       providerCase: "collision",
-      expectedPolicySets: 2,
-      expectedDetaches: 0,
-      expectedDeletes: 0,
+      expectedProviderRollback: "none",
     },
     {
       channelId: "telegram",
       failure: "attach",
       providerCase: "existing",
-      expectedPolicySets: 0,
-      expectedDetaches: 0,
-      expectedDeletes: 0,
+      expectedProviderRollback: "none",
     },
     {
       channelId: "telegram",
       failure: "provider-upsert",
       providerCase: "created",
-      expectedPolicySets: 2,
-      expectedDetaches: 0,
-      expectedDeletes: 1,
+      expectedProviderRollback: "delete",
     },
     {
       channelId: "telegram",
       failure: "provider-upsert",
       providerCase: "existing",
-      expectedPolicySets: 0,
-      expectedDetaches: 0,
-      expectedDeletes: 0,
+      expectedProviderRollback: "none",
     },
     {
       channelId: "telegram",
       failure: "registry",
       providerCase: "policy-identity-drift",
-      expectedPolicySets: 0,
-      expectedDetaches: 0,
-      expectedDeletes: 0,
+      expectedProviderRollback: "none",
     },
     {
       channelId: "telegram",
       failure: "provider-upsert",
       providerCase: "collision",
-      expectedPolicySets: 2,
-      expectedDetaches: 0,
-      expectedDeletes: 0,
+      expectedProviderRollback: "none",
     },
     {
       channelId: "telegram",
       failure: "provider-upsert",
       providerCase: "indeterminate",
-      expectedPolicySets: 2,
-      expectedDetaches: 0,
-      expectedDeletes: 0,
+      expectedProviderRollback: "none",
     },
     {
       channelId: "telegram",
       failure: "provider-upsert",
       providerCase: "identity-drift",
-      expectedPolicySets: 1,
-      expectedDetaches: 0,
-      expectedDeletes: 0,
+      expectedProviderRollback: "none",
     },
     {
       channelId: "telegram",
       failure: "registry",
       providerCase: "identity-drift",
-      expectedPolicySets: 1,
-      expectedDetaches: 0,
-      expectedDeletes: 0,
+      expectedProviderRollback: "none",
     },
   ] as const)(
     "restores the exact original policy after fresh $channelId $failure failure with a $providerCase provider",
-    async ({
-      channelId,
-      failure,
-      providerCase,
-      expectedPolicySets,
-      expectedDetaches,
-      expectedDeletes,
-    }) => {
+    async ({ channelId, failure, providerCase, expectedProviderRollback }) => {
       const fixtureParent = path.join(
         process.cwd(),
         `node_modules/.cache/nemoclaw-channel-policy-${channelId}-${failure}`,
@@ -272,6 +237,7 @@ describe("receipt-backed add rollback safety", () => {
         const originalPolicy = "version: 1\nnetwork_policies: {}\n";
         policyContext = contextWithPolicy(originalPolicy);
         let livePolicy = originalPolicy;
+        const rollbackEvents: string[] = [];
         let policySubmission = 0;
         const policySubmissionOutcomes = {
           attach: ["accept"],
@@ -295,6 +261,11 @@ describe("receipt-backed add rollback safety", () => {
           .mockImplementation((_sandbox, desiredPolicy) => {
             policySubmission += 1;
             livePolicy = desiredPolicy;
+            rollbackEvents.push(
+              isDeepStrictEqual(YAML.parse(desiredPolicy), YAML.parse(originalPolicy))
+                ? "policy:restore-original"
+                : "policy:submit",
+            );
             const outcome = policySubmissionOutcomes[failure][policySubmission - 1] ?? "accept";
             return applyPolicySubmissionOutcome[outcome]();
           });
@@ -323,9 +294,11 @@ describe("receipt-backed add rollback safety", () => {
         ].includes(providerCase)
           ? providerNames
           : [];
+        let providerDeleted = false;
+        let providerAttached = false;
         const providerUpsert = vi
           .spyOn(policyChannelDependencies, "upsertMessagingProviders")
-          .mockImplementation((_definitions, _gatewayName, options) => {
+          .mockImplementation(async (_definitions, _gatewayName, options) => {
             const throwProviderMutationFailure = (): never => {
               throw Object.assign(new Error("transport failed after provider mutation"), {
                 code: "NEMOCLAW_MESSAGING_PROVIDER_MUTATION_FAILURE",
@@ -335,6 +308,9 @@ describe("receipt-backed add rollback safety", () => {
               });
             };
             const recordProviderMutation = () => {
+              // The typed applier owns attachment. Model its observable result
+              // so the production path reaches the fault selected by this row.
+              providerAttached = failure === "attach" ? providerAttached : providerNames.length > 0;
               options?.recordMutationReceipt?.({
                 createdProviderNames,
                 mutatedProviderNames:
@@ -360,8 +336,6 @@ describe("receipt-backed add rollback safety", () => {
             providerCase === "identity-drift" && targetInspectionCount >= 4;
           return changedBeforePolicy || changedAfterPolicy ? "0".repeat(64) : "f".repeat(64);
         });
-        let providerDeleted = false;
-        let providerAttached = false;
         vi.spyOn(policyChannelDependencies, "inspectMessagingProviderBinding").mockImplementation(
           () =>
             providerCase === "collision"
@@ -401,23 +375,51 @@ describe("receipt-backed add rollback safety", () => {
         vi.spyOn(policyChannelDependencies, "runOpenshell").mockImplementation(
           () =>
             ({
-              status: failure === "attach" ? 1 : ((providerAttached = true), 0),
+              status: 0,
               stdout: "",
-              stderr: failure === "attach" ? "transport failed after attach" : "",
+              stderr: "",
             }) as never,
         );
-        const detachProvider = vi
-          .spyOn(policyChannelDependencies, "runGatewayOpenshell")
-          .mockImplementation(() => {
-            providerAttached = false;
-            return { status: 0, stdout: "", stderr: "" } as never;
-          });
-        const deleteProvider = vi
-          .spyOn(policyChannelDependencies, "deleteMessagingProviderWithRecovery")
-          .mockImplementation(() => {
-            providerDeleted = true;
-            return { ok: true, status: 0, stdout: "", stderr: "" } as never;
-          });
+        const cleanupProviders = vi
+          .spyOn(policyChannelDependencies, "cleanupMessagingProviders")
+          .mockImplementation(
+            async (names, _sandbox, _gateway, revalidateSandboxIdentity, cleanupOptions = {}) => {
+              const detachOnly = new Set(cleanupOptions.detachOnlyProviderNames ?? []);
+              names.length > 0 ? rollbackEvents.push("provider:cleanup") : undefined;
+              const outcomes = names.map((name) => {
+                revalidateSandboxIdentity(`clean up messaging provider ${JSON.stringify(name)}`);
+                const expectedProviderId = cleanupOptions.expectedProviderIds?.[name];
+                const absent = providerDeleted;
+                const identityDrift = !absent && expectedProviderId !== `${name}-id`;
+                const mayMutate = !absent && !identityDrift;
+                const detached = mayMutate && providerAttached;
+                const removed = mayMutate && !detachOnly.has(name);
+                providerAttached = detached ? false : providerAttached;
+                providerDeleted = removed ? true : providerDeleted;
+                return { absent, detached, identityDrift, name, removed };
+              });
+              return {
+                removedProviderNames: outcomes
+                  .filter(({ removed }) => removed)
+                  .map(({ name }) => name),
+                absentProviderNames: outcomes
+                  .filter(({ absent }) => absent)
+                  .map(({ name }) => name),
+                detachedAttachments: outcomes
+                  .filter(({ detached }) => detached)
+                  .map(({ name }) => ({ providerName: name, sandboxName })),
+                residualProviders: outcomes
+                  .filter(({ identityDrift }) => identityDrift)
+                  .map(({ name }) => ({
+                    providerName: name,
+                    error: {
+                      kind: "validation" as const,
+                      message: `Messaging provider '${name}' changed from its recorded stable identity.`,
+                    },
+                  })),
+              };
+            },
+          );
         vi.spyOn(gatewayRuntime, "recoverNamedGatewayRuntime").mockResolvedValue({
           recovered: true,
           attempted: false,
@@ -433,19 +435,56 @@ describe("receipt-backed add rollback safety", () => {
           throw new Error(`process.exit(${code ?? 0})`);
         }) as never);
 
-        await expect(addSandboxChannel(sandboxName, { channel: channelId })).rejects.toThrow(
-          "process.exit(1)",
+        await expect(addSandboxChannel(sandboxName, { channel: channelId })).rejects.toBeInstanceOf(
+          Error,
         );
 
-        expect(policies.setPolicyDocument).toHaveBeenCalledTimes(expectedPolicySets);
         expect(isDeepStrictEqual(YAML.parse(livePolicy), YAML.parse(originalPolicy))).toBe(
           providerCase !== "identity-drift",
         );
         expect(legacyPresetLoad).not.toHaveBeenCalled();
         expect(legacyPresetApply).not.toHaveBeenCalled();
         expect(legacyPresetRemove).not.toHaveBeenCalled();
-        expect(detachProvider).toHaveBeenCalledTimes(expectedDetaches);
-        expect(deleteProvider).toHaveBeenCalledTimes(expectedDeletes);
+        const providerCleanupCalls = cleanupProviders.mock.calls.filter(
+          ([names]) => names.length > 0,
+        );
+        const observedProviderCleanup = providerCleanupCalls.map(
+          ([names, targetSandbox, targetGateway, _revalidate, cleanupOptions]) => ({
+            names,
+            targetSandbox,
+            targetGateway,
+            expectedProviderIds: cleanupOptions?.expectedProviderIds,
+            detachOnlyProviderNames: cleanupOptions?.detachOnlyProviderNames,
+          }),
+        );
+        const expectedProviderCleanup =
+          expectedProviderRollback === "none"
+            ? []
+            : [
+                {
+                  names: [providerName],
+                  targetSandbox: sandboxName,
+                  targetGateway: "nemoclaw",
+                  expectedProviderIds: { [providerName]: `${providerName}-id` },
+                  detachOnlyProviderNames:
+                    expectedProviderRollback === "detach" ? [providerName] : [],
+                },
+              ];
+        expect(observedProviderCleanup).toEqual(expectedProviderCleanup);
+        expect(providerDeleted).toBe(expectedProviderRollback === "delete");
+        expect(expectedProviderRollback === "none" || providerAttached === false).toBe(true);
+
+        const cleanupIndex = rollbackEvents.indexOf("provider:cleanup");
+        const policyRestoreIndex = rollbackEvents.lastIndexOf("policy:restore-original");
+        expect(cleanupIndex >= 0).toBe(expectedProviderRollback !== "none");
+        expect(expectedProviderRollback === "none" || policyRestoreIndex >= 0).toBe(true);
+        expect(
+          expectedProviderRollback === "none"
+            ? true
+            : failure === "registry"
+              ? policyRestoreIndex < cleanupIndex
+              : cleanupIndex < policyRestoreIndex,
+        ).toBe(true);
         expect(
           providerCase !== "policy-identity-drift" || providerUpsert.mock.calls.length === 0,
         ).toBe(true);

@@ -245,6 +245,19 @@ export function preparePackageChannelPolicy(input: {
   );
   const ownedPolicyKeys = new Set(retained.ownedPolicyKeys);
   const targetPolicyKeys = new Set(resolvedEntries.flatMap(({ entry }) => entry.policyKeys));
+  if (input.workflow === "start-channel" || input.workflow === "stop-channel") {
+    const storedTarget = retained.plan?.channels.find(
+      (channel) => channel.channelId === input.channelId && channel.configured,
+    );
+    if (storedTarget) {
+      for (const entry of retained.plan?.networkPolicy.entries ?? []) {
+        if (entry.channelId !== input.channelId) continue;
+        for (const key of entry.policyKeys) {
+          if (targetPolicyKeys.has(key)) ownedPolicyKeys.add(key);
+        }
+      }
+    }
+  }
   for (const receipt of input.priorPolicyMutationReceipts ?? []) {
     if (
       receipt.channelId === input.channelId &&

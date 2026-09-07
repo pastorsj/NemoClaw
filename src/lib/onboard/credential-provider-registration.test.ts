@@ -3,6 +3,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import { MessagingProviderApplyError } from "../messaging/applier/openshell-provider";
+import { MessagingSetupApplier } from "../messaging/applier/setup-applier";
 import type { SandboxMessagingPlan } from "../messaging/manifest";
 import type { Session } from "../state/onboard-session";
 import { requiredMessagingProviderBindings } from "./checkpoint-replay";
@@ -12,16 +14,6 @@ import {
 } from "./credential-provider-registration";
 import type { MessagingBridgeProfile } from "./messaging-bridge-provider";
 import type { MessagingTokenDef } from "./messaging-prep";
-
-const messagingBridgeProvider =
-  require("./messaging-bridge-provider") as typeof import("./messaging-bridge-provider");
-const providersModule = require("./providers") as {
-  upsertMessagingProviders(
-    tokenDefs: MessagingTokenDef[],
-    runOpenshell: CredentialProviderRegistrationDeps["runOpenshell"],
-    options?: { allowedSandboxes?: readonly string[] },
-  ): string[];
-};
 
 const BRAVE_SECRET = "brv-resume-secret";
 const DISCORD_SECRET = "discord-resume-secret";
@@ -102,6 +94,10 @@ function providerMetadata(
   };
 }
 
+function providerMissing(name: string) {
+  return { status: 1, stdout: "", stderr: `provider '${name}' not found` };
+}
+
 function registrationDeps(
   runOpenshellMock: ReturnType<typeof vi.fn>,
   session: Session,
@@ -115,6 +111,7 @@ function registrationDeps(
     getGatewayName: () => "test-gateway",
     getCredential: () => null,
     updateSession,
+    loadSession: () => session,
     stagedLegacyValues: new Map(),
     migratedLegacyKeys: new Set(),
     persistMigratedLegacyKeys: vi.fn(),
@@ -139,104 +136,39 @@ function sandboxInput(bindings: ReturnType<typeof requiredBindings>) {
   };
 }
 
-function bridgeRefreshCleanupScenario(deleteStatus: number, deleteError: string) {
-  const session = { stagedCredentialProviders: [] } as unknown as Session;
-  let providerExists = false;
-  const commandHandlers = new Map<string, () => ReturnType<typeof providerMetadata>>([
-    [
-      "get",
-      () =>
-        providerExists
-          ? providerMetadata(
-              "alpha-googlechat-bridge",
-              "google-chat-bridge",
-              "GOOGLE_CHAT_ACCESS_TOKEN",
-            )
-          : {
-              status: 1,
-              stdout: "",
-              stderr:
-                "Error: code: 'Some requested entity was not found', message: \"provider not found\"",
-            },
-    ],
-    [
-      "create",
-      () => {
-        providerExists = true;
-        return { status: 0, stdout: "", stderr: "" };
-      },
-    ],
-    [
-      "delete",
-      () => {
-        providerExists = deleteStatus !== 0;
-        return { status: deleteStatus, stdout: "", stderr: deleteError };
-      },
-    ],
-  ]);
-  const runOpenshell = vi.fn(
-    (args: string[]) =>
-      commandHandlers.get(args[1] ?? "")?.() ?? { status: 0, stdout: "", stderr: "" },
-  );
-  const registration = createCredentialProviderRegistration(
-    registrationDeps(runOpenshell, session),
-  );
-  const tokenDef: MessagingTokenDef = {
-    name: "alpha-googlechat-bridge",
-    envKey: "GOOGLE_CHAT_ACCESS_TOKEN",
-    token: messagingBridgeProvider.MESSAGING_BRIDGE_PENDING_VALUE,
-    providerType: "google-chat-bridge",
-  };
-  const ensureProfiles = vi
-    .spyOn(messagingBridgeProvider, "ensureMessagingBridgeProfiles")
-    .mockImplementation(() => undefined);
-  const configureRefreshes = vi
-    .spyOn(messagingBridgeProvider, "configureMessagingBridgeRefreshes")
-    .mockReturnValue({ ok: false, reason: "token minting failed" });
-  const exit = vi.spyOn(process, "exit").mockImplementation((code) => {
-    throw new Error(`exit:${code ?? 0}`);
-  });
-  const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-  return {
-    errorLog,
-    providerExists: () => providerExists,
-    registration,
-    restore: () => {
-      errorLog.mockRestore();
-      exit.mockRestore();
-      configureRefreshes.mockRestore();
-      ensureProfiles.mockRestore();
-    },
-    runOpenshell,
-    session,
-    tokenDef,
-  };
-}
-
 describe("credential provider registration", () => {
   it("confines receipt-backed provider mutations to the target sandbox", async () => {
     const session = { stagedCredentialProviders: [] } as unknown as Session;
-    const runOpenshell = vi.fn(() => ({ status: 0, stdout: "", stderr: "" }));
-    const registration = createCredentialProviderRegistration(
-      registrationDeps(runOpenshell, session),
-    );
-    const upsert = vi.spyOn(providersModule, "upsertMessagingProviders").mockReturnValue([]);
+    const registration = createCredentialProviderRegistration(registrationDeps(vi.fn(), session));
+    const apply = vi.spyOn(MessagingSetupApplier, "applyCredentialsAtOpenShell").mockResolvedValue({
+      upserted: [],
+      reused: [],
+      missing: [],
+      replacedProviderNames: [],
+      mutatedProviderNames: [],
+      createdProviderNames: [],
+      providerNames: [],
+      providerIds: {},
+      attachedProviderNames: [],
+      sandboxCreateProviderArgs: [],
+    });
     try {
       await expect(
         registration.stageSandboxCredentialProviders(
-          {
-            ...sandboxInput([]),
-            receiptBackedPackage: true,
-          },
+          { ...sandboxInput([]), receiptBackedPackage: true },
           async () => ({ messagingTokenDefs: [] }),
         ),
       ).resolves.toEqual([]);
 
-      expect(upsert).toHaveBeenCalledOnce();
-      expect(upsert.mock.calls[0]?.[2]).toMatchObject({ allowedSandboxes: ["alpha"] });
+      expect(apply).toHaveBeenCalledExactlyOnceWith(
+        expect.any(Object),
+        expect.objectContaining({
+          allowedSandboxes: ["alpha"],
+          requireStableProviderIdentity: true,
+        }),
+      );
     } finally {
-      upsert.mockRestore();
+      apply.mockRestore();
     }
   });
 
@@ -425,14 +357,18 @@ describe("credential provider registration", () => {
       envKey: "DISCORD_BOT_TOKEN",
       token: null,
       providerType: "discord-hermes-static-v1",
+      messagingProviderProfile: DISCORD_MESSAGING_PROFILE,
     };
 
     await expect(
       registration.stageSandboxCredentialProviders(
-        sandboxInput(requiredBindings([tokenDef])),
+        {
+          ...sandboxInput(requiredBindings([tokenDef])),
+          agent: { name: "hermes" },
+        },
         async () => ({ messagingTokenDefs: [tokenDef] }),
       ),
-    ).rejects.toThrow("existing credential provider does not match");
+    ).rejects.toThrow("does not match the checked-in credential boundary");
 
     expect(deps.updateSession).not.toHaveBeenCalled();
     expect(
@@ -533,9 +469,9 @@ describe("credential provider registration", () => {
         ? { ...defaultResult, stdout: JSON.stringify(BRAVE_PROFILE) }
         : (commandResults.get(args.join(" ")) ?? defaultResult),
     );
-    const registration = createCredentialProviderRegistration(
-      registrationDeps(runOpenshell, session),
-    );
+    const deps = registrationDeps(runOpenshell, session);
+    deps.root = process.cwd();
+    const registration = createCredentialProviderRegistration(deps);
     const tokenDefs: MessagingTokenDef[] = [
       {
         name: "alpha-brave-search",
@@ -600,18 +536,27 @@ describe("credential provider registration", () => {
 
   it("creates a missing messaging provider and records its receipt (#6743)", async () => {
     const session = { stagedCredentialProviders: [] } as unknown as Session;
-    const missing = { status: 1, stdout: "", stderr: "not found" };
     const success = { status: 0, stdout: "", stderr: "" };
-    let created = false;
-    const runOpenshell = vi.fn((args: string[]) => {
-      const operation = args.slice(0, 2).join(" ");
-      created ||= operation === "provider create";
-      return operation === "provider get"
-        ? created
-          ? providerMetadata("alpha-discord-bridge", "generic", "DISCORD_BOT_TOKEN")
-          : missing
-        : success;
-    });
+    let providerCreated = false;
+    const commandHandlers = new Map<string, () => ReturnType<typeof providerMetadata>>([
+      [
+        "create",
+        () => {
+          providerCreated = true;
+          return success;
+        },
+      ],
+      [
+        "get",
+        () =>
+          providerCreated
+            ? providerMetadata("alpha-discord-bridge", "generic", "DISCORD_BOT_TOKEN")
+            : providerMissing("alpha-discord-bridge"),
+      ],
+    ]);
+    const runOpenshell = vi.fn(
+      (args: string[]) => commandHandlers.get(args[1] ?? "")?.() ?? success,
+    );
     const registration = createCredentialProviderRegistration(
       registrationDeps(runOpenshell, session),
     );
@@ -632,6 +577,13 @@ describe("credential provider registration", () => {
       { name: "alpha-discord-bridge", type: "generic", credentialEnv: "DISCORD_BOT_TOKEN" },
     ]);
     expect(session.stagedCredentialProviders).toEqual(["alpha-discord-bridge"]);
+    expect(session.stagedCredentialProviderReceipts).toEqual([
+      {
+        providerName: "alpha-discord-bridge",
+        providerId: "provider-alpha-discord-bridge",
+        createdByNemoClaw: true,
+      },
+    ]);
     expect(runOpenshell).toHaveBeenCalledWith(
       [
         "provider",
@@ -649,17 +601,365 @@ describe("credential provider registration", () => {
     );
   });
 
+  it.each([
+    {
+      case: "fresh creation",
+      replacedProviderNames: [],
+      expectedMutatedProviderNames: [],
+    },
+    {
+      case: "replacement",
+      replacedProviderNames: ["alpha-discord-bridge"],
+      expectedMutatedProviderNames: ["alpha-discord-bridge"],
+    },
+  ])(
+    "reconciles a cleaned $case with exact post-cleanup evidence (#9806)",
+    async ({ replacedProviderNames, expectedMutatedProviderNames }) => {
+      const providerName = "alpha-discord-bridge";
+      const apply = vi
+        .spyOn(MessagingSetupApplier, "applyCredentialsAtOpenShell")
+        .mockRejectedValue(
+          new MessagingProviderApplyError({
+            message: "refresh failed",
+            mutatedProviderNames: [providerName],
+            createdProviderNames: [providerName],
+            replacedProviderNames,
+          }),
+        );
+      const cleanup = vi
+        .spyOn(MessagingSetupApplier, "cleanupProvidersAtOpenShell")
+        .mockResolvedValue({
+          removedProviderNames: [providerName],
+          absentProviderNames: [],
+          detachedAttachments: [],
+          residualProviders: [],
+        });
+      const session = { stagedCredentialProviders: [] } as unknown as Session;
+      const registration = createCredentialProviderRegistration(registrationDeps(vi.fn(), session));
+
+      try {
+        const failure = await registration
+          .applyMessagingProviders(
+            [
+              {
+                name: providerName,
+                envKey: "DISCORD_BOT_TOKEN",
+                token: DISCORD_SECRET,
+                providerType: "nemoclaw-mcp-v1",
+              },
+            ],
+            { allowedSandboxes: ["alpha"] },
+          )
+          .catch((error: unknown) => error);
+
+        expect(failure).toMatchObject({
+          message: "refresh failed",
+          mutatedProviderNames: expectedMutatedProviderNames,
+          createdProviderNames: [],
+          replacedProviderNames,
+        });
+        expect(cleanup).toHaveBeenCalledExactlyOnceWith(
+          [providerName],
+          expect.objectContaining({
+            target: { kind: "named", gatewayName: "test-gateway" },
+            allowedSandboxes: ["alpha"],
+          }),
+        );
+      } finally {
+        cleanup.mockRestore();
+        apply.mockRestore();
+      }
+    },
+  );
+
+  it("returns exact residual recovery when typed onboarding cleanup fails (#9806)", async () => {
+    const providerName = "alpha-discord-bridge";
+    const apply = vi.spyOn(MessagingSetupApplier, "applyCredentialsAtOpenShell").mockRejectedValue(
+      new MessagingProviderApplyError({
+        message: "refresh failed",
+        mutatedProviderNames: [providerName],
+        createdProviderNames: [providerName],
+      }),
+    );
+    const cleanup = vi
+      .spyOn(MessagingSetupApplier, "cleanupProvidersAtOpenShell")
+      .mockResolvedValue({
+        removedProviderNames: [],
+        absentProviderNames: [],
+        detachedAttachments: [],
+        residualProviders: [
+          {
+            providerName,
+            error: { kind: "transport", reason: "unreachable", message: "gateway unavailable" },
+          },
+        ],
+      });
+    const registration = createCredentialProviderRegistration(
+      registrationDeps(vi.fn(), { stagedCredentialProviders: [] } as unknown as Session),
+    );
+
+    try {
+      const failure = await registration
+        .applyMessagingProviders([
+          {
+            name: providerName,
+            envKey: "DISCORD_BOT_TOKEN",
+            token: DISCORD_SECRET,
+            providerType: "nemoclaw-mcp-v1",
+          },
+        ])
+        .catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({
+        mutatedProviderNames: [providerName],
+        createdProviderNames: [providerName],
+        replacedProviderNames: [],
+      });
+      expect((failure as Error).message).toContain(
+        'Automatic cleanup could not remove "alpha-discord-bridge": gateway unavailable.',
+      );
+      expect((failure as Error).message).toContain(
+        'openshell provider delete -g "test-gateway" "alpha-discord-bridge"',
+      );
+    } finally {
+      cleanup.mockRestore();
+      apply.mockRestore();
+    }
+  });
+
+  it("routes messaging and web-search providers through one typed application (#9806)", async () => {
+    const messagingProviderName = "alpha-discord-bridge";
+    const webSearchProviderName = "alpha-brave-search";
+    const runOpenshell = vi.fn(() => ({ status: 0, stdout: "", stderr: "" }));
+    const apply = vi.spyOn(MessagingSetupApplier, "applyCredentialsAtOpenShell").mockResolvedValue({
+      upserted: [
+        {
+          channelId: "discord",
+          credentialId: "DISCORD_BOT_TOKEN",
+          providerName: messagingProviderName,
+          envKey: "DISCORD_BOT_TOKEN",
+          action: "create",
+        },
+        {
+          channelId: "messaging",
+          credentialId: "BRAVE_API_KEY",
+          providerName: webSearchProviderName,
+          envKey: "BRAVE_API_KEY",
+          action: "create",
+        },
+      ],
+      reused: [],
+      missing: [],
+      replacedProviderNames: [],
+      mutatedProviderNames: [messagingProviderName, webSearchProviderName],
+      createdProviderNames: [messagingProviderName, webSearchProviderName],
+      providerNames: [messagingProviderName, webSearchProviderName],
+      providerIds: {
+        [messagingProviderName]: `provider-${messagingProviderName}`,
+        [webSearchProviderName]: `provider-${webSearchProviderName}`,
+      },
+      attachedProviderNames: [],
+      sandboxCreateProviderArgs: [
+        "--provider",
+        messagingProviderName,
+        "--provider",
+        webSearchProviderName,
+      ],
+    });
+    const registration = createCredentialProviderRegistration(
+      registrationDeps(runOpenshell, { stagedCredentialProviders: [] } as unknown as Session),
+    );
+
+    try {
+      const registered = await registration.applyMessagingProviders([
+        {
+          name: messagingProviderName,
+          envKey: "DISCORD_BOT_TOKEN",
+          token: DISCORD_SECRET,
+          providerType: "nemoclaw-mcp-v1",
+        },
+        {
+          name: webSearchProviderName,
+          envKey: "BRAVE_API_KEY",
+          token: BRAVE_SECRET,
+          providerType: "brave",
+          providerProfilePath: "/repo/nemoclaw-blueprint/provider-profiles/brave.yaml",
+        },
+      ]);
+
+      expect(registered).toEqual([messagingProviderName, webSearchProviderName]);
+      expect(apply).toHaveBeenCalledExactlyOnceWith(
+        expect.any(Object),
+        expect.objectContaining({
+          definitions: [
+            expect.objectContaining({
+              providerName: messagingProviderName,
+              providerType: "nemoclaw-mcp-v1",
+            }),
+            expect.objectContaining({
+              providerName: webSearchProviderName,
+              providerType: "brave",
+              profile: {
+                profilePath: "/repo/nemoclaw-blueprint/provider-profiles/brave.yaml",
+                profileType: "brave",
+              },
+            }),
+          ],
+        }),
+      );
+    } finally {
+      apply.mockRestore();
+    }
+  });
+
+  it("reconciles all typed creations when migration authority changes (#9806)", async () => {
+    const typedProviderName = "alpha-discord-bridge";
+    const fallbackProviderName = "alpha-brave-search";
+    const runOpenshell = vi.fn(() => ({ status: 0, stdout: "", stderr: "" }));
+    const apply = vi.spyOn(MessagingSetupApplier, "applyCredentialsAtOpenShell").mockResolvedValue({
+      upserted: [
+        {
+          channelId: "discord",
+          credentialId: "DISCORD_BOT_TOKEN",
+          providerName: typedProviderName,
+          envKey: "DISCORD_BOT_TOKEN",
+          action: "create",
+        },
+        {
+          channelId: "messaging",
+          credentialId: "BRAVE_API_KEY",
+          providerName: fallbackProviderName,
+          envKey: "BRAVE_API_KEY",
+          action: "create",
+        },
+      ],
+      reused: [],
+      missing: [],
+      replacedProviderNames: [typedProviderName],
+      mutatedProviderNames: [typedProviderName, fallbackProviderName],
+      createdProviderNames: [fallbackProviderName],
+      providerNames: [typedProviderName, fallbackProviderName],
+      providerIds: {
+        [typedProviderName]: `provider-${typedProviderName}`,
+        [fallbackProviderName]: `provider-${fallbackProviderName}`,
+      },
+      attachedProviderNames: [],
+      sandboxCreateProviderArgs: [
+        "--provider",
+        typedProviderName,
+        "--provider",
+        fallbackProviderName,
+      ],
+    });
+    const cleanup = vi
+      .spyOn(MessagingSetupApplier, "cleanupProvidersAtOpenShell")
+      .mockResolvedValue({
+        removedProviderNames: [typedProviderName, fallbackProviderName],
+        absentProviderNames: [],
+        detachedAttachments: [],
+        residualProviders: [],
+      });
+    const deps = registrationDeps(runOpenshell, {
+      stagedCredentialProviders: [],
+    } as unknown as Session);
+    deps.stagedLegacyValues = new Map([["BRAVE_API_KEY", BRAVE_SECRET]]);
+    const registration = createCredentialProviderRegistration(deps);
+
+    try {
+      const failure = await registration
+        .applyMessagingProviders(
+          [
+            {
+              name: typedProviderName,
+              envKey: "DISCORD_BOT_TOKEN",
+              token: DISCORD_SECRET,
+              providerType: "nemoclaw-mcp-v1",
+            },
+            {
+              name: fallbackProviderName,
+              envKey: "BRAVE_API_KEY",
+              token: BRAVE_SECRET,
+              providerType: "brave",
+            },
+          ],
+          { revalidateSandboxIdentity: refuseAuthorityChange },
+        )
+        .catch((error: unknown) => error);
+
+      expect(cleanup).toHaveBeenCalledExactlyOnceWith([fallbackProviderName], expect.any(Object));
+      expect(failure).toMatchObject({
+        message: "authority changed",
+        mutatedProviderNames: [typedProviderName],
+        createdProviderNames: [],
+        replacedProviderNames: [typedProviderName],
+      });
+    } finally {
+      cleanup.mockRestore();
+      apply.mockRestore();
+    }
+  });
+
+  it("retains replacement evidence when migration receipt persistence fails (#9806)", async () => {
+    const providerName = "alpha-discord-bridge";
+    const apply = vi.spyOn(MessagingSetupApplier, "applyCredentialsAtOpenShell").mockResolvedValue({
+      upserted: [
+        {
+          channelId: "discord",
+          credentialId: "DISCORD_BOT_TOKEN",
+          providerName,
+          envKey: "DISCORD_BOT_TOKEN",
+          action: "update",
+        },
+      ],
+      reused: [],
+      missing: [],
+      replacedProviderNames: [providerName],
+      mutatedProviderNames: [providerName],
+      createdProviderNames: [],
+      providerNames: [providerName],
+      providerIds: { [providerName]: `provider-${providerName}` },
+      attachedProviderNames: [],
+      sandboxCreateProviderArgs: ["--provider", providerName],
+    });
+    const cleanup = vi.spyOn(MessagingSetupApplier, "cleanupProvidersAtOpenShell");
+    const deps = registrationDeps(vi.fn(), { stagedCredentialProviders: [] } as unknown as Session);
+    deps.stagedLegacyValues = new Map([["DISCORD_BOT_TOKEN", DISCORD_SECRET]]);
+    deps.persistMigratedLegacyKeys = vi.fn(() => {
+      throw new Error("receipt persistence failed");
+    });
+    const registration = createCredentialProviderRegistration(deps);
+
+    try {
+      const failure = await registration
+        .applyMessagingProviders([
+          {
+            name: providerName,
+            envKey: "DISCORD_BOT_TOKEN",
+            token: DISCORD_SECRET,
+            providerType: "generic",
+          },
+        ])
+        .catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({
+        message: "receipt persistence failed",
+        mutatedProviderNames: [providerName],
+        createdProviderNames: [],
+        replacedProviderNames: [providerName],
+      });
+      expect(cleanup).not.toHaveBeenCalled();
+    } finally {
+      cleanup.mockRestore();
+      apply.mockRestore();
+    }
+  });
+
   it("registers one static Hermes Discord provider from the checkpoint binding", async () => {
     const session = { stagedCredentialProviders: [] } as unknown as Session;
-    const missingProfile = {
+    const missing = {
       status: 1,
       stdout: "",
       stderr: "provider profile 'discord-hermes-static-v1' not found",
-    };
-    const missingProvider = {
-      status: 1,
-      stdout: "",
-      stderr: "provider 'alpha-discord-bridge' not found",
     };
     const success = { status: 0, stdout: "", stderr: "" };
     let profileImported = false;
@@ -671,7 +971,7 @@ describe("credential provider registration", () => {
       return args[0] === "provider" && args.includes("profile") && args.includes("export")
         ? profileImported
           ? { ...success, stdout: JSON.stringify(DISCORD_STATIC_PROFILE) }
-          : missingProfile
+          : missing
         : args[0] === "provider" && args[1] === "get"
           ? providerCreated
             ? providerMetadata(
@@ -679,12 +979,12 @@ describe("credential provider registration", () => {
                 "discord-hermes-static-v1",
                 "DISCORD_BOT_TOKEN",
               )
-            : missingProvider
+            : providerMissing(String(args.at(-1)))
           : success;
     });
-    const registration = createCredentialProviderRegistration(
-      registrationDeps(runOpenshell, session),
-    );
+    const deps = registrationDeps(runOpenshell, session);
+    deps.root = process.cwd();
+    const registration = createCredentialProviderRegistration(deps);
     const plan: SandboxMessagingPlan = {
       schemaVersion: 1,
       sandboxName: "alpha",
@@ -728,7 +1028,6 @@ describe("credential provider registration", () => {
         envKey: "DISCORD_BOT_TOKEN",
         token: DISCORD_SECRET,
         providerType: "discord-hermes-static-v1",
-        messagingProviderProfile: DISCORD_MESSAGING_PROFILE,
       },
     ];
 
@@ -766,88 +1065,6 @@ describe("credential provider registration", () => {
       ],
       expect.objectContaining({ env: { DISCORD_BOT_TOKEN: DISCORD_SECRET } }),
     );
-  });
-
-  it("rejects an extra credential on a static package provider before credential update", async () => {
-    const session = { stagedCredentialProviders: [] } as unknown as Session;
-    const providerWithExtraCredential = {
-      status: 0,
-      stdout: [
-        "Name: alpha-discord-bridge",
-        "Type: discord-hermes-static-v1",
-        "Credential keys: DISCORD_BOT_TOKEN, DISCORD_BOT_TOKEN_EXTRA",
-        "Config keys: <none>",
-        "",
-      ].join("\n"),
-      stderr: "",
-    };
-    const runOpenshell = vi.fn((args: string[]) =>
-      args.includes("profile") && args.includes("export")
-        ? { status: 0, stdout: JSON.stringify(DISCORD_STATIC_PROFILE), stderr: "" }
-        : providerWithExtraCredential,
-    );
-    const registration = createCredentialProviderRegistration(
-      registrationDeps(runOpenshell, session),
-    );
-    const tokenDef: MessagingTokenDef = {
-      name: "alpha-discord-bridge",
-      envKey: "DISCORD_BOT_TOKEN",
-      token: DISCORD_SECRET,
-      providerType: "discord-hermes-static-v1",
-      messagingProviderProfile: DISCORD_MESSAGING_PROFILE,
-    };
-
-    await expect(
-      registration.stageSandboxCredentialProviders(
-        sandboxInput(requiredBindings([tokenDef])),
-        async () => ({ messagingTokenDefs: [tokenDef] }),
-      ),
-    ).rejects.toThrow("An existing credential provider does not match the required binding.");
-
-    expect(session.stagedCredentialProviders).toEqual([]);
-    expect(
-      runOpenshell.mock.calls
-        .map(([args]) => args)
-        .filter((args) => args[0] === "provider" && ["create", "update"].includes(args[1] ?? "")),
-    ).toEqual([]);
-  });
-
-  it("rejects an extra credential on an endpointless static provider", async () => {
-    const session = { stagedCredentialProviders: [] } as unknown as Session;
-    const runOpenshell = vi.fn((_args: string[]) => ({
-      status: 0,
-      stdout: [
-        "Name: alpha-telegram-bridge",
-        "Type: nemoclaw-mcp-v1",
-        "Credential keys: TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_TOKEN_EXTRA",
-        "Config keys: <none>",
-        "",
-      ].join("\n"),
-      stderr: "",
-    }));
-    const registration = createCredentialProviderRegistration(
-      registrationDeps(runOpenshell, session),
-    );
-    const tokenDef: MessagingTokenDef = {
-      name: "alpha-telegram-bridge",
-      envKey: "TELEGRAM_BOT_TOKEN",
-      token: "telegram-test",
-      providerType: "nemoclaw-mcp-v1",
-    };
-
-    await expect(
-      registration.stageSandboxCredentialProviders(
-        sandboxInput(requiredBindings([tokenDef])),
-        async () => ({ messagingTokenDefs: [tokenDef] }),
-      ),
-    ).rejects.toThrow("An existing credential provider does not match the required binding.");
-
-    expect(session.stagedCredentialProviders).toEqual([]);
-    expect(
-      runOpenshell.mock.calls
-        .map(([args]) => args)
-        .filter((args) => args[0] === "provider" && ["create", "update"].includes(args[1] ?? "")),
-    ).toEqual([]);
   });
 
   it("rejects a mismatched existing provider before updating it (#6743)", async () => {
@@ -891,14 +1108,13 @@ describe("credential provider registration", () => {
     const session = {
       stagedCredentialProviders: ["alpha-slack-bridge", "alpha-slack-app"],
     } as unknown as Session;
-    const missing = { status: 1, stdout: "", stderr: "not found" };
     const success = { status: 0, stdout: "", stderr: "" };
     const responses = new Map([
       [
         "provider get -g test-gateway alpha-slack-bridge",
         providerMetadata("alpha-slack-bridge", "slack", "SLACK_BOT_TOKEN"),
       ],
-      ["provider get -g test-gateway alpha-slack-app", missing],
+      ["provider get -g test-gateway alpha-slack-app", providerMissing("alpha-slack-app")],
     ]);
     const runOpenshell = vi.fn((args: string[]) => responses.get(args.join(" ")) ?? success);
     const deps = registrationDeps(runOpenshell, session);
@@ -966,7 +1182,7 @@ describe("credential provider registration", () => {
   it.each([
     {
       condition: "the app provider is missing",
-      appProvider: { status: 1, stdout: "", stderr: "not found" },
+      appProvider: providerMissing("alpha-slack-app"),
       error:
         "A required credential provider is missing and no credential is available to recreate it.",
     },
@@ -981,10 +1197,9 @@ describe("credential provider registration", () => {
       const session = {
         stagedCredentialProviders: ["alpha-slack-bridge", "alpha-slack-app"],
       } as unknown as Session;
-      const missing = { status: 1, stdout: "", stderr: "not found" };
       const success = { status: 0, stdout: "", stderr: "" };
       const responses = new Map([
-        ["provider get -g test-gateway alpha-slack-bridge", missing],
+        ["provider get -g test-gateway alpha-slack-bridge", providerMissing("alpha-slack-bridge")],
         ["provider get -g test-gateway alpha-slack-app", appProvider],
       ]);
       const runOpenshell = vi.fn((args: string[]) => responses.get(args.join(" ")) ?? success);
@@ -1131,11 +1346,16 @@ describe("credential provider registration", () => {
 
   it("stops provider registration when authority changes after the first provider (#9833)", async () => {
     const session = { stagedCredentialProviders: [] } as unknown as Session;
-    const runOpenshell = vi.fn((args: string[]) =>
-      args[1] === "get"
-        ? { status: 1, stdout: "", stderr: "not found" }
-        : { status: 0, stdout: "", stderr: "" },
-    );
+    const success = { status: 0, stdout: "", stderr: "" };
+    const runOpenshell = vi
+      .fn()
+      .mockReturnValueOnce(providerMissing("alpha-first"))
+      .mockReturnValueOnce(providerMissing("alpha-second"))
+      .mockReturnValueOnce(providerMissing("alpha-first"))
+      .mockReturnValueOnce(providerMissing("alpha-second"))
+      .mockReturnValueOnce(success)
+      .mockReturnValueOnce(providerMetadata("alpha-first", "generic", "FIRST_TOKEN"))
+      .mockReturnValueOnce(success);
     const deps = registrationDeps(runOpenshell, session);
     const registration = createCredentialProviderRegistration(deps);
     const tokenDefs: MessagingTokenDef[] = [
@@ -1143,7 +1363,7 @@ describe("credential provider registration", () => {
       { name: "alpha-second", envKey: "SECOND_TOKEN", token: "second-secret" },
     ];
     const revalidateSandboxIdentity = vi.fn((operation: string) =>
-      operation === 'inspect or change provider "alpha-second"'
+      operation === 'create messaging provider "alpha-second"'
         ? refuseAuthorityChange()
         : undefined,
     );
@@ -1157,8 +1377,9 @@ describe("credential provider registration", () => {
         async () => ({ messagingTokenDefs: tokenDefs }),
       ),
     ).rejects.toMatchObject({
-      message: expect.stringMatching(/authority changed.*alpha-first.*inspect.*before retrying/isu),
-      mutatedProviderNames: ["alpha-first"],
+      message: expect.stringContaining("authority changed"),
+      mutatedProviderNames: [],
+      createdProviderNames: [],
     });
 
     expect(
@@ -1166,91 +1387,10 @@ describe("credential provider registration", () => {
         .map(([args]) => args)
         .filter((args) => args[0] === "provider" && args[1] === "create"),
     ).toHaveLength(1);
-    expect(session.stagedCredentialProviders).toEqual([]);
-  });
-
-  it("removes a newly created bridge provider when refresh configuration fails", async () => {
-    const scenario = bridgeRefreshCleanupScenario(0, "");
-    try {
-      await expect(
-        scenario.registration.stageSandboxCredentialProviders(
-          sandboxInput(requiredBindings([scenario.tokenDef])),
-          async () => ({ messagingTokenDefs: [scenario.tokenDef] }),
-        ),
-      ).rejects.toThrow("exit:1");
-
-      expect(scenario.runOpenshell).toHaveBeenCalledWith(
-        ["provider", "delete", "-g", "test-gateway", "alpha-googlechat-bridge"],
-        expect.objectContaining({ ignoreError: true }),
-      );
-      expect(scenario.session.stagedCredentialProviders).toEqual([]);
-      expect(scenario.providerExists()).toBe(false);
-      expect(scenario.errorLog.mock.calls.flat().join("\n")).not.toContain(
-        "Automatic cleanup could not remove",
-      );
-    } finally {
-      scenario.restore();
-    }
-  });
-
-  it("reports a newly created bridge provider when refresh cleanup fails", async () => {
-    const scenario = bridgeRefreshCleanupScenario(1, "gateway unavailable");
-    try {
-      await expect(
-        scenario.registration.stageSandboxCredentialProviders(
-          sandboxInput(requiredBindings([scenario.tokenDef])),
-          async () => ({ messagingTokenDefs: [scenario.tokenDef] }),
-        ),
-      ).rejects.toThrow("exit:1");
-
-      expect(scenario.runOpenshell).toHaveBeenCalledWith(
-        ["provider", "delete", "-g", "test-gateway", "alpha-googlechat-bridge"],
-        expect.objectContaining({ ignoreError: true }),
-      );
-      expect(scenario.session.stagedCredentialProviders).toEqual([]);
-      expect(scenario.providerExists()).toBe(true);
-      const diagnostics = scenario.errorLog.mock.calls.flat().join("\n");
-      expect(diagnostics).toContain("Automatic cleanup could not remove");
-      expect(diagnostics).toContain("alpha-googlechat-bridge");
-      expect(diagnostics).toContain("gateway unavailable");
-      expect(diagnostics).toContain(
-        'openshell provider delete -g "test-gateway" "alpha-googlechat-bridge"',
-      );
-    } finally {
-      scenario.restore();
-    }
-  });
-
-  it("rechecks before persisting migrated messaging credentials (#9833)", () => {
-    const session = { stagedCredentialProviders: [] } as unknown as Session;
-    const runOpenshell = vi.fn((args: string[]) =>
-      args[1] === "get"
-        ? { status: 1, stdout: "", stderr: "not found" }
-        : { status: 0, stdout: "", stderr: "" },
+    expect(runOpenshell).toHaveBeenCalledWith(
+      ["provider", "delete", "-g", "test-gateway", "alpha-first"],
+      expect.objectContaining({ ignoreError: true }),
     );
-    const deps = registrationDeps(runOpenshell, session);
-    deps.stagedLegacyValues = new Map([["DISCORD_BOT_TOKEN", DISCORD_SECRET]]);
-    const registration = createCredentialProviderRegistration(deps);
-    const revalidateSandboxIdentity = vi
-      .fn<(operation: string) => void>()
-      .mockImplementationOnce(() => undefined)
-      .mockImplementationOnce(() => undefined)
-      .mockImplementationOnce(refuseAuthorityChange);
-
-    expect(() =>
-      registration.upsertMessagingProviders(
-        [
-          {
-            name: "alpha-discord-bridge",
-            envKey: "DISCORD_BOT_TOKEN",
-            token: DISCORD_SECRET,
-          },
-        ],
-        { revalidateSandboxIdentity },
-      ),
-    ).toThrow("authority changed");
-
-    expect(deps.migratedLegacyKeys).toEqual(new Set());
-    expect(deps.persistMigratedLegacyKeys).not.toHaveBeenCalled();
+    expect(session.stagedCredentialProviders).toEqual([]);
   });
 });

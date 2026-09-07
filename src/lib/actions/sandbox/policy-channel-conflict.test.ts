@@ -351,7 +351,9 @@ beforeEach(() => {
   updateSandboxMock = vi.spyOn(registry, "updateSandbox").mockReturnValue(true);
 
   // Lazy legacy-provider seam: no onboarding graph is loaded for this suite.
-  upsertMock = vi.spyOn(policyChannelDependencies, "upsertMessagingProviders").mockReturnValue([]);
+  upsertMock = vi
+    .spyOn(policyChannelDependencies, "upsertMessagingProviders")
+    .mockResolvedValue([]);
   vi.spyOn(policyChannelDependencies, "revalidateChannelProviderPolicy").mockImplementation(
     () => undefined,
   );
@@ -575,17 +577,19 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
   it("removes credential-free policy when provider attachment fails", async () => {
     arrangeRegistry({ current: makeEmptyEntry("alpha") });
     getCredentialMock.mockReturnValue(TELEGRAM_TOKEN);
-    upsertMock.mockReturnValue(["alpha-telegram-bridge"]);
+    upsertMock.mockRejectedValue(
+      Object.assign(new Error("provider attachment failed"), {
+        code: "NEMOCLAW_MESSAGING_PROVIDER_MUTATION_FAILURE",
+        mutatedProviderNames: ["alpha-telegram-bridge"],
+        createdProviderNames: ["alpha-telegram-bridge"],
+      }),
+    );
     vi.mocked(policy.listPresets).mockReturnValue([
       { file: "telegram.yaml", name: "telegram", description: "Telegram" },
     ]);
     vi.mocked(policy.getAppliedPresets).mockReturnValue(["telegram"]);
     const removePresetMock = vi.spyOn(policy, "removePreset").mockReturnValue(true);
-    runOpenshellMock.mockImplementation((args: readonly string[]) =>
-      args.includes("attach")
-        ? { ...successfulOpenshellResult(), status: 1 }
-        : successfulOpenshellResult(),
-    );
+    runOpenshellMock.mockReturnValue(successfulOpenshellResult());
 
     await expect(addSandboxChannel("alpha", { channel: "telegram" })).rejects.toThrow(
       "process.exit(1)",
@@ -641,13 +645,18 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
         },
       ],
       "nemoclaw",
-      {
+      expect.objectContaining({
         bestEffort: true,
         deferCreatedProviderCleanup: true,
         recordMutationReceipt: expect.any(Function),
+        replaceExisting: true,
         requireExactBindings: true,
         revalidateSandboxIdentity: expect.any(Function),
-      },
+      }),
+      expect.objectContaining({
+        channelName: "discord",
+        sandboxName: "alpha",
+      }),
     );
   });
 
@@ -1299,9 +1308,9 @@ describe("Teams host-forward lifecycle (PRA-2)", () => {
     };
     arrangeRegistry({ current: makeEmptyEntry("alpha"), others: [unavailable] });
 
-    await expect(
-      addSandboxChannel("alpha", { channel: "teams", force: true }),
-    ).rejects.toThrow(/package|integrity/u);
+    await expect(addSandboxChannel("alpha", { channel: "teams", force: true })).rejects.toThrow(
+      /package|integrity/u,
+    );
     expect(upsertMock).not.toHaveBeenCalled();
     expect(updateSandboxMock).not.toHaveBeenCalled();
     expect(rebuildSandboxMock).not.toHaveBeenCalled();

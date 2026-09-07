@@ -12,11 +12,21 @@ import { authorizeMcpHarnessScript } from "../helpers/mcp-authority";
 
 const MATCHING_OPENSHELL = path.resolve("test/fixtures/openshell-v0.0.106");
 
+function writeManagedGatewayDeclaration(home: string): string {
+  const declarationPath = path.join(home, "gateway-management.json");
+  fs.writeFileSync(
+    declarationPath,
+    JSON.stringify({ version: 1, mode: "nemoclaw-managed", requiredCapabilities: [] }),
+  );
+  return declarationPath;
+}
+
 describe("MCP restart policy ordering", () => {
   it.each(["restart", "restore"] as const)(
     "rejects a later foreign attached credential key before any policy or provider mutation during %s (#9388)",
     (operation) => {
       const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-mcp-restart-order-"));
+      const gatewayManagement = writeManagedGatewayDeclaration(home);
       const script = String.raw`
 process.env.HOME = ${JSON.stringify(home)};
 process.env.FIRST_MCP_TOKEN = "first-host-only-secret";
@@ -146,7 +156,12 @@ operationPromise.then(
       const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
         cwd: process.cwd(),
         encoding: "utf8",
-        env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL },
+        env: {
+          ...process.env,
+          HOME: home,
+          NEMOCLAW_GATEWAY_MANAGEMENT: gatewayManagement,
+          NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL,
+        },
         timeout: 30_000,
       });
       fs.rmSync(home, { recursive: true, force: true });
@@ -167,6 +182,7 @@ operationPromise.then(
 
   it("compares bounded provider revision observations on the host during restart", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-mcp-restart-revision-"));
+    const gatewayManagement = writeManagedGatewayDeclaration(home);
     const script = String.raw`
 process.env.HOME = ${JSON.stringify(home)};
 process.env.MCP_TOKEN = "host-only-secret";
@@ -189,6 +205,8 @@ const entry = {
   adapter: "mcporter",
   url: "https://8.8.8.8/mcp",
   env: ["MCP_TOKEN"],
+  denyTools: ["old_tool"],
+  pendingDenyTools: ["replacement_*"],
   providerName: "alpha-mcp-example",
   providerId: "11111111-2222-4333-8444-555555555555",
   policyName: "mcp-bridge-example",
@@ -269,14 +287,27 @@ registry.addExtraProvider("foreign-registered");
 
 const bridge = require("./src/lib/actions/sandbox/mcp-bridge.js");
 bridge.restartMcpBridge("alpha", "example").then(
-  () => process.stdout.write(JSON.stringify({ observations, proofScripts, providerCalls, registeredProviderGets })),
+  () => process.stdout.write(JSON.stringify({
+    observations,
+    proofScripts,
+    providerCalls,
+    registeredProviderGets,
+    persistedAllowedIps: registry.getSandbox("alpha")?.mcp?.bridges?.example?.allowedIps,
+    persistedDenyTools: registry.getSandbox("alpha")?.mcp?.bridges?.example?.denyTools,
+    persistedPendingDenyTools: registry.getSandbox("alpha")?.mcp?.bridges?.example?.pendingDenyTools,
+  })),
   (error) => { console.error(error); process.exit(1); },
 );
 `;
     const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL },
+      env: {
+        ...process.env,
+        HOME: home,
+        NEMOCLAW_GATEWAY_MANAGEMENT: gatewayManagement,
+        NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL,
+      },
       timeout: 30_000,
     });
     fs.rmSync(home, { recursive: true, force: true });
@@ -287,6 +318,9 @@ bridge.restartMcpBridge("alpha", "example").then(
       proofScripts: string[];
       providerCalls: string[];
       registeredProviderGets: number;
+      persistedAllowedIps: string[];
+      persistedDenyTools: string[];
+      persistedPendingDenyTools?: string[];
     };
     expect(payload.observations).toEqual(["v1", "v3", "v3", "v3", "v3", "v3"]);
     expect(payload.providerCalls).toEqual([
@@ -294,6 +328,9 @@ bridge.restartMcpBridge("alpha", "example").then(
       "provider update alpha-mcp-example",
     ]);
     expect(payload.registeredProviderGets).toBe(1);
+    expect(payload.persistedAllowedIps).toEqual(["8.8.8.8"]);
+    expect(payload.persistedDenyTools).toEqual(["replacement_*"]);
+    expect(payload.persistedPendingDenyTools).toBeUndefined();
     expect(payload.proofScripts).toHaveLength(6);
     expect(payload.proofScripts.join("\n")).not.toMatch(/\/tmp|snapshot/);
   });
@@ -308,6 +345,8 @@ bridge.restartMcpBridge("alpha", "example").then(
     probeResponses,
     statusErrors = {},
     restartAll = false,
+    pendingDenyTools,
+    policyApplyFails = false,
   }: {
     probeResponses: Record<
       string,
@@ -320,8 +359,11 @@ bridge.restartMcpBridge("alpha", "example").then(
     >;
     statusErrors?: Record<string, string>;
     restartAll?: boolean;
+    pendingDenyTools?: string[];
+    policyApplyFails?: boolean;
   }) => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-mcp-restart-credential-"));
+    const gatewayManagement = writeManagedGatewayDeclaration(home);
     const script = String.raw`
 process.env.HOME = ${JSON.stringify(home)};
 delete process.env.MCP_TOKEN;
@@ -344,6 +386,8 @@ const entry = {
   adapter: "mcporter",
   url: "https://8.8.8.8/mcp",
   env: ["MCP_TOKEN"],
+  denyTools: ["old_tool"],
+  pendingDenyTools: ${JSON.stringify(pendingDenyTools)},
   providerName: "alpha-mcp-example",
   providerId: "11111111-2222-4333-8444-555555555555",
   policyName: "mcp-bridge-example",
@@ -393,9 +437,14 @@ providerCommands.runOpenshellProviderCommand = (args) => {
   return { status: 0, stdout: "", stderr: "" };
 };
 policies.getPresetContentGatewayState = () => "match";
+const policyApplyFails = ${JSON.stringify(policyApplyFails)};
+const journalState = () => ${JSON.stringify(pendingDenyTools !== undefined)} ? {
+  persistedDenyTools: registry.getSandbox("alpha")?.mcp?.bridges?.example?.denyTools,
+  persistedPendingDenyTools: registry.getSandbox("alpha")?.mcp?.bridges?.example?.pendingDenyTools,
+} : {};
 policies.applyPresetContent = () => {
   policyApplyCalls += 1;
-  return true;
+  return !policyApplyFails;
 };
 processRecovery.executeSandboxExecCommand = () => ({ status: 0, stdout: "v" + resourceVersion, stderr: "" });
 processRecovery.executeSandboxCommand = (_sandbox, command) => ({
@@ -431,6 +480,7 @@ bridge.restartMcpBridge("alpha", ${restartAll ? "undefined" : '"example"'}).then
       policyApplyCalls,
       providerCalls,
       statusCalls,
+      ...journalState(),
     });
   },
   (error) => {
@@ -441,6 +491,7 @@ bridge.restartMcpBridge("alpha", ${restartAll ? "undefined" : '"example"'}).then
       policyApplyCalls,
       providerCalls,
       statusCalls,
+      ...journalState(),
     });
   },
 );
@@ -448,7 +499,12 @@ bridge.restartMcpBridge("alpha", ${restartAll ? "undefined" : '"example"'}).then
     const result = spawnSync(process.execPath, ["-e", authorizeMcpHarnessScript(home, script)], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL },
+      env: {
+        ...process.env,
+        HOME: home,
+        NEMOCLAW_GATEWAY_MANAGEMENT: gatewayManagement,
+        NEMOCLAW_OPENSHELL_BIN: MATCHING_OPENSHELL,
+      },
       timeout: 60_000,
     });
     fs.rmSync(home, { recursive: true, force: true });
@@ -460,6 +516,8 @@ bridge.restartMcpBridge("alpha", ${restartAll ? "undefined" : '"example"'}).then
       exitCode?: number;
       policyApplyCalls: number;
       providerCalls: string[];
+      persistedDenyTools?: string[];
+      persistedPendingDenyTools?: string[];
       statusCalls: Array<{
         sandboxName: string;
         server: string;
@@ -472,6 +530,7 @@ bridge.restartMcpBridge("alpha", ${restartAll ? "undefined" : '"example"'}).then
     sandboxName: "alpha",
     server,
     options: {
+      allowCredentialProbeWithAdapterMismatch: true,
       probeCredentialResolution: true,
       runtimeSelection: { gatewayName: "nemoclaw", workspace: "default" },
     },
@@ -537,6 +596,24 @@ bridge.restartMcpBridge("alpha", ${restartAll ? "undefined" : '"example"'}).then
       policyApplyCalls: 2,
       providerCalls: ["provider update alpha-mcp-example"],
       statusCalls: [expectedStatusCall("example")],
+    });
+  }, 75_000);
+
+  it("retains journaled replacement intent until restart policy activation succeeds (#11115)", () => {
+    const payload = runCredentialRestart({
+      probeResponses: {
+        example: { ok: true, httpStatus: 200, controlHttpStatus: 401 },
+      },
+      pendingDenyTools: ["replacement_*"],
+      policyApplyFails: true,
+    });
+
+    expect(payload).toMatchObject({
+      outcome: "rejected",
+      persistedDenyTools: ["old_tool"],
+      persistedPendingDenyTools: ["replacement_*"],
+      policyApplyCalls: 1,
+      providerCalls: [],
     });
   }, 75_000);
 

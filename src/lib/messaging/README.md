@@ -455,6 +455,7 @@ and durable ownership receipt before the plan can be persisted.
 ```ts
 MessagingSetupApplier.writePlanToEnv(plan);
 
+await MessagingSetupApplier.applyCredentialsAtOpenShell(plan, credentialOptions);
 MessagingSetupApplier.applyPolicyAtOpenShell(plan, policyOptions);
 await MessagingSetupApplier.applyPreEnableChecks(plan, hookOptions);
 await MessagingSetupApplier.applyAgentConfigAtOpenShell(plan, configOptions);

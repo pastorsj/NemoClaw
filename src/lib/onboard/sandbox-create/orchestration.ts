@@ -249,20 +249,22 @@ export function refreshReusedMessagingProviders(input: {
   readonly receiptBackedPackage: boolean;
   readonly revalidateSandboxIdentity: (required: boolean, operation: string) => void;
   readonly sandboxName: string;
-  readonly upsertMessagingProviders: SandboxCreateOrchestrationRuntime["upsertMessagingProviders"];
-}): void {
+  readonly upsertMessagingProviders: SandboxCreateOrchestrationRuntime["applyMessagingProviders"];
+}): Promise<void> {
   input.revalidateSandboxIdentity(true, `reusing sandbox '${input.sandboxName}'`);
-  input.upsertMessagingProviders(input.messagingTokenDefs, {
-    ...(input.receiptBackedPackage
-      ? {
-          allowedSandboxes: [input.sandboxName],
-          requireExactBindings: true,
-          requireExistingProvider: true,
-          requireOwnedExistingProvider: true,
-        }
-      : {}),
-    revalidateSandboxIdentity: (operation) => input.revalidateSandboxIdentity(true, operation),
-  });
+  return Promise.resolve(
+    input.upsertMessagingProviders(input.messagingTokenDefs, {
+      ...(input.receiptBackedPackage
+        ? {
+            allowedSandboxes: [input.sandboxName],
+            requireExactBindings: true,
+            requireExistingProvider: true,
+            requireOwnedExistingProvider: true,
+          }
+        : {}),
+      revalidateSandboxIdentity: (operation) => input.revalidateSandboxIdentity(true, operation),
+    }),
+  ).then(() => undefined);
 }
 
 function revalidateInitialPackageAuthority(
@@ -1273,7 +1275,7 @@ export function createProviderEffectBoundary(input: {
   readonly preparationDeps: ProviderPreparationDeps;
   readonly runVerifiedSandboxCreateEffects: import("../types").VerifiedSandboxCreateEffects | null;
   readonly activateDeferredProviderEffects:
-    | ((revalidateSandboxIdentity: (operation: string) => void) => readonly string[])
+    | ((revalidateSandboxIdentity: (operation: string) => void) => Promise<readonly string[]>)
     | null;
   readonly revalidateSandboxIdentityBeforeCreate: () => void;
   readonly recordPublishedMessagingProviders?: (providerIds: ReadonlyMap<string, string>) => void;
@@ -1312,7 +1314,7 @@ export function createProviderEffectBoundary(input: {
         `activating deferred providers for sandbox '${input.sandboxName}'`,
       );
       const providerNames =
-        input.activateDeferredProviderEffects?.(context.revalidateSandboxIdentity) ?? [];
+        (await input.activateDeferredProviderEffects?.(context.revalidateSandboxIdentity)) ?? [];
       await validate();
       context.revalidateSandboxIdentity(
         `publishing deferred providers for sandbox '${input.sandboxName}'`,
@@ -1701,7 +1703,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       step,
       stringSetsEqual,
       toolDisclosureFlow,
-      upsertMessagingProviders,
+      applyMessagingProviders,
       usesManagedDcodeIdentity,
       validateName,
       verifyDirectSandboxGpu,
@@ -2482,14 +2484,14 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
               if (actionableSelectionDrift) {
                 note("  [non-interactive] Recreating sandbox due to provider/model drift.");
               } else {
-                // Upsert messaging providers even on reuse so credential changes take
+                // Apply messaging providers even on reuse so credential changes take
                 // effect without requiring a full sandbox recreation.
-                refreshReusedMessagingProviders({
+                await refreshReusedMessagingProviders({
                   messagingTokenDefs,
                   receiptBackedPackage,
                   revalidateSandboxIdentity,
                   sandboxName,
-                  upsertMessagingProviders,
+                  upsertMessagingProviders: applyMessagingProviders,
                 });
                 if (selectionDrift.unknown) {
                   note(
@@ -2534,12 +2536,12 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
               console.log(`  Sandbox '${sandboxName}' already exists.`);
               console.log("  Choosing 'n' will delete the existing sandbox and create a new one.");
               if (await promptYesNoOrDefault("  Reuse existing sandbox?", null, true)) {
-                refreshReusedMessagingProviders({
+                await refreshReusedMessagingProviders({
                   messagingTokenDefs,
                   receiptBackedPackage,
                   revalidateSandboxIdentity,
                   sandboxName,
-                  upsertMessagingProviders,
+                  upsertMessagingProviders: applyMessagingProviders,
                 });
                 await restoreReusedSandboxDashboard(!selectionDrift.unknown);
                 return resolution(true);
@@ -2878,7 +2880,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
                 });
               },
               upsertMessagingProviders: (tokenDefs, options) =>
-                upsertMessagingProviders(tokenDefs, {
+                applyMessagingProviders(tokenDefs, {
                   ...options,
                   revalidateSandboxIdentity: (operation) =>
                     (

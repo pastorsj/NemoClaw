@@ -16,6 +16,11 @@ import type {
   MessagingHookOutputMap,
   MessagingHookRunResult,
 } from "../hooks";
+import type {
+  OpenShellProviderAdapter,
+  OpenShellProviderError,
+} from "../../adapters/openshell/provider-adapter";
+import type { OpenShellGatewayTarget } from "../../adapters/openshell/sandbox-observer";
 
 export const MESSAGING_SETUP_APPLIER_ENV_KEY = "NEMOCLAW_MESSAGING_PLAN_B64";
 
@@ -70,6 +75,121 @@ export type MessagingOpenShellRunner = (
   options?: MessagingOpenShellRunOptions,
 ) => MessagingOpenShellRunResult;
 
+export type MessagingCredentialProviderProfile = Readonly<{
+  profilePath: string;
+  profileType: string;
+  /** Receipt-verified bytes. Package callers use this instead of rereading mutable storage. */
+  profileSource?: string;
+}>;
+
+/**
+ * Ephemeral provider adapter input. Credential values may be present only while
+ * applying the provider and must never enter a serializable plan, persisted
+ * state, diagnostic, log message, or applier result.
+ */
+export type MessagingCredentialProviderEphemeralInput = Readonly<{
+  channelId: MessagingChannelId;
+  credentialId: string;
+  providerName: string;
+  providerType: string;
+  credentials: readonly Readonly<{ name: string; value: string | null }>[];
+  /** Checked-in custom profile to prepare. Built-in OpenShell types omit this. */
+  profile?: MessagingCredentialProviderProfile;
+  /** Stable resource identity retained by a prior NemoClaw ownership receipt. */
+  expectedProviderId?: string;
+  /** A prior ownership receipt explicitly authorizes replacing this provider. */
+  allowProviderReplacement?: boolean;
+}>;
+
+/**
+ * Ephemeral refresh adapter input. `secretMaterial` is process-memory-only and
+ * must reach OpenShell through the child environment, never argv, serialized
+ * plans, persisted state, diagnostics, log messages, or applier results.
+ */
+export type MessagingProviderRefreshEphemeralInput = Readonly<{
+  channelId: MessagingChannelId;
+  providerName: string;
+  credentialKey: string;
+  strategy: string;
+  material: readonly Readonly<{ key: string; value: string }>[];
+  secretMaterial: readonly Readonly<{ key: string; value: string }>[];
+}>;
+
+type MessagingCredentialProviderBoundary =
+  | Readonly<{ providerAdapter: OpenShellProviderAdapter; runOpenshell?: never }>
+  | Readonly<{ providerAdapter?: never; runOpenshell: MessagingOpenShellRunner }>;
+
+export type MessagingCredentialApplyOptions = MessagingSetupEnvOptions &
+  MessagingCredentialProviderBoundary &
+  Readonly<{
+    target?: OpenShellGatewayTarget;
+    definitions?: readonly MessagingCredentialProviderEphemeralInput[];
+    refreshes?: readonly MessagingProviderRefreshEphemeralInput[];
+    requireCompleteBindings?: boolean;
+    replaceExisting?: boolean;
+    allowedSandboxes?: readonly string[];
+    attachToSandbox?: string;
+    /** Providers already attached with the expected stable identity before this operation. */
+    alreadyAttachedProviderNames?: readonly string[];
+    /** Fail closed unless every applied or reused provider exposes a stable identity. */
+    requireStableProviderIdentity?: boolean;
+    revalidateSandboxIdentity?(operation: string): void;
+    sleep?(milliseconds: number): Promise<void>;
+    now?(): number;
+    log?(message: string): void;
+  }>;
+
+export type MessagingProviderCleanupOptions = Readonly<{
+  providerAdapter: OpenShellProviderAdapter;
+  target?: OpenShellGatewayTarget;
+  allowedSandboxes?: readonly string[];
+  /** Stable resource identities required before cleanup mutates a provider. */
+  expectedProviderIds?: Readonly<Record<string, string>>;
+  /** Providers to detach from allowed sandboxes without deleting. */
+  detachOnlyProviderNames?: readonly string[];
+  revalidateSandboxIdentity?(operation: string): void;
+}>;
+
+export type MessagingProviderCleanupResult = Readonly<{
+  removedProviderNames: readonly string[];
+  absentProviderNames: readonly string[];
+  detachedAttachments: readonly Readonly<{ providerName: string; sandboxName: string }>[];
+  residualProviders: readonly Readonly<{
+    providerName: string;
+    error: OpenShellProviderError;
+  }>[];
+}>;
+
+export interface MessagingCredentialApplyResult {
+  readonly upserted: readonly {
+    readonly channelId: MessagingChannelId;
+    readonly credentialId: string;
+    readonly providerName: string;
+    readonly envKey: string;
+    readonly action: "create" | "update";
+  }[];
+  readonly reused: readonly {
+    readonly channelId: MessagingChannelId;
+    readonly credentialId: string;
+    readonly providerName: string;
+    readonly envKey: string;
+  }[];
+  readonly missing: readonly {
+    readonly channelId: MessagingChannelId;
+    readonly credentialId: string;
+    readonly providerName: string;
+    readonly envKey: string;
+  }[];
+  readonly replacedProviderNames: readonly string[];
+  readonly mutatedProviderNames: readonly string[];
+  readonly createdProviderNames: readonly string[];
+  readonly providerNames: readonly string[];
+  /** Stable, non-secret resource identities confirmed after application. */
+  readonly providerIds: Readonly<Record<string, string>>;
+  /** Attachments added by this operation, excluding confirmed pre-existing attachments. */
+  readonly attachedProviderNames: readonly string[];
+  readonly sandboxCreateProviderArgs: readonly string[];
+}
 export interface MessagingPolicyApplyContext {
   readonly agent: MessagingAgentId;
   readonly entries: readonly SandboxMessagingNetworkPolicyEntryPlan[];

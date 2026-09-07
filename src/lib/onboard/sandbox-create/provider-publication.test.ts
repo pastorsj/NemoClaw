@@ -95,6 +95,12 @@ function typedProviderAdapter(
     })),
     deleteProvider: vi.fn(async () => ({ ok: true as const })),
     detachProvider: vi.fn(async () => ({ ok: true as const })),
+    attachProvider: vi.fn(async () => ({ ok: true as const })),
+    configureProviderRefresh: vi.fn(async () => ({ ok: true as const })),
+    getProviderRefreshStatus: vi.fn(async () => ({
+      ok: true as const,
+      value: { status: "refreshed" },
+    })),
   };
   return { ...adapter, ...overrides };
 }

@@ -119,7 +119,9 @@ beforeEach(() => {
 
   getSandboxMock = vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "da-test" });
   updateSandboxMock = vi.spyOn(registry, "updateSandbox").mockReturnValue(true);
-  upsertMock = vi.spyOn(policyChannelDependencies, "upsertMessagingProviders").mockReturnValue([]);
+  upsertMock = vi
+    .spyOn(policyChannelDependencies, "upsertMessagingProviders")
+    .mockResolvedValue([]);
   runOpenshellMock = vi.spyOn(runtime, "runOpenshell").mockReturnValue(successfulOpenshellResult());
   loadPresetForSandboxMock = vi
     .spyOn(policy, "loadPresetForSandbox")

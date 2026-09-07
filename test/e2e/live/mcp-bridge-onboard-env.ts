@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
 import type { ShippedManagedImageAgent } from "../../../src/lib/onboard/managed-image/contract.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { assertManagedImageReceiptMatchesSelectedCohort } from "../fixtures/managed-image-receipt.ts";
@@ -63,6 +64,20 @@ export function assertMcpBridgeManagedImageReceipt(options: {
     environment,
     expectedAgent: options.expectedAgent,
     workload: options.workload,
+  });
+}
+
+export function assertMcpBridgeManagedImageReceiptFromRegistry(
+  registryFile: string,
+  sandboxName: string,
+  expectedAgent: ShippedManagedImageAgent,
+): void {
+  const registry = JSON.parse(fs.readFileSync(registryFile, "utf8")) as {
+    sandboxes?: Record<string, { workload?: Record<string, unknown> }>;
+  };
+  assertMcpBridgeManagedImageReceipt({
+    expectedAgent,
+    workload: registry.sandboxes?.[sandboxName]?.workload,
   });
 }
 

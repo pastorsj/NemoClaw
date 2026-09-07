@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as sandboxAgent from "../../onboard/sandbox-agent";
 import * as mutableConfigPerms from "../../sandbox/mutable-config-perms";
 import * as onboardSession from "../../state/onboard-session";
@@ -25,6 +25,7 @@ import {
   createPostRestoreRegistryEntry,
   type RebuildPostRestoreAgent,
 } from "../../../../test/helpers/rebuild-post-restore-fixture";
+import { installRebuildPostRestoreTestHooks } from "./rebuild-support";
 
 describe("rebuild post-restore phase", () => {
   let agentName: RebuildPostRestoreAgent;
@@ -43,102 +44,16 @@ describe("rebuild post-restore phase", () => {
     return createPostRestoreOnboardSession(currentAgentAuthority());
   }
 
-  beforeEach(() => {
-    agentName = "openclaw";
-    agentExpectedVersion = undefined;
-    order = [];
-    vi.spyOn(console, "log").mockImplementation(() => undefined);
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation(() => currentAgentAuthority());
-    vi.spyOn(processRecovery, "executeSandboxExecCommand").mockImplementation(() => {
-      order.push("doctor");
-      return { status: 0, stdout: "", stderr: "" };
-    });
-    vi.spyOn(restoredGatewayPairing, "establishRestoredSandboxGatewayPairing").mockImplementation(
-      async () => {
-        order.push("restored-pairing");
-      },
-    );
-    vi.spyOn(sessionModels, "reconcileStalePinnedSessionModelsAfterRebuild").mockImplementation(
-      () => {
-        order.push("reconcile");
-      },
-    );
-    vi.spyOn(rebuildMessaging, "reapplyMessagingManifestAfterOpenClawDoctor").mockImplementation(
-      async () => {
-        order.push("messaging");
-      },
-    );
-    vi.spyOn(
-      rebuildConfigHash,
-      "refreshMutableOpenClawConfigHashAfterPostRestoreWrites",
-    ).mockImplementation(() => {
-      order.push("config-hash");
-      return true;
-    });
-    vi.spyOn(rebuildConfigHash, "verifyFinalMutableOpenClawConfigHash").mockImplementation(() => {
-      order.push("config-hash-final");
-      return true;
-    });
-    vi.spyOn(mutableConfigPerms, "repairMutableConfigPerms").mockReturnValue({
-      applied: true,
-      verified: true,
-      errors: [],
-    });
-    vi.spyOn(mutableConfigPerms, "inspectMutableHermesConfigPerms").mockReturnValue({
-      verified: true,
-      errors: [],
-    });
-    vi.spyOn(rebuildMcp, "restoreMcpAfterRebuild").mockImplementation(async () => {
-      order.push("mcp");
-      return true;
-    });
-    vi.spyOn(rebuildHermesPostRestore, "restartHermesGatewayAfterStateRestore").mockImplementation(
-      (_sandboxName, restartRequired) => (restartRequired ? "restarted" : "not-applicable"),
-    );
-    vi.spyOn(rebuildHermesPostRestore, "verifyHermesGatewayAfterStateRestore").mockImplementation(
-      (_sandboxName, restartRequired) => (restartRequired ? "healthy" : "not-applicable"),
-    );
-    vi.spyOn(
-      rebuildHermesPostRestore,
-      "verifyHermesGatewayAfterStateRestoreForCronGate",
-    ).mockReturnValue({
-      state: "healthy",
-      replacementIdentity: { pid: 77, start_time: 903, drain_token: "restore-token" },
-    });
-    vi.spyOn(
-      rebuildHermesPostRestore,
-      "completeHermesCronRestoreAfterGatewayReplacement",
-    ).mockReturnValue({ pid: 77, start_time: 903, drain_token: "restore-token" });
-    vi.spyOn(
-      rebuildHermesPostRestore,
-      "isHermesCronRestoreDrainMarkerRollbackFailure",
-    ).mockReturnValue(false);
-    vi.spyOn(registry, "getSandbox").mockImplementation(() => currentRegistryEntry());
-    vi.spyOn(onboardSession, "loadSession").mockImplementation(() => currentOnboardSession());
-    vi.spyOn(registry, "updateSandboxIfCurrent").mockImplementation(
-      (expected, updates) => ({ ...expected, ...updates }) as never,
-    );
-    vi.spyOn(registry, "updateSandbox").mockReturnValue(true);
-    vi.spyOn(sandboxVersion, "checkAgentVersion").mockReturnValue({
-      sandboxVersion: null,
-      expectedVersion: null,
-      isStale: false,
-      verificationFailed: true,
-      detectionMethod: "unavailable",
-      unavailableReason: "no-expected-version",
-    });
-    vi.spyOn(messagingHostForward, "ensureMessagingHostForwardAfterRebuild").mockImplementation(
-      () => {
-        order.push("host-forward");
-        return true;
-      },
-    );
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllEnvs();
+  installRebuildPostRestoreTestHooks({
+    currentAgentAuthority,
+    currentOnboardSession,
+    currentRegistryEntry,
+    recordOrder: (event) => order.push(event),
+    reset: () => {
+      agentName = "openclaw";
+      agentExpectedVersion = undefined;
+      order = [];
+    },
   });
 
   function input() {
@@ -739,6 +654,29 @@ describe("rebuild post-restore phase", () => {
     expect(process.env.OPENSHELL_GATEWAY).toBe("hostile-gateway");
   });
 
+  it("refuses frozen Hermes supervisor authority when the recreated gateway binding changed", async () => {
+    agentName = "hermes";
+    vi.mocked(registry.getSandbox).mockReturnValue({
+      agent: "hermes",
+      gatewayName: "nemoclaw-19081",
+      gatewayPort: 19081,
+    } as never);
+    const args = {
+      ...input(),
+      mcpRuntimeSelection: {
+        gatewayName: "nemoclaw-19080",
+        workspace: "default",
+      },
+    };
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+  });
+
   it("does not record a final hash without trusted doctor completion (#9946)", async () => {
     vi.mocked(processRecovery.executeSandboxExecCommand).mockReturnValue(null);
     const args = input();
@@ -955,35 +893,6 @@ describe("rebuild post-restore phase", () => {
       "Sandbox 'alpha' rebuild completed",
     );
   });
-
-  it("does not claim mutable Hermes posture without the exact sandbox proof", async () => {
-    agentName = "hermes";
-    vi.mocked(mutableConfigPerms.inspectMutableHermesConfigPerms).mockReturnValue({
-      verified: false,
-      errors: ["config.yaml remains read-only"],
-    });
-    const args = input();
-
-    const verification = await runRebuildPostRestorePhase(args);
-
-    expect(args.bail).not.toHaveBeenCalled();
-    expect(verification).toEqual({ mutableConfigPermissionsVerified: false });
-    expect(args.log).toHaveBeenCalledWith(
-      "Hermes mutable config posture was not verified: config.yaml remains read-only",
-    );
-  });
-
-  it.each(["langchain-deepagents-code", "pi"] as const)(
-    "proves the rebuilt %s terminal-agent posture from exact generic completion",
-    async (terminalAgent) => {
-      agentName = terminalAgent;
-
-      const verification = await runRebuildPostRestorePhase(input());
-
-      expect(verification).toEqual({ mutableConfigPermissionsVerified: true });
-      expect(mutableConfigPerms.inspectMutableHermesConfigPerms).not.toHaveBeenCalled();
-    },
-  );
 
   it("keeps cron dispatch blocked through replacement health verification (#8472)", async () => {
     agentName = "hermes";

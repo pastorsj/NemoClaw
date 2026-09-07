@@ -2,12 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { inspectOpenShellSandboxIdentityFingerprint } from "../../adapters/openshell/sandbox-identity-cli";
+import { createCliOpenShellProviderAdapter } from "../../adapters/openshell/provider-adapter-cli";
+import { parseCliOpenShellProviderAttachmentNames } from "../../adapters/openshell/provider-attachment-cli";
 import { runOpenshell } from "../../adapters/openshell/runtime";
+import { namedOpenShellGateway } from "../../adapters/openshell/sandbox-observer";
 import {
   getCredential as getStoredCredential,
   normalizeCredentialValue as normalizeStoredCredentialValue,
   prompt as promptForCredential,
 } from "../../credentials/store";
+import {
+  isMessagingProviderBindingConflict as isTypedMessagingProviderBindingConflict,
+  isMessagingProviderMutationFailure as isTypedMessagingProviderMutationFailure,
+} from "../../messaging/applier/openshell-provider";
+import { buildMessagingProviderApplication } from "../../messaging/applier/provider-application";
+import { MessagingSetupApplier } from "../../messaging/applier/setup-applier";
+import type { SandboxMessagingPlan } from "../../messaging/manifest";
 import {
   inspectGatewayCredentialFamilyProviderBinding,
   inspectGatewayCredentialOnlyProviderBinding,
@@ -15,8 +25,10 @@ import {
   type GatewayCredentialFamilyProviderBinding,
   type GatewayCredentialOnlyProviderInspection,
 } from "../../onboard/gateway-provider-metadata";
-import { parseCliOpenShellProviderAttachmentNames } from "../../adapters/openshell/provider-attachment-cli";
-import type { MessagingProviderMutationReceipt } from "../../onboard/messaging-prep";
+import type {
+  MessagingProviderMutationReceipt,
+  MessagingTokenDef,
+} from "../../onboard/messaging-prep";
 
 export type MessagingProviderAttachment = Readonly<{
   name: string;
@@ -26,14 +38,6 @@ export type MessagingProviderAttachment = Readonly<{
 
 export { listLegacyChannelStatePaths } from "../../messaging/legacy-profile";
 export { legacyMessagingPolicyWarningAgent } from "./policy-channel-legacy";
-
-type MessagingProviderTokenDefinition = {
-  name: string;
-  envKey: string;
-  token: string | null;
-  providerType?: string;
-  expectedProviderId?: string;
-};
 
 type MessagingProviderUpsertOptions = {
   replaceExisting?: boolean;
@@ -46,24 +50,7 @@ type MessagingProviderUpsertOptions = {
   gatewayName?: string;
   revalidateSandboxIdentity?: (operation: string) => void;
   recordMutationReceipt?: (receipt: MessagingProviderMutationReceipt) => void;
-};
-
-type LegacyOnboardProvidersModule = {
-  isMessagingProviderBindingConflict(error: unknown): error is Error & {
-    readonly mutatedProviderNames: readonly string[];
-    readonly createdProviderNames?: readonly string[];
-    readonly providerIds?: Readonly<Record<string, string>>;
-  };
-  isMessagingProviderMutationFailure(error: unknown): error is Error & {
-    readonly mutatedProviderNames: readonly string[];
-    readonly createdProviderNames: readonly string[];
-    readonly providerIds: Readonly<Record<string, string>>;
-  };
-  upsertMessagingProviders(
-    tokenDefs: MessagingProviderTokenDefinition[],
-    run: typeof runOpenshell,
-    options?: MessagingProviderUpsertOptions,
-  ): string[];
+  alreadyAttachedProviderNames?: readonly string[];
 };
 
 type RebuildModule = typeof import("./rebuild");
@@ -116,9 +103,7 @@ export const policyChannelDependencies = {
     return normalizeStoredCredentialValue(...args);
   },
   /** Run an OpenShell command through the same replaceable workflow boundary. */
-  runOpenshell(
-    ...args: Parameters<typeof runOpenshell>
-  ): ReturnType<typeof runOpenshell> {
+  runOpenshell(...args: Parameters<typeof runOpenshell>): ReturnType<typeof runOpenshell> {
     return runOpenshell(...args);
   },
   /** Use stopped Docker cleanup only after both in-sandbox cleanup attempts fail. */
@@ -147,18 +132,18 @@ export const policyChannelDependencies = {
     const context = policy.inspectPolicyMutationContext(sandboxName, operation, gatewayName);
     policy.recheckPolicyMutationContext(sandboxName, operation, context);
   },
+  inspectMessagingProviderAttachmentTarget(sandboxName: string, gatewayName: string): string {
+    return inspectOpenShellSandboxIdentityFingerprint({
+      sandboxName,
+      gatewayName,
+    });
+  },
   runGatewayOpenshell(
     gatewayName: string,
     args: Parameters<typeof runOpenshell>[0],
     options?: Parameters<typeof runOpenshell>[1],
   ): ReturnType<typeof runOpenshell> {
     return gatewayRunner(gatewayName)(args, options);
-  },
-  inspectMessagingProviderAttachmentTarget(sandboxName: string, gatewayName: string): string {
-    return inspectOpenShellSandboxIdentityFingerprint({
-      sandboxName,
-      gatewayName,
-    });
   },
   inspectMessagingProviderBinding(
     binding: GatewayCredentialFamilyProviderBinding & {
@@ -210,27 +195,79 @@ export const policyChannelDependencies = {
     readonly mutatedProviderNames: readonly string[];
     readonly createdProviderNames?: readonly string[];
     readonly providerIds?: Readonly<Record<string, string>>;
+    readonly replacedProviderNames?: readonly string[];
+    readonly attachedProviderNames?: readonly string[];
   } {
-    const providers = require("../../onboard/providers") as LegacyOnboardProvidersModule;
-    return providers.isMessagingProviderBindingConflict(error);
+    return isTypedMessagingProviderBindingConflict(error);
   },
   isMessagingProviderMutationFailure(error: unknown): error is Error & {
     readonly mutatedProviderNames: readonly string[];
     readonly createdProviderNames: readonly string[];
     readonly providerIds: Readonly<Record<string, string>>;
+    readonly replacedProviderNames?: readonly string[];
+    readonly attachedProviderNames?: readonly string[];
   } {
-    const providers = require("../../onboard/providers") as LegacyOnboardProvidersModule;
-    return providers.isMessagingProviderMutationFailure(error);
+    return isTypedMessagingProviderMutationFailure(error);
   },
-  upsertMessagingProviders(
-    tokenDefs: MessagingProviderTokenDefinition[],
+  async upsertMessagingProviders(
+    tokenDefs: MessagingTokenDef[],
     gatewayName: string,
     options?: MessagingProviderUpsertOptions,
-  ): string[] {
-    const providers = require("../../onboard/providers") as LegacyOnboardProvidersModule;
-    return providers.upsertMessagingProviders(tokenDefs, gatewayRunner(gatewayName), {
-      ...options,
-      gatewayName,
+    context?: {
+      readonly plan: SandboxMessagingPlan;
+      readonly channelName: string;
+      readonly sandboxName: string;
+      readonly revalidateSandboxIdentity: (operation: string) => void;
+    },
+  ): Promise<string[]> {
+    if (!context) throw new Error("Messaging provider application context is missing.");
+    const application = buildMessagingProviderApplication({
+      tokenDefs,
+      getCredential: getStoredCredential,
+      env: process.env,
+      normalizeCredentialValue: (value) =>
+        normalizeStoredCredentialValue(value as string | undefined),
+      channelIdForCredential: () => context.channelName,
+    });
+    const result = await MessagingSetupApplier.applyCredentialsAtOpenShell(context.plan, {
+      providerAdapter: createCliOpenShellProviderAdapter({ run: runOpenshell }),
+      target: namedOpenShellGateway(gatewayName),
+      definitions: application.definitions,
+      refreshes: application.refreshes,
+      replaceExisting: options?.replaceExisting,
+      allowedSandboxes: options?.allowedSandboxes ?? [context.sandboxName],
+      attachToSandbox: context.sandboxName,
+      alreadyAttachedProviderNames: options?.alreadyAttachedProviderNames,
+      requireCompleteBindings: true,
+      requireStableProviderIdentity: options?.requireOwnedExistingProvider,
+      revalidateSandboxIdentity: context.revalidateSandboxIdentity,
+      log: (message) => console.error(`  ${message}`),
+    });
+    options?.recordMutationReceipt?.({
+      providerNames: result.providerNames,
+      mutatedProviderNames: result.mutatedProviderNames,
+      createdProviderNames: result.createdProviderNames,
+      providerIds: result.providerIds,
+    });
+    return [...result.providerNames];
+  },
+  cleanupMessagingProviders(
+    providerNames: readonly string[],
+    sandboxName: string,
+    gatewayName: string,
+    revalidateSandboxIdentity: (operation: string) => void,
+    options: {
+      readonly expectedProviderIds?: Readonly<Record<string, string>>;
+      readonly detachOnlyProviderNames?: readonly string[];
+    } = {},
+  ) {
+    return MessagingSetupApplier.cleanupProvidersAtOpenShell(providerNames, {
+      providerAdapter: createCliOpenShellProviderAdapter({ run: runOpenshell }),
+      target: namedOpenShellGateway(gatewayName),
+      allowedSandboxes: [sandboxName],
+      expectedProviderIds: options.expectedProviderIds,
+      detachOnlyProviderNames: options.detachOnlyProviderNames,
+      revalidateSandboxIdentity,
     });
   },
   rebuildSandbox(

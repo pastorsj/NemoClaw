@@ -126,7 +126,7 @@ export type SandboxCreatePlan = {
   sandboxGpuLogMessage: string | null;
   /** One-shot provider activation owned by the post-create verification boundary. */
   activateDeferredProviderEffects:
-    | ((revalidateSandboxIdentity: (operation: string) => void) => readonly string[])
+    | ((revalidateSandboxIdentity: (operation: string) => void) => Promise<readonly string[]>)
     | null;
 };
 
@@ -380,7 +380,7 @@ function assertDeferredProviderPlanSupported(
 }
 
 /** Materialize policy, route metadata, resources, and providers from a secretless intent. */
-export function materializeSandboxCreatePlan({
+export async function materializeSandboxCreatePlan({
   intent,
   packageAgentDefinition,
   preparedPolicy,
@@ -398,11 +398,8 @@ export function materializeSandboxCreatePlan({
   getHermesToolGatewayProviderName,
   discloseInitialSandboxPolicy,
   prepareInitialSandboxCreatePolicy = getInitialSandboxCreatePolicy,
-}: MaterializeSandboxCreatePlanInput): SandboxCreatePlan {
-  const enabledMessagingTokenDefs = validateSandboxCreateIntentBindings(
-    intent,
-    messagingTokenDefs,
-  );
+}: MaterializeSandboxCreatePlanInput): Promise<SandboxCreatePlan> {
+  const enabledMessagingTokenDefs = validateSandboxCreateIntentBindings(intent, messagingTokenDefs);
   const driverConfig = buildSandboxDriverConfig(
     intent,
     managedStateMounts,
@@ -459,13 +456,13 @@ export function materializeSandboxCreatePlan({
     }
   }
 
-  const activateProviderEffects = (
+  const activateProviderEffects = async (
     revalidateSandboxIdentity?: (operation: string) => void,
-  ): readonly string[] => {
+  ): Promise<readonly string[]> => {
     runProviderPreDeleteCleanup(revalidateSandboxIdentity);
     const activatedMessagingProviders = filterMessagingProvidersForSandboxCreate(
       [
-        ...upsertMessagingProviders(enabledMessagingTokenDefs, {
+        ...(await upsertMessagingProviders(enabledMessagingTokenDefs, {
           replaceExisting: true,
           allowedSandboxes: [intent.sandboxName],
           requireExactBindings: packageAgentDefinition !== undefined,
@@ -474,7 +471,7 @@ export function materializeSandboxCreatePlan({
             ? { recordMutationReceipt: recordMessagingProviderMutationReceipt }
             : {}),
           ...(revalidateSandboxIdentity ? { revalidateSandboxIdentity } : {}),
-        }),
+        })),
         ...intent.reusableMessagingProviders,
       ],
       intent.messagingProviderRequests,
@@ -497,8 +494,13 @@ export function materializeSandboxCreatePlan({
     return [...createProviders];
   };
   if (!deferSandboxEffectsUntilIdentityVerification && !skipProviderEffects) {
-    for (const provider of activateProviderEffects()) {
-      createArgs.push("--provider", provider);
+    try {
+      for (const provider of await activateProviderEffects()) {
+        createArgs.push("--provider", provider);
+      }
+    } catch (error) {
+      initialSandboxPolicy.cleanup?.();
+      throw error;
     }
   }
 

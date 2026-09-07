@@ -6,7 +6,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import YAML from "yaml";
 
+import { loadAgent } from "../../../../src/lib/agent/defs";
 import { installHomeMcpHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 import { mockManagedEndpointlessProviderProfile } from "../helpers/provider-mocks.ts";
 
@@ -59,6 +61,11 @@ vi.mock(
 
 const packageRoot = path.resolve(import.meta.dirname, "../..");
 const repoRoot = path.resolve(packageRoot, "../..");
+const deepAgentsDefinition = loadAgent("langchain-deepagents-code");
+if (deepAgentsDefinition.mcpCapability.support !== "bridge") {
+  throw new Error("Deep Agents MCP package fixture must declare bridge support.");
+}
+const deepAgentsMcpPolicyBinaries = deepAgentsDefinition.mcpCapability.policy_binaries;
 const MATCHING_OPENSHELL = path.join(repoRoot, "test", "fixtures", "openshell-v0.0.106");
 const ORIGINAL_HOME = process.env.HOME;
 const ORIGINAL_GATEWAY_MANAGEMENT = process.env.NEMOCLAW_GATEWAY_MANAGEMENT;
@@ -223,13 +230,22 @@ beforeEach(() => {
     policyState = "absent";
     return true;
   });
-  mocks.captureRecordedSandboxBasePolicy
-    .mockReset()
-    .mockImplementation(() =>
-      policyState === "absent"
-        ? "version: 1\nnetwork_policies: {}\n"
-        : "version: 1\nnetwork_policies:\n  mcp_bridge_github: {}\n",
-    );
+  mocks.captureRecordedSandboxBasePolicy.mockReset().mockImplementation(() =>
+    policyState === "absent"
+      ? "version: 1\nnetwork_policies: {}\n"
+      : YAML.stringify({
+          version: 1,
+          network_policies: YAML.parse(
+            bridge.buildMcpBridgePolicyYaml(
+              "github",
+              "https://8.8.8.8/github",
+              { addresses: ["8.8.8.8"] },
+              deepAgentsMcpPolicyBinaries,
+              "alpha-mcp-github",
+            ),
+          ).network_policies,
+        }),
+  );
 
   mocks.executeGatewaySupervisorAction.mockReset();
   mocks.executeSandboxCommand

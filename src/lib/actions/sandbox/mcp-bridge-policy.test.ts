@@ -12,6 +12,7 @@ import {
   buildMcpBridgePolicyName,
   buildMcpBridgePolicyYaml,
   getRegisteredGeneratedPolicy,
+  materializePendingMcpDenyTools,
   MCP_BRIDGE_ALLOWED_METHODS,
   MCP_BRIDGE_POLICY_MAX_BODY_BYTES,
   removeGeneratedPolicy,
@@ -42,11 +43,7 @@ const policyBinaries = {
     "/usr/local/bin/node",
     "/usr/bin/node",
   ],
-  "hermes-config": [
-    "/usr/local/bin/hermes",
-    "/usr/bin/python3*",
-    "/opt/hermes/.venv/bin/python*",
-  ],
+  "hermes-config": ["/usr/local/bin/hermes", "/usr/bin/python3*", "/opt/hermes/.venv/bin/python*"],
   "deepagents-config": ["/usr/local/bin/dcode", "/opt/venv/bin/python3*"],
 } as const;
 
@@ -60,14 +57,57 @@ describe("generated MCP policy", () => {
   it("refuses live policy mutation without package authority", () => {
     const applySpy = vi.spyOn(policies, "applyPresetContent");
     expect(() =>
-      applyGeneratedPolicy(
-        "alpha",
-        entry,
-        { addresses: ["8.8.8.8"] },
-        { runtimeSelection },
-      ),
+      applyGeneratedPolicy("alpha", entry, { addresses: ["8.8.8.8"] }, { runtimeSelection }),
     ).toThrow(/Sandbox 'alpha' not found/u);
     expect(applySpy).not.toHaveBeenCalled();
+  });
+
+  it("renders denied tool names and globs as tools/call deny rules (#11115)", () => {
+    const parsed = YAML.parse(
+      buildMcpBridgePolicyYaml(
+        entry.server,
+        entry.url,
+        { addresses: ["8.8.8.8"] },
+        policyBinaries.mcporter,
+        "mcp-github",
+        ["delete_*", "doordash_submit_order"],
+      ),
+    ) as {
+      network_policies: Record<
+        string,
+        { endpoints: Array<{ deny_rules?: Array<{ method: string; tool: string }> }> }
+      >;
+    };
+
+    expect(parsed.network_policies.mcp_bridge_github.endpoints[0].deny_rules).toEqual([
+      { method: "tools/call", tool: "delete_*" },
+      { method: "tools/call", tool: "doordash_submit_order" },
+    ]);
+  });
+
+  it("materializes journaled replacement intent for restart recovery (#11115)", () => {
+    const materialized = materializePendingMcpDenyTools({
+      ...entry,
+      denyTools: ["old_tool"],
+      pendingDenyTools: ["replacement_*"],
+    });
+
+    expect(materialized.denyTools).toEqual(["replacement_*"]);
+    expect(materialized).not.toHaveProperty("pendingDenyTools");
+  });
+
+  it("omits deny_rules when the bridge has no denied tools (#11115)", () => {
+    const parsed = YAML.parse(
+      buildMcpBridgePolicyYaml(
+        entry.server,
+        entry.url,
+        { addresses: ["8.8.8.8"] },
+        policyBinaries.mcporter,
+        "mcp-github",
+      ),
+    ) as { network_policies: Record<string, { endpoints: Array<Record<string, unknown>> }> };
+
+    expect(parsed.network_policies.mcp_bridge_github.endpoints[0]).not.toHaveProperty("deny_rules");
   });
 
   it("removes generated content from the live policy", () => {
@@ -84,15 +124,15 @@ describe("generated MCP policy", () => {
         ).network_policies.mcp_bridge_github,
       },
     };
-    const removeSpy = vi.spyOn(policies, "removePreset").mockImplementation(
-      (_sandboxName, _presetName, options) => {
+    const removeSpy = vi
+      .spyOn(policies, "removePreset")
+      .mockImplementation((_sandboxName, _presetName, options) => {
         const removal = (YAML.parse(options?.presetContent ?? "") as typeof livePolicy)
           .network_policies;
         expect(removal).toHaveProperty("mcp_bridge_github");
         delete livePolicy.network_policies.mcp_bridge_github;
         return true;
-      },
-    );
+      });
 
     removeGeneratedPolicy("alpha", entry, { runtimeSelection });
 

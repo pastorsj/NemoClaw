@@ -47,6 +47,8 @@ import {
   verifyPackageRuntimeAfterStateRestore,
   verifyPackageRuntimeAfterStateRestoreForScheduledWorkGate,
 } from "./rebuild-hermes-post-restore";
+import { getPersistedSandboxTargetGatewayName } from "./gateway-target";
+import { executeGatewaySupervisorAction } from "./runtime/hermes-lifecycle";
 import {
   type McpRebuildPreparation,
   postRestoreCompleted,
@@ -303,7 +305,13 @@ async function runReceiptBackedPackagePostRestore(input: {
   const agentDefinition = agentAuthority.definition;
   const postRestore = agentDefinition.stateLifecycle.rebuild.post_restore;
   const runtimeOptions = buildSelectedRuntimeOptions(mcpRuntimeSelection);
-  const runtimeLifecycleOptions = { agentDefinition, ...runtimeOptions };
+  const runtimeLifecycleOptions = {
+    agentDefinition,
+    ...(mcpRuntimeSelection
+      ? { frozenTargetGatewaySupervisorAction: executeGatewaySupervisorAction }
+      : {}),
+    ...runtimeOptions,
+  };
   let current = requireCurrentAgentAuthority("before package post-restore work");
   if (!current) return;
   let effectiveMessagingPlan = messagingPlan;
@@ -779,7 +787,22 @@ export async function runRebuildPostRestorePhase(
     } catch {
       return rejectAgentAuthority(stage, "the recreated registry row could not be read");
     }
-    const issue = verifyCurrentAgentAuthority(sandboxName, agentAuthority, recreatedEntry);
+    const agentIssue = verifyCurrentAgentAuthority(sandboxName, agentAuthority, recreatedEntry);
+    const hasPersistedGatewayBinding = Boolean(
+      recreatedEntry &&
+      (recreatedEntry.gatewayName !== undefined || recreatedEntry.gatewayPort !== undefined),
+    );
+    const persistedGatewayName =
+      recreatedEntry && hasPersistedGatewayBinding
+        ? getPersistedSandboxTargetGatewayName(recreatedEntry)
+        : null;
+    const gatewayIssue =
+      mcpRuntimeSelection &&
+      persistedGatewayName &&
+      persistedGatewayName !== mcpRuntimeSelection.gatewayName
+        ? "the recreated registry gateway does not match the pinned rebuild target"
+        : null;
+    const issue = agentIssue ?? gatewayIssue;
     return issue ? rejectAgentAuthority(stage, issue) : recreatedEntry;
   };
 
@@ -800,6 +823,9 @@ export async function runRebuildPostRestorePhase(
   const selectedRuntimeOptions = buildSelectedRuntimeOptions(mcpRuntimeSelection);
   const selectedAgentRuntimeOptions = {
     agentDefinition: agentDef,
+    ...(mcpRuntimeSelection
+      ? { frozenTargetGatewaySupervisorAction: executeGatewaySupervisorAction }
+      : {}),
     ...selectedRuntimeOptions,
   };
   const rebuiltAgentName = agentDef.displayName;
@@ -809,7 +835,6 @@ export async function runRebuildPostRestorePhase(
   let finalMutableConfigHashUnverified = false;
   let messagingHostForwardUnverified = false;
   let effectiveMessagingPlan = messagingPlan;
-
   if (legacyRebuildRequestsStateAction(stateLifecycle.rebuild, "repair-upgraded-state")) {
     const repair = await repairOpenClawStateAfterRestore({
       sandboxName,

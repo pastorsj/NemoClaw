@@ -408,6 +408,45 @@ beforeEach(() => {
       return { ok: true, status: 0, stdout: "", stderr: "" } as never;
     },
   );
+  vi.spyOn(policyChannelDependencies, "cleanupMessagingProviders").mockImplementation(
+    async (providerNames, _sandboxName, _gatewayName, revalidateSandboxIdentity, options = {}) => {
+      const detachOnly = new Set(options.detachOnlyProviderNames ?? []);
+      const outcomes = providerNames.map((providerName) => {
+        revalidateSandboxIdentity(`clean up messaging provider ${JSON.stringify(providerName)}`);
+        const metadata = liveProviderMetadata.get(providerName);
+        const expectedProviderId = options.expectedProviderIds?.[providerName];
+        const absent = metadata === undefined;
+        const identityDrift = Boolean(
+          metadata && expectedProviderId && metadata.id !== expectedProviderId,
+        );
+        const mayMutate = !absent && !identityDrift;
+        const detached = mayMutate && attachedProviderNames.delete(providerName);
+        const removed = mayMutate && !detachOnly.has(providerName);
+        removed ? liveProviderMetadata.delete(providerName) : undefined;
+        return { absent, detached, identityDrift, providerName, removed };
+      });
+      return {
+        removedProviderNames: outcomes
+          .filter(({ removed }) => removed)
+          .map(({ providerName }) => providerName),
+        absentProviderNames: outcomes
+          .filter(({ absent }) => absent)
+          .map(({ providerName }) => providerName),
+        detachedAttachments: outcomes
+          .filter(({ detached }) => detached)
+          .map(({ providerName }) => ({ providerName, sandboxName: SANDBOX_NAME })),
+        residualProviders: outcomes
+          .filter(({ identityDrift }) => identityDrift)
+          .map(({ providerName }) => ({
+            providerName,
+            error: {
+              kind: "validation" as const,
+              message: `Messaging provider '${providerName}' changed from its recorded stable identity.`,
+            },
+          })),
+      };
+    },
+  );
   vi.spyOn(policyChannelDependencies, "inspectMessagingProviderAttachmentTarget").mockReturnValue(
     LIVE_SANDBOX_FINGERPRINT,
   );
@@ -722,15 +761,17 @@ describe.sequential("channels remove full teardown (#3998)", () => {
       }),
       "nemoclaw",
     );
-    expect(policyChannelDependencies.runGatewayOpenshell).toHaveBeenCalledWith(
-      "nemoclaw",
-      ["sandbox", "provider", "detach", SANDBOX_NAME, "test-sb-telegram-bridge"],
-      expect.any(Object),
-    );
-    expect(policyChannelDependencies.deleteMessagingProviderWithRecovery).toHaveBeenCalledWith(
-      "test-sb-telegram-bridge",
+    expect(policyChannelDependencies.cleanupMessagingProviders).toHaveBeenCalledWith(
+      ["test-sb-telegram-bridge"],
       SANDBOX_NAME,
       "nemoclaw",
+      expect.any(Function),
+      {
+        expectedProviderIds: {
+          "test-sb-telegram-bridge": "telegram-provider-id",
+        },
+        detachOnlyProviderNames: [],
+      },
     );
   });
 
@@ -760,8 +801,7 @@ describe.sequential("channels remove full teardown (#3998)", () => {
       );
       expect(sandboxExecSpy).not.toHaveBeenCalled();
       expect(setPolicyDocumentSpy).not.toHaveBeenCalled();
-      expect(policyChannelDependencies.runGatewayOpenshell).not.toHaveBeenCalled();
-      expect(policyChannelDependencies.deleteMessagingProviderWithRecovery).not.toHaveBeenCalled();
+      expect(policyChannelDependencies.cleanupMessagingProviders).not.toHaveBeenCalled();
       expect(registry.getSandbox(SANDBOX_NAME)).toEqual(original);
       expect(process.env.TELEGRAM_BOT_TOKEN).toBe("test-token-that-must-remain");
     },
@@ -783,8 +823,7 @@ describe.sequential("channels remove full teardown (#3998)", () => {
 
     expect(policyChannelDependencies.inspectMessagingProviderBinding).not.toHaveBeenCalled();
     expect(setPolicyDocumentSpy).not.toHaveBeenCalled();
-    expect(policyChannelDependencies.runGatewayOpenshell).not.toHaveBeenCalled();
-    expect(policyChannelDependencies.deleteMessagingProviderWithRecovery).not.toHaveBeenCalled();
+    expect(policyChannelDependencies.cleanupMessagingProviders).not.toHaveBeenCalled();
     expect(registry.getSandbox(SANDBOX_NAME)).toEqual(original);
   });
 });

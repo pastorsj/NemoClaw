@@ -140,7 +140,7 @@ export type MaterializeSandboxCreatePlanInput = {
       recordMutationReceipt?(receipt: MessagingProviderMutationReceipt): void;
       revalidateSandboxIdentity?(operation: string): void;
     },
-  ): string[];
+  ): string[] | Promise<string[]>;
   getHermesToolGatewayProviderName(sandboxName: string): string;
   discloseInitialSandboxPolicy?(policy: InitialSandboxPolicy): void;
   prepareInitialSandboxCreatePolicy?: PrepareInitialSandboxCreatePolicy;

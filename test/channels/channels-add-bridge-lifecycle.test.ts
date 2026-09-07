@@ -24,9 +24,15 @@ import * as store from "../../src/lib/credentials/store";
 import * as gatewayRuntime from "../../src/lib/gateway-runtime-action";
 import { MESSAGING_BRIDGE_PENDING_VALUE } from "../../src/lib/onboard/messaging-bridge-provider";
 import * as policies from "../../src/lib/policy";
+import { captureSandboxCommandAgentAuthority } from "../../src/lib/sandbox/command-agent";
 import * as onboardSession from "../../src/lib/state/onboard-session";
 import type { SandboxEntry } from "../../src/lib/state/registry";
 import * as registry from "../../src/lib/state/registry";
+import {
+  createHarnessPackageFixture,
+  type HarnessPackageFixture,
+} from "../helpers/harness-packages";
+import { makeMessagingPlan } from "../helpers/messaging-plan-fixtures";
 
 class ExitError extends Error {
   constructor(public readonly code: number | undefined) {
@@ -49,6 +55,9 @@ const GOOGLECHAT_ENV = {
 // adapter comparison in this lifecycle test must fail.
 const GOOGLECHAT_PROFILE_DOC: Record<string, unknown> = {
   id: "google-chat-bridge",
+  display_name: "Google Chat Bridge",
+  description: "Gateway-minted Google Chat bot token for outbound Chat API requests",
+  category: "agent",
   credentials: [
     {
       name: "access_token",
@@ -63,19 +72,19 @@ const GOOGLECHAT_PROFILE_DOC: Record<string, unknown> = {
         material: [
           {
             name: "client_email",
-            description: "Service-account client email (JWT issuer)",
+            description: "Service-account client email",
             required: true,
             secret: false,
           },
           {
             name: "private_key",
-            description: "Service-account RSA private key (PEM); signs the JWT assertion",
+            description: "Service-account RSA private key",
             required: true,
             secret: true,
           },
           {
             name: "scope",
-            description: "OAuth scope(s) to mint the token for",
+            description: "OAuth scopes used to mint the token",
             required: false,
             secret: false,
           },
@@ -96,6 +105,9 @@ const GOOGLECHAT_PROFILE_DOC: Record<string, unknown> = {
   inference_capable: false,
 };
 const LIVE_IDENTITY_FINGERPRINT = "a".repeat(64);
+const realUpsertMessagingProviders =
+  policyChannelDependencies.upsertMessagingProviders.bind(policyChannelDependencies);
+const realUpdateSandbox = registry.updateSandbox.bind(registry);
 
 // Why this mock exists: the real googlechat tunnel/audience gate needs a human
 // operator (Google Cloud Console steps), so on a non-interactive test run it
@@ -139,12 +151,15 @@ let gatewayCallCount: number;
 let bridgeRefreshWasSecure: boolean;
 let bridgeProfileRegistered: boolean;
 let bridgeProfileWasImported: boolean;
+let attachedProviders: Set<string>;
 let detachedProviders: Set<string>;
 let deletedProviders: Set<string>;
 let registeredProviders: Set<string>;
 let bridgeRefreshError: string | null;
 let bridgeRefreshStatusError: string | null;
 let providerDeleteError: string | null;
+let packageFixture: HarnessPackageFixture;
+let livePolicyDocument: string;
 
 function printedText(): string {
   return [...logSpy.mock.calls, ...errorSpy.mock.calls]
@@ -168,7 +183,7 @@ function resetGatewayObservations(): void {
 beforeEach(() => {
   stdinIsTty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
   Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
-  testHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-add-bridge-"));
+  testHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-add-bridge-")));
   process.env.HOME = testHome;
   process.env.NEMOCLAW_NON_INTERACTIVE = "1";
   Object.assign(process.env, GOOGLECHAT_ENV);
@@ -179,13 +194,46 @@ beforeEach(() => {
     throw new ExitError(code);
   }) as never);
 
+  packageFixture = createHarnessPackageFixture({
+    fixtureParent: path.join(testHome, "package-fixtures"),
+    storeRoot: path.join(testHome, ".nemoclaw", "harnesses"),
+    messaging: { packageId: "openclaw", channelIds: ["googlechat"] },
+  });
+  const packageRoot = packageFixture.packageRoots.get("openclaw");
+  expect(packageRoot).toBeDefined();
+  const manifestPath = path.join(packageRoot!, "manifest.yaml");
+  fs.writeFileSync(
+    manifestPath,
+    fs
+      .readFileSync(manifestPath, "utf8")
+      .replace("  owned_presets: []", "  owned_presets:\n    - googlechat"),
+    { mode: 0o600 },
+  );
+  const presetDirectory = path.join(packageRoot!, "policies", "presets");
+  fs.mkdirSync(presetDirectory, { recursive: true, mode: 0o700 });
+  fs.copyFileSync(
+    path.join(
+      process.cwd(),
+      "packages",
+      "nemoclaw-openclaw",
+      "policies",
+      "presets",
+      "googlechat.yaml",
+    ),
+    path.join(presetDirectory, "googlechat.yaml"),
+  );
+  const installedPackage = packageFixture.install("openclaw");
+
   registryEntry = {
     name: "test-sb",
     agent: "openclaw",
     gatewayName: "nemoclaw",
     lifecycleGeneration: "generation-1",
     lifecycleLiveIdentityFingerprint: LIVE_IDENTITY_FINGERPRINT,
+    harnessPackage: installedPackage.identity,
   } as SandboxEntry;
+  registry.clearAll();
+  registry.registerSandbox(registryEntry);
   vi.spyOn(registry, "getSandbox").mockImplementation(() => registryEntry);
   vi.spyOn(registry, "listSandboxes").mockImplementation(() => ({
     sandboxes: [registryEntry],
@@ -193,13 +241,14 @@ beforeEach(() => {
   }));
   vi.spyOn(registry, "updateSandbox").mockImplementation((_name, update) => {
     registryEntry = { ...registryEntry, ...update } as SandboxEntry;
-    return true;
+    return realUpdateSandbox(_name, update);
   });
   vi.spyOn(registry, "getDisabledChannels").mockImplementation(() => [
     ...(registryEntry.messaging?.plan.disabledChannels ?? []),
   ]);
 
   appliedPresets = [];
+  livePolicyDocument = "version: 1\nnetwork_policies: {}\n";
   vi.spyOn(policies, "loadPresetForSandbox").mockReturnValue(
     "network_policies:\n  stub:\n    egress:\n      - host: example.com\n",
   );
@@ -212,6 +261,19 @@ beforeEach(() => {
     return true;
   });
   vi.spyOn(policies, "getAppliedPresets").mockImplementation(() => [...appliedPresets]);
+  const policyMutationContext = (): policies.PolicyMutationContext => ({
+    gatewayName: "nemoclaw",
+    inspection: {} as policies.PolicyMutationContext["inspection"],
+    basePolicyDocument: livePolicyDocument,
+    agentAuthority: captureSandboxCommandAgentAuthority(registryEntry),
+  });
+  vi.spyOn(policies, "inspectPolicyMutationContext").mockImplementation(policyMutationContext);
+  vi.spyOn(policies, "recheckPolicyMutationContext").mockImplementation(policyMutationContext);
+  vi.spyOn(policies, "setPolicyDocument").mockImplementation((_sandboxName, policyDocument) => {
+    livePolicyDocument = policyDocument;
+    appliedPresets = policyDocument.includes("googlechat:") ? ["googlechat"] : [];
+    return true;
+  });
 
   vi.spyOn(store, "getCredential").mockImplementation((key) => process.env[key] || null);
   vi.spyOn(store, "saveCredential").mockImplementation(() => undefined);
@@ -236,6 +298,26 @@ beforeEach(() => {
   vi.spyOn(policyChannelDependencies, "inspectMessagingProviderAttachmentTarget").mockReturnValue(
     LIVE_IDENTITY_FINGERPRINT,
   );
+  vi.spyOn(policyChannelDependencies, "inspectMessagingProviderMetadata").mockImplementation(
+    (providerName) =>
+      registeredProviders.has(providerName)
+        ? {
+            id: "google-chat-provider-id",
+            name: providerName,
+            type: "google-chat-bridge",
+            credentialKeys: ["GOOGLE_CHAT_ACCESS_TOKEN"],
+            configKeys: [],
+          }
+        : null,
+  );
+  vi.spyOn(policyChannelDependencies, "inspectMessagingProviderAttachments").mockImplementation(
+    () =>
+      [...attachedProviders].map((providerName) => ({
+        name: providerName,
+        providerId: "google-chat-provider-id",
+        credentialKeys: ["GOOGLE_CHAT_ACCESS_TOKEN"],
+      })),
+  );
   vi.spyOn(policyChannelDependencies, "rebuildSandbox").mockImplementation(async () => undefined);
   stopGooglechatWebhookTunnelSpy = vi
     .spyOn(policyChannelDependencies, "stopGooglechatWebhookTunnel")
@@ -254,6 +336,7 @@ beforeEach(() => {
   bridgeRefreshWasSecure = false;
   bridgeProfileRegistered = false;
   bridgeProfileWasImported = false;
+  attachedProviders = new Set();
   detachedProviders = new Set();
   deletedProviders = new Set();
   registeredProviders = new Set();
@@ -276,6 +359,10 @@ beforeEach(() => {
       command[0] === "sandbox" && command[1] === "provider" && command[2] === "detach"
         ? command[4]
         : null;
+    const attachedProvider =
+      command[0] === "sandbox" && command[1] === "provider" && command[2] === "attach"
+        ? command[4]
+        : null;
     const deletedProvider =
       command[0] === "provider" && command[1] === "delete" ? command[2] : null;
     const createdProvider =
@@ -287,18 +374,24 @@ beforeEach(() => {
     const readingRefreshStatus = isRefreshStatus(args);
     const refreshFailure = configuringRefresh ? bridgeRefreshError : null;
     const refreshStatusFailure = readingRefreshStatus ? bridgeRefreshStatusError : null;
-    const deleteFailure = deletedProvider ? providerDeleteError : null;
+    const attachmentFailure =
+      deletedProvider && attachedProviders.has(deletedProvider)
+        ? `provider '${deletedProvider}' is attached to sandbox(es): test-sb.`
+        : null;
+    const deleteFailure = deletedProvider ? (providerDeleteError ?? attachmentFailure) : null;
     const commandFailure = refreshFailure ?? deleteFailure ?? "";
+    attachedProvider ? attachedProviders.add(attachedProvider) : undefined;
+    detachedProvider ? attachedProviders.delete(detachedProvider) : undefined;
     detachedProvider ? detachedProviders.add(detachedProvider) : undefined;
-    deletedProvider ? deletedProviders.add(deletedProvider) : undefined;
+    deletedProvider && !deleteFailure ? deletedProviders.add(deletedProvider) : undefined;
     deletedProvider && !deleteFailure ? registeredProviders.delete(deletedProvider) : undefined;
     createdProvider ? registeredProviders.add(createdProvider) : undefined;
     const runEnv = options?.env as Record<string, string> | undefined;
     bridgeRefreshWasSecure = configuringRefresh
       ? command.includes("--secret-material-env") &&
-        command.includes("private_key=MESSAGING_BRIDGE_SECRET_0") &&
+        command.includes("private_key=NEMOCLAW_PROVIDER_REFRESH_SECRET_0") &&
         !command.join(" ").includes("fake-test-private-key-material") &&
-        runEnv?.MESSAGING_BRIDGE_SECRET_0 === "fake-test-private-key-material"
+        runEnv?.NEMOCLAW_PROVIDER_REFRESH_SECRET_0 === "fake-test-private-key-material"
       : bridgeRefreshWasSecure;
     const invalidRefresh = configuringRefresh && !bridgeRefreshWasSecure;
     refreshStatusFailure
@@ -314,7 +407,7 @@ beforeEach(() => {
         : exportingProfile && !profileMissing
           ? JSON.stringify(GOOGLECHAT_PROFILE_DOC)
           : providerName && !providerMissing
-            ? `Name: ${providerName}\nType: google-chat-bridge\nCredential keys: GOOGLE_CHAT_ACCESS_TOKEN\nConfig keys: <none>\n`
+            ? `ID: google-chat-provider-id\nName: ${providerName}\nType: google-chat-bridge\nCredential keys: GOOGLE_CHAT_ACCESS_TOKEN\nConfig keys: <none>\n`
             : "",
       stderr: invalidRefresh
         ? "invalid secret handoff"
@@ -359,6 +452,8 @@ afterEach(() => {
   stdinIsTty
     ? Object.defineProperty(process.stdin, "isTTY", stdinIsTty)
     : Reflect.deleteProperty(process.stdin, "isTTY");
+  packageFixture.cleanup();
+  registry.clearAll();
   fs.rmSync(testHome, { recursive: true, force: true });
   for (const key of Object.keys(process.env)) delete process.env[key];
   Object.assign(process.env, originalProcessEnv);
@@ -370,21 +465,31 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
 
     expect(providerSpy).toHaveBeenCalledWith(
       [
-        {
+        expect.objectContaining({
           name: "test-sb-googlechat-bridge",
           envKey: "GOOGLE_CHAT_ACCESS_TOKEN",
           token: MESSAGING_BRIDGE_PENDING_VALUE,
           providerType: "google-chat-bridge",
-        },
+          messagingProviderProfile: expect.objectContaining({
+            channelId: "googlechat",
+            profileId: "google-chat-bridge",
+            profileSource: expect.any(String),
+          }),
+        }),
       ],
       "nemoclaw",
-      {
+      expect.objectContaining({
         bestEffort: true,
         deferCreatedProviderCleanup: true,
         recordMutationReceipt: expect.any(Function),
+        replaceExisting: true,
         requireExactBindings: true,
         revalidateSandboxIdentity: expect.any(Function),
-      },
+      }),
+      expect.objectContaining({
+        channelName: "googlechat",
+        sandboxName: "test-sb",
+      }),
     );
     expect(bridgeProfileWasImported).toBe(true);
     expect(bridgeRefreshWasSecure).toBe(true);
@@ -420,7 +525,8 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
   });
 
   it("detaches and deletes the newly created bridge provider when registration fails", async () => {
-    providerSpy.mockImplementation(() => {
+    providerSpy.mockImplementation(async (tokenDefs, gatewayName, options, context) => {
+      await realUpsertMessagingProviders(tokenDefs, gatewayName, options, context);
       throw new Error("simulated gateway failure");
     });
 
@@ -429,6 +535,7 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
     });
 
     expect(printedText()).toContain("Failed to register channel providers with the gateway.");
+    expect(attachedProviders.has("test-sb-googlechat-bridge")).toBe(false);
     expect(detachedProviders.has("test-sb-googlechat-bridge")).toBe(true);
     expect(deletedProviders.has("test-sb-googlechat-bridge")).toBe(true);
   });
@@ -447,12 +554,37 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
     expect(diagnostics).not.toContain(
       'openshell provider delete -g "nemoclaw" "test-sb-googlechat-bridge"',
     );
-    expect(diagnostics).toContain("Inspect those providers before retrying");
+    expect(diagnostics).toContain("inspect the named provider and target gateway before retrying");
+    expect(attachedProviders.has("test-sb-googlechat-bridge")).toBe(false);
+    expect(detachedProviders.has("test-sb-googlechat-bridge")).toBe(false);
+    expect(deletedProviders.has("test-sb-googlechat-bridge")).toBe(false);
+    expect(registeredProviders.has("test-sb-googlechat-bridge")).toBe(true);
   });
 
   it("reports an uncertain existing provider when refresh status inspection throws", async () => {
     bridgeProfileRegistered = true;
     registeredProviders.add("test-sb-googlechat-bridge");
+    const messaging = {
+      schemaVersion: 1 as const,
+      plan: makeMessagingPlan({
+        sandboxName: "test-sb",
+        channels: [],
+        providerReceipts: [
+          {
+            channelId: "googlechat" as const,
+            providerName: "test-sb-googlechat-bridge",
+            providerId: "google-chat-provider-id",
+            createdByNemoClaw: true,
+            attachmentAddedByNemoClaw: true,
+          },
+        ],
+      }),
+    };
+    registryEntry = {
+      ...registryEntry,
+      messaging,
+    };
+    expect(realUpdateSandbox("test-sb", { messaging })).toBe(true);
     bridgeRefreshStatusError = `status inspection failed: ${SA_JSON}`;
 
     await expect(addSandboxChannel("test-sb", { channel: "googlechat" })).rejects.toMatchObject({
@@ -461,7 +593,9 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
 
     const diagnostics = printedText();
     expect(diagnostics).toContain("test-sb-googlechat-bridge");
-    expect(diagnostics).toContain("status inspection failed");
+    expect(diagnostics).toContain(
+      "OpenShell did not report whether the provider operation completed.",
+    );
     expect(diagnostics).toContain("inspect the named provider");
     expect(diagnostics).toContain("correct the gateway failure");
     expect(diagnostics).not.toContain(SA_JSON);
@@ -518,7 +652,8 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
     expect(registry.getConfiguredMessagingChannelsFromEntry(registryEntry)).toContain("googlechat");
     expect(appliedPresets).toContain("googlechat");
     expect(providerSpy).not.toHaveBeenCalled();
-    expect(gatewayCallCount).toBe(0);
+    expect(detachedProviders).toEqual(new Set());
+    expect(deletedProviders).toEqual(new Set());
     expect(policies.removePreset).not.toHaveBeenCalled();
     expect(registry.updateSandbox).not.toHaveBeenCalled();
     expect(policyChannelDependencies.rebuildSandbox).not.toHaveBeenCalled();

@@ -10,10 +10,11 @@ import { isDirectSandboxFallbackUnavailableError } from "../../sandbox/privilege
 import type { GatewayRestartResult } from "./gateway-restart";
 import {
   checkAndRecoverSandboxProcesses,
+  executeGatewaySupervisorAction,
   executePrivilegedSandboxCommand,
   restartSandboxGateway,
   type SandboxCommandResult,
-} from "./process-recovery";
+} from "./runtime/hermes-lifecycle";
 
 const HERMES_CRON_CONTROL = "/usr/local/lib/nemoclaw/hermes-cron-restore-control.py";
 const HERMES_PYTHON = "/opt/hermes/.venv/bin/python";
@@ -149,6 +150,7 @@ interface HermesPostRestoreGatewayDeps {
     sandboxName: string,
     originalIdentity: HermesCronRestoreIdentity,
   ) => HermesCronRestoreIdentity;
+  frozenTargetGatewaySupervisorAction?: typeof executeGatewaySupervisorAction;
   runtimeSelection?: OpenShellRuntimeSelection;
 }
 
@@ -183,9 +185,13 @@ export function restartPackageRuntimeAfterStateRestore(
 ): HermesPostRestoreGatewayRestartState {
   if (!restartRequired) return "not-applicable";
   const restart = deps.restartSandboxGateway ?? restartSandboxGateway;
+  const requestGatewaySupervisorAction = deps.frozenTargetGatewaySupervisorAction;
   const result = restart(sandboxName, {
     quiet: true,
     ...(deps.agentDefinition ? { agentDefinition: deps.agentDefinition } : {}),
+    ...(requestGatewaySupervisorAction
+      ? { deps: { requestGatewaySupervisorAction } }
+      : {}),
     ...(deps.runtimeSelection ? { runtimeSelection: deps.runtimeSelection } : {}),
   });
   if (result.ok) return "restarted";
@@ -293,6 +299,9 @@ function verifyHermesGatewayAfterStateRestoreImpl(
     const observation: GatewayRecoveryObservation = checkAndRecover(sandboxName, {
       quiet: true,
       ...(deps.agentDefinition ? { agentDefinition: deps.agentDefinition } : {}),
+      ...(deps.frozenTargetGatewaySupervisorAction
+        ? { requestGatewaySupervisorAction: deps.frozenTargetGatewaySupervisorAction }
+        : {}),
       ...(deps.runtimeSelection ? { runtimeSelection: deps.runtimeSelection } : {}),
     });
     if (observation.forwardRecoveryFailed === true || observation.secretBoundaryRefused === true) {

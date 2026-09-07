@@ -1001,6 +1001,7 @@ async function applyChannelAddToGatewayAndRegistry(
   channelName: string,
   acquired: Record<string, string>,
   messagingProfile: SandboxMessagingProfile,
+  plan: SandboxMessagingPlan,
   applyPolicyAfterAttachment?: () => boolean,
   upsertMessagingProviders = policyChannelDependencies.upsertMessagingProviders,
   expectedAgentAuthority?: SandboxCommandAgentAuthority,
@@ -1133,7 +1134,10 @@ async function applyChannelAddToGatewayAndRegistry(
   if (expectedAgentAuthority) {
     for (const tokenDef of tokenDefs) {
       const receipt = findMessagingProviderReceipt(existingPlan, channelName, tokenDef.name);
-      if (receipt) tokenDef.expectedProviderId = receipt.providerId;
+      if (receipt) {
+        tokenDef.expectedProviderId = receipt.providerId;
+        tokenDef.allowProviderReplacement = receipt.createdByNemoClaw;
+      }
     }
   }
   const attachmentsBefore = expectedAgentAuthority
@@ -1147,29 +1151,45 @@ async function applyChannelAddToGatewayAndRegistry(
   let mutationReceipt: MessagingProviderMutationReceipt | undefined;
   const attachedProviderNames: string[] = [];
   try {
-    // bestEffort: failures throw (instead of process.exit inside the helper)
-    // so a partial add can be torn down below before exiting.
-    const providerNames = upsertMessagingProviders(tokenDefs, gatewayName, {
-      bestEffort: true,
-      requireExactBindings: true,
-      ...(expectedAgentAuthority
-        ? {
-            requireOwnedExistingProvider: true,
-            allowedSandboxes: [sandboxName],
-          }
-        : {}),
-      deferCreatedProviderCleanup: true,
-      recordMutationReceipt: (receipt) => {
-        mutationReceipt = receipt;
+    const providerNames = await upsertMessagingProviders(
+      tokenDefs,
+      gatewayName,
+      {
+        replaceExisting: true,
+        bestEffort: true,
+        requireExactBindings: true,
+        ...(expectedAgentAuthority
+          ? {
+              requireOwnedExistingProvider: true,
+              allowedSandboxes: [sandboxName],
+            }
+          : {}),
+        deferCreatedProviderCleanup: true,
+        alreadyAttachedProviderNames: attachmentsBefore?.map(({ name }) => name),
+        recordMutationReceipt: (receipt) => {
+          mutationReceipt = receipt;
+        },
+        revalidateSandboxIdentity: (_operation) =>
+          revalidateMessagingProviderAttachmentTarget(
+            sandboxName,
+            gatewayName,
+            expectedAgentAuthority,
+            providerTargetAuthority,
+          ),
       },
-      revalidateSandboxIdentity: (_operation) =>
-        revalidateMessagingProviderAttachmentTarget(
-          sandboxName,
-          gatewayName,
-          expectedAgentAuthority,
-          providerTargetAuthority,
-        ),
-    });
+      {
+        plan,
+        channelName,
+        sandboxName,
+        revalidateSandboxIdentity: (_operation) =>
+          revalidateMessagingProviderAttachmentTarget(
+            sandboxName,
+            gatewayName,
+            expectedAgentAuthority,
+            providerTargetAuthority,
+          ),
+      },
+    );
     if (expectedAgentAuthority && !mutationReceipt) {
       throw new Error(`Messaging channel '${channelName}' provider receipt was not returned`);
     }
@@ -1202,22 +1222,6 @@ async function applyChannelAddToGatewayAndRegistry(
           }
           continue;
         }
-      }
-      const attached = policyChannelDependencies.runOpenshell(
-        ["sandbox", "provider", "attach", "-g", gatewayName, sandboxName, providerName],
-        {
-          ignoreError: true,
-          maxBuffer: PROVIDER_COMMAND_MAX_BUFFER,
-          stdio: ["ignore", "pipe", "pipe"],
-          timeout: OPENSHELL_OPERATION_TIMEOUT_MS,
-        },
-      );
-      if (attached.status !== 0) {
-        throw new Error(
-          `OpenShell did not attach messaging provider '${providerName}' to sandbox '${sandboxName}'.`,
-        );
-      }
-      if (expectedAgentAuthority && providerId) {
         if (
           requireProviderAttachmentState(
             sandboxName,
@@ -1251,8 +1255,10 @@ async function applyChannelAddToGatewayAndRegistry(
     ) {
       const createdProviderNames = [...(err.createdProviderNames ?? [])];
       const createdProviders = new Set(createdProviderNames);
+      const replacedProviders = new Set(err.replacedProviderNames ?? []);
       const updatedProviderNames = err.mutatedProviderNames.filter(
-        (providerName) => !createdProviders.has(providerName),
+        (providerName) =>
+          !createdProviders.has(providerName) || replacedProviders.has(providerName),
       );
       const originalFailure = formatGatewayFailureOutput(
         err instanceof Error ? err.message : String(err),
@@ -1304,26 +1310,20 @@ async function applyChannelAddToGatewayAndRegistry(
             );
           }
         } else {
-          for (const providerName of createdProviderNames) {
-            const result = policyChannelDependencies.runGatewayOpenshell(
-              gatewayName,
-              ["provider", "delete", providerName],
-              {
-                ignoreError: true,
-                maxBuffer: PROVIDER_COMMAND_MAX_BUFFER,
-                stdio: ["ignore", "pipe", "pipe"],
-                timeout: OPENSHELL_OPERATION_TIMEOUT_MS,
-              },
+          const cleanup = await policyChannelDependencies.cleanupMessagingProviders(
+            createdProviderNames,
+            sandboxName,
+            gatewayName,
+            () => revalidateMessagingProviderAttachmentTarget(sandboxName, gatewayName),
+          );
+          for (const { providerName, error } of cleanup.residualProviders) {
+            const diagnostic = redactFullWithUrls(error.message).replace(/\s+/gu, " ").trim();
+            console.error(
+              `  ${YW}⚠${R} Could not remove newly created provider ${JSON.stringify(providerName)}: ${diagnostic}.`,
             );
-            const output = `${result.stdout || ""}${result.stderr || ""}`;
-            if (
-              result.status !== 0 &&
-              !reportsExactProviderNotFound(output, providerName, PROVIDER_COMMAND_MAX_BUFFER)
-            ) {
-              console.error(
-                `  ${YW}⚠${R} Could not remove newly created provider ${JSON.stringify(providerName)}: ${formatGatewayFailureOutput(output) || `provider delete exited with status ${result.status ?? "unknown"}`}.`,
-              );
-            }
+            console.error(
+              `  Rerun '${CLI_NAME} ${sandboxName} channels remove ${channelName}' after the gateway recovers.`,
+            );
           }
         }
       }
@@ -1711,172 +1711,109 @@ async function applyChannelRemoveToGatewayAndRegistry(
     }
   }
 
-  // Detach providers from the sandbox before deletion. openshell rejects
-  // `provider delete` with FailedPrecondition when the provider is still
-  // attached to a sandbox; the sandbox image itself only stops referencing
-  // the bridge after the next rebuild, so without an explicit detach the
-  // delete will fail on any sandbox that is still alive at remove-time.
-  // NotFound / NotAttached are treated as success-equivalent because a
-  // previous run may have already detached, or the channel may have been
-  // configured for a sandbox that is no longer alive.
-  const detachFailures: Array<{ name: string; output: string }> = [];
-  let providerAuthorityFailed = false;
   if (gatewayReachable) {
-    for (const name of detachProviderNames) {
-      try {
+    const deleteSet = new Set(deleteProviderNames);
+    const detachOnlyProviderNames = detachProviderNames.filter((name) => !deleteSet.has(name));
+    const cleanupProviderNames: string[] = [];
+    const expectedProviderIds: Record<string, string> = {};
+    try {
+      for (const name of providerNames) {
         requireCurrentMessagingProfileAuthority(sandboxName, options.expectedAgentAuthority);
-        const preparedState =
-          options.expectedAgentAuthority && options.preparedTeardown
-            ? recheckPreparedChannelProvider(
-                options.preparedTeardown,
-                channelName,
-                name,
-                options.expectedAgentAuthority,
-              )
-            : "exact";
-        if (preparedState === "missing") continue;
-        const preparedReceipt = options.preparedTeardown?.providerReceipts.get(name);
-        if (
-          options.expectedAgentAuthority &&
-          (!preparedReceipt ||
-            requireProviderAttachmentState(
-              sandboxName,
-              channelName,
-              name,
-              preparedReceipt.providerId,
-              gatewayName,
-            ) === "missing")
-        ) {
-          continue;
-        }
-        const result = policyChannelDependencies.runGatewayOpenshell(
-          gatewayName,
-          ["sandbox", "provider", "detach", sandboxName, name],
-          {
-            ignoreError: true,
-            maxBuffer: PROVIDER_COMMAND_MAX_BUFFER,
-            stdio: ["ignore", "pipe", "pipe"],
-            timeout: OPENSHELL_OPERATION_TIMEOUT_MS,
-          },
-        );
-        if (result.status !== 0) {
-          const output = `${result.stdout || ""}${result.stderr || ""}`;
-          if (
-            !reportsExactProviderNotFound(output, name, 64 * 1024) &&
-            !reportsExactProviderNotAttached(output, name, sandboxName)
-          ) {
-            detachFailures.push({ name, output: formatGatewayFailureOutput(output) });
-          }
-        }
         if (options.expectedAgentAuthority && options.preparedTeardown) {
-          recheckPreparedChannelProvider(
+          const state = recheckPreparedChannelProvider(
             options.preparedTeardown,
             channelName,
             name,
             options.expectedAgentAuthority,
           );
+          if (state === "missing") continue;
+          const receipt = options.preparedTeardown.providerReceipts.get(name);
+          if (!receipt) throw new Error(`Messaging channel '${channelName}' receipt is incomplete`);
+          expectedProviderIds[name] = receipt.providerId;
           if (
-            preparedReceipt &&
+            detachOnlyProviderNames.includes(name) &&
             requireProviderAttachmentState(
               sandboxName,
               channelName,
               name,
-              preparedReceipt.providerId,
+              receipt.providerId,
               gatewayName,
-            ) !== "missing"
+            ) === "missing"
           ) {
-            throw new Error(
-              `Messaging channel '${channelName}' provider detachment was not confirmed`,
-            );
+            continue;
           }
         }
-      } catch (error) {
-        detachFailures.push({
-          name,
-          output: formatGatewayFailureOutput(formatErrorMessage(error)),
-        });
-        providerAuthorityFailed = true;
-        break;
+        cleanupProviderNames.push(name);
       }
-    }
-    if (detachFailures.length > 0) {
+    } catch (error) {
       console.error(
-        `  Failed to detach bridge provider(s) from sandbox '${sandboxName}': ${detachFailures.map((f) => f.name).join(", ")}.`,
+        `  Refusing messaging provider cleanup after authority changed: ${formatErrorMessage(error)}`,
       );
-      for (const f of detachFailures) {
-        console.error(`    [${f.name}] ${f.output.split("\n").join("\n      ")}`);
+      if (!bestEffort) process.exit(1);
+      residual.push("gateway-providers");
+    }
+    const cleanup = await policyChannelDependencies.cleanupMessagingProviders(
+      cleanupProviderNames,
+      sandboxName,
+      gatewayName,
+      () =>
+        revalidateMessagingProviderAttachmentTarget(
+          sandboxName,
+          gatewayName,
+          options.expectedAgentAuthority,
+          options.preparedTeardown?.targetAuthority,
+        ),
+      {
+        ...(options.expectedAgentAuthority ? { expectedProviderIds } : {}),
+        detachOnlyProviderNames,
+      },
+    );
+    if (cleanup.residualProviders.length > 0) {
+      console.error(
+        `  Failed to remove bridge provider(s) from the OpenShell gateway: ${cleanup.residualProviders.map(({ providerName }) => providerName).join(", ")}.`,
+      );
+      for (const failure of cleanup.residualProviders) {
+        const diagnostic = redactFullWithUrls(failure.error.message).replace(/\s+/gu, " ").trim();
+        console.error(`    [${failure.providerName}] ${diagnostic}`);
       }
       if (!bestEffort) {
         console.error("  Registry not updated; re-run after resolving the gateway error.");
         process.exit(1);
       }
       if (!residual.includes("gateway-providers")) residual.push("gateway-providers");
-    }
-  }
-
-  // Capture each delete's outcome. If any non-NotFound failure surfaces
-  // we must NOT update the registry — otherwise NemoClaw would record
-  // the channel as removed locally while the bridge is still live in
-  // the gateway, which produces a half-configured sandbox the user
-  // can't easily recover. Surface the underlying openshell output so the
-  // operator can see exactly why the delete was rejected.
-  const deleteFailures: Array<{ name: string; output: string }> = [];
-  if (gatewayReachable && !providerAuthorityFailed) {
-    const detachFailedSet = new Set(detachFailures.map((f) => f.name));
-    for (const name of deleteProviderNames) {
-      if (detachFailedSet.has(name)) continue;
+    } else if (options.expectedAgentAuthority && options.preparedTeardown) {
       try {
-        requireCurrentMessagingProfileAuthority(sandboxName, options.expectedAgentAuthority);
-        const preparedState =
-          options.expectedAgentAuthority && options.preparedTeardown
-            ? recheckPreparedChannelProvider(
+        for (const name of cleanupProviderNames) {
+          const receipt = options.preparedTeardown.providerReceipts.get(name);
+          if (!receipt) throw new Error(`Messaging channel '${channelName}' receipt is incomplete`);
+          if (deleteSet.has(name)) {
+            if (
+              recheckPreparedChannelProvider(
                 options.preparedTeardown,
                 channelName,
                 name,
                 options.expectedAgentAuthority,
-              )
-            : "exact";
-        if (preparedState === "missing") continue;
-        const result = policyChannelDependencies.deleteMessagingProviderWithRecovery(
-          name,
-          sandboxName,
-          gatewayName,
-        );
-        if (!result.ok) {
-          const output = `${result.stdout}${result.stderr}`;
-          deleteFailures.push({ name, output: formatGatewayFailureOutput(output) });
-        } else if (
-          options.expectedAgentAuthority &&
-          options.preparedTeardown &&
-          recheckPreparedChannelProvider(
-            options.preparedTeardown,
-            channelName,
-            name,
-            options.expectedAgentAuthority,
-          ) !== "missing"
-        ) {
-          deleteFailures.push({ name, output: "provider deletion was not confirmed" });
+              ) !== "missing"
+            ) {
+              throw new Error(`Messaging provider '${name}' deletion was not confirmed`);
+            }
+          } else if (
+            requireProviderAttachmentState(
+              sandboxName,
+              channelName,
+              name,
+              receipt.providerId,
+              gatewayName,
+            ) !== "missing"
+          ) {
+            throw new Error(`Messaging provider '${name}' detachment was not confirmed`);
+          }
         }
       } catch (error) {
-        deleteFailures.push({
-          name,
-          output: formatGatewayFailureOutput(formatErrorMessage(error)),
-        });
-        break;
+        console.error(`  Provider cleanup verification failed: ${formatErrorMessage(error)}`);
+        if (!bestEffort) process.exit(1);
+        if (!residual.includes("gateway-providers")) residual.push("gateway-providers");
       }
-    }
-    if (deleteFailures.length > 0) {
-      console.error(
-        `  Failed to delete bridge provider(s) from the OpenShell gateway: ${deleteFailures.map((f) => f.name).join(", ")}.`,
-      );
-      for (const f of deleteFailures) {
-        console.error(`    [${f.name}] ${f.output.split("\n").join("\n      ")}`);
-      }
-      if (!bestEffort) {
-        console.error("  Registry not updated; re-run after resolving the gateway error.");
-        process.exit(1);
-      }
-      if (!residual.includes("gateway-providers")) residual.push("gateway-providers");
     }
   }
 
@@ -2407,6 +2344,7 @@ async function addSandboxChannelUnlocked(
         canonical,
         {},
         messagingProfile,
+        plan,
         undefined,
         dependencies.upsertMessagingProviders,
         messagingProfile.receiptAuthority,
@@ -2431,6 +2369,7 @@ async function addSandboxChannelUnlocked(
         sandboxName,
         channelDef,
         canonical,
+        plan,
         rollbackSnapshot,
         messagingProfile,
         packagePolicyMutationReceipts,
@@ -2515,6 +2454,7 @@ async function addSandboxChannelUnlocked(
       canonical,
       acquired,
       messagingProfile,
+      plan,
       () =>
         applyChannelPresetIfAvailable(sandboxName, canonical, "add", {
           disclosedPresetState,
@@ -2551,6 +2491,7 @@ async function addSandboxChannelUnlocked(
       sandboxName,
       channelDef,
       canonical,
+      plan,
       rollbackSnapshot,
       messagingProfile,
       packagePolicyMutationReceipts,
@@ -2577,6 +2518,7 @@ async function rollbackChannelAdd(
   sandboxName: string,
   channel: ChannelDef,
   canonical: string,
+  plan: SandboxMessagingPlan,
   snapshot: {
     wasAlreadyEnabled: boolean;
     priorCreds: Record<string, string>;
@@ -2678,17 +2620,21 @@ async function rollbackChannelAdd(
               ? { messagingProviderProfile: staticProviderProfile }
               : {}),
             ...(typedBinding
-              ? {
-                  expectedProviderId: findMessagingProviderReceipt(
+              ? (() => {
+                  const receipt = findMessagingProviderReceipt(
                     snapshot.priorMessagingPlan,
                     canonical,
                     typedBinding.name,
-                  )?.providerId,
-                }
+                  );
+                  return {
+                    expectedProviderId: receipt?.providerId,
+                    allowProviderReplacement: receipt?.createdByNemoClaw === true,
+                  };
+                })()
               : {}),
           };
         });
-        policyChannelDependencies.upsertMessagingProviders(
+        await policyChannelDependencies.upsertMessagingProviders(
           priorTokenDefs,
           preparedProviderTarget?.gatewayName ?? getSandboxTargetGatewayName(sandboxName),
           {
@@ -2708,6 +2654,18 @@ async function rollbackChannelAdd(
                     ),
                 }
               : {}),
+          },
+          {
+            plan,
+            channelName: canonical,
+            sandboxName,
+            revalidateSandboxIdentity: (_operation) =>
+              revalidateMessagingProviderAttachmentTarget(
+                sandboxName,
+                preparedProviderTarget?.gatewayName ?? getSandboxTargetGatewayName(sandboxName),
+                messagingProfile.receiptAuthority,
+                preparedProviderTarget?.targetAuthority,
+              ),
           },
         );
       } catch (err) {

@@ -434,9 +434,7 @@ async function captureLaunchIdentity(
     const runtimeIdentity = agent.managedImage?.runtime_identity;
     if (!runtimeIdentity) throw new PackageSessionQualificationError();
     try {
-      session = (
-        deps.observePackageSessionQualification ?? observePackageSessionQualification
-      )(
+      session = (deps.observePackageSessionQualification ?? observePackageSessionQualification)(
         sandboxName,
         packageAuthority.harnessPackage.id,
         agent.runtime.session_qualification,
