@@ -58,12 +58,12 @@ import type {
 } from "./sandbox-recreate-transaction";
 import {
   type CreatedSandboxRegistrationInput,
+  buildRegistryInferenceSelection,
   creationFidelity,
   prepareCreatedSandboxRegistration,
   registerCreatedSandbox,
   registerPreparedCreatedSandbox,
   revalidatePreparedCreatedSandboxRegistration,
-  selection,
 } from "./sandbox-registration";
 import type { SelectionDrift } from "./selection-drift";
 import type { VerifiedSandboxCreateBoundary } from "./types";
@@ -816,7 +816,7 @@ export function createOnboardCreatedSandboxCompletion(
       },
       registration: {
         sandboxName,
-        inferenceSelection: selection(
+        inferenceSelection: buildRegistryInferenceSelection(
           sandboxName,
           provider,
           model,

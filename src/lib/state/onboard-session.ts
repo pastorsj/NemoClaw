@@ -68,10 +68,9 @@ import {
   type ToolDisclosure,
 } from "./onboard-session-tool-disclosure";
 import { nextMachineStateAfterCompletedStep } from "./onboard-step-state";
-import { normalizeWebSearchProviderOwnership } from "./registry-normalization";
-import { parseSandboxProviderBrokerOwnership } from "./registry/provider-broker";
 import {
   listRetainedSandboxRecoveryRecords as readRetainedSandboxRecoveryRecords,
+  pendingCreateRecoveryResources,
   reconcileRetainedRecoveryPackage as writeRetainedRecoveryPackage,
   recordRetainedSandboxRecovery as writeRetainedSandboxRecovery,
   requireRetainedRecoveryPackage,
@@ -2281,73 +2280,6 @@ export function listRetainedSandboxRecoveryRecords(): readonly RetainedSandboxRe
     }
     return records;
   });
-}
-
-function collectRecoveryEvidence(label: string, values: readonly unknown[]): string[] {
-  const evidence = values.filter((value) => value !== null && value !== undefined);
-  if (evidence.some((value) => !validSafeEvidence(value))) {
-    throw new Error(`Cannot reconstruct retained sandbox recovery: ${label} is invalid.`);
-  }
-  return [...new Set(evidence as string[])].sort();
-}
-
-function pendingMessagingRecoveryEvidence(entry: SandboxEntry): {
-  readonly providerNames: readonly string[];
-  readonly credentialEnvironmentVariables: readonly string[];
-} {
-  if (entry.messaging === undefined) {
-    return { providerNames: [], credentialEnvironmentVariables: [] };
-  }
-  if (entry.messaging.schemaVersion !== 1) {
-    throw new Error("Cannot reconstruct retained sandbox recovery: messaging state is invalid.");
-  }
-  const plan = parseSandboxMessagingPlan(entry.messaging.plan, {
-    sandboxName: entry.name,
-    agent: entry.harnessPackage?.id ?? entry.agent ?? "openclaw",
-    environment: {},
-  });
-  if (!plan) {
-    throw new Error("Cannot reconstruct retained sandbox recovery: messaging plan is invalid.");
-  }
-  const persistedCredentialBindings =
-    isObjectRecord(entry.messaging.plan) && Array.isArray(entry.messaging.plan.credentialBindings)
-      ? entry.messaging.plan.credentialBindings
-      : [];
-  return {
-    providerNames: (plan.providerReceipts ?? []).map((receipt) => receipt.providerName),
-    credentialEnvironmentVariables: persistedCredentialBindings.flatMap((binding) =>
-      isObjectRecord(binding) && typeof binding.providerEnvKey === "string"
-        ? [binding.providerEnvKey]
-        : [],
-    ),
-  };
-}
-
-function pendingCreateRecoveryResources(
-  entry: SandboxEntry,
-): RecordRetainedSandboxRecoveryInput["resources"] {
-  const messaging = pendingMessagingRecoveryEvidence(entry);
-  const providerBroker =
-    entry.providerBroker === undefined
-      ? undefined
-      : parseSandboxProviderBrokerOwnership(entry.providerBroker, entry.harnessPackage);
-  const webSearchProvider = normalizeWebSearchProviderOwnership(entry);
-  return {
-    sharedInferenceProviders: collectRecoveryEvidence("inference provider evidence", [
-      entry.provider,
-    ]),
-    sandboxScopedProviders: collectRecoveryEvidence("scoped provider evidence", [
-      providerBroker?.providerName,
-      webSearchProvider?.providerName,
-      ...messaging.providerNames,
-    ]),
-    credentialEnvironmentVariables: collectRecoveryEvidence("credential environment evidence", [
-      entry.credentialEnv,
-      providerBroker?.credentialEnv,
-      webSearchProvider?.credentialEnv,
-      ...messaging.credentialEnvironmentVariables,
-    ]),
-  };
 }
 
 type RetainedRecoveryPackageOwner = {

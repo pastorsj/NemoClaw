@@ -403,14 +403,27 @@ export function creationFidelity(
   };
 }
 
-export function selection(
+type RegistryInferenceSession = Pick<
+  onboardSession.Session,
+  | "sandboxName"
+  | "provider"
+  | "model"
+  | "endpointUrl"
+  | "credentialEnv"
+  | "compatibleEndpointReasoning"
+  | "compatibleEndpointReasoningEffort"
+  | "nimContainer"
+>;
+
+/** Build the persisted inference selection from only the matching onboarding session. */
+export function buildRegistryInferenceSelection(
   sandboxName: string,
   provider: string,
   model: string,
   preferredInferenceApi: string | null,
   endpointSource: InferenceEndpointSource | null,
+  session: RegistryInferenceSession | null = onboardSession.loadSession(),
 ): InferenceSelection {
-  const session = onboardSession.loadSession();
   const sessionMatches =
     session?.sandboxName === sandboxName &&
     session.provider === provider &&
@@ -431,6 +444,9 @@ export function selection(
     nimContainer: sessionMatches ? (session.nimContainer ?? null) : null,
   });
 }
+
+/** @deprecated Use the descriptive registry-selection name. */
+export const selection = buildRegistryInferenceSelection;
 
 /** Normalize the exact provider-phase route carried into sandbox creation. */
 export function sandboxCreateInferenceSelection(

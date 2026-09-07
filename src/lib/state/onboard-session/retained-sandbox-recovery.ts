@@ -14,6 +14,10 @@ import {
   type HarnessPackageMigration,
 } from "../../agent-runtime/package/identity";
 import { NAME_MAX_LENGTH, NAME_VALID_PATTERN } from "../../sandbox-name-contract";
+import { getMessagingPlanFromEntry } from "../registry-messaging";
+import { normalizeWebSearchProviderOwnership } from "../registry-normalization";
+import { parseSandboxProviderBrokerOwnership } from "../registry/provider-broker";
+import type { SandboxEntry } from "../registry/types";
 
 const STATE_SCHEMA_VERSION = 1;
 const LEGACY_RECORD_SCHEMA_VERSION = 1;
@@ -396,6 +400,74 @@ function validSandboxName(value: unknown): value is string {
 
 export function validSafeEvidence(value: unknown): value is string {
   return typeof value === "string" && SAFE_EVIDENCE_PATTERN.test(value);
+}
+
+function collectRecoveryEvidence(label: string, values: readonly unknown[]): string[] {
+  const evidence = values.filter((value) => value !== null && value !== undefined);
+  if (evidence.some((value) => !validSafeEvidence(value))) {
+    throw new Error(`Cannot reconstruct retained sandbox recovery: ${label} is invalid.`);
+  }
+  return [...new Set(evidence as string[])].sort();
+}
+
+function pendingMessagingRecoveryEvidence(entry: SandboxEntry): {
+  readonly providerNames: readonly string[];
+  readonly credentialEnvironmentVariables: readonly string[];
+} {
+  if (entry.messaging === undefined) {
+    return { providerNames: [], credentialEnvironmentVariables: [] };
+  }
+  if (entry.messaging.schemaVersion !== 1) {
+    throw new Error("Cannot reconstruct retained sandbox recovery: messaging state is invalid.");
+  }
+  const plan = getMessagingPlanFromEntry(entry, {
+    sandboxName: entry.name,
+    agent: entry.harnessPackage?.id ?? entry.agent ?? "openclaw",
+    environment: {},
+  });
+  if (!plan) {
+    throw new Error("Cannot reconstruct retained sandbox recovery: messaging plan is invalid.");
+  }
+  const persistedCredentialBindings =
+    isObjectRecord(entry.messaging.plan) && Array.isArray(entry.messaging.plan.credentialBindings)
+      ? entry.messaging.plan.credentialBindings
+      : [];
+  return {
+    providerNames: (plan.providerReceipts ?? []).map((receipt) => receipt.providerName),
+    credentialEnvironmentVariables: persistedCredentialBindings.flatMap((binding) =>
+      isObjectRecord(binding) && typeof binding.providerEnvKey === "string"
+        ? [binding.providerEnvKey]
+        : [],
+    ),
+  };
+}
+
+/** Project durable, receipt-backed cleanup evidence for one interrupted package create. */
+export function pendingCreateRecoveryResources(
+  entry: SandboxEntry,
+): RecordRetainedSandboxRecoveryInput["resources"] {
+  const messaging = pendingMessagingRecoveryEvidence(entry);
+  const providerBroker =
+    entry.providerBroker === undefined
+      ? undefined
+      : parseSandboxProviderBrokerOwnership(entry.providerBroker, entry.harnessPackage);
+  const webSearchProvider = normalizeWebSearchProviderOwnership(entry);
+  return {
+    sharedInferenceProviders: collectRecoveryEvidence("inference provider evidence", [
+      entry.provider,
+    ]),
+    sandboxScopedProviders: collectRecoveryEvidence("scoped provider evidence", [
+      providerBroker?.providerName,
+      webSearchProvider?.providerName,
+      ...messaging.providerNames,
+    ]),
+    credentialEnvironmentVariables: collectRecoveryEvidence("credential environment evidence", [
+      entry.credentialEnv,
+      providerBroker?.credentialEnv,
+      webSearchProvider?.credentialEnv,
+      ...messaging.credentialEnvironmentVariables,
+    ]),
+  };
 }
 
 function validTimestamp(value: unknown): value is string {

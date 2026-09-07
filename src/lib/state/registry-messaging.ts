@@ -10,6 +10,7 @@ import {
   getDisabledChannelIdsFromPlan,
   getMessagingChannelConfigFromPlan,
   parseSandboxMessagingPlan,
+  type SandboxMessagingPlanParseOptions,
 } from "../messaging/plan-validation";
 import type { MessagingChannelConfig } from "../messaging-channel-config";
 import type { SandboxEntry, SandboxRegistry } from "./registry";
@@ -29,7 +30,6 @@ export interface RegistryMessagingHydrationOptions {
   /** Exact composed manifests required by a receipt-backed registry row. */
   readonly manifests?: readonly ChannelManifest[];
 }
-
 
 export interface RegistryMessagingReadDeps {
   load(): SandboxRegistry;
@@ -61,17 +61,17 @@ export function serializeSandboxMessagingStateForDisk(
 
 export function getMessagingPlanFromEntry(
   entry: EntryWithMessaging | null | undefined,
+  options: SandboxMessagingPlanParseOptions = {},
 ): SandboxMessagingPlan | null {
   if (entry?.messaging?.schemaVersion !== 1) return null;
-  return parseSandboxMessagingPlan(entry.messaging.plan);
+  return parseSandboxMessagingPlan(entry.messaging.plan, options);
 }
 
 export function getHydratedMessagingPlanFromEntry(
   entry: EntryWithMessaging | null | undefined,
   options: RegistryMessagingHydrationOptions = {},
 ): SandboxMessagingPlan | null {
-  const receiptBacked =
-    entry?.harnessPackage != null || entry?.harnessPackageMigration != null;
+  const receiptBacked = entry?.harnessPackage != null || entry?.harnessPackageMigration != null;
   if (receiptBacked && options.manifests === undefined) {
     throw new Error("Receipt-backed registry messaging hydration requires exact manifests");
   }

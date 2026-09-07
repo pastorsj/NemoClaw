@@ -1,22 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createRequire } from "node:module";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-const requireDist = createRequire(import.meta.url);
-const onboardSession = requireDist("../state/onboard-session.js");
-const { selection } = requireDist(
-  "./sandbox-registration.ts",
-) as typeof import("./sandbox-registration");
+import { buildRegistryInferenceSelection } from "./sandbox-registration";
 
-describe("selection", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
+describe("buildRegistryInferenceSelection", () => {
   it("does not borrow endpoint credential or NIM metadata from an unrelated session", () => {
-    vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+    const unrelatedSession = {
       sandboxName: "other",
       provider: "compatible-endpoint",
       model: "llama",
@@ -25,10 +16,17 @@ describe("selection", () => {
       compatibleEndpointReasoning: "true",
       compatibleEndpointReasoningEffort: null,
       nimContainer: "wrong",
-    });
+    } as const;
 
     expect(
-      selection("demo", "compatible-endpoint", "llama", "openai-completions", "onboard"),
+      buildRegistryInferenceSelection(
+        "demo",
+        "compatible-endpoint",
+        "llama",
+        "openai-completions",
+        "onboard",
+        unrelatedSession,
+      ),
     ).toEqual({
       provider: "compatible-endpoint",
       model: "llama",
@@ -43,7 +41,7 @@ describe("selection", () => {
   });
 
   it("borrows session-scoped metadata only when sandbox provider and model match", () => {
-    vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+    const matchingSession = {
       sandboxName: "demo",
       provider: "compatible-endpoint",
       model: "llama",
@@ -52,10 +50,17 @@ describe("selection", () => {
       compatibleEndpointReasoning: "true",
       compatibleEndpointReasoningEffort: "high",
       nimContainer: "nim-right",
-    });
+    } as const;
 
     expect(
-      selection("demo", "compatible-endpoint", "llama", "openai-completions", "onboard"),
+      buildRegistryInferenceSelection(
+        "demo",
+        "compatible-endpoint",
+        "llama",
+        "openai-completions",
+        "onboard",
+        matchingSession,
+      ),
     ).toEqual({
       provider: "compatible-endpoint",
       model: "llama",
