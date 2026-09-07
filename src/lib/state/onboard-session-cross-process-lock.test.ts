@@ -466,4 +466,247 @@ describe("cross-process onboard lock", () => {
       }),
     ]);
   });
+
+  it("reconstructs retained recovery from the sole verified-create registry checkpoint (#11096)", () => {
+    const fingerprint = "a".repeat(64);
+    const createAttemptNonce = "b".repeat(62);
+    const lifecycleGeneration = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "future-harness",
+      packageVersion: "1.2.3",
+      contentDigest: "c".repeat(64),
+    } as const;
+    const pendingCreateIdentity = {
+      schemaVersion: 1 as const,
+      state: "verified-create" as const,
+      harnessPackage,
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      sandboxName: "alpha",
+      lifecycleGeneration,
+      sandboxIdentityFingerprint: fingerprint,
+      createAttemptNonce,
+      route: "native" as const,
+    };
+    session.saveSession(
+      session.createSession({ sessionId: "replacement-session", sandboxName: "alpha" }),
+    );
+    const registryEntry = {
+      name: "alpha",
+      agent: "future-harness",
+      harnessPackage,
+      provider: "vllm-local",
+      credentialEnv: "VLLM_API_KEY",
+      hermesInferenceProvider: "alpha-stale-legacy-provider",
+      providerBroker: {
+        schemaVersion: 1 as const,
+        harnessPackage,
+        providerName: "alpha-upstream",
+        providerType: "generic" as const,
+        credentialEnv: "UPSTREAM_API_KEY",
+      },
+      webSearchProviderOwnership: {
+        schemaVersion: 1 as const,
+        purpose: "web-search" as const,
+        providerName: "alpha-brave-search",
+        providerId: "provider-search",
+        providerType: "search",
+        credentialEnv: "SEARCH_API_KEY",
+        createdByNemoClaw: true,
+        attachmentAddedByNemoClaw: true,
+      },
+      webSearchEnabled: true,
+      webSearchProvider: "brave" as const,
+      messaging: {
+        schemaVersion: 1 as const,
+        plan: {
+          schemaVersion: 1 as const,
+          sandboxName: "alpha",
+          agent: "future-harness",
+          workflow: "onboard" as const,
+          channels: [
+            {
+              channelId: "future-chat",
+              displayName: "Future Chat",
+              authMode: "token-paste" as const,
+              active: true,
+              selected: true,
+              configured: true,
+              disabled: false,
+              inputs: [],
+              hooks: [],
+            },
+          ],
+          disabledChannels: [],
+          credentialBindings: [
+            {
+              channelId: "future-chat",
+              providerEnvKey: "FUTURE_CHAT_TOKEN",
+              credentialAvailable: true,
+            },
+          ] as never,
+          providerReceipts: [
+            {
+              channelId: "future-chat",
+              providerName: "alpha-future-chat",
+              providerId: "provider-chat",
+              createdByNemoClaw: true,
+              attachmentAddedByNemoClaw: true,
+            },
+          ],
+          networkPolicy: { presets: [], entries: [] },
+          agentRender: [],
+          buildSteps: [],
+          stateUpdates: [],
+          healthChecks: [],
+          packageBuild: { configRoot: "~/.future-harness", packageManagers: [] },
+        },
+      },
+      pendingRouteReservation: true as const,
+      reservationSessionId: "failed-create-session",
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      lifecycleGeneration,
+      lifecycleLiveIdentityFingerprint: fingerprint,
+      pendingCreateIdentity,
+    };
+
+    const first = session.reconstructRetainedSandboxRecoveryFromPendingCreate(registryEntry);
+    const second = session.reconstructRetainedSandboxRecoveryFromPendingCreate(registryEntry);
+
+    expect(second).toEqual(first);
+    expect(session.listRetainedSandboxRecoveryRecords()).toEqual([
+      expect.objectContaining({
+        schemaVersion: 2,
+        sandboxName: "alpha",
+        sandboxIdentityFingerprint: fingerprint,
+        gatewayName: "nemoclaw",
+        gatewayPort: 8080,
+        lifecycleGeneration,
+        harnessPackage,
+        createAttemptNonce,
+        resources: {
+          sharedInferenceProviders: ["vllm-local"],
+          sandboxScopedProviders: ["alpha-brave-search", "alpha-future-chat", "alpha-upstream"],
+          credentialEnvironmentVariables: [
+            "FUTURE_CHAT_TOKEN",
+            "SEARCH_API_KEY",
+            "UPSTREAM_API_KEY",
+            "VLLM_API_KEY",
+          ],
+        },
+      }),
+    ]);
+  });
+
+  it("refuses registry-only recovery when package authority changed after verified create", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.2.3",
+      contentDigest: "c".repeat(64),
+    } as const;
+    expect(() =>
+      session.reconstructRetainedSandboxRecoveryFromPendingCreate({
+        name: "alpha",
+        agent: "openclaw",
+        harnessPackage,
+        pendingRouteReservation: true,
+        gatewayName: "nemoclaw",
+        gatewayPort: 8080,
+        lifecycleGeneration: "generation-alpha",
+        lifecycleLiveIdentityFingerprint: "a".repeat(64),
+        pendingCreateIdentity: {
+          schemaVersion: 1,
+          state: "verified-create",
+          harnessPackage: { ...harnessPackage, contentDigest: "d".repeat(64) },
+          gatewayName: "nemoclaw",
+          gatewayPort: 8080,
+          sandboxName: "alpha",
+          lifecycleGeneration: "generation-alpha",
+          sandboxIdentityFingerprint: "a".repeat(64),
+          createAttemptNonce: "c".repeat(62),
+          route: "native",
+        },
+      }),
+    ).toThrow(/checkpoint does not match the registry harness package authority/u);
+    expect(session.listRetainedSandboxRecoveryRecords()).toEqual([]);
+  });
+
+  it("refuses an existing retained record owned by different package bytes", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "future-harness",
+      packageVersion: "1.2.3",
+      contentDigest: "c".repeat(64),
+    } as const;
+    const createAttemptNonce = "d".repeat(62);
+    session.recordRetainedSandboxRecovery({
+      sandboxName: "alpha",
+      sandboxIdentityFingerprint: "a".repeat(64),
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      lifecycleGeneration: "generation-alpha",
+      createAttemptNonce,
+      harnessPackage: { ...harnessPackage, contentDigest: "e".repeat(64) },
+      resources: {
+        sharedInferenceProviders: [],
+        sandboxScopedProviders: [],
+        credentialEnvironmentVariables: [],
+      },
+      reason: "retained_after_sandbox_creation_failure",
+    });
+
+    expect(() =>
+      session.reconstructRetainedSandboxRecoveryFromPendingCreate({
+        name: "alpha",
+        agent: "future-harness",
+        harnessPackage,
+        pendingRouteReservation: true,
+        gatewayName: "nemoclaw",
+        gatewayPort: 8080,
+        lifecycleGeneration: "generation-alpha",
+        lifecycleLiveIdentityFingerprint: "a".repeat(64),
+        pendingCreateIdentity: {
+          schemaVersion: 1,
+          state: "verified-create",
+          harnessPackage,
+          gatewayName: "nemoclaw",
+          gatewayPort: 8080,
+          sandboxName: "alpha",
+          lifecycleGeneration: "generation-alpha",
+          sandboxIdentityFingerprint: "a".repeat(64),
+          createAttemptNonce,
+          route: "native",
+        },
+      }),
+    ).toThrow(/independent recovery authority conflicts/u);
+  });
+
+  it("refuses registry-only recovery when the checkpoint overlay disagrees (#11096)", () => {
+    expect(() =>
+      session.reconstructRetainedSandboxRecoveryFromPendingCreate({
+        name: "alpha",
+        pendingRouteReservation: true,
+        reservationSessionId: "failed-create-session",
+        gatewayName: "nemoclaw",
+        gatewayPort: 8080,
+        lifecycleGeneration: "generation-alpha",
+        lifecycleLiveIdentityFingerprint: "a".repeat(64),
+        pendingCreateIdentity: {
+          schemaVersion: 1,
+          state: "verified-create",
+          gatewayName: "nemoclaw",
+          gatewayPort: 8080,
+          sandboxName: "alpha",
+          lifecycleGeneration: "generation-alpha",
+          sandboxIdentityFingerprint: "b".repeat(64),
+          createAttemptNonce: "c".repeat(62),
+          route: "native",
+        },
+      }),
+    ).toThrow(/does not match the registry lifecycle authority/u);
+    expect(session.listRetainedSandboxRecoveryRecords()).toEqual([]);
+  });
 });

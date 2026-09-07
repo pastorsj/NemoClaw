@@ -146,6 +146,11 @@ function selectRetainedSandboxRecoveryAuthority(
   const matchesRegistryAuthority = (
     record: onboardSession.RetainedSandboxRecoveryRecord,
   ): boolean => {
+    const packageMatches =
+      record.schemaVersion === 1
+        ? sandbox.harnessPackage === undefined && sandbox.harnessPackageMigration === undefined
+        : onboardSession.retainedRecoveryMatchesPackage(record, sandbox);
+    if (!packageMatches) return false;
     const pending = sandbox.pendingCreateIdentity;
     if (pending) {
       return (
@@ -737,6 +742,9 @@ async function destroySandboxUnlocked(
   const registeredSandbox = registry.getSandbox(sandboxName);
   const operationRuntimeSelection = resolveSandboxDestroyRuntimeSelection(registeredSandbox);
   if (!(await confirmSandboxDestroy(sandboxName, normalized, operationRuntimeSelection))) return;
+  if (registeredSandbox) {
+    onboardSession.reconstructRetainedSandboxRecoveryFromPendingCreate(registeredSandbox);
+  }
   const destroySession = onboardSession.loadSession();
   const retainedRecoveryRecords = onboardSession.listRetainedSandboxRecoveryRecords();
   const retainedRecoveryAuthority = selectRetainedSandboxRecoveryAuthority(

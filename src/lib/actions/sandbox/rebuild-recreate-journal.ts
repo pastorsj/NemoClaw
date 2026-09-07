@@ -584,6 +584,7 @@ type RebuildFingerprintOptions = Pick<
   | "toolDisclosure"
   | "dcodeAutoApprovalMode"
   | "observabilityEnabled"
+  | "reinstallDeferredN1xManagedVllm"
 >;
 
 function readRebuildPackageAuthority(entry: {
@@ -675,6 +676,9 @@ export function fingerprintRebuildRecreateTargetIntent(options: RebuildFingerpri
     toolDisclosure: options.toolDisclosure,
     dcodeAutoApprovalMode: options.dcodeAutoApprovalMode,
     observabilityEnabled: options.observabilityEnabled,
+    ...(options.reinstallDeferredN1xManagedVllm === true
+      ? { reinstallDeferredN1xManagedVllm: true }
+      : {}),
   });
 }
 
@@ -709,6 +713,9 @@ export function fingerprintLegacyRebuildRecreateTargetIntent(
     toolDisclosure: options.toolDisclosure,
     dcodeAutoApprovalMode: options.dcodeAutoApprovalMode,
     observabilityEnabled: options.observabilityEnabled,
+    ...(options.reinstallDeferredN1xManagedVllm === true
+      ? { reinstallDeferredN1xManagedVllm: true }
+      : {}),
   });
 }
 

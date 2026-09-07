@@ -166,6 +166,24 @@ function legacyRegistryEntry(name: string, agent: string | null): SandboxEntry {
   return { name, agent, createdAt: "2026-08-28T09:00:00.000Z" };
 }
 
+function pendingCreateIdentity(
+  sandboxName: string,
+  harnessPackage?: HarnessPackageIdentity,
+): NonNullable<SandboxEntry["pendingCreateIdentity"]> {
+  return {
+    schemaVersion: 1,
+    state: "verified-create",
+    ...(harnessPackage ? { harnessPackage } : {}),
+    gatewayName: "nemoclaw",
+    gatewayPort: 8080,
+    sandboxName,
+    lifecycleGeneration: `generation-${sandboxName}`,
+    sandboxIdentityFingerprint: "a".repeat(64),
+    createAttemptNonce: "b".repeat(62),
+    route: "native",
+  };
+}
+
 function migrationRecord(legacyAgent: string | null, migratedAt = MIGRATED_AT) {
   return {
     schemaVersion: 1 as const,
@@ -421,14 +439,64 @@ describe("legacy harness migration", () => {
   });
 
   it("commits a registry-only owner without fabricating a session", () => {
-    const harness = new MigrationHarness(null, [legacyRegistryEntry("hermes", "hermes")]);
+    const entry = legacyRegistryEntry("hermes", "hermes");
+    entry.pendingCreateIdentity = pendingCreateIdentity("hermes");
+    const harness = new MigrationHarness(null, [entry]);
     const prepared = prepareRegistry(harness, "hermes");
 
     reconcile(harness, prepared);
 
     expect(harness.session).toBeNull();
     expect(harness.registry.sandboxes.hermes?.harnessPackage?.id).toBe("hermes");
+    expect(harness.registry.sandboxes.hermes?.pendingCreateIdentity?.harnessPackage).toEqual(
+      prepared.harnessPackage,
+    );
     expect(harness.events).not.toContain("session-cas");
+  });
+
+  it("repairs a legacy pending-create checkpoint on an already migrated registry owner", () => {
+    const legacyEntry = {
+      ...legacyRegistryEntry("hermes", "hermes"),
+      pendingCreateIdentity: pendingCreateIdentity("hermes"),
+    };
+    const harness = new MigrationHarness(null, [legacyEntry]);
+    const initial = prepareRegistry(harness, "hermes");
+    installHarnessPackage(
+      { packageRoot: initial.packageRoot, sourceIdentity: initial.sourceIdentity },
+      { storeRoot },
+    );
+    harness.registry.sandboxes.hermes = {
+      ...legacyEntry,
+      harnessPackage: initial.harnessPackage,
+      harnessPackageMigration: initial.harnessPackageMigration,
+    };
+
+    reconcile(harness, prepareRegistry(harness, "hermes"));
+
+    expect(harness.registry.sandboxes.hermes?.pendingCreateIdentity?.harnessPackage).toEqual(
+      initial.harnessPackage,
+    );
+  });
+
+  it("rejects a conflicting pending-create package before migration writes", () => {
+    const conflicting = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.2.3",
+      contentDigest: "d".repeat(64),
+    } as const;
+    const entry = {
+      ...legacyRegistryEntry("hermes", "hermes"),
+      pendingCreateIdentity: pendingCreateIdentity("hermes", conflicting),
+    };
+    const harness = new MigrationHarness(null, [entry]);
+    const initialStore = fs.readdirSync(storeRoot);
+
+    expect(() => prepareRegistry(harness, "hermes")).toThrow(
+      /pending sandbox create checkpoint conflicts/u,
+    );
+    expect(fs.readdirSync(storeRoot)).toEqual(initialStore);
+    expect(harness.registry.sandboxes.hermes).toEqual(entry);
   });
 
   it("leaves unrelated package owners with different identities and migration times untouched", () => {

@@ -481,6 +481,9 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   const warnUnpreservedUserManagedFilesSpy = vi
     .spyOn(rebuildFlowHelpers, "warnUnpreservedUserManagedFiles")
     .mockImplementation(() => undefined);
+  vi.spyOn(rebuildFlowHelpers, "removeStaleRebuildDockerOrphan").mockImplementation(
+    () => undefined,
+  );
   vi.spyOn(resolve, "resolveOpenshell").mockReturnValue(null);
   vi.spyOn(forwardRecovery, "teardownSandboxDashboardForward").mockReturnValue(true);
   vi.spyOn(agentDefs, "loadAgent").mockImplementation(() => {

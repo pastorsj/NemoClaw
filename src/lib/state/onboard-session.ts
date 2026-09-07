@@ -16,6 +16,7 @@ import { isObjectRecord, type JsonObject, type JsonValue } from "../core/json-ty
 import { DEFAULT_GATEWAY_PORT, GATEWAY_PORT } from "../core/ports";
 import {
   harnessPackageAuthoritiesEqual,
+  harnessPackageIdentitiesEqual,
   inspectHarnessPackageState,
   parseHarnessPackageId,
   type HarnessPackageIdentity,
@@ -67,6 +68,8 @@ import {
   type ToolDisclosure,
 } from "./onboard-session-tool-disclosure";
 import { nextMachineStateAfterCompletedStep } from "./onboard-step-state";
+import { normalizeWebSearchProviderOwnership } from "./registry-normalization";
+import { parseSandboxProviderBrokerOwnership } from "./registry/provider-broker";
 import {
   listRetainedSandboxRecoveryRecords as readRetainedSandboxRecoveryRecords,
   reconcileRetainedRecoveryPackage as writeRetainedRecoveryPackage,
@@ -80,8 +83,9 @@ import {
   type RecordRetainedSandboxRecoveryInput,
   type RetainedSandboxRecoveryRecord,
   type RetainedSandboxRecoveryReason,
+  validSafeEvidence,
 } from "./onboard-session/retained-sandbox-recovery";
-import type { SandboxHostMount } from "./registry/types";
+import type { SandboxEntry, SandboxHostMount } from "./registry/types";
 import { hasUnsafeHostMountTerminalText } from "./registry/host-mount";
 import { nemoclawStateRoot } from "./state-root";
 
@@ -617,9 +621,7 @@ function readStringArray(value: SessionJsonValue | undefined): string[] | null {
   return value.filter((entry): entry is string => typeof entry === "string");
 }
 
-function readStagedCredentialProviderReceipts(
-  value: unknown,
-): StagedCredentialProviderReceipt[] {
+function readStagedCredentialProviderReceipts(value: unknown): StagedCredentialProviderReceipt[] {
   if (!Array.isArray(value)) return [];
   const receipts: StagedCredentialProviderReceipt[] = [];
   const names = new Set<string>();
@@ -2281,6 +2283,187 @@ export function listRetainedSandboxRecoveryRecords(): readonly RetainedSandboxRe
   });
 }
 
+function collectRecoveryEvidence(label: string, values: readonly unknown[]): string[] {
+  const evidence = values.filter((value) => value !== null && value !== undefined);
+  if (evidence.some((value) => !validSafeEvidence(value))) {
+    throw new Error(`Cannot reconstruct retained sandbox recovery: ${label} is invalid.`);
+  }
+  return [...new Set(evidence as string[])].sort();
+}
+
+function pendingMessagingRecoveryEvidence(entry: SandboxEntry): {
+  readonly providerNames: readonly string[];
+  readonly credentialEnvironmentVariables: readonly string[];
+} {
+  if (entry.messaging === undefined) {
+    return { providerNames: [], credentialEnvironmentVariables: [] };
+  }
+  if (entry.messaging.schemaVersion !== 1) {
+    throw new Error("Cannot reconstruct retained sandbox recovery: messaging state is invalid.");
+  }
+  const plan = parseSandboxMessagingPlan(entry.messaging.plan, {
+    sandboxName: entry.name,
+    agent: entry.harnessPackage?.id ?? entry.agent ?? "openclaw",
+    environment: {},
+  });
+  if (!plan) {
+    throw new Error("Cannot reconstruct retained sandbox recovery: messaging plan is invalid.");
+  }
+  const persistedCredentialBindings =
+    isObjectRecord(entry.messaging.plan) && Array.isArray(entry.messaging.plan.credentialBindings)
+      ? entry.messaging.plan.credentialBindings
+      : [];
+  return {
+    providerNames: (plan.providerReceipts ?? []).map((receipt) => receipt.providerName),
+    credentialEnvironmentVariables: persistedCredentialBindings.flatMap((binding) =>
+      isObjectRecord(binding) && typeof binding.providerEnvKey === "string"
+        ? [binding.providerEnvKey]
+        : [],
+    ),
+  };
+}
+
+function pendingCreateRecoveryResources(
+  entry: SandboxEntry,
+): RecordRetainedSandboxRecoveryInput["resources"] {
+  const messaging = pendingMessagingRecoveryEvidence(entry);
+  const providerBroker =
+    entry.providerBroker === undefined
+      ? undefined
+      : parseSandboxProviderBrokerOwnership(entry.providerBroker, entry.harnessPackage);
+  const webSearchProvider = normalizeWebSearchProviderOwnership(entry);
+  return {
+    sharedInferenceProviders: collectRecoveryEvidence("inference provider evidence", [
+      entry.provider,
+    ]),
+    sandboxScopedProviders: collectRecoveryEvidence("scoped provider evidence", [
+      providerBroker?.providerName,
+      webSearchProvider?.providerName,
+      ...messaging.providerNames,
+    ]),
+    credentialEnvironmentVariables: collectRecoveryEvidence("credential environment evidence", [
+      entry.credentialEnv,
+      providerBroker?.credentialEnv,
+      webSearchProvider?.credentialEnv,
+      ...messaging.credentialEnvironmentVariables,
+    ]),
+  };
+}
+
+type RetainedRecoveryPackageOwner = {
+  readonly agent?: string | null;
+  readonly harnessPackage?: HarnessPackageIdentity | null;
+  readonly harnessPackageMigration?: HarnessPackageMigration | null;
+};
+
+/** Match a current retained record to the exact package authority that owns it. */
+export function retainedRecoveryMatchesPackage(
+  record: RetainedSandboxRecoveryRecord,
+  owner: RetainedRecoveryPackageOwner,
+): boolean {
+  if (record.schemaVersion !== 2) return false;
+  try {
+    const harnessPackage = requireRetainedRecoveryPackage({
+      agent: owner.agent ?? null,
+      harnessPackage: owner.harnessPackage ?? null,
+      harnessPackageMigration: owner.harnessPackageMigration ?? null,
+    });
+    return harnessPackage === null
+      ? record.harnessPackage === null
+      : record.harnessPackage !== null &&
+          harnessPackageIdentitiesEqual(harnessPackage, record.harnessPackage);
+  } catch {
+    return false;
+  }
+}
+
+function retainedRecoveryMatchesPendingCreate(
+  record: RetainedSandboxRecoveryRecord,
+  entry: SandboxEntry,
+): boolean {
+  const checkpoint = entry.pendingCreateIdentity;
+  return Boolean(
+    checkpoint &&
+    record.sandboxName === checkpoint.sandboxName &&
+    record.sandboxIdentityFingerprint === checkpoint.sandboxIdentityFingerprint &&
+    record.gatewayName === checkpoint.gatewayName &&
+    record.gatewayPort === checkpoint.gatewayPort &&
+    record.lifecycleGeneration === checkpoint.lifecycleGeneration &&
+    record.createAttemptNonce === checkpoint.createAttemptNonce &&
+    retainedRecoveryMatchesPackage(record, entry),
+  );
+}
+
+/**
+ * Reconstruct the independent retained-sandbox record when the verified-create
+ * registry checkpoint is the only recovery authority that survived a crash.
+ */
+export function reconstructRetainedSandboxRecoveryFromPendingCreate(
+  entry: SandboxEntry,
+): RetainedSandboxRecoveryRecord | null {
+  const checkpoint = entry.pendingCreateIdentity;
+  const createAttemptNonce = checkpoint?.createAttemptNonce;
+  if (!checkpoint || entry.pendingRouteReservation !== true || !createAttemptNonce) {
+    return null;
+  }
+  if (
+    entry.name !== checkpoint.sandboxName ||
+    entry.gatewayName !== checkpoint.gatewayName ||
+    entry.gatewayPort !== checkpoint.gatewayPort ||
+    entry.lifecycleGeneration !== checkpoint.lifecycleGeneration ||
+    entry.lifecycleLiveIdentityFingerprint !== checkpoint.sandboxIdentityFingerprint
+  ) {
+    throw new Error(
+      `Cannot reconstruct retained sandbox recovery for '${entry.name}': its verified create checkpoint does not match the registry lifecycle authority.`,
+    );
+  }
+  const harnessPackage = requireRetainedRecoveryPackage({
+    agent: entry.agent ?? null,
+    harnessPackage: entry.harnessPackage ?? null,
+    harnessPackageMigration: entry.harnessPackageMigration ?? null,
+  });
+  const checkpointHarnessPackage = checkpoint.harnessPackage ?? null;
+  let checkpointPackageMatches = harnessPackage === null && checkpointHarnessPackage === null;
+  if (harnessPackage !== null && checkpointHarnessPackage !== null) {
+    try {
+      checkpointPackageMatches = harnessPackageIdentitiesEqual(
+        harnessPackage,
+        checkpointHarnessPackage,
+      );
+    } catch {
+      checkpointPackageMatches = false;
+    }
+  }
+  if (!checkpointPackageMatches) {
+    throw new Error(
+      `Cannot reconstruct retained sandbox recovery for '${entry.name}': its verified create checkpoint does not match the registry harness package authority.`,
+    );
+  }
+  return withOwnedOnboardLock("nemoclaw retained sandbox recovery reconstruction", () => {
+    const records = readRetainedSandboxRecoveryRecords(RETAINED_SANDBOX_RECOVERY_FILE);
+    const sameName = records.filter((record) => record.sandboxName === entry.name);
+    if (sameName.length === 1 && retainedRecoveryMatchesPendingCreate(sameName[0]!, entry)) {
+      return sameName[0]!;
+    }
+    if (sameName.length > 0) {
+      throw new Error(
+        `Cannot reconstruct retained sandbox recovery for '${entry.name}': its independent recovery authority conflicts with the verified create checkpoint.`,
+      );
+    }
+    return writeRetainedSandboxRecovery(RETAINED_SANDBOX_RECOVERY_FILE, {
+      sandboxName: checkpoint.sandboxName,
+      sandboxIdentityFingerprint: checkpoint.sandboxIdentityFingerprint,
+      gatewayName: checkpoint.gatewayName,
+      gatewayPort: checkpoint.gatewayPort,
+      lifecycleGeneration: checkpoint.lifecycleGeneration,
+      createAttemptNonce,
+      harnessPackage,
+      resources: pendingCreateRecoveryResources(entry),
+      reason: "retained_after_sandbox_creation_failure",
+    });
+  });
+}
+
 export function recordRetainedSandboxRecovery(
   input: RecordRetainedSandboxRecoveryInput,
 ): RetainedSandboxRecoveryRecord {
@@ -2299,7 +2482,10 @@ export function reconcileRetainedRecoveryPackage(
 
 export function retainedSandboxRecoveryMatchesSession(
   record: RetainedSandboxRecoveryRecord,
-  session: Pick<Session, "cancellationRecovery"> | null | undefined,
+  session:
+    | Pick<Session, "agent" | "cancellationRecovery" | "harnessPackage" | "harnessPackageMigration">
+    | null
+    | undefined,
 ): boolean {
   const recovery = session?.cancellationRecovery;
   if (!recovery) return false;
@@ -2309,7 +2495,10 @@ export function retainedSandboxRecoveryMatchesSession(
     record.gatewayName === recovery.gatewayName &&
     record.gatewayPort === recovery.gatewayPort &&
     record.lifecycleGeneration === recovery.lifecycleGeneration &&
-    record.createAttemptNonce === recovery.createAttemptNonce
+    record.createAttemptNonce === recovery.createAttemptNonce &&
+    (record.schemaVersion === 1
+      ? session.harnessPackage === null && session.harnessPackageMigration === null
+      : retainedRecoveryMatchesPackage(record, session))
   );
 }
 

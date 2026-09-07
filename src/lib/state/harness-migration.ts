@@ -241,6 +241,20 @@ function cloneIdentity(value: HarnessPackageIdentity): HarnessPackageIdentity {
   return parseHarnessPackageIdentity(structuredClone(value));
 }
 
+function bindPendingCreatePackageAuthority(
+  pending: SandboxEntry["pendingCreateIdentity"],
+  harnessPackage: HarnessPackageIdentity,
+): SandboxEntry["pendingCreateIdentity"] {
+  if (!pending) return undefined;
+  if (
+    pending.harnessPackage &&
+    !harnessPackageIdentitiesEqual(pending.harnessPackage, harnessPackage)
+  ) {
+    throw migrationError("the pending sandbox create checkpoint conflicts with its registry owner");
+  }
+  return { ...pending, harnessPackage: cloneIdentity(harnessPackage) };
+}
+
 /**
  * Read and bind one legacy owner to the exact reviewed package bytes it may migrate to.
  * This phase deliberately performs no package-store, session, or registry write.
@@ -306,6 +320,9 @@ export function prepareLegacyHarnessMigration(
     migratedAt: migrationTimestamp(deps.now()),
   };
   const parsedMigration = cloneMigration(harnessPackageMigration, harnessPackage);
+  if (registryEntry) {
+    bindPendingCreatePackageAuthority(registryEntry.pendingCreateIdentity, harnessPackage);
+  }
 
   return Object.freeze({
     packageDisposition: adopted ? "adopted-pinned" : "current-bundle",
@@ -479,8 +496,13 @@ function reconcileRegistry(
     ) {
       throw migrationError("the prepared registry compatibility agent changed");
     }
+    const pendingCreateIdentity = bindPendingCreatePackageAuthority(
+      current.pendingCreateIdentity,
+      prepared.harnessPackage,
+    );
     if (
-      authorityMatchesDesired(current.harnessPackage, current.harnessPackageMigration, prepared)
+      authorityMatchesDesired(current.harnessPackage, current.harnessPackageMigration, prepared) &&
+      isDeepStrictEqual(current.pendingCreateIdentity, pendingCreateIdentity)
     ) {
       return;
     }
@@ -494,12 +516,14 @@ function reconcileRegistry(
         prepared.harnessPackageMigration,
         prepared.harnessPackage,
       ),
+      ...(pendingCreateIdentity ? { pendingCreateIdentity } : {}),
     };
     deps.saveRegistry(registry);
     const reread = deps.loadRegistry().sandboxes[sandboxName];
     if (
       !reread ||
-      !authorityMatchesDesired(reread.harnessPackage, reread.harnessPackageMigration, prepared)
+      !authorityMatchesDesired(reread.harnessPackage, reread.harnessPackageMigration, prepared) ||
+      !isDeepStrictEqual(reread.pendingCreateIdentity, pendingCreateIdentity)
     ) {
       throw migrationError("the registry package authority did not survive readback");
     }

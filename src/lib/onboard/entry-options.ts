@@ -79,6 +79,66 @@ interface DefaultRunEntryState {
   listRetainedSandboxRecoveryRecords(): readonly { readonly sandboxName: string }[];
 }
 
+type PendingCreateRecoverySession = {
+  readonly sessionId?: string;
+  readonly status: string;
+  readonly cancellationRecovery?: { readonly sandboxName: string } | null;
+};
+
+type PendingCreateRecoveryEntry = {
+  readonly name: string;
+  readonly pendingCreateIdentity?: unknown;
+  readonly reservationSessionId?: string;
+};
+
+/** Restore missing independent recovery before a new session can replace its owner. */
+export function reconstructUnownedPendingCreateRecoveries<Entry extends PendingCreateRecoveryEntry>(
+  options: Pick<OnboardEntryOptionsInput["opts"], "fresh" | "resume">,
+  persistedSession: PendingCreateRecoverySession | null,
+  entries: readonly Entry[],
+  reconstruct: (entry: Entry) => unknown,
+): void {
+  const preservesPendingCreateSession =
+    options.resume === true ||
+    (options.fresh !== true && persistedSession?.status === "in_progress");
+  for (const entry of entries) {
+    if (!entry.pendingCreateIdentity) continue;
+    const matchingSessionId =
+      entry.reservationSessionId !== undefined &&
+      entry.reservationSessionId === persistedSession?.sessionId;
+    const sessionAlreadyOwnsRecovery =
+      matchingSessionId && entry.name === persistedSession?.cancellationRecovery?.sandboxName;
+    if (sessionAlreadyOwnsRecovery || (preservesPendingCreateSession && matchingSessionId)) {
+      continue;
+    }
+    reconstruct(entry);
+  }
+}
+
+/** Restore orphaned create authority before onboarding can replace its session owner. */
+export function resolveEntryOptions<Entry extends PendingCreateRecoveryEntry>(
+  options: OnboardOptions,
+  validateSandboxName: OnboardEntryOptionsDeps["validateName"],
+  state: DefaultRunEntryState & {
+    reconstructRetainedSandboxRecoveryFromPendingCreate(entry: Entry): unknown;
+  },
+  registryState: { listSandboxes(): { sandboxes: readonly Entry[] } },
+) {
+  const persistedSession = state.loadSession();
+  const entryOptions = readOptions(options, validateSandboxName, state);
+  const targetSandboxName =
+    entryOptions.requestedSandboxName ?? persistedSession?.sandboxName?.trim();
+  reconstructUnownedPendingCreateRecoveries(
+    options,
+    persistedSession,
+    registryState
+      .listSandboxes()
+      .sandboxes.filter((entry) => !targetSandboxName || entry.name === targetSandboxName),
+    state.reconstructRetainedSandboxRecoveryFromPendingCreate,
+  );
+  return readOptions(options, validateSandboxName, state);
+}
+
 type NonInteractiveEntryOptions = { nonInteractive?: boolean };
 type ResumableEntryOptions = Pick<
   OnboardOptions,
@@ -228,6 +288,8 @@ export function resolveDefaultRunEntryOptionsFromState(
     state.listRetainedSandboxRecoveryRecords().map((record) => record.sandboxName),
   );
 }
+
+export const readOptions = resolveDefaultRunEntryOptionsFromState;
 
 export function assertDefaultSandboxNameAllowed(sandboxName: string): void {
   if (!RESERVED_SANDBOX_NAMES.has(sandboxName)) return;

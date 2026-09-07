@@ -319,9 +319,19 @@ describe("reconcileInstallerHarnesses", () => {
   });
 
   it("migrates one same-name session and registry owner through the shared service", () => {
-    const harness = new InstallerStateHarness(legacySession("hermes", "agent-one"), [
-      registryEntry("agent-one", "hermes"),
-    ]);
+    const entry = registryEntry("agent-one", "hermes");
+    entry.pendingCreateIdentity = {
+      schemaVersion: 1,
+      state: "verified-create",
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      sandboxName: "agent-one",
+      lifecycleGeneration: "generation-agent-one",
+      sandboxIdentityFingerprint: "a".repeat(64),
+      createAttemptNonce: "b".repeat(62),
+      route: "native",
+    };
+    const harness = new InstallerStateHarness(legacySession("hermes", "agent-one"), [entry]);
 
     const result = reconcile(harness);
 
@@ -336,6 +346,12 @@ describe("reconcileInstallerHarnesses", () => {
     expect(harness.registry.sandboxes["agent-one"]?.harnessPackage).toEqual(
       harness.session?.harnessPackage,
     );
+    expect(harness.registry.sandboxes["agent-one"]?.pendingCreateIdentity?.harnessPackage).toEqual(
+      harness.session?.harnessPackage,
+    );
+    expect(() =>
+      normalizeSandboxPolicyAttribution(harness.registry.sandboxes["agent-one"]!),
+    ).not.toThrow();
     expect(harness.registry.sandboxes["agent-one"]?.harnessPackageMigration).toEqual({
       schemaVersion: 1,
       source: "legacy-current-bundle",
@@ -406,9 +422,19 @@ describe("reconcileInstallerHarnesses", () => {
 
   it("accepts explicit Session nulls and normalized registry omission for NemoCUA", () => {
     const session = legacySession("nemocua", "cua-owner");
-    const harness = new InstallerStateHarness(session, [
-      candidateRegistryEntry("cua-owner", "nemocua"),
-    ]);
+    const entry = candidateRegistryEntry("cua-owner", "nemocua");
+    entry.pendingCreateIdentity = {
+      schemaVersion: 1,
+      state: "verified-create",
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      sandboxName: "cua-owner",
+      lifecycleGeneration: "generation-cua",
+      sandboxIdentityFingerprint: "c".repeat(64),
+      createAttemptNonce: "d".repeat(62),
+      route: "native",
+    };
+    const harness = new InstallerStateHarness(session, [entry]);
 
     const result = reconcile(harness);
 
@@ -423,6 +449,9 @@ describe("reconcileInstallerHarnesses", () => {
     expect(harness.session).toHaveProperty("harnessPackageMigration", null);
     expect(harness.registry.sandboxes["cua-owner"]).not.toHaveProperty("harnessPackage");
     expect(harness.registry.sandboxes["cua-owner"]).not.toHaveProperty("harnessPackageMigration");
+    expect(harness.registry.sandboxes["cua-owner"]?.pendingCreateIdentity).not.toHaveProperty(
+      "harnessPackage",
+    );
   });
 
   it("fails closed without writes when repository qualification disappears", () => {

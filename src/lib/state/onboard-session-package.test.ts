@@ -182,4 +182,30 @@ describe("onboard session package persistence", () => {
       { schemaVersion: 2, harnessPackage: null },
     ]);
   });
+
+  it("matches a recovery session only when its exact package bytes still own it", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.2.3",
+      contentDigest: "a".repeat(64),
+    } as const;
+    session.saveSession(
+      session.createSession({ agent: "openclaw", sandboxName: "retained-sb", harnessPackage }),
+    );
+    const recoverySession = session.markCancellationRecovery(
+      "retained-sb",
+      "5".repeat(64),
+      retainedRecoveryContext,
+    );
+    const record = session.listRetainedSandboxRecoveryRecords()[0]!;
+
+    expect(session.retainedSandboxRecoveryMatchesSession(record, recoverySession)).toBe(true);
+    expect(
+      session.retainedSandboxRecoveryMatchesSession(record, {
+        ...recoverySession,
+        harnessPackage: { ...harnessPackage, contentDigest: "b".repeat(64) },
+      }),
+    ).toBe(false);
+  });
 });

@@ -1067,6 +1067,7 @@ function installVerifiedSandboxCreateFixture(registry, options) {
   const reservationEntry = {
     name: sandboxName,
     gatewayName,
+    gatewayPort,
     pendingRouteReservation: true,
     reservationSessionId: sessionId,
     ...selection,
