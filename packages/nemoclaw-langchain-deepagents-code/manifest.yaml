@@ -206,6 +206,7 @@ device_pairing: false
 inference:
   route_probe:
     terminal_connect: required
+    rebuild_preflight: inference-invocation
     models_404: inference-invocation
   config_update:
     support: unsupported

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { RebuildSandboxOptions } from "../../domain/lifecycle/options";
+import type { OpenShellRuntimeSelection } from "../../adapters/openshell/runtime-selection";
+import type { AgentDefinition } from "../../agent/defs";
 import type { SandboxMessagingPlan } from "../../messaging";
 import type { HarnessScheduledWorkDeclaration } from "@nvidia/nemoclaw-harness-contract";
 import { hydrateCredentialEnv } from "../../onboard/credential-env";
@@ -72,6 +74,11 @@ import {
   validatePreparedRecoveryManifest,
 } from "./rebuild-prepared-recovery";
 import { checkRebuildGatewayCredentialReuseOrBail } from "./rebuild-provider-preflight";
+import {
+  probeSandboxInferenceInvocation,
+  type SandboxInferenceInvocationResult,
+} from "./inference-invocation-probe";
+import type { RebuildResumeConfig } from "./rebuild-resume-config";
 import type { RebuildTargetConfig } from "./rebuild-target-preflight";
 
 export { finalizePreparedRebuildImageMessagingPlan } from "./rebuild-custom-image-preflight";
@@ -109,6 +116,59 @@ interface ScheduledWorkRestoreBackupPreflightInput {
   backedUpDirs: readonly string[];
   log: RebuildLog;
   bail: RebuildBail;
+}
+
+export interface ReceiptRebuildInferencePreflightInput {
+  readonly sandboxName: string;
+  readonly targetConfig: {
+    readonly agentAuthority: Pick<ResolvedSandboxAgent, "harnessPackage">;
+    readonly agentDefinition: Pick<AgentDefinition, "inference" | "name" | "runtime">;
+    readonly resumeConfig: Pick<
+      RebuildResumeConfig,
+      "model" | "preferredInferenceApi" | "provider"
+    >;
+  };
+  readonly gatewayName: string;
+  readonly runtimeSelection?: OpenShellRuntimeSelection;
+  readonly bail: RebuildBail;
+}
+
+export type ReceiptRebuildInferenceProbe = (
+  input: Parameters<typeof probeSandboxInferenceInvocation>[0],
+) => SandboxInferenceInvocationResult;
+
+/** Run a package-selected, core-owned inference proof before rebuild mutates the sandbox. */
+export function runRebuildInferencePreflight(
+  input: ReceiptRebuildInferencePreflightInput,
+  probe: ReceiptRebuildInferenceProbe = probeSandboxInferenceInvocation,
+): boolean {
+  const { agentAuthority, agentDefinition, resumeConfig } = input.targetConfig;
+  if (
+    agentAuthority.harnessPackage === null ||
+    agentDefinition.inference?.route_probe?.rebuild_preflight !== "inference-invocation"
+  ) {
+    return true;
+  }
+
+  const result = probe({
+    sandboxName: input.sandboxName,
+    gatewayName: input.gatewayName,
+    ...(input.runtimeSelection ? { runtimeSelection: input.runtimeSelection } : {}),
+    agentName: agentDefinition.name,
+    provider: resumeConfig.provider,
+    model: resumeConfig.model,
+    preferredInferenceApi: resumeConfig.preferredInferenceApi,
+    probeBoundary: agentDefinition.runtime?.smoke_boundary ?? { kind: "login-shell" },
+  });
+  if (result.ok) return true;
+
+  printRebuildPreflightFailure(
+    "the recorded inference credentials or route were rejected.",
+    result.detail,
+    "Recorded inference route smoke check failed",
+    input.bail,
+  );
+  return false;
 }
 
 /** Validate a receipt-backed package's scheduled-work backup before sandbox deletion. */
@@ -415,8 +475,22 @@ export async function runRebuildPreflightPhase(
         },
       );
       if (!liveState) return null;
+      const recoveryRecreate = liveState.staleRecovery || recoveryManifest !== null;
+      if (
+        !recoveryRecreate &&
+        !runRebuildInferencePreflight({
+          sandboxName,
+          targetConfig: preparedTarget.targetConfig,
+          gatewayName: preparedTarget.recreateOptions.targetGatewayName,
+          ...(preparedTarget.recreateOptions.runtimeSelection
+            ? { runtimeSelection: preparedTarget.recreateOptions.runtimeSelection }
+            : {}),
+          bail,
+        })
+      ) {
+        return null;
+      }
       if (legacyDcodeRebuild) {
-        const recoveryRecreate = liveState.staleRecovery || recoveryManifest !== null;
         const imageReady = await dcodePreflight.prepareImage(
           preparedTarget.targetConfig.resumeConfig,
           preparedTarget.targetConfig.durableConfig.webSearchConfig,

@@ -567,8 +567,12 @@ export function readInference(record: ManifestRecord): AgentInference | undefine
     }
     const probe = routeProbe as ManifestRecord;
     if (
-      Object.keys(probe).some((key) => key !== "terminal_connect" && key !== "models_404") ||
+      Object.keys(probe).some(
+        (key) => key !== "terminal_connect" && key !== "rebuild_preflight" && key !== "models_404",
+      ) ||
       (probe.terminal_connect !== undefined && probe.terminal_connect !== "required") ||
+      (probe.rebuild_preflight !== undefined &&
+        probe.rebuild_preflight !== "inference-invocation") ||
       (probe.models_404 !== undefined && probe.models_404 !== "inference-invocation")
     ) {
       throw new Error(
@@ -577,6 +581,7 @@ export function readInference(record: ManifestRecord): AgentInference | undefine
     }
     parsedRouteProbe = Object.freeze({
       ...(probe.terminal_connect ? { terminal_connect: "required" as const } : {}),
+      ...(probe.rebuild_preflight ? { rebuild_preflight: "inference-invocation" as const } : {}),
       ...(probe.models_404 ? { models_404: "inference-invocation" as const } : {}),
     });
   }

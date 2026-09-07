@@ -1486,6 +1486,15 @@ test("rejects unknown and missing fields in every public nested manifest shape",
       },
     },
     {
+      name: "an unsupported rebuild inference route probe",
+      field: "inference.route_probe.rebuild_preflight",
+      update: (manifest) => {
+        manifestRecordAt(manifest, "inference").route_probe = {
+          rebuild_preflight: "package-callback",
+        };
+      },
+    },
+    {
       name: "an unsupported provider-key credential alias",
       field: "inference.provider_key_credential_alias",
       update: (manifest) => {
@@ -1800,6 +1809,9 @@ test("accepts typed sandbox-create, web-search, and messaging-route declarations
   manifestRecordAt(manifest, "inference").refresh_route_for_messaging_providers = [
     "compatible-endpoint",
   ];
+  manifestRecordAt(manifest, "inference").route_probe = {
+    rebuild_preflight: "inference-invocation",
+  };
 
   assert.doesNotThrow(() => validateHarnessManifest(manifest, "future-terminal"));
 });

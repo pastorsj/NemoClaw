@@ -176,6 +176,7 @@ export interface AgentInference {
   };
   route_probe?: {
     readonly terminal_connect?: "required";
+    readonly rebuild_preflight?: "inference-invocation";
     readonly models_404?: "inference-invocation";
   };
   /** Provider/API requirements declared by the selected package's config adapter. */

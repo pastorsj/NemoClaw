@@ -409,6 +409,8 @@ export interface HarnessInferenceManifest {
   /** Finite core-owned route checks required by this harness. */
   readonly route_probe?: {
     readonly terminal_connect?: "required";
+    /** Require one inference request from the retained sandbox before rebuild mutates it. */
+    readonly rebuild_preflight?: "inference-invocation";
     readonly models_404?: "inference-invocation";
   };
 }

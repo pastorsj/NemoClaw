@@ -309,7 +309,7 @@ export function validateHarnessConfig(manifest: ManifestRecord): void {
     const routeProbe = requireRecord(inference.route_probe, "inference.route_probe");
     requireKnownFields(
       routeProbe,
-      new Set(["models_404", "terminal_connect"]),
+      new Set(["models_404", "rebuild_preflight", "terminal_connect"]),
       new Set(),
       "inference.route_probe",
     );
@@ -327,6 +327,12 @@ export function validateHarnessConfig(manifest: ManifestRecord): void {
     }
     if (routeProbe.models_404 !== undefined && routeProbe.models_404 !== "inference-invocation") {
       fail("inference.route_probe.models_404", "must be inference-invocation");
+    }
+    if (
+      routeProbe.rebuild_preflight !== undefined &&
+      routeProbe.rebuild_preflight !== "inference-invocation"
+    ) {
+      fail("inference.route_probe.rebuild_preflight", "must be inference-invocation");
     }
   }
 }

@@ -201,6 +201,7 @@ const manifestFields = {
       support: "unsupported",
       reason: "This synthetic package has fixed inference configuration.",
     },
+    route_probe: { rebuild_preflight: "inference-invocation" },
   },
   messaging: { support: "disabled" },
   policy: {

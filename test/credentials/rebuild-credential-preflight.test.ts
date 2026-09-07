@@ -14,9 +14,11 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { HarnessStartupSettings } from "@nvidia/nemoclaw-harness-contract";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createHarnessPackageFixture,
+  createPackageStartupProfileFixture,
   type HarnessPackageFixtureId,
 } from "../helpers/harness-packages";
 import { execTimeout, testTimeoutOptions } from "../helpers/timeouts";
@@ -63,18 +65,70 @@ function createFixture(opts: {
   const packageFixture = createHarnessPackageFixture({
     fixtureParent: path.join(tmpDir, "harness-package-fixtures"),
     storeRoot: path.join(nemoclawDir, "harnesses"),
+    agentPolicyAdditionsContent: fs.readFileSync(
+      path.join(REPO_ROOT, "packages", `nemoclaw-${agentName}`, "policy-additions.yaml"),
+      "utf8",
+    ),
   });
   const packageRoot = packageFixture.packageRoots.get(agentName);
   expect(packageRoot, `Missing harness package fixture for '${agentName}'`).toBeDefined();
-  fs.copyFileSync(
-    path.join(REPO_ROOT, "packages", `nemoclaw-${agentName}`, "manifest.yaml"),
-    path.join(packageRoot!, "packages", `nemoclaw-${agentName}`, "manifest.yaml"),
+  const manifestPath = path.join(packageRoot!, "manifest.yaml");
+  const rebuildRouteProbe =
+    agentName === "langchain-deepagents-code"
+      ? "  route_probe:\n    rebuild_preflight: inference-invocation\n"
+      : "";
+  fs.writeFileSync(
+    manifestPath,
+    fs
+      .readFileSync(manifestPath, "utf8")
+      .replace("inference:\n", `inference:\n${rebuildRouteProbe}`),
   );
   fs.copyFileSync(
-    path.join(REPO_ROOT, "packages", `nemoclaw-${agentName}`, "policy-additions.yaml"),
-    path.join(packageRoot!, "packages", `nemoclaw-${agentName}`, "policy-additions.yaml"),
+    path.join(REPO_ROOT, "packages", `nemoclaw-${agentName}`, "Dockerfile"),
+    path.join(packageRoot!, "Dockerfile"),
   );
   const installedHarness = packageFixture.install(agentName);
+  const startupSettings: HarnessStartupSettings = {
+    configuration: {
+      agent: agentName,
+      ...(agentName === "langchain-deepagents-code"
+        ? { autoApprovalMode: "disabled" as const, observabilityEnabled: false }
+        : {}),
+    },
+    inference: {
+      routeProvider: "inference",
+      upstreamProvider: provider,
+      model: "meta/llama-3.3-70b-instruct",
+      routedBaseUrl: "http://inference.local/v1",
+      upstreamEndpointUrl:
+        provider === "compatible-endpoint" ? "https://inference-api.nvidia.com/v1" : null,
+      api: "openai-completions",
+      primaryModelRef: null,
+      compatibility: null,
+      inputModalities: null,
+    },
+    proxy: {
+      managedHost: "inference.local",
+      managedPort: 80,
+      hostHttpUrl: null,
+      hostHttpsUrl: null,
+      hostNoProxy: [],
+    },
+    dashboard: { agent: agentName, mode: "disabled" },
+    tools: { disclosure: "progressive", enabledGateways: [] },
+    messaging: { plan: null },
+    tuning: {
+      contextWindow: null,
+      maxTokens: null,
+      reasoning: null,
+      reasoningEffort: null,
+    },
+    corporateCa: { bundleSha256: null },
+  };
+  const packageStartupProfile = createPackageStartupProfileFixture(
+    installedHarness.identity,
+    startupSettings,
+  );
 
   const gatewayReadyMarker = path.join(tmpDir, "gateway-ready");
   const gatewayProcess = spawn(
@@ -124,6 +178,13 @@ wait();`,
           fromDockerfile: null,
           agent,
           harnessPackage: installedHarness.identity,
+          workload: {
+            schemaVersion: 1,
+            kind: "legacy-dockerfile",
+            reference: null,
+            packageStartupProfile,
+            shared: false,
+          },
           ...(agent === "langchain-deepagents-code"
             ? {
                 credentialEnv,
@@ -186,6 +247,11 @@ wait();`,
   const workspaceDir = path.join(fakeRoot, "workspace");
   fs.mkdirSync(workspaceDir, { recursive: true });
   fs.writeFileSync(path.join(workspaceDir, "marker.txt"), "test-workspace");
+  const trackedCoreFixture = path.join(tmpDir, "tracked-core");
+  // This process contract stops at the inference preflight. Keep the real
+  // package-image path, but archive only the build-context shape needed to
+  // reach that boundary; package build contents have their own contract tests.
+  fs.mkdirSync(path.join(trackedCoreFixture, "packages"), { recursive: true });
   const deleteMarker = path.join(tmpDir, "sandbox-delete-invoked");
   const atomicityMarker = path.join(fakeRoot, "rebuild-atomicity-marker.txt");
   fs.writeFileSync(atomicityMarker, "dcode-atomicity-marker\n");
@@ -239,9 +305,18 @@ if (a[0] === "inference" && a[1] === "get") { process.stdout.write("Gateway infe
 if (a[0] === "inference" && a[1] === "set") process.exit(0);
 if (a[0] === "provider" && a[1] === "get") {
   if (!${providerRegistered ? "true" : "false"}) process.exit(1);
+  process.stdout.write("Name: ${provider}\\nType: openai\\nCredential keys: ${credentialEnv}\\nConfig keys: OPENAI_BASE_URL\\n");
   process.exit(0);
 }
 if (a[0] === "provider") process.exit(0);
+if (a[0] === "policy" && a[1] === "get") {
+  if (a.includes("--output")) {
+    process.stdout.write(JSON.stringify({ scope: "sandbox", sandbox: "${sandboxName}", status: "effective", policy_source: "sandbox", hash: "fixture-policy", active_version: 1, policy: { version: 1, network_policies: {} } }) + "\\n");
+  } else {
+    process.stdout.write("Version: 1\\nActive: 1\\n---\\nversion: 1\\nnetwork_policies: {}\\n");
+  }
+  process.exit(0);
+}
 if (a[0] === "forward" && a[1] === "list") { process.stdout.write("SANDBOX BIND PORT PID STATUS\\n${sandboxName} 127.0.0.1 18789 4242 running\\n"); process.exit(0); }
 if (a[0] === "forward") process.exit(0);
 process.exit(0);
@@ -268,6 +343,24 @@ process.exit(0);
   fs.writeFileSync(path.join(tmpDir, "ps"), "#!/usr/bin/env node\nprocess.exit(0);\n", {
     mode: 0o755,
   });
+
+  fs.writeFileSync(
+    path.join(tmpDir, "git"),
+    `#!/bin/sh
+set -eu
+output=""
+for argument in "$@"; do
+  case "$argument" in
+    --output=*) output="\${argument#--output=}" ;;
+  esac
+done
+if [ "\${1:-}" != "archive" ] || [ -z "$output" ]; then
+  exit 1
+fi
+tar -cf "$output" -C ${JSON.stringify(trackedCoreFixture)} .
+`,
+    { mode: 0o755 },
+  );
 
   fs.writeFileSync(
     path.join(tmpDir, "docker"),
@@ -427,7 +520,7 @@ describe("atomic rebuild process contracts (#2273)", () => {
 
       expect(result.status).not.toBe(0);
       expect(output).toContain("HTTP 401");
-      expect(output).toContain("Sandbox is untouched");
+      expect(output.toLowerCase()).toContain("sandbox is untouched");
       expect(output).not.toContain("Backing up sandbox state");
       expect(output).not.toContain("Deleting old sandbox");
       expect(output).not.toContain("Creating new sandbox with current image");

@@ -77,6 +77,24 @@ afterEach(() => {
 });
 
 describe("inference manifest metadata", () => {
+  it("projects the finite receipt-backed rebuild invocation selector", () => {
+    expect(
+      readInference({
+        inference: { route_probe: { rebuild_preflight: "inference-invocation" } },
+      }),
+    ).toMatchObject({
+      route_probe: { rebuild_preflight: "inference-invocation" },
+    });
+  });
+
+  it("rejects an unsupported receipt-backed rebuild probe mode", () => {
+    expect(() =>
+      readInference({
+        inference: { route_probe: { rebuild_preflight: "package-callback" } },
+      }),
+    ).toThrow(/route_probe.*supported core-owned probe modes/);
+  });
+
   it("projects the finite hosted-inference provider-key compatibility declaration", () => {
     expect(
       readInference({
