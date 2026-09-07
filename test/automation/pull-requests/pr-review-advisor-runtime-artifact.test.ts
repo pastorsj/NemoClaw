@@ -17,6 +17,11 @@ function fixture() {
   fs.mkdirSync(path.join(advisor, "node_modules", "package"), { recursive: true });
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(advisor, "node_modules", "package", "index.js"), "export {};\n");
+  fs.linkSync(
+    path.join(advisor, "node_modules", "package", "index.js"),
+    path.join(advisor, "node_modules", "package", "hardlink.js"),
+  );
+  fs.symlinkSync("index.js", path.join(advisor, "node_modules", "package", "symlink.js"));
   for (const name of ["rg", "fdfind"])
     fs.writeFileSync(path.join(bin, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   return { directory, advisor, bin };
@@ -40,7 +45,12 @@ describe("PR Review Advisor runtime artifact", () => {
     const input = fixture();
     const env = environment(input);
     const artifact = path.join(input.directory, "artifact");
+    const repeatedArtifact = path.join(input.directory, "repeated-artifact");
     execFileSync(packageScript, [artifact], { env });
+    execFileSync(packageScript, [repeatedArtifact], { env });
+    expect(fs.readFileSync(path.join(artifact, "runtime.sha256"), "utf8")).toBe(
+      fs.readFileSync(path.join(repeatedArtifact, "runtime.sha256"), "utf8"),
+    );
     fs.rmSync(path.join(input.advisor, "node_modules"), { recursive: true });
     env.EXPECTED_RUNTIME_SHA = fs
       .readFileSync(path.join(artifact, "runtime.sha256"), "utf8")
@@ -49,7 +59,15 @@ describe("PR Review Advisor runtime artifact", () => {
     expect(fs.readFileSync(path.join(input.advisor, "node_modules/package/index.js"), "utf8")).toBe(
       "export {};\n",
     );
-    expect(fs.readFileSync(env.GITHUB_PATH as string, "utf8")).toContain("pr-review-advisor-runtime-bin");
+    expect(
+      fs.lstatSync(path.join(input.advisor, "node_modules/package/hardlink.js")).isFile(),
+    ).toBe(true);
+    expect(fs.lstatSync(path.join(input.advisor, "node_modules/package/symlink.js")).isFile()).toBe(
+      true,
+    );
+    expect(fs.readFileSync(env.GITHUB_PATH as string, "utf8")).toContain(
+      "pr-review-advisor-runtime-bin",
+    );
   });
 
   it("rejects a payload whose digest changed", () => {

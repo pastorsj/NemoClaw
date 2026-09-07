@@ -97,7 +97,7 @@ describe("PR review advisor", () => {
 +++ b/src/lib/example.ts
 +spawn("command");`;
     const requiredRiskCandidates = classifyTestDepth([
-      "agents/langchain-deepagents-code/patch-managed-deepagents-code.py",
+      "packages/nemoclaw-langchain-deepagents-code/compat/runtime-patch.py",
     ]).suggestedTests;
 
     expect({
