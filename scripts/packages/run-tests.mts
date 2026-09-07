@@ -6,12 +6,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export type PackageTestMode = "spec" | "test";
+export type PackageTestMode = "fabric" | "spec" | "test";
 
 export interface HarnessPackageTestPlan {
   readonly packageName: string;
   readonly packageRoot: string;
-  readonly scriptName: "test" | "test:spec";
+  readonly scriptName: "test" | "test:fabric:composed" | "test:spec";
 }
 
 type PackageTestSpawnResult = {
@@ -62,7 +62,8 @@ function declaredHarnessManifest(
   return true;
 }
 
-function packageScriptName(mode: PackageTestMode): "test" | "test:spec" {
+function packageScriptName(mode: PackageTestMode): HarnessPackageTestPlan["scriptName"] {
+  if (mode === "fabric") return "test:fabric:composed";
   return mode === "spec" ? "test:spec" : "test";
 }
 
@@ -141,8 +142,10 @@ export function runHarnessPackageTests(
 }
 
 export function parsePackageTestMode(args: readonly string[]): PackageTestMode {
-  if (args.length === 1 && (args[0] === "test" || args[0] === "spec")) return args[0];
-  throw new Error("Usage: tsx scripts/packages/run-tests.mts <test|spec>");
+  if (args.length === 1 && (args[0] === "test" || args[0] === "spec" || args[0] === "fabric")) {
+    return args[0];
+  }
+  throw new Error("Usage: tsx scripts/packages/run-tests.mts <test|spec|fabric>");
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : "";

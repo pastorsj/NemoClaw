@@ -427,9 +427,11 @@ Each package exposes the same primary commands:
 | `npm run test:spec` | Render the package behavior tree. |
 | `npm run test:watch` | Watch checkout-independent TypeScript tests. |
 
-The root `npm run test:packages` and `npm run test:spec` commands discover packages through
-`nemoclaw.harnessManifest`. Rehearse the future separate-repository boundary with a package-only
-workspace and then an immutable NemoClaw revision:
+The root `npm run test:packages`, `npm run test:spec`, and `npm run test:fabric` commands discover
+packages through `nemoclaw.harnessManifest`. The Fabric lane first qualifies its generic runner
+independently, then invokes every package's composed proof. Rehearse the future
+separate-repository boundary with a package-only workspace and then an immutable NemoClaw
+revision:
 
 ```bash
 PACKAGE_ID=openclaw

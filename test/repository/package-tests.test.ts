@@ -29,6 +29,7 @@ function harnessMetadata(name: string): Record<string, unknown> {
     name,
     scripts: {
       test: "vitest run",
+      "test:fabric:composed": "bash tests/fabric/run-tests.sh composed",
       "test:spec": "vitest run --reporter=tree",
     },
     nemoclaw: { harnessManifest: "manifest.yaml" },
@@ -80,6 +81,23 @@ describe("harness package test runner", () => {
         packageName: "@nvidia/nemoclaw-example",
         packageRoot,
         scriptName: "test:spec",
+      },
+    ]);
+  });
+
+  test("selects every discovered package's composed Fabric proof", ({ resources }) => {
+    const packagesRoot = resources.temporaryDirectory("nemoclaw-package-fabric-");
+    const packageRoot = writePackage(
+      packagesRoot,
+      "nemoclaw-example",
+      harnessMetadata("@nvidia/nemoclaw-example"),
+    );
+
+    expect(discoverHarnessPackageTests("fabric", packagesRoot)).toEqual([
+      {
+        packageName: "@nvidia/nemoclaw-example",
+        packageRoot,
+        scriptName: "test:fabric:composed",
       },
     ]);
   });
@@ -200,8 +218,9 @@ describe("harness package test runner", () => {
   test("requires one test mode argument", () => {
     expect(parsePackageTestMode(["test"])).toBe("test");
     expect(parsePackageTestMode(["spec"])).toBe("spec");
+    expect(parsePackageTestMode(["fabric"])).toBe("fabric");
     expect(() => parsePackageTestMode([])).toThrow(
-      "Usage: tsx scripts/packages/run-tests.mts <test|spec>",
+      "Usage: tsx scripts/packages/run-tests.mts <test|spec|fabric>",
     );
   });
 });

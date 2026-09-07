@@ -63,3 +63,11 @@ if [ "${TEST_MODE}" = "composed" ]; then
 fi
 
 PYTHONDONTWRITEBYTECODE=1 uv run "${UV_ARGS[@]}" "${TEST_ARGS[@]}"
+
+if [ "${TEST_MODE}" = "composed" ]; then
+  PYTHONDONTWRITEBYTECODE=1 uv run \
+    --isolated \
+    --no-project \
+    --python 3.13 \
+    python3 tests/fabric/split_venv.py --runner-source "${RUNNER_SOURCE}"
+fi

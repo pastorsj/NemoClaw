@@ -182,4 +182,6 @@ commit. Image qualification and focused live tests prove combinations that need 
 external services.
 
 `npm test` does not run `test:fabric` separately because the composed Fabric lane in
-`test:nemoclaw` includes its direct cases.
+`test:nemoclaw` includes its direct cases. That lane also creates separate runner and Hermes
+adapter Python environments, verifies their dependency boundaries, and completes one Fabric
+lifecycle request across them.

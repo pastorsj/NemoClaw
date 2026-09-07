@@ -47,7 +47,7 @@
     "test:e2e-phases:check": "npm run catalog:compile && npm run build:policy-boundary && node --experimental-strip-types --no-warnings tools/e2e/check-semantic-phases.mts",
     "test:runtime-audit": "tsx scripts/audit-test-runtime.mts",
     "test:integration": "npm run clean:cli && npm run build:cli && vitest run --project integration --project installer-integration",
-    "test:fabric": "bash scripts/checks/test-fabric-integration.sh",
+    "test:fabric": "bash packages/nemoclaw-fabric/tests/run-tests.sh && tsx scripts/packages/run-tests.mts fabric",
     "test:package": "npm run clean:cli && npm --prefix packages/nemoclaw-openclaw/plugin run clean && npm run build:cli && npm --prefix packages/nemoclaw-openclaw/plugin run build && vitest run --project package-contract",
     "test:packages": "tsx scripts/packages/run-tests.mts test",
     "test:package:rehearsals": "node --experimental-strip-types --no-warnings scripts/packages/rehearsal-matrix.mts",

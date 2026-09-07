@@ -8,9 +8,9 @@ NeMo Fabric adapter. The runner reads a normal Fabric configuration. It does
 not select or install adapters.
 
 This path is a local product-scope candidate, not an approved support or distribution policy.
-LangChain Deep Agents Code and Hermes use released Fabric adapters. Pi and OpenClaw use small
-package-owned adapters around stable native headless commands. The Fabric path does not replace
-their native interactive or gateway commands.
+LangChain Deep Agents Code and Hermes use released Fabric adapters. Pi, OpenClaw, DeepSeek
+Harness, and Haystack Agent use small package-owned adapters around stable native headless
+commands. The Fabric path does not replace their native interactive or gateway commands.
 
 ```bash
 nemoclaw-fabric --version
@@ -114,16 +114,22 @@ From the repository root, run the complete isolated test lane:
 npm run test:fabric
 ```
 
-The command creates a Python 3.13 environment. It installs the package-owned
-hash locks for build tooling and runtime dependencies, builds the runner
-offline, installs it without dependency resolution, and runs:
+The command first qualifies the generic runner from its own source copy and
+hash lock. It then discovers every installable harness package from the same
+`nemoclaw.harnessManifest` marker used by the installer and runs that package's
+composed Fabric proof. Adding a package therefore adds coverage without editing
+a central harness list. The lane runs:
 
 - Generic runner unit tests.
 - Generic released-SDK lifecycle tests.
-- The Deep Agents package's real adapter test against a loopback endpoint.
-- The Pi and OpenClaw adapters through both direct and generic-runner lifecycle boundaries.
-- The Hermes package projection against the released Hermes adapter.
-- `pip check` for the installed dependency graph.
+- Deep Agents Code, Pi, OpenClaw, Hermes, DeepSeek Harness, and Haystack Agent
+  through their package-owned adapter and generic-runner lifecycle boundaries.
+
+The generic runner can be qualified independently from its directory:
+
+```bash
+bash tests/run-tests.sh
+```
 
 The generic tests can also run from an environment that has the `test` extra:
 
@@ -136,13 +142,16 @@ python -m unittest tests/integration/test_fabric.py -v
 
 Keep the adapter-specific work in the agent package:
 
-1. Add the released Fabric adapter to the package's hash lock.
+1. Add the released Fabric adapter, or a small package-owned adapter, to the
+   package's hash lock.
 2. Generate a Fabric config that selects the adapter, sets `runtime.timeout_seconds`, and names credential environment variables.
 3. Mark configurations unavailable when the released adapter cannot preserve required agent behavior.
 4. Set a bounded manifest headless command, such as `nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config ...`.
 5. Install the runner and adapter graph in the package image.
 6. Add only the network policy destinations that the runner and adapter use.
-7. Add a package-owned test that runs the generated config through the released adapter.
+7. Implement `test:fabric` for the adapter boundary and `test:fabric:composed`
+   for the same cases through `nemoclaw-fabric`. The root lane discovers both
+   from package metadata.
 
 Keep the native agent command available for behavior the Fabric adapter does
 not preserve. The runner package must not import the agent package or branch on

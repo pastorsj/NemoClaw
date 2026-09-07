@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Keep the generic runner's qualification graph package-owned. Harness packages
+# add their own adapter dependencies in their own locks.
+nemo-fabric==0.2.0
+nemo-fabric-adapter-contract==0.2.0
+nemo-fabric-adapters-common==0.2.0
