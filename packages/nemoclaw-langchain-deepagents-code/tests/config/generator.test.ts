@@ -8,7 +8,8 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { loadAgent } from "../../../../src/lib/agent/defs";
+import { buildAgentDefinition } from "../../../../src/lib/agent-runtime/manifest-loader.ts";
+import { loadValidatedHarnessManifest } from "../../../../src/lib/agent-runtime/manifest-readers.ts";
 import {
   coerceAgentInferenceApi,
   getSandboxInferenceConfig,
@@ -394,8 +395,14 @@ describe("LangChain Deep Agents Code config generator", () => {
   });
 
   it("bakes the /v1 managed route for a fresh Custom Anthropic-compatible onboard (#6294)", () => {
-    // Real manifest: Deep Agents Code declares the OpenAI-only inference contract.
-    const agent = loadAgent("langchain-deepagents-code");
+    // The package under test is the authority for its OpenAI-only inference contract.
+    // Build the definition directly so this test does not depend on repository package discovery.
+    const manifestPath = path.join(packageRoot, "manifest.yaml");
+    const agent = buildAgentDefinition({
+      manifest: loadValidatedHarnessManifest(manifestPath, "langchain-deepagents-code"),
+      manifestPath,
+      packageRoot,
+    });
     expect(agent.inference?.provider_type).toBe("openai_compatible");
 
     // The Anthropic endpoint probe resolves anthropic-messages on this route.
