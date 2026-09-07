@@ -12,7 +12,10 @@ import { type GatewayRestartDeps, restartSandboxGatewayWithDeps } from "./gatewa
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../../..");
 const HERMES_GUARD = path.join(REPO_ROOT, "packages/nemoclaw-hermes/runtime/config-guard.py");
-const HERMES_TRANSACTION = path.join(REPO_ROOT, "packages/nemoclaw-hermes/runtime/mcp-transaction.py");
+const HERMES_TRANSACTION = path.join(
+  REPO_ROOT,
+  "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
+);
 const YAML_STUB_PYTHON = String.raw`
 import json, sys, types
 
@@ -132,54 +135,6 @@ raise SystemExit(transaction.main())
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
-
-it("sanitizes an injected Hermes reconciliation refusal before post-restart mutations", () => {
-  try {
-    const postReconciliationMutations = [
-      vi.fn(() => true),
-      vi.fn(() => null),
-      vi.fn(() => null),
-      vi.fn(() => null),
-    ] as const;
-    const deps: GatewayRestartDeps = {
-      getSessionAgent: () => hermesAgent,
-      getSandbox: () => ({ agent: "hermes" }),
-      resolveSandboxDashboardPort: () => 18789,
-      requestGatewaySupervisorAction: vi.fn(() => ({
-        status: 0,
-        stdout: "GATEWAY_PID=123",
-        stderr: "",
-      })),
-      executeSandboxExecCommand: vi.fn(() => null),
-      waitForRecoveredSandboxGateway: vi.fn(() => true),
-      ensureSandboxPortForward: postReconciliationMutations[0],
-      ensureHermesDashboardPortForwardIfEnabled: postReconciliationMutations[1],
-      recoverMessagingHostForward: postReconciliationMutations[2],
-      recoverDeclaredAgentForwardPorts: postReconciliationMutations[3],
-      printGatewayWedgeDiagnostics: vi.fn(() => false),
-      inspectMcpRuntimeIntentRefusal: vi.fn(() => ({
-        detail: "Hermes config hash does not match persisted inputs FORGED SUCCESS <REDACTED>",
-      })),
-    };
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-    expect(restartSandboxGatewayWithDeps("alpha", { quiet: true, deps })).toEqual({
-      ok: false,
-      failureLayer: "MCP reconciliation refusal",
-      detail: "Hermes config hash does not match persisted inputs FORGED SUCCESS <REDACTED>",
-      restarted: true,
-      healthPassed: true,
-    });
-    expect(postReconciliationMutations[0]).not.toHaveBeenCalled();
-    expect(postReconciliationMutations[1]).not.toHaveBeenCalled();
-    expect(postReconciliationMutations[2]).not.toHaveBeenCalled();
-    expect(postReconciliationMutations[3]).not.toHaveBeenCalled();
-    expect(error.mock.calls.flat().join("\n")).not.toMatch(/\x1b|ghp_0123456789abcdefghij/u);
-  } finally {
-    vi.restoreAllMocks();
-  }
-});
-
 it("rejects a supplied Hermes definition when the persisted sandbox agent changed", () => {
   const requestGatewaySupervisorAction = vi.fn(() => ({
     status: 0,
@@ -198,7 +153,6 @@ it("rejects a supplied Hermes definition when the persisted sandbox agent change
     recoverMessagingHostForward: vi.fn(() => null),
     recoverDeclaredAgentForwardPorts: vi.fn(() => null),
     printGatewayWedgeDiagnostics: vi.fn(() => false),
-    inspectMcpRuntimeIntentRefusal: vi.fn(() => null),
   };
 
   expect(restartSandboxGatewayWithDeps("alpha", { quiet: true, deps })).toMatchObject({

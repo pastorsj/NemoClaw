@@ -77,7 +77,7 @@ export interface ChannelCredentialProviderSpec {
   readonly sourceInputId: string;
   readonly sourceSecretEnv: string;
   readonly refresh?: {
-    readonly strategy: "google-service-account-jwt";
+    readonly strategy: "google_service_account_jwt";
     readonly scopes: readonly string[];
     readonly secretMaterialKeys: readonly string[];
   };

@@ -167,7 +167,7 @@ const credentialProviderSchema: AnySchemaObject = Object.freeze({
       additionalProperties: false,
       required: ["strategy", "scopes", "secretMaterialKeys"],
       properties: {
-        strategy: { const: "google-service-account-jwt" },
+        strategy: { const: "google_service_account_jwt" },
         scopes: {
           type: "array",
           minItems: 1,

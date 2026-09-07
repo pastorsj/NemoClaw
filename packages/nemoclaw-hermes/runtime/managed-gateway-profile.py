@@ -185,9 +185,9 @@ DIAGNOSTIC_PATTERNS = (
     r"\[gateway\] CRITICAL: Hermes gateway lost its listener or health endpoint; stopping the exact child for recovery",
     r"\[gateway\] Hermes gateway pid [1-9][0-9]* exited \(rc=[0-9]+; authenticated host authorization\); respawning without charging crash quarantine in 2s",
     r"\[gateway\] Hermes gateway respawned \(pid [1-9][0-9]*\)",
-    r"\[gateway\] CRITICAL: [1-9][0-9]* exits in 60s window — Hermes relaunch is quarantined until sandbox recreation; check /tmp/gateway\.log",
+    r"\[gateway\] Hermes runtime preparation failed after 5 consecutive attempts; supervisor exiting without launching a gateway; correct the reported failure, then stop and start the sandbox",
+    r"\[gateway\] CRITICAL: [1-9][0-9]* exits in 60s window — Hermes relaunch is stopped for this supervisor instance; correct the reported failure, then stop and start the sandbox; check /tmp/gateway\.log",
     r"\[gateway\] CRITICAL: (?:exact Hermes replacement|unhealthy Hermes gateway|initial Hermes gateway) could not be stopped; managed supervisor is quarantined without another launch",
-    r"\[SECURITY\] Hermes automatic respawn is quarantined until MCP integrity is restored by rebuilding the sandbox",
     r"\[CRITICAL\] Newly launched Hermes (?:gateway|gateway-log|dashboard|dashboard-log|api-socat|dashboard-socat) pid [1-9][0-9]* failed exact role identity capture; quarantining the managed startup supervisor without signaling the unproven child",
-    r"\[CRITICAL\] Unproven Hermes (?:gateway|gateway-log|dashboard|dashboard-log|api-socat|dashboard-socat) child exited; managed supervisor remains quarantined until sandbox recreation",
+    r"\[CRITICAL\] Unproven Hermes (?:gateway|gateway-log|dashboard|dashboard-log|api-socat|dashboard-socat) child exited; relaunch is stopped for this supervisor instance; correct the reported failure, then stop and start the sandbox",
 )

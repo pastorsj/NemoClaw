@@ -222,7 +222,9 @@ function prepareStartupProfile(request) {
     if (!input.dashboard.managed || input.dashboard.port < 1024) {
         fail("managed dashboard state is required");
     }
-    if (input.webSearch && input.webSearch.provider !== null && input.webSearch.provider !== "tavily") {
+    if (input.webSearch &&
+        input.webSearch.provider !== null &&
+        input.webSearch.provider !== "tavily") {
         fail("Hermes only supports Tavily web search");
     }
     const forwarding = input.dashboard.forwarding;

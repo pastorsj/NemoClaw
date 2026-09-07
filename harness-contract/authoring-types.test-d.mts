@@ -119,8 +119,17 @@ const messagingCredentialProvider = {
   credentialEnv: "FUTURE_MESSAGING_TOKEN",
   sourceInputId: "token",
 } satisfies HarnessMessagingCredentialProvider;
+const messagingRefreshProvider = {
+  ...messagingCredentialProvider,
+  refresh: {
+    strategy: "google_service_account_jwt",
+    scopes: ["https://www.googleapis.com/auth/chat.bot"],
+    secretMaterialKeys: ["private_key"],
+  },
+} satisfies HarnessMessagingCredentialProvider;
 
 void messagingCredentialProvider;
+void messagingRefreshProvider;
 
 const messagingBuildRuntimeProfile = {
   packageId: "future-harness",

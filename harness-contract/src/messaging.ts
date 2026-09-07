@@ -72,7 +72,8 @@ export interface HarnessMessagingCredentialProvider {
   readonly sourceInputId: string;
   /** Absence means the source credential is installed directly into an endpointless profile. */
   readonly refresh?: {
-    readonly strategy: "google-service-account-jwt";
+    /** Canonical OpenShell profile value; core converts it only for the CLI flag. */
+    readonly strategy: "google_service_account_jwt";
     readonly scopes: readonly string[];
     readonly secretMaterialKeys: readonly string[];
   };

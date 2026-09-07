@@ -133,7 +133,7 @@ describe("Hermes messaging adapter", () => {
       credentialEnv: "GOOGLE_CHAT_ACCESS_TOKEN",
       sourceInputId: "serviceAccount",
       refresh: {
-        strategy: "google-service-account-jwt",
+        strategy: "google_service_account_jwt",
         scopes: [
           "https://www.googleapis.com/auth/chat.bot",
           "https://www.googleapis.com/auth/pubsub",

@@ -330,17 +330,6 @@ describe("collectSandboxStatusSnapshot Docker recovery", () => {
       },
     ],
     [
-      "mcp-reconciliation",
-      {
-        checked: true,
-        wasRunning: true,
-        recovered: false,
-        forwardRecovered: false,
-        mcpReconciliationRefused: true,
-        mcpReconciliationReason: "MCP intent mismatch",
-      },
-    ],
-    [
       "unsupported",
       {
         checked: true,

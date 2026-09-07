@@ -110,6 +110,46 @@ describe("parseSandboxMessagingPlan", () => {
     ).toBeNull();
   });
 
+  it("stores the canonical refresh strategy without accepting the CLI spelling", () => {
+    const credentialProvider = {
+      profilePath: "provider-profiles/googlechat.yaml",
+      profileId: "google-chat-bridge",
+      credentialEnv: "GOOGLE_CHAT_ACCESS_TOKEN",
+      sourceInputId: "serviceAccount",
+      sourceSecretEnv: "GOOGLECHAT_SERVICE_ACCOUNT",
+      refresh: {
+        strategy: "google_service_account_jwt",
+        scopes: ["https://www.googleapis.com/auth/chat.bot"],
+        secretMaterialKeys: ["private_key"],
+      },
+    } as const;
+    const source = makePlan({
+      packageBuild: { configRoot: "~/.future", packageManagers: [] },
+      channels: [{ ...makePlan().channels[0], credentialProvider }],
+    });
+
+    expect(parseSandboxMessagingPlan(source)?.channels[0]?.credentialProvider).toEqual(
+      credentialProvider,
+    );
+    expect(
+      parseSandboxMessagingPlan({
+        ...source,
+        channels: [
+          {
+            ...source.channels[0],
+            credentialProvider: {
+              ...credentialProvider,
+              refresh: {
+                ...credentialProvider.refresh,
+                strategy: "google-service-account-jwt",
+              },
+            },
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
   it("accepts compact persisted plans without manifest-derived sections", () => {
     const source = makePlan({
       channels: [

@@ -28,6 +28,7 @@ import {
   decodeManagedStartupProfile,
   encodeManagedStartupDurableProfile,
   encodeManagedStartupProfile,
+  type ManagedStartupJsonObject,
   type ManagedStartupPackageProfile,
   serializeManagedStartupDurableProfile,
   serializeManagedStartupProfile,
@@ -114,6 +115,14 @@ function futureDesiredState() {
     ...settings,
     configuration: { agent: FUTURE_PACKAGE_ID },
     dashboard: { agent: FUTURE_PACKAGE_ID, mode: "disabled" as const },
+  };
+}
+
+function packageMessagingSettings(placeholder: string): ManagedStartupJsonObject {
+  return {
+    messaging: {
+      plan: { credentialBindings: [{ placeholder }] },
+    },
   };
 }
 
@@ -270,7 +279,9 @@ describe("managed startup package profile", () => {
       buildManagedStartupPackageProfile({
         harnessPackage: FUTURE_PACKAGE_IDENTITY,
         desiredState,
-        packageConfig: { settings: desiredState },
+        packageConfig: {
+          settings: packageMessagingSettings("xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN"),
+        },
         credentialProxyReplayRequired: true,
         dashboardRemoteBindPrepared: false,
       }),
@@ -281,12 +292,7 @@ describe("managed startup package profile", () => {
         harnessPackage: FUTURE_PACKAGE_IDENTITY,
         desiredState,
         packageConfig: {
-          settings: {
-            ...desiredState,
-            messaging: {
-              plan: { credentialBindings: [{ placeholder: "xoxb-not-a-placeholder-token" }] },
-            },
-          },
+          settings: packageMessagingSettings("xoxb-not-a-placeholder-token"),
         },
         credentialProxyReplayRequired: true,
         dashboardRemoteBindPrepared: false,

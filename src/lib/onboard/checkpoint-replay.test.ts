@@ -458,7 +458,7 @@ describe("requiredMessagingProviderBindings", () => {
             sourceInputId: "serviceAccount",
             sourceSecretEnv: "FUTURE_SERVICE_ACCOUNT",
             refresh: {
-              strategy: "google-service-account-jwt",
+              strategy: "google_service_account_jwt",
               scopes: ["https://example.test/future.scope"],
               secretMaterialKeys: ["private_key"],
             },

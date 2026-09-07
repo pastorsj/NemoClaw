@@ -1002,7 +1002,7 @@ with tempfile.TemporaryDirectory() as root:
         "[gateway] Hermes replacement gateway failed listener or health validation; stopping the exact child",
         "[gateway] Hermes replacement gateway lost its listener or health endpoint during auxiliary validation; stopping the exact child",
         "[gateway] CRITICAL: Hermes gateway lost its listener or health endpoint; stopping the exact child for recovery",
-        "[gateway] CRITICAL: 5 exits in 60s window — Hermes relaunch is quarantined until sandbox recreation; check /tmp/gateway.log",
+        "[gateway] CRITICAL: 5 exits in 60s window — Hermes relaunch is stopped for this supervisor instance; correct the reported failure, then stop and start the sandbox; check /tmp/gateway.log",
         "[CRITICAL] Newly launched Hermes gateway pid 5252 failed exact role identity capture; quarantining the managed startup supervisor without signaling the unproven child",
     ]
     supervisor_log_uid = 1000 if os.geteuid() == 0 else os.geteuid()
@@ -1418,7 +1418,7 @@ describe("managed gateway root control", () => {
           "[gateway] Hermes replacement gateway failed listener or health validation; stopping the exact child",
           "[gateway] Hermes replacement gateway lost its listener or health endpoint during auxiliary validation; stopping the exact child",
           "[gateway] CRITICAL: Hermes gateway lost its listener or health endpoint; stopping the exact child for recovery",
-          "[gateway] CRITICAL: 5 exits in 60s window — Hermes relaunch is quarantined until sandbox recreation; check /tmp/gateway.log",
+          "[gateway] CRITICAL: 5 exits in 60s window — Hermes relaunch is stopped for this supervisor instance; correct the reported failure, then stop and start the sandbox; check /tmp/gateway.log",
           "[CRITICAL] Newly launched Hermes gateway pid 5252 failed exact role identity capture; quarantining the managed startup supervisor without signaling the unproven child",
         ],
         excerpt: [
@@ -1426,7 +1426,7 @@ describe("managed gateway root control", () => {
           "[gateway] Hermes replacement gateway failed listener or health validation; stopping the exact child",
           "[gateway] Hermes replacement gateway lost its listener or health endpoint during auxiliary validation; stopping the exact child",
           "[gateway] CRITICAL: Hermes gateway lost its listener or health endpoint; stopping the exact child for recovery",
-          "[gateway] CRITICAL: 5 exits in 60s window — Hermes relaunch is quarantined until sandbox recreation; check /tmp/gateway.log",
+          "[gateway] CRITICAL: 5 exits in 60s window — Hermes relaunch is stopped for this supervisor instance; correct the reported failure, then stop and start the sandbox; check /tmp/gateway.log",
           "[CRITICAL] Newly launched Hermes gateway pid 5252 failed exact role identity capture; quarantining the managed startup supervisor without signaling the unproven child",
         ],
         rejected_lines: [null, null, null, null, null],

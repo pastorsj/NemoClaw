@@ -25,7 +25,7 @@ import { policyChannelDependencies } from "../../src/lib/actions/sandbox/policy-
 import * as processRecovery from "../../src/lib/actions/sandbox/process-recovery";
 import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/types";
 import * as gatewayRuntime from "../../src/lib/gateway-runtime-action";
-import type { MessagingAgentId, SandboxMessagingPlan } from "../../src/lib/messaging";
+import type { SandboxMessagingPlan } from "../../src/lib/messaging";
 import * as policies from "../../src/lib/policy";
 import * as registry from "../../src/lib/state/registry";
 import type { SandboxEntry } from "../../src/lib/state/registry/types";
@@ -46,7 +46,7 @@ const MESSAGING_ENV_PREFIXES = [
   "WHATSAPP_",
 ];
 
-type AgentUnderTest = Extract<MessagingAgentId, "openclaw" | "hermes">;
+type AgentUnderTest = "openclaw" | "hermes";
 type SandboxCommandResult = {
   readonly status: number;
   readonly stdout: string;

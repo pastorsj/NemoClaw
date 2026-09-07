@@ -18,57 +18,16 @@ const RESTART_SUCCEEDED = {
   healthPassed: true,
   forwardRecovered: false,
 } as const;
-const RESTARTED_WITH_MCP_MISMATCH = {
-  ok: false,
-  failureLayer: "MCP reconciliation refusal",
-  detail: "Hermes MCP config does not match persisted managed intent",
-  restarted: true,
-  healthPassed: true,
-} as const;
-const MCP_REFUSED_BEFORE_RESTART = {
+const RESTART_REFUSED = {
   ok: false,
   failureLayer: "MCP reconciliation refusal",
   detail: "supervisor refused the restart before replacing the gateway",
 } as const;
 
 describe("binding the Hermes gateway to restored state", () => {
-  it("keeps restart evidence while rebuild restores the managed MCP projection (#8671)", () => {
-    const restartState = restartHermesGatewayAfterStateRestore("alpha", true, {
-      restartSandboxGateway: () => RESTARTED_WITH_MCP_MISMATCH,
-    });
-
-    expect(restartState).toBe("restarted");
-    expect(
-      verifyHermesGatewayAfterStateRestore("alpha", true, restartState, {
-        checkAndRecoverSandboxProcesses: () => ({
-          checked: true,
-          wasRunning: true,
-          recovered: false,
-        }),
-      }),
-    ).toBe("healthy");
-  });
-
-  it("rejects managed MCP drift that remains after rebuild restoration (#8671)", () => {
-    const restartState = restartHermesGatewayAfterStateRestore("alpha", true, {
-      restartSandboxGateway: () => RESTARTED_WITH_MCP_MISMATCH,
-    });
-
-    expect(
-      verifyHermesGatewayAfterStateRestore("alpha", true, restartState, {
-        checkAndRecoverSandboxProcesses: () => ({
-          checked: true,
-          wasRunning: true,
-          recovered: false,
-          mcpReconciliationRefused: true,
-        }),
-      }),
-    ).toBe("unverified");
-  });
-
   it("preserves an MCP refusal before gateway replacement (#8671)", () => {
     const restartState = restartHermesGatewayAfterStateRestore("alpha", true, {
-      restartSandboxGateway: () => MCP_REFUSED_BEFORE_RESTART,
+      restartSandboxGateway: () => RESTART_REFUSED,
     });
 
     expect(restartState).toBe("restart-failed");
@@ -128,23 +87,6 @@ describe("binding the Hermes gateway to restored state", () => {
         },
       ),
     ).toEqual({ state: "unverified" });
-    expect(restartSandboxGateway).not.toHaveBeenCalled();
-  });
-
-  it("preserves MCP reconciliation refusal during restart-free final verification (#7084)", () => {
-    const restartSandboxGateway = vi.fn(() => RESTART_SUCCEEDED);
-
-    expect(
-      verifyHermesGatewayAfterStateRestore("alpha", true, "restarted", {
-        restartSandboxGateway,
-        checkAndRecoverSandboxProcesses: () => ({
-          checked: true,
-          wasRunning: true,
-          recovered: false,
-          mcpReconciliationRefused: true,
-        }),
-      }),
-    ).toBe("unverified");
     expect(restartSandboxGateway).not.toHaveBeenCalled();
   });
 });
@@ -247,40 +189,6 @@ describe("Hermes rebuild post-restore verification", () => {
     const output = harness.logSpy.mock.calls.map((call) => String(call[0])).join("\n");
     expect(output).not.toContain("rebuilt successfully");
     expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalled();
-  });
-
-  it("fails when the final gateway check refuses MCP reconciliation (#7084)", async () => {
-    const mcpEntry = {
-      server: "blender",
-      providerName: "nemoclaw-mcp-alpha-blender",
-    };
-    const harness = createRebuildFlowHarness({
-      agentName: "hermes",
-      checkAndRecoverSandboxProcesses: () => ({
-        checked: true,
-        wasRunning: true,
-        recovered: false,
-        forwardRecovered: false,
-        mcpReconciliationRefused: true,
-      }),
-      mcpPreparation: {
-        entries: [mcpEntry],
-        detachedProviderEntries: [mcpEntry],
-        scrubbedAdapterEntries: [mcpEntry],
-      },
-      sandboxEntry: { agent: "hermes" },
-    });
-
-    await expect(
-      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).rejects.toThrow("Hermes Agent post-restore verification failed");
-
-    expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry], {
-      agentDefinition: expect.objectContaining({ name: "hermes" }),
-    });
-    expect(harness.logSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining("rebuilt successfully"),
-    );
   });
 
   it.each(["forwardRecoveryFailed", "secretBoundaryRefused"] as const)(

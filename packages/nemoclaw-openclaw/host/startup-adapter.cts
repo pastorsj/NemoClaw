@@ -276,7 +276,8 @@ function dashboardHostname(value) {
     if (authority.startsWith("[")) {
         const bracket = authority.indexOf("]");
         const suffix = bracket < 0 ? "" : authority.slice(bracket + 1);
-        if (bracket <= 1 || (suffix !== "" && (!suffix.startsWith(":") || !validPort(suffix.slice(1))))) {
+        if (bracket <= 1 ||
+            (suffix !== "" && (!suffix.startsWith(":") || !validPort(suffix.slice(1))))) {
             return fail("dashboard URL is invalid");
         }
         return authority.slice(0, bracket + 1).toLowerCase();

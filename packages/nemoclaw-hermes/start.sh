@@ -11,9 +11,10 @@
 #   - Gateway listens on internal port 18642, socat forwards the API to 8642
 #   - Dashboard listens on a private loopback port, socat forwards it to 18789
 #
-# SECURITY: The gateway runs as a separate user so the sandboxed agent cannot
-# kill it or restart it with a tampered config. Config hash is verified at
-# startup to detect tampering.
+# SECURITY: The direct-root gateway runs as a separate user so the sandboxed
+# agent cannot control its process lifecycle. Hermes config remains mutable;
+# restart transactions validate its paths, secret boundary, and managed MCP
+# state before a replacement consumes it.
 
 set -euo pipefail
 
@@ -198,11 +199,15 @@ print(f"{dashboard_port}|{external_host}")
 PYPORT
 }
 
+# Consumed by the package-owned service controller sourced later in this file.
+# shellcheck disable=SC2034
 HERMES_DASHBOARD_EXTERNAL_HOST=""
 _chat_ui_port=""
 if [ -n "${CHAT_UI_URL:-}" ]; then
   if _chat_ui_settings="$(_chat_ui_url_dashboard_settings)"; then
     _chat_ui_port="${_chat_ui_settings%%|*}"
+    # Consumed by runtime/service-control.sh.
+    # shellcheck disable=SC2034
     HERMES_DASHBOARD_EXTERNAL_HOST="${_chat_ui_settings#*|}"
   else
     printf '%s\n' \
@@ -336,7 +341,6 @@ HERMES_RESTART_SEALED=0
 HERMES_RESTART_UNSEALING=0
 HERMES_RESTART_SIGNAL_PENDING=0
 HERMES_MCP_RECONCILE_PENDING=0
-HERMES_MCP_INTEGRITY_FAILED=0
 
 # A same-container PID 1 restart can retain /run. Revoke the prior readiness
 # lease before any startup migration or mutable config read; host mutations are

@@ -223,12 +223,10 @@ handle_hermes_gateway_control_request() {
   local failure_code
 
   if [ "$GATEWAY_CONTROL_ACTION" = "probe" ]; then
-    if ! prepare_hermes_gateway_restart; then
+    # Probe verifies the running process and credential boundary. It does not
+    # adopt mutable config or change MCP transaction state.
+    if ! validate_running_hermes_boundary; then
       gateway_control_fail "$HERMES_RESTART_FAILURE_CODE" "$old_pid"
-      return 1
-    fi
-    if [ "$HERMES_MCP_RECONCILE_PENDING" -eq 1 ]; then
-      gateway_control_fail mcp-reconcile-required "$old_pid"
       return 1
     fi
     if ! gateway_control_pid_is_live "$old_pid" \
@@ -245,8 +243,8 @@ handle_hermes_gateway_control_request() {
     && gateway_control_pid_is_live "$old_pid" \
     && hermes_gateway_healthy "$old_pid"; then
     # Recovery may also recreate the dashboard from the shared Hermes config.
-    # Verify the root-owned trust anchor before any auxiliary consumes it; a
-    # healthy gateway is not authority to bless direct sandbox config drift.
+    # Adopt one stable snapshot before any auxiliary consumes current config;
+    # the old gateway's health does not prove that snapshot stayed unchanged.
     if ! prepare_hermes_gateway_restart; then
       if hermes_restart_failure_revokes_gateway "$HERMES_RESTART_FAILURE_CODE"; then
         stop_hermes_gateway_fail_closed
@@ -394,10 +392,9 @@ prepare_hermes_nonroot_runtime() {
   # startup mutations below so their outputs remain covered as well.
   validate_hermes_env_secret_boundary || return 1
   # The non-root Hermes runtime can persist safe config/env changes while it is
-  # running. Reconcile that mutable compatibility anchor only after the secret
-  # boundary is valid; refresh-hashes still requires the recorded MCP intent to
-  # match exactly before it advances the anchor.
-  refresh_hermes_runtime_config_hashes compat || return 1
+  # running. Adopt one stable snapshot only after the secret boundary is valid.
+  # Direct MCP drift becomes pending until the replacement gateway is healthy.
+  refresh_hermes_runtime_config_hashes compat adopt || return 1
   inspect_hermes_mcp_integrity "${HERMES_DIR}/.config-hash" || return 1
   prepare_hermes_lazy_dependencies || return 1
   ensure_hermes_runtime_api_server_key compat || return 1
@@ -505,7 +502,10 @@ publish_hermes_root_runtime_marker() {
 }
 
 prepare_hermes_root_runtime() {
-  verify_hermes_config_integrity || return 1
+  validate_hermes_env_secret_boundary || return 1
+  validate_hermes_runtime_env_secret_boundary || return 1
+  refresh_hermes_runtime_config_hashes both adopt || return 1
+  inspect_hermes_mcp_integrity "$HERMES_HASH_FILE" || return 1
   prepare_hermes_lazy_dependencies || return 1
   ensure_hermes_config_root_mode || return 1
   ensure_hermes_runtime_api_server_key both || return 1
@@ -660,26 +660,27 @@ record_hermes_managed_gateway_exit() {
   HERMES_MANAGED_GATEWAY_EXIT_TIMES=("${retained[@]+"${retained[@]}"}")
   HERMES_MANAGED_GATEWAY_EXIT_COUNT=${#HERMES_MANAGED_GATEWAY_EXIT_TIMES[@]}
   if [ "$HERMES_MANAGED_GATEWAY_EXIT_COUNT" -ge 5 ]; then
-    echo "[gateway] CRITICAL: $HERMES_MANAGED_GATEWAY_EXIT_COUNT exits in 60s window — Hermes relaunch is quarantined until sandbox recreation; check /tmp/gateway.log" >&2
+    echo "[gateway] CRITICAL: $HERMES_MANAGED_GATEWAY_EXIT_COUNT exits in 60s window — Hermes relaunch is stopped for this supervisor instance; correct the reported failure, then stop and start the sandbox; check /tmp/gateway.log" >&2
     quarantine_hermes_managed_gateway_relaunch
     return 1
   fi
 }
 
 recover_hermes_gateway_current_user() {
-  local replacement_reached_internal_health
+  local replacement_reached_internal_health preparation_failures=0 preparation_failure_limit=5
 
   while :; do
     replacement_reached_internal_health=0
     until prepare_hermes_nonroot_runtime; do
-      if [ "$HERMES_MCP_INTEGRITY_FAILED" -eq 1 ]; then
-        echo "[SECURITY] Hermes automatic respawn is quarantined until MCP integrity is restored by rebuilding the sandbox" >&2
-        quarantine_hermes_managed_gateway_relaunch
+      preparation_failures=$((preparation_failures + 1))
+      if [ "$preparation_failures" -ge "$preparation_failure_limit" ]; then
+        echo "[gateway] Hermes runtime preparation failed after ${preparation_failures} consecutive attempts; supervisor exiting without launching a gateway; correct the reported failure, then stop and start the sandbox" >&2
         return 1
       fi
       echo "[gateway] Hermes runtime preparation refused automatic respawn; retrying in 5s" >&2
       sleep 5 || true
     done
+    preparation_failures=0
     if ! launch_hermes_gateway_current_user; then
       echo "[gateway] Hermes gateway launch failed; retrying under the same supervisor" >&2
       sleep 5 || true

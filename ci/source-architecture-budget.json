@@ -28,7 +28,7 @@
       "src/lib/onboard/gateway-binding.ts": 54,
       "src/lib/onboard/sandbox-agent.ts": 18,
       "src/lib/runner.ts": 79,
-      "src/lib/security/redact.ts": 51,
+      "src/lib/security/redact.ts": 50,
       "src/lib/state/onboard-session.ts": 38,
       "src/lib/state/mcp-lifecycle-lock.ts": 21,
       "src/lib/state/mcp-lifecycle-lock-acquisition.ts": 20,
@@ -47,7 +47,7 @@
       "src/lib/actions/sandbox/gateway-state.ts": 21,
       "src/lib/actions/sandbox/status-snapshot.ts": 19,
       "src/lib/actions/sandbox/policy-channel.ts": 30,
-      "src/lib/actions/sandbox/process-recovery.ts": 20,
+      "src/lib/actions/sandbox/process-recovery.ts": 19,
       "src/lib/actions/sandbox/rebuild-pipeline.ts": 30,
       "src/lib/actions/sandbox/snapshot.ts": 36,
       "src/lib/actions/uninstall/run-plan.ts": 25,
@@ -67,7 +67,7 @@
   "maxRootFiles": {
     "src/lib/onboard": 302,
     "src/lib/actions": 18,
-    "src/lib/actions/sandbox": 178,
+    "src/lib/actions/sandbox": 177,
     "src/lib/state": 38,
     "src/lib/inference": 63,
     "scripts": 32

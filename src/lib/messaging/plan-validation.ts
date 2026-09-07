@@ -168,7 +168,7 @@ function isCredentialProvider(value: unknown): boolean {
         ["strategy", "scopes", "secretMaterialKeys"].includes(key),
       ) &&
       Object.keys(refresh).length === 3 &&
-      refresh.strategy === "google-service-account-jwt" &&
+      refresh.strategy === "google_service_account_jwt" &&
       Array.isArray(refresh.scopes) &&
       refresh.scopes.length > 0 &&
       refresh.scopes.length <= 16 &&

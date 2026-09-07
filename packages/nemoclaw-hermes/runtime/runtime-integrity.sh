@@ -176,11 +176,13 @@ refresh_hermes_provider_placeholders() {
 
 refresh_hermes_runtime_config_hashes() {
   local mode="${1:-strict}"
+  local mcp_transition="${2:-preserve}"
   local cmd=(
     "$_HERMES_PYTHON" -I "$_HERMES_RUNTIME_CONFIG_GUARD" refresh-hashes
     --hermes-dir "$HERMES_DIR"
     --hash-file "$HERMES_HASH_FILE"
     --mode "$mode"
+    --mcp-transition "$mcp_transition"
     --startup-owner
   )
   if [ "$mode" = "compat" ] && [ "$(id -u)" -eq 0 ]; then
@@ -228,14 +230,10 @@ inspect_hermes_mcp_integrity() {
     0) HERMES_MCP_RECONCILE_PENDING=0 ;;
     10) HERMES_MCP_RECONCILE_PENDING=1 ;;
     *)
-      HERMES_MCP_INTEGRITY_FAILED=1
       echo "[SECURITY] HERMES_MCP_CONFIG_DRIFT: MCP intent cannot be matched to the persisted gateway state; rebuild the sandbox from its NemoClaw registry state" >&2
       return 1
       ;;
   esac
-  # Consumed by gateway-control.sh after both modules are sourced.
-  # shellcheck disable=SC2034
-  HERMES_MCP_INTEGRITY_FAILED=0
 }
 
 commit_hermes_mcp_applied_if_pending() {
@@ -364,13 +362,14 @@ prepare_hermes_gateway_restart() {
     return 1
   fi
 
-  # A restart is a lifecycle action, not authority to bless arbitrary bytes
-  # written by the sandbox user. Supported host config commands refresh the
-  # root-owned strict hash when they make a change; direct in-sandbox edits do
-  # not. Require that trusted anchor instead of chowning attacker-controlled
-  # paths or adopting a new hash here.
+  # Hermes owns its mutable config. Adopt one stable snapshot before sealing
+  # restart inputs. A direct MCP change becomes pending and is committed only
+  # after replacement health. Host reconciliation reports any registry mismatch
+  # without making that host state a precondition for Hermes to run.
   HERMES_RESTART_FAILURE_CODE=hash-mismatch
-  verify_hermes_config_integrity || return 1
+  refresh_hermes_runtime_config_hashes both adopt || return 1
+  HERMES_RESTART_FAILURE_CODE=mcp-integrity
+  inspect_hermes_mcp_integrity "$HERMES_HASH_FILE" || return 1
   prepare_hermes_lazy_dependencies
 }
 

@@ -15,19 +15,22 @@ credentials:
     header_name: Authorization
     query_param: ''
     refresh:
-      strategy: google-service-account-jwt
+      strategy: google_service_account_jwt
       scopes:
         - https://www.googleapis.com/auth/chat.bot
       material:
         - name: client_email
           description: Service-account client email
           required: true
+          secret: false
         - name: private_key
           description: Service-account RSA private key
           required: true
           secret: true
         - name: scope
           description: OAuth scopes used to mint the token
+          required: false
+          secret: false
 endpoints:
   - host: chat.googleapis.com
     port: 443

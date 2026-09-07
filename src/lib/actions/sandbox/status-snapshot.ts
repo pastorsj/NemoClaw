@@ -240,7 +240,6 @@ type SandboxProcessRecoveryFailure = {
     | "inspection"
     | "unsupported"
     | "secret-boundary"
-    | "mcp-reconciliation"
     | "gateway-recovery"
     | "forward-recovery"
     | "recovery-error";
@@ -303,16 +302,6 @@ function processRecoveryFailure(
         "secretBoundaryReason" in result
           ? result.secretBoundaryReason
           : "the agent secret boundary refused recovery",
-      ),
-    };
-  }
-  if ("mcpReconciliationRefused" in result && result.mcpReconciliationRefused) {
-    return {
-      layer: "mcp-reconciliation",
-      detail: sanitizedStatusDetail(
-        "mcpReconciliationReason" in result
-          ? result.mcpReconciliationReason
-          : "MCP reconciliation refused recovery",
       ),
     };
   }

@@ -188,12 +188,13 @@ hermes_fatal_unproven_child() {
   # In managed OpenShell, exiting this non-root supervisor would leave PID 1
   # and the unproven child alive. Bash's job table can still wait for the exact
   # `$!` child without treating a reused numeric PID as authority to signal it.
-  # Quarantine the supervisor after that child exits; only sandbox destruction
-  # may tear down a process tree whose identities could not be established.
+  # Quarantine this supervisor after that child exits. A sandbox stop/start
+  # replaces the supervisor through the sandbox lifecycle without asking this
+  # process to signal a child whose identity it could not establish.
   echo "[CRITICAL] Newly launched Hermes ${role} pid ${pid} failed exact role identity capture; quarantining the managed startup supervisor without signaling the unproven child" >&2
   trap ':' TERM INT
   wait "$pid" 2>/dev/null || true
-  echo "[CRITICAL] Unproven Hermes ${role} child exited; managed supervisor remains quarantined until sandbox recreation" >&2
+  echo "[CRITICAL] Unproven Hermes ${role} child exited; relaunch is stopped for this supervisor instance; correct the reported failure, then stop and start the sandbox" >&2
   while :; do
     sleep 60 || true
   done

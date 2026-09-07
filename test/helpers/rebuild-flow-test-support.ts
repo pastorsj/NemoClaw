@@ -58,7 +58,6 @@ export type RebuildFlowOverrides = {
     forwardRecovered: boolean;
     forwardRecoveryFailed?: boolean;
     secretBoundaryRefused?: boolean;
-    mcpReconciliationRefused?: boolean;
   };
   restartSandboxGateway?: () => GatewayRestartResult;
   establishRestoredSandboxGatewayPairing?: () => Promise<void>;

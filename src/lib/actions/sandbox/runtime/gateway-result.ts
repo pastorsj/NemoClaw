@@ -58,6 +58,7 @@ export type GatewayRestartFailureLayer =
 const GATEWAY_RELAUNCH_QUARANTINE_MARKERS = [
   "quarantined until sandbox recreation",
   "quarantined until MCP integrity is restored",
+  "relaunch is stopped for this supervisor instance",
   "quarantined without another launch",
   "quarantining the managed startup supervisor",
 ] as const;

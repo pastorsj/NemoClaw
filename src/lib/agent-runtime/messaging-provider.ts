@@ -10,7 +10,7 @@ type ParsedMessagingCredentialProvider = Readonly<{
   profileId: string;
   credentialEnv: string;
   refresh?: Readonly<{
-    strategy: "google-service-account-jwt";
+    strategy: "google_service_account_jwt";
     scopes: readonly string[];
     secretMaterialKeys: readonly string[];
   }>;
@@ -26,6 +26,29 @@ function record(value: unknown): Record<string, unknown> | null {
 
 function stringList(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : null;
+}
+
+const GOOGLE_SERVICE_ACCOUNT_MATERIAL_CONTRACT = Object.freeze([
+  Object.freeze({ name: "client_email", required: true, secret: false }),
+  Object.freeze({ name: "private_key", required: true, secret: true }),
+  Object.freeze({ name: "scope", required: false, secret: false }),
+]);
+
+function hasCanonicalGoogleServiceAccountMaterial(material: readonly unknown[]): boolean {
+  const flags = material
+    .flatMap((entry) => {
+      const item = record(entry);
+      return typeof item?.name === "string" &&
+        typeof item.required === "boolean" &&
+        typeof item.secret === "boolean"
+        ? [{ name: item.name, required: item.required, secret: item.secret }]
+        : [];
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+  return (
+    flags.length === material.length &&
+    isDeepStrictEqual(flags, GOOGLE_SERVICE_ACCOUNT_MATERIAL_CONTRACT)
+  );
 }
 
 /** Parse only the finite OpenShell fields that NemoClaw's messaging executor consumes. */
@@ -69,10 +92,16 @@ export function parseMessagingCredentialProviderProfile(
     return Object.freeze({ profileId, credentialEnv: envVars[0]! });
   }
 
-  if (refresh.strategy !== "google-service-account-jwt") return null;
+  if (refresh.strategy !== "google_service_account_jwt") return null;
   const scopes = stringList(refresh.scopes);
   const material = Array.isArray(refresh.material) ? refresh.material : null;
-  if (!scopes || scopes.length === 0 || !material) return null;
+  if (
+    !scopes ||
+    scopes.length === 0 ||
+    !material ||
+    !hasCanonicalGoogleServiceAccountMaterial(material)
+  )
+    return null;
   const secretMaterialKeys = material.flatMap((entry) => {
     const item = record(entry);
     return item?.secret === true && typeof item.name === "string" ? [item.name] : [];

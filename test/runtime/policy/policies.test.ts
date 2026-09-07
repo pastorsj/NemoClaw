@@ -18,6 +18,7 @@ import {
   SANDBOX_ID,
   SANDBOX_IDENTITY,
 } from "../../helpers/live-policy-fixture";
+import type { SandboxEntry } from "../../../src/lib/state/registry";
 
 const requireForTest = createRequire(import.meta.url);
 const YAML = requireForTest("yaml");
@@ -657,9 +658,7 @@ process.stdout.write("\n__RESULT__" + JSON.stringify({
   });
 
   describe("preset apply must not overwrite a live policy that could not be read (#4586)", () => {
-    const registryModule = requireForTest(
-      path.join(REPO_ROOT, "src", "lib", "state", "registry.ts"),
-    ) as Record<string, any>;
+    const registryModule = registryForTest;
     const CUSTOM = "network_policies:\n  example:\n    host: example.com\n";
     const DEGRADED =
       '#!/bin/sh\nif [ "$1" = "policy" ] && [ "$2" = "get" ]; then echo "error: gateway is restarting"; fi\nexit 0\n';
@@ -733,9 +732,7 @@ process.stdout.write("\n__RESULT__" + JSON.stringify({
   });
 
   describe("policy-add when the sandbox is absent from the registry (#4510, #9295)", () => {
-    const registryModule = requireForTest(
-      path.join(REPO_ROOT, "src", "lib", "state", "registry.ts"),
-    ) as Record<string, any>;
+    const registryModule = registryForTest;
     const CUSTOM_CONTENT = `preset:
   name: slack-files-upload
   description: Allow Slack file uploads
@@ -818,7 +815,7 @@ exit 0
 
     it("refuses a built-in preset when sandbox policy state cannot be located", () => {
       vi.spyOn(registryModule, "getSandbox").mockImplementation(() => null);
-      const updateSpy = vi.fn(() => true);
+      const updateSpy = vi.fn<typeof registryModule.updateSandbox>(() => true);
       vi.spyOn(registryModule, "updateSandbox").mockImplementation(updateSpy);
       const errors: string[] = [];
       const errSpy = vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => {
@@ -839,14 +836,12 @@ exit 0
     });
 
     it("applies a well-formed custom preset without recording a policy copy", () => {
-      let sandbox: Record<string, unknown> = managedSandboxEntry("my-assistant");
+      let sandbox: SandboxEntry = managedSandboxEntry("my-assistant");
       vi.spyOn(registryModule, "getSandbox").mockImplementation(() => sandbox);
-      vi.spyOn(registryModule, "updateSandbox").mockImplementation(
-        (_name: string, updates: Record<string, unknown>) => {
-          sandbox = { ...sandbox, ...updates };
-          return true;
-        },
-      );
+      vi.spyOn(registryModule, "updateSandbox").mockImplementation((_name, updates) => {
+        sandbox = { ...sandbox, ...updates };
+        return true;
+      });
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
       const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
       try {

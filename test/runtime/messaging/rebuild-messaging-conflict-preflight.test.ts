@@ -16,6 +16,8 @@ import type { HarnessStartupSettings } from "@nvidia/nemoclaw-harness-contract";
 import { afterEach, describe, expect, it } from "vitest";
 import type { HarnessPackageIdentity } from "../../../src/lib/agent-runtime/package/identity";
 import { findChannelConflictsFromPlan } from "../../../src/lib/messaging/applier";
+import type { SandboxMessagingPlan } from "../../../src/lib/messaging/manifest";
+import type { SandboxEntry } from "../../../src/lib/state/registry";
 import { hydrateMessagingRegistryEntriesForAuthority } from "../../../src/lib/state/registry/messaging-authority";
 import {
   createPackageStartupProfileFixture,
@@ -28,6 +30,9 @@ const DOCKER_OPERATING_SYSTEM =
   ({ darwin: "Docker Desktop" } as Partial<Record<NodeJS.Platform, string>>)[process.platform] ??
   "Docker Engine";
 const tmpFixtures: string[] = [];
+type TeamsSandboxEntry = SandboxEntry & {
+  readonly messaging: { readonly schemaVersion: 1; readonly plan: SandboxMessagingPlan };
+};
 
 afterEach(() => {
   tmpFixtures.splice(0).forEach((dir) => {
@@ -43,7 +48,7 @@ afterEach(() => {
 // credential binding carrying a hash — staging preserves credentialBindings
 // verbatim, so a shared hash across two sandboxes is a "matching-token"
 // conflict.
-function teamsPlan(sandboxName: string, credentialHash: string) {
+function teamsPlan(sandboxName: string, credentialHash: string): SandboxMessagingPlan {
   return {
     schemaVersion: 1,
     sandboxName,
@@ -174,7 +179,7 @@ function createConflictFixture() {
   expect(gatewayPort).toBeGreaterThan(0);
   const gatewayName = `nemoclaw-${String(gatewayPort)}`;
 
-  const sandboxEntry = (name: string) => {
+  const sandboxEntry = (name: string): TeamsSandboxEntry => {
     const plan = teamsPlan(name, "shared-teams-hash");
     const desiredState: HarnessStartupSettings = {
       configuration: { agent: "openclaw" },
