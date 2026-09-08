@@ -19,11 +19,11 @@ function withPackageRoot(run: (packageRoot: string) => void): void {
   }
 }
 
-test("materializes and verifies each reviewed shared runtime", () => {
+test("materializes and verifies each reviewed shared runtime with its declared mode", () => {
   withPackageRoot((packageRoot) => {
-    for (const [artifact, destination] of [
-      ["managed-gateway", "runtime/managed-gateway-control.py"],
-      ["messaging-build", "messaging/messaging-build.mts"],
+    for (const [artifact, destination, expectedMode] of [
+      ["managed-gateway", "runtime/managed-gateway-control.py", 0o755],
+      ["messaging-build", "messaging/messaging-build.mts", 0o644],
     ] as const) {
       materializeHarnessRuntime({ artifact, destination, workingDirectory: packageRoot });
       materializeHarnessRuntime({
@@ -32,7 +32,19 @@ test("materializes and verifies each reviewed shared runtime", () => {
         workingDirectory: packageRoot,
         check: true,
       });
-      assert.ok((fs.statSync(path.join(packageRoot, destination)).mode & 0o111) !== 0);
+      const outputPath = path.join(packageRoot, destination);
+      assert.equal(fs.statSync(outputPath).mode & 0o777, expectedMode);
+      fs.chmodSync(outputPath, expectedMode === 0o755 ? 0o644 : 0o755);
+      assert.throws(
+        () =>
+          materializeHarnessRuntime({
+            artifact,
+            destination,
+            workingDirectory: packageRoot,
+            check: true,
+          }),
+        /has a stale mode/u,
+      );
     }
   });
 });

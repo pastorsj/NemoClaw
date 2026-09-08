@@ -13,8 +13,8 @@ const CONTRACT_ROOT = path.basename(TOOL_ROOT) === "dist" ? path.dirname(TOOL_RO
 const RUNTIME_ROOT = path.join(CONTRACT_ROOT, "runtime");
 const MAX_RUNTIME_BYTES = 4 * 1024 * 1024;
 const RUNTIME_ARTIFACTS = Object.freeze({
-  "managed-gateway": "gateway-runtime.py",
-  "messaging-build": "messaging-build.mts",
+  "managed-gateway": Object.freeze({ source: "gateway-runtime.py", mode: 0o755 }),
+  "messaging-build": Object.freeze({ source: "messaging-build.mts", mode: 0o644 }),
 });
 
 export type HarnessRuntimeArtifact = keyof typeof RUNTIME_ARTIFACTS;
@@ -49,7 +49,7 @@ function requireSafeDestination(destination: string, workingDirectory: string): 
 }
 
 function runtimeSource(artifact: HarnessRuntimeArtifact): Buffer {
-  const sourcePath = path.join(RUNTIME_ROOT, RUNTIME_ARTIFACTS[artifact]);
+  const sourcePath = path.join(RUNTIME_ROOT, RUNTIME_ARTIFACTS[artifact].source);
   const metadata = requireRegularFile(sourcePath, `runtime artifact '${artifact}'`);
   if (metadata.size > MAX_RUNTIME_BYTES) fail(`runtime artifact '${artifact}' exceeds its limit`);
   return fs.readFileSync(sourcePath);
@@ -64,16 +64,20 @@ export function materializeHarnessRuntime(options: {
   const workingDirectory = fs.realpathSync.native(path.resolve(options.workingDirectory ?? "."));
   const outputPath = requireSafeDestination(options.destination, workingDirectory);
   const expected = runtimeSource(options.artifact);
+  const expectedMode = RUNTIME_ARTIFACTS[options.artifact].mode;
   if (options.check) {
     if (!fs.existsSync(outputPath) || !fs.readFileSync(outputPath).equals(expected)) {
       fail(`${options.destination} is stale; materialize '${options.artifact}' again`);
+    }
+    if ((fs.statSync(outputPath).mode & 0o777) !== expectedMode) {
+      fail(`${options.destination} has a stale mode; materialize '${options.artifact}' again`);
     }
     return;
   }
   const temporaryPath = `${outputPath}.tmp-${String(process.pid)}`;
   try {
-    fs.writeFileSync(temporaryPath, expected, { flag: "wx", mode: 0o755 });
-    fs.chmodSync(temporaryPath, 0o755);
+    fs.writeFileSync(temporaryPath, expected, { flag: "wx", mode: expectedMode });
+    fs.chmodSync(temporaryPath, expectedMode);
     fs.renameSync(temporaryPath, outputPath);
   } finally {
     fs.rmSync(temporaryPath, { force: true });
