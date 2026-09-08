@@ -1,44 +1,563 @@
 {
   "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\nSPDX-License-Identifier: Apache-2.0",
-  "description": "Audited pre-package compatibility and separately qualified Portable-product decisions. Receipt-backed harness packages must not reach these branches. Remove an entry when its legacy or qualified product path is retired. New entries require a named audit.",
-  "match": ["file","function","decisionKind","packageId","occurrences"],
-  "entries": [
-    ["src/lib/actions/sandbox/agents/legacy-rebuild.ts","prepareLegacyManagedRebuildProfileHandoff","equality","hermes",4],
-    ["src/lib/actions/sandbox/agents/legacy-rebuild.ts","prepareLegacyManagedRebuildProfileHandoff","equality","langchain-deepagents-code",1],
-    ["src/lib/actions/sandbox/agents/legacy-rebuild.ts","prepareLegacyManagedRebuildProfileHandoff","equality","openclaw",7],
-    ["src/lib/actions/sandbox/legacy-skin.ts","prepareLegacyHermesLightSkin","equality","hermes",2],
-    ["src/lib/actions/sandbox/policy-channel.ts","clearSandboxChannelDurableState","equality","openclaw",1],
-    ["src/lib/actions/sandbox/policy-channel.ts","removeSandboxChannelUnlocked","equality","openclaw",1],
-    ["src/lib/actions/sandbox/portable-status.ts","getQualifiedHermesPortablePhase","equality","hermes",1],
-    ["src/lib/actions/sandbox/portable-status.ts","inspectHermesPortableStatus","equality","hermes",1],
-    ["src/lib/actions/sandbox/rebuild-messaging-phase.ts","reapplyMessagingManifestAfterOpenClawDoctor","equality","openclaw",1],
-    ["src/lib/actions/sandbox/runtime/hermes-cron-restore-recovery.ts","recoverSandboxStateAfterRestore","equality","hermes",2],
-    ["src/lib/actions/sandbox/sessions/legacy-export.ts","exportSandboxSessionsUnlocked","equality","hermes",1],
-    ["src/lib/actions/sandbox/sessions/legacy-export.ts","rejectOpenClawOnlyOptions","equality","hermes",1],
-    ["src/lib/actions/sandbox/sessions/legacy-list.ts","runLegacySessionList","equality","hermes",3],
-    ["src/lib/actions/sandbox/snapshot/legacy-hermes.ts","destinationHermesBindings","equality","hermes",1],
-    ["src/lib/actions/sandbox/snapshot/legacy-hermes.ts","hermesEnabled","equality","hermes",1],
-    ["src/lib/actions/sandbox/snapshot/legacy-providers.ts","applicationBindings","equality","hermes",2],
-    ["src/lib/actions/sandbox/snapshot/legacy-providers.ts","applicationBindings","equality","openclaw",1],
-    ["src/lib/actions/sandbox/snapshot/legacy-providers.ts","destinationOwnedBindings","equality","hermes",1],
-    ["src/lib/actions/sandbox/supervisor-relaunch.ts","<module>","membership","hermes",1],
-    ["src/lib/actions/sandbox/supervisor-relaunch.ts","<module>","membership","openclaw",1],
-    ["src/lib/actions/uninstall/hermes-portable-uninstall.ts","requireSandboxRow","equality","hermes",1],
-    ["src/lib/actions/uninstall/hermes-portable-uninstall.ts","schema5SandboxNames","equality","hermes",1],
-    ["src/lib/actions/uninstall/portable-runtime-cleanup.ts","requireReceiptRegistryOwnership","equality","openclaw",1],
-    ["src/lib/onboard/experimental/hermes-portable-ollama-inference.ts","createHermesPortableOllamaInferenceResolver","equality","hermes",1],
-    ["src/lib/onboard/experimental/hermes-portable-ollama-inference.ts","inspectHermesPortableOllamaReadinessRuntime","equality","hermes",1],
-    ["src/lib/onboard/experimental/hermes-portable-onboarding.ts","classifyHermesPortableRegistry","equality","hermes",1],
-    ["src/lib/onboard/experimental/hermes-portable-onboarding.ts","isHermesPortableLifecycleMode","equality","hermes",1],
-    ["src/lib/onboard/experimental/hermes-portable-onboarding.ts","requireCurrentReceiptSnapshot","equality","hermes",1],
-    ["src/lib/onboard/experimental/hermes-portable-onboarding.ts","runHermesPortableOnboardingTransaction","equality","hermes",1],
-    ["src/lib/onboard/experimental/hermes-portable-onboarding.ts","runHermesPortableOnboardingTransaction","equality","openclaw",1],
-    ["src/lib/onboard/openclaw-setup.ts","readEnabled","equality","openclaw",1],
-    ["src/lib/onboard/workload/legacy-clone.ts","prepareLegacyManagedCloneHandoff","equality","hermes",1],
-    ["src/lib/onboard/workload/legacy-clone.ts","reboundMessaging","equality","langchain-deepagents-code",1],
-    ["src/lib/onboard/workload/legacy-clone.ts","reboundMessaging","equality","pi",1],
-    ["src/lib/onboard/workload/legacy-clone.ts","registryFields","equality","hermes",4],
-    ["src/lib/onboard/workload/legacy-clone.ts","registryFields","equality","langchain-deepagents-code",1],
-    ["src/lib/onboard/workload/legacy-clone.ts","registryFields","equality","openclaw",5]
-  ]
+  "description": "Audited exact harness-ID decisions that remain in production core. Receipt-backed code receives no broader exception: every allowance is pinned to its file, owning function, decision kind, package ID, and occurrence count. Remove entries as compatibility and product-specific paths move behind package metadata. New entries require a named audit.",
+  "match": ["file", "function", "decisionKind", "packageId", "occurrences"],
+  "classifications": {
+    "legacy-migration": {
+      "description": "Compatibility decisions that read, translate, restore, rebuild, or retire state created before package receipts.",
+      "decisions": {
+        "src/lib/actions/sandbox/agents/legacy-rebuild.ts": [
+          ["prepareLegacyManagedRebuildProfileHandoff", "equality", "hermes", 4],
+          ["prepareLegacyManagedRebuildProfileHandoff", "equality", "langchain-deepagents-code", 1],
+          ["prepareLegacyManagedRebuildProfileHandoff", "equality", "openclaw", 7]
+        ],
+        "src/lib/actions/sandbox/forward-recovery.ts": [
+          ["resolveDeclaredAgentForwardPorts", "equality", "hermes", 2]
+        ],
+        "src/lib/actions/sandbox/hermes-dashboard-recovery.ts": [
+          ["getHermesDashboardRecoveryConfig", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/sandbox/rebuild-messaging-phase.ts": [
+          ["reapplyMessagingManifestAfterOpenClawDoctor", "equality", "openclaw", 1]
+        ],
+        "src/lib/actions/sandbox/rebuild/legacy-state.ts": [
+          ["filterLegacyRebuildToolGatewaysForWebSearch", "equality", "hermes", 1],
+          [
+            "legacyManagedRebuildRejectsCustomDockerfile",
+            "equality",
+            "langchain-deepagents-code",
+            1
+          ],
+          ["legacyRebuildCanReuseGatewayWebSearchCredential", "equality", "openclaw", 1],
+          ["legacyRebuildPreservesScheduledWork", "equality", "hermes", 1],
+          ["legacyRebuildRequiresImagePluginProvenance", "equality", "openclaw", 1],
+          ["resolveLegacyRebuildToolGateways", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/sandbox/runtime/hermes-cron-restore-recovery.ts": [
+          ["recoverSandboxStateAfterRestore", "equality", "hermes", 2]
+        ],
+        "src/lib/actions/sandbox/runtime/legacy-recovery.ts": [
+          ["collectLegacyGatewayFailureLog", "equality", "hermes", 1],
+          ["isLegacyManagedGatewayAgent", "equality", "hermes", 2],
+          ["isLegacyManagedGatewayAgent", "equality", "openclaw", 2],
+          ["legacyRecoveryDisplayName", "equality", "openclaw", 1],
+          ["needsLegacyOpenClawRelaunchWindow", "equality", "openclaw", 1],
+          ["requiresLegacyRunningGatewayRevalidation", "equality", "hermes", 1],
+          ["validateLegacyGatewayRestartAgent", "equality", "hermes", 3],
+          ["validateLegacyGatewayRestartAgent", "equality", "openclaw", 3]
+        ],
+        "src/lib/actions/sandbox/snapshot-hermes-gateway-hint.ts": [
+          ["printLegacyHermesGatewayRestoreHint", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/sandbox/snapshot/legacy-hermes.ts": [
+          ["destinationHermesBindings", "equality", "hermes", 1],
+          ["hermesEnabled", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/sandbox/snapshot/legacy-providers.ts": [
+          ["applicationBindings", "equality", "hermes", 2],
+          ["applicationBindings", "equality", "openclaw", 1],
+          ["destinationOwnedBindings", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/update.ts": [
+          ["updateBranding", "equality", "hermes", 1],
+          ["updateBranding", "equality", "langchain-deepagents-code", 1]
+        ],
+        "src/lib/actions/upgrade/legacy.ts": [
+          ["isConfirmedLegacyManagedUpgradeSandbox", "equality", "hermes", 1],
+          ["isConfirmedLegacyManagedUpgradeSandbox", "equality", "openclaw", 1]
+        ],
+        "src/lib/agent-runtime/package/identity.ts": [
+          ["<module>", "membership", "hermes", 1],
+          ["<module>", "membership", "langchain-deepagents-code", 1],
+          ["<module>", "membership", "openclaw", 1],
+          ["<module>", "membership", "pi", 1]
+        ],
+        "src/lib/config/export-observation.ts": [
+          ["classifyExportRegistryFidelity", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/agent-resume-state.ts": [
+          ["clearAgentScopedResumeState", "equality", "openclaw", 1],
+          ["normalizeAgentNameForResumeState", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/checkpoint-replay.ts": [
+          ["requiredWebSearchProviderType", "equality", "hermes", 1]
+        ],
+        "src/lib/onboard/machine/handlers/sandbox-resume.ts": [
+          ["hasCompatibleEndpointInferenceApiDrift", "equality", "hermes", 1]
+        ],
+        "src/lib/onboard/managed-startup/legacy-clone.ts": [
+          ["currentAgentConfig", "equality", "langchain-deepagents-code", 1],
+          ["currentAgentConfig", "equality", "pi", 1],
+          ["currentInference", "equality", "langchain-deepagents-code", 1],
+          ["currentInference", "equality", "openclaw", 3],
+          ["currentSourceDashboard", "equality", "hermes", 1],
+          ["currentSourceDashboard", "equality", "openclaw", 1],
+          ["currentWebSearch", "equality", "hermes", 2],
+          ["currentWebSearch", "equality", "openclaw", 1],
+          ["destinationDashboard", "equality", "hermes", 1],
+          ["destinationDashboard", "equality", "openclaw", 1],
+          ["destinationInference", "equality", "hermes", 1],
+          ["destinationMessagingPlan", "equality", "langchain-deepagents-code", 1],
+          ["destinationMessagingPlan", "equality", "pi", 1],
+          ["reconcileCurrentSourceProfile", "equality", "hermes", 1],
+          ["reconcileCurrentSourceProfile", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/managed-startup/legacy-profile.ts": [
+          ["buildLegacyManagedStartupProfile", "equality", "langchain-deepagents-code", 2],
+          ["buildLegacyManagedStartupProfile", "equality", "openclaw", 2]
+        ],
+        "src/lib/onboard/portable-retirement-authority.ts": [
+          ["matchesRegistryAgent", "equality", "openclaw", 1],
+          ["verifyAuthority", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/station-express-resume.ts": [
+          ["<module>", "membership", "hermes", 1],
+          ["<module>", "membership", "langchain-deepagents-code", 1],
+          ["<module>", "membership", "openclaw", 1]
+        ],
+        "src/lib/onboard/workload/legacy-clone.ts": [
+          ["prepareLegacyManagedCloneHandoff", "equality", "hermes", 1],
+          ["reboundMessaging", "equality", "langchain-deepagents-code", 1],
+          ["reboundMessaging", "equality", "pi", 1],
+          ["registryFields", "equality", "hermes", 4],
+          ["registryFields", "equality", "langchain-deepagents-code", 1],
+          ["registryFields", "equality", "openclaw", 5]
+        ],
+        "src/lib/onboard/workload/rebuild-compat.ts": [
+          ["managedWorkloadRebuildProfileEnvironment", "equality", "hermes", 1],
+          ["managedWorkloadRebuildProfileEnvironment", "equality", "openclaw", 2]
+        ],
+        "src/lib/state/harness-migration.ts": [
+          ["<module>", "membership", "hermes", 1],
+          ["<module>", "membership", "langchain-deepagents-code", 1],
+          ["<module>", "membership", "openclaw", 1],
+          ["<module>", "membership", "pi", 1]
+        ],
+        "src/lib/state/onboard-session/retained-sandbox-recovery.ts": [
+          ["requireRetainedRecoveryPackage", "equality", "openclaw", 1]
+        ],
+        "src/lib/state/onboard-step-state.ts": [
+          ["nextMachineStateAfterCompletedStep", "switch-case", "openclaw", 1]
+        ],
+        "src/lib/state/openclaw-managed-extensions.ts": [
+          ["shouldPreserveOpenClawManagedExtensions", "equality", "openclaw", 1]
+        ],
+        "src/lib/state/preserved-env/index.ts": [
+          ["mergePreservedEnvironmentIntoMessagingPlan", "equality", "hermes", 1]
+        ],
+        "src/lib/state/registry.ts": [["registerSandbox", "equality", "openclaw", 1]],
+        "src/lib/state/snapshot/legacy-manifest.ts": [
+          ["allowsLegacyImagePluginProvenance", "equality", "openclaw", 1],
+          ["allowsLegacyNullPackageAuthority", "equality", "pi", 1],
+          ["allowsLegacyPreservedEnvironment", "equality", "hermes", 1],
+          ["allowsLegacyPrivilegedStateFileCapture", "equality", "openclaw", 1]
+        ]
+      }
+    },
+    "legacy-runtime": {
+      "description": "Direct runtime compatibility retained for sandboxes and commands that predate the typed package contract.",
+      "decisions": {
+        "src/lib/actions/inference-set/legacy.ts": [
+          ["requireLegacyInferenceAgent", "equality", "hermes", 1],
+          ["requireLegacyInferenceAgent", "equality", "openclaw", 1]
+        ],
+        "src/lib/actions/sandbox/agent/legacy-openclaw.ts": [
+          ["isLegacyOpenClawSandbox", "equality", "openclaw", 1],
+          ["requestedLegacyOpenClawTimeoutSeconds", "equality", "openclaw", 1]
+        ],
+        "src/lib/actions/sandbox/exec-legacy.ts": [
+          ["isLegacyGoogleChatPairingApproval", "equality", "openclaw", 1],
+          ["legacyAgentOwnsGoogleChatApproval", "equality", "openclaw", 1]
+        ],
+        "src/lib/actions/sandbox/exec-policy-hint-rendering.ts": [
+          ["execCommandTargetsOpenClaw", "equality", "openclaw", 1]
+        ],
+        "src/lib/actions/sandbox/hermes-portable-launch.ts": [
+          ["hasMatchingHermesPortableLaunchAgents", "equality", "hermes", 3],
+          ["isHermesPortableDisposition", "equality", "hermes", 1],
+          ["isHermesPortableRegistryAgent", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/sandbox/launch-compat.ts": [
+          ["canIgnorePortableOpenClawReceipt", "equality", "openclaw", 1],
+          ["isRecordedPortableOpenClawAgent", "equality", "openclaw", 1],
+          ["ownsPortableOpenClawReceipt", "equality", "openclaw", 2],
+          ["usesOpenClawPairingProtocol", "equality", "openclaw", 2]
+        ],
+        "src/lib/actions/sandbox/legacy-doctor.ts": [
+          ["collectLegacyOpenClawToolScopeChecks", "equality", "openclaw", 1],
+          ["legacyDoctorDefaultRuntimeIsGateway", "equality", "openclaw", 1]
+        ],
+        "src/lib/actions/sandbox/legacy-skin.ts": [
+          ["prepareLegacyHermesLightSkin", "equality", "hermes", 2]
+        ],
+        "src/lib/actions/sandbox/legacy-start.ts": [
+          ["resolveLegacyInferenceProbeAgent", "equality", "langchain-deepagents-code", 1]
+        ],
+        "src/lib/actions/sandbox/legacy/hermes-broker.ts": [
+          ["isHermesManagedToolGatewayEntry", "equality", "hermes", 1],
+          ["matchesHermesToolGatewayProviderIdentity", "equality", "hermes", 1],
+          ["removeHermesToolGatewayProviderStateForSandboxEntry", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/sandbox/policy-channel-legacy.ts": [
+          ["legacyMessagingPolicyWarningAgent", "equality", "hermes", 1],
+          ["legacyMessagingPolicyWarningAgent", "equality", "openclaw", 1]
+        ],
+        "src/lib/actions/sandbox/policy-channel.ts": [
+          ["clearSandboxChannelDurableState", "equality", "openclaw", 1],
+          ["removeSandboxChannelUnlocked", "equality", "openclaw", 1]
+        ],
+        "src/lib/actions/sandbox/sessions/gateway-rpc.ts": [
+          ["refuseUnsupportedSandboxAgent", "equality", "hermes", 1],
+          ["sandboxUsesHermesAgent", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/sandbox/sessions/legacy-export.ts": [
+          ["exportSandboxSessionsUnlocked", "equality", "hermes", 1],
+          ["rejectOpenClawOnlyOptions", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/sandbox/sessions/legacy-list.ts": [
+          ["runLegacySessionList", "equality", "hermes", 3]
+        ],
+        "src/lib/actions/sandbox/status-legacy.ts": [
+          ["needsLegacyManagedGatewayDeliveryProof", "equality", "openclaw", 1],
+          ["resolveLegacyDcodeAutoApprovalMode", "equality", "langchain-deepagents-code", 1],
+          ["resolveLegacyInferenceProbeAgentName", "equality", "langchain-deepagents-code", 1]
+        ],
+        "src/lib/actions/sandbox/supervisor-relaunch.ts": [
+          ["<module>", "membership", "hermes", 1],
+          ["<module>", "membership", "openclaw", 1]
+        ],
+        "src/lib/agent/gateway-restart-scripts.ts": [
+          ["getInteractiveAgentCommand", "equality", "openclaw", 1]
+        ],
+        "src/lib/agent/legacy-diagnostics.ts": [
+          ["collectLegacyAgentStartupDiagnostics", "equality", "hermes", 1]
+        ],
+        "src/lib/agent/legacy-status.ts": [["legacyStatusDefaults", "equality", "openclaw", 1]],
+        "src/lib/agent/runtime.ts": [["getRegisteredAgent", "equality", "openclaw", 1]],
+        "src/lib/config/schema.ts": [["semanticProblems", "equality", "openclaw", 1]],
+        "src/lib/dashboard-url-command.ts": [
+          ["resolveAgentDashboardAuth", "equality", "openclaw", 1],
+          ["resolveTerminalRuntime", "equality", "openclaw", 1],
+          ["runDashboardUrlCommand", "equality", "openclaw", 1]
+        ],
+        "src/lib/domain/sandbox/connect-env.ts": [
+          ["shouldInspectHermesLightSkinConfig", "equality", "hermes", 1]
+        ],
+        "src/lib/gateway-token-command.ts": [["runGatewayTokenCommand", "equality", "openclaw", 1]],
+        "src/lib/inference/config.ts": [["resolveAgentInferenceApi", "equality", "hermes", 1]],
+        "src/lib/inference/ollama-runtime-context.ts": [
+          ["getOllamaContextWindowFloorForAgent", "equality", "hermes", 1]
+        ],
+        "src/lib/legacy-skills.ts": [
+          ["resolveLegacySkillPaths", "equality", "hermes", 1],
+          ["resolveLegacySkillPaths", "equality", "langchain-deepagents-code", 1],
+          ["resolveLegacySkillPaths", "equality", "openclaw", 1]
+        ],
+        "src/lib/messaging/applier/legacy-config.ts": [
+          ["resolveLegacyMessagingConfigRoot", "equality", "hermes", 1],
+          ["resolveLegacyMessagingConfigRoot", "equality", "openclaw", 1]
+        ],
+        "src/lib/messaging/channels/legacy/policy-files.ts": [
+          ["resolveLegacyMessagingPolicyFile", "equality", "hermes", 1],
+          ["resolveLegacyMessagingPolicyFile", "equality", "openclaw", 1]
+        ],
+        "src/lib/messaging/channels/legacy/rendered-config.ts": [
+          ["listLegacyRenderedConfigKeys", "equality", "hermes", 1],
+          ["listLegacyRenderedConfigKeys", "equality", "openclaw", 1]
+        ],
+        "src/lib/messaging/channels/metadata.ts": [
+          ["listOpenClawPluginExtensionIds", "equality", "openclaw", 1]
+        ],
+        "src/lib/messaging/hooks/legacy-status.ts": [
+          ["legacyMessagingStatusAgents", "membership", "openclaw", 1]
+        ],
+        "src/lib/messaging/legacy-package.ts": [
+          ["legacyHasManagedToolGateways", "equality", "hermes", 1],
+          ["legacyShowsDegradedGatewayLog", "equality", "hermes", 1],
+          ["legacyUsesNpmPolicyCompatibility", "equality", "openclaw", 1],
+          ["legacyUsesTeamsOutlookSharedLogin", "equality", "hermes", 1]
+        ],
+        "src/lib/messaging/legacy-profile.ts": [
+          ["listLegacyChannelStatePaths", "equality", "hermes", 2],
+          ["listLegacyChannelStatePaths", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/dcode-selection-drift.ts": [
+          ["usesManagedDcodeIdentity", "equality", "langchain-deepagents-code", 1]
+        ],
+        "src/lib/onboard/docker-startup-command-agent.ts": [
+          ["resolveDockerStartupCommandPatch", "equality", "hermes", 1],
+          ["resolveDockerStartupCommandPatch", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/legacy-runtime.ts": [
+          ["appendLegacyObservability", "equality", "langchain-deepagents-code", 1],
+          ["isLegacyOpenClaw", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/machine/phase-progress.ts": [["<module>", "membership", "openclaw", 1]],
+        "src/lib/onboard/openclaw-setup.ts": [["readEnabled", "equality", "openclaw", 1]],
+        "src/lib/onboard/package/legacy-onboard.ts": [
+          ["filterLegacyWebSearchToolGateways", "equality", "hermes", 1],
+          ["isLegacyOpenClawAgentName", "equality", "openclaw", 1],
+          [
+            "legacyAcceptsHostedInferenceProviderKeyAlias",
+            "equality",
+            "langchain-deepagents-code",
+            1
+          ],
+          ["legacyAgentSupportsWebSearchProvider", "equality", "hermes", 1],
+          ["legacyDevicePairingRequired", "equality", "openclaw", 1],
+          ["legacyManagedDockerfilePatchOptions", "equality", "hermes", 1],
+          ["legacyManagedDockerfilePatchOptions", "equality", "openclaw", 2],
+          ["legacyMessagingRouteRefreshRequired", "equality", "openclaw", 1],
+          ["resumesLegacyOpenClawSandboxPrompts", "equality", "openclaw", 1],
+          ["selectLegacyDockerfilePatchAgent", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/skipped-step-message.ts": [
+          ["skippedStepMessage", "equality", "openclaw", 1]
+        ],
+        "src/lib/policy/legacy-policy.ts": [
+          ["isLegacyAgentOwnedPreset", "equality", "hermes", 1],
+          ["isLegacyAgentOwnedPreset", "equality", "openclaw", 1]
+        ],
+        "src/lib/sandbox/legacy-config.ts": [
+          ["classifyLegacyConfigAgent", "equality", "hermes", 1],
+          ["classifyLegacyConfigAgent", "equality", "openclaw", 1]
+        ],
+        "src/lib/tunnel/legacy-stop.ts": [["isLegacyGatewayStopTarget", "equality", "openclaw", 1]]
+      }
+    },
+    "qualified-product/catalogue": {
+      "description": "Explicit product qualification and catalogue decisions that remain owned by NemoClaw until they become package metadata.",
+      "decisions": {
+        "src/lib/actions/inference-route-api.ts": [
+          ["resolveRuntimeInferenceApi", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/installer/harness-reconcile.ts": [
+          ["inspectPeerAuthority", "equality", "nemocua", 1]
+        ],
+        "src/lib/actions/sandbox/portable-status.ts": [
+          ["getQualifiedHermesPortablePhase", "equality", "hermes", 1],
+          ["inspectHermesPortableStatus", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/sandbox/rebuild-flow-helpers.ts": [
+          ["ensureRebuildAgentBaseImage", "equality", "nemocua", 1]
+        ],
+        "src/lib/actions/sandbox/rebuild/authority.ts": [
+          ["checkPinnedAgentAuthority", "equality", "nemocua", 1]
+        ],
+        "src/lib/actions/sandbox/snapshot/restore-authority.ts": [
+          ["isRepositoryQualifiedAgent", "equality", "nemocua", 1]
+        ],
+        "src/lib/actions/uninstall/hermes-portable-uninstall.ts": [
+          ["requireSandboxRow", "equality", "hermes", 1],
+          ["schema5SandboxNames", "equality", "hermes", 1]
+        ],
+        "src/lib/actions/uninstall/portable-runtime-cleanup.ts": [
+          ["requireReceiptRegistryOwnership", "equality", "openclaw", 1]
+        ],
+        "src/lib/agent/base-image.ts": [
+          ["getAgentSandboxBaseImageEnvVar", "equality", "nemocua", 1],
+          ["ensureAgentBaseImage", "equality", "nemocua", 1],
+          ["createAgentSandbox", "equality", "nemocua", 4]
+        ],
+        "src/lib/agent/deep-agents-code-base-image.ts": [
+          [
+            "createDeepAgentsCodeBaseImageResolutionOptions",
+            "equality",
+            "langchain-deepagents-code",
+            1
+          ]
+        ],
+        "src/lib/agent/defs.ts": [
+          ["listAgents", "equality", "nemocua", 1],
+          ["loadAgentFresh", "equality", "nemocua", 1],
+          ["loadAgent", "equality", "nemocua", 1]
+        ],
+        "src/lib/agent/manifest-inventory.ts": [
+          ["readAgentAliasTargets", "equality", "nemocua", 1]
+        ],
+        "src/lib/messaging/applier/build/messaging-build-applier.mts": [
+          ["installManagedImageCapabilityUnion", "equality", "hermes", 1],
+          ["installManagedImageCapabilityUnion", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/agent-policy-presets.ts": [["isHermesAgent", "equality", "hermes", 1]],
+        "src/lib/onboard/custom-openclaw-runtime-diagnosis.ts": [
+          ["shouldDiagnoseCustomOpenClawRuntime", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/experimental/hermes-portable-contract.ts": [
+          ["resolveHermesPortableStartupContract", "equality", "hermes", 2]
+        ],
+        "src/lib/onboard/experimental/hermes-portable-lifecycle.ts": [
+          ["contextMatches", "equality", "hermes", 1],
+          ["requireRegistry", "equality", "hermes", 1],
+          ["requireStaticRegistry", "equality", "hermes", 1]
+        ],
+        "src/lib/onboard/experimental/hermes-portable-ollama-inference.ts": [
+          ["createHermesPortableOllamaInferenceResolver", "equality", "hermes", 1],
+          ["inspectHermesPortableOllamaReadinessRuntime", "equality", "hermes", 1]
+        ],
+        "src/lib/onboard/experimental/hermes-portable-onboarding.ts": [
+          ["classifyHermesPortableRegistry", "equality", "hermes", 1],
+          ["isHermesPortableLifecycleMode", "equality", "hermes", 1],
+          ["requireCurrentReceiptSnapshot", "equality", "hermes", 1],
+          ["runHermesPortableOnboardingTransaction", "equality", "hermes", 1],
+          ["runHermesPortableOnboardingTransaction", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/experimental/hermes-portable-receipt.ts": [
+          ["parseReceiptBytes", "equality", "hermes", 1],
+          ["parseStartup", "equality", "hermes", 1],
+          ["parseSuccessorBytes", "equality", "hermes", 1]
+        ],
+        "src/lib/onboard/experimental/portable-agent-lifecycle.ts": [
+          ["assertHermesPortableAgentLifecycleAuthority", "equality", "hermes", 1],
+          ["assertHermesPortableCommandSupported", "equality", "hermes", 1],
+          ["assertHermesPortableCommandUnavailable", "equality", "hermes", 1],
+          ["buildHermesPortableCommandAuthority", "equality", "hermes", 1],
+          ["buildHermesPortableCommandEnvironment", "equality", "hermes", 1],
+          ["buildHermesPortableOnboardingCommandAuthority", "equality", "hermes", 1],
+          ["inspectHermesPortableCommandAuthority", "equality", "hermes", 4],
+          ["qualifyHermesPortableAcceptedReadinessAuthority", "equality", "hermes", 2],
+          ["qualifyHermesPortableOperatingCommandAuthority", "equality", "hermes", 1],
+          ["qualifyPortableAgentLifecycleAuthority", "equality", "hermes", 2],
+          ["receiptDisposition", "equality", "openclaw", 1],
+          ["recoverPortableAgentSandboxLifecycle", "equality", "openclaw", 1],
+          ["requalifyPortableAgentSandboxAuthority", "equality", "hermes", 1],
+          ["requireHermesPortableActiveLifecycleAuthority", "equality", "hermes", 1],
+          ["stopPortableAgentSandboxLifecycle", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/experimental/portable-demo-lifecycle.ts": [
+          ["recoverPortableDemoSandboxLifecycle", "equality", "openclaw", 1],
+          ["requirePortableDemoDestroyContext", "equality", "openclaw", 1],
+          ["stopPortableDemoSandboxLifecycle", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/experimental/portable-product-qualification.ts": [
+          ["assertHermesPortableIntentAgent", "equality", "hermes", 1],
+          ["hasProviderlessApfAgentIntent", "equality", "openclaw", 2],
+          ["isHermesPortableProduct", "equality", "hermes", 1],
+          ["isHermesPortableReceiptDisposition", "equality", "hermes", 1],
+          ["isOpenClawPortableRegistryAgent", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/experimental/portable-profile.ts": [
+          ["isOpenClawPortableProduct", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/hermes-api-port.ts": [
+          ["resolveSandboxHealthPort", "equality", "hermes", 2],
+          ["usesSecondaryForwardPort", "equality", "hermes", 1]
+        ],
+        "src/lib/onboard/hermes-dashboard.ts": [
+          ["hasHermesDashboardDrift", "equality", "hermes", 1],
+          ["resolveHermesDashboardOnboardState", "equality", "hermes", 1]
+        ],
+        "src/lib/onboard/inference-route.ts": [
+          ["resolveManagedStartupInferenceRoute", "equality", "langchain-deepagents-code", 1]
+        ],
+        "src/lib/onboard/managed-image/catalog.ts": [
+          ["resolveManagedImageCatalogFromGhcr", "equality", "openclaw", 1],
+          ["resolveManagedImageContractFromGhcr", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/managed-startup/onboard-profile.ts": [
+          ["buildManagedStartupOnboardProfile", "equality", "hermes", 1],
+          ["buildManagedStartupOnboardProfile", "equality", "langchain-deepagents-code", 2],
+          ["dashboardForInput", "equality", "langchain-deepagents-code", 1],
+          ["dashboardForInput", "equality", "openclaw", 1],
+          ["dashboardForInput", "equality", "pi", 1]
+        ],
+        "src/lib/onboard/managed-startup/profile-builder.ts": [
+          ["assertAgentSpecificInput", "equality", "hermes", 1],
+          ["assertAgentSpecificInput", "equality", "openclaw", 1],
+          ["assertAgentSpecificInput", "equality", "pi", 1],
+          ["assertEnvironmentConsistency", "equality", "hermes", 3],
+          ["assertEnvironmentConsistency", "equality", "langchain-deepagents-code", 1],
+          ["assertEnvironmentConsistency", "equality", "openclaw", 5],
+          ["assertNoWrongAgentEnvironment", "equality", "hermes", 1],
+          ["assertNoWrongAgentEnvironment", "equality", "openclaw", 1],
+          ["buildCandidate", "equality", "hermes", 2],
+          ["buildCandidate", "equality", "openclaw", 3],
+          ["buildCandidate", "equality", "pi", 1],
+          ["normalizeMessagingPlan", "equality", "langchain-deepagents-code", 1],
+          ["normalizeWebSearch", "equality", "hermes", 2],
+          ["normalizeWebSearch", "equality", "langchain-deepagents-code", 1]
+        ],
+        "src/lib/onboard/managed-startup/profile.ts": [
+          ["validateAgentConfig", "equality", "hermes", 1],
+          ["validateAgentConfig", "equality", "openclaw", 1],
+          ["validateAgentConfig", "equality", "pi", 1],
+          ["validateDashboard", "equality", "hermes", 1],
+          ["validateDashboard", "equality", "openclaw", 1],
+          ["validateDashboard", "equality", "pi", 1],
+          ["validateInference", "equality", "langchain-deepagents-code", 1],
+          ["validateInference", "equality", "openclaw", 1],
+          ["validateManagedStartupProfile", "equality", "openclaw", 2],
+          ["validateTuning", "equality", "hermes", 1],
+          ["validateTuning", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/managed-startup/shared-state-transaction.ts": [
+          ["agentRoot", "switch-case", "hermes", 1],
+          ["agentRoot", "switch-case", "langchain-deepagents-code", 1],
+          ["agentRoot", "switch-case", "openclaw", 1],
+          ["agentRoot", "switch-case", "pi", 1],
+          ["managedOutputTargets", "switch-case", "hermes", 1],
+          ["managedOutputTargets", "switch-case", "langchain-deepagents-code", 1],
+          ["managedOutputTargets", "switch-case", "openclaw", 1],
+          ["managedOutputTargets", "switch-case", "pi", 1],
+          ["renderTarget", "equality", "hermes", 1],
+          ["renderTarget", "equality", "openclaw", 2]
+        ],
+        "src/lib/onboard/managed-workload/hermes-state-volume.ts": [
+          ["requiresManagedHermesStateVolume", "equality", "hermes", 1]
+        ],
+        "src/lib/onboard/messaging-prep.ts": [
+          ["prepareCreateSandboxMessaging", "equality", "hermes", 1],
+          ["prepareCreateSandboxMessaging", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/openclaw-otel-policy-presets.ts": [
+          ["isOpenclawAgent", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/package/package-authority.ts": [
+          ["onboardHarnessPackageAuthority", "equality", "nemocua", 1]
+        ],
+        "src/lib/onboard/package/unpackaged-agent.ts": [
+          ["resolveUnpackagedOnboardAgent", "equality", "nemocua", 1]
+        ],
+        "src/lib/onboard/policy-preset-reconciliation.ts": [
+          ["createUnavailablePolicyPresetPruner", "equality", "hermes", 1]
+        ],
+        "src/lib/onboard/runtime-provider/hermes-portable-inference-qualification.ts": [
+          ["assertHermesPortableInferenceSandbox", "equality", "hermes", 1],
+          ["assertHermesPortableInferenceStartupRequest", "equality", "hermes", 1]
+        ],
+        "src/lib/onboard/runtime-provider/registry.ts": [["<module>", "membership", "openclaw", 1]],
+        "src/lib/onboard/sandbox-agent.ts": [
+          ["getSandboxAgentRegistryFields", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/sandbox-agent/authority.ts": [
+          ["resolveSandboxAgent", "equality", "nemocua", 1]
+        ],
+        "src/lib/onboard/sandbox-agent/naming.ts": [
+          ["formatSandboxAgentName", "equality", "hermes", 1],
+          ["formatSandboxAgentName", "equality", "langchain-deepagents-code", 1],
+          ["formatSandboxAgentName", "equality", "openclaw", 1],
+          ["normalizeSandboxAgentName", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/sandbox-registration.ts": [
+          ["assertFinalHarnessPackageAuthority", "equality", "nemocua", 1]
+        ],
+        "src/lib/onboard/session-bootstrap.ts": [
+          ["requireFreshHarnessBinding", "equality", "nemocua", 1]
+        ],
+        "src/lib/onboard/web-search-verify.ts": [
+          ["verifyWebSearchInsideSandbox", "equality", "hermes", 1],
+          ["verifyWebSearchInsideSandbox", "equality", "openclaw", 1]
+        ],
+        "src/lib/onboard/web-search/support.ts": [
+          ["agentSupportsWebSearchProvider", "equality", "hermes", 1]
+        ],
+        "src/lib/state/onboard-session/retained-sandbox-recovery.ts": [
+          ["requireRetainedRecoveryPackage", "equality", "nemocua", 1]
+        ],
+        "src/lib/state/snapshot/manifest.ts": [
+          ["isRepositoryQualifiedManifestAgent", "equality", "nemocua", 1]
+        ]
+      }
+    }
+  }
 }

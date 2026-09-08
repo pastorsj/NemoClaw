@@ -12,7 +12,7 @@ import {
   findLayerImportBoundaryViolations,
   findManagedRuntimeBoundaryViolations,
   findPackageImageBoundaryViolations,
-  parseReceiptHarnessDecisionBaseline,
+  parseHarnessDecisionBaseline,
 } from "../../scripts/checks/layer-import-boundaries.mts";
 
 const REPO_ROOT = path.join(import.meta.dirname, "../..");
@@ -51,10 +51,23 @@ function scanFixture(
 }
 
 function harnessDebtSource(entries: readonly unknown[]): string {
+  const decisions = (
+    entries as readonly (readonly [file: string, ...decision: unknown[]])[]
+  ).reduce<Record<string, unknown[]>>(
+    (grouped, [file, ...decision]) => ({
+      ...grouped,
+      [file]: [...(grouped[file] ?? []), decision],
+    }),
+    {},
+  );
   return JSON.stringify({
-    description: "Test receipt-backed harness debt.",
+    description: "Test harness debt.",
     match: ["file", "function", "decisionKind", "packageId", "occurrences"],
-    entries,
+    classifications: {
+      "legacy-migration": { description: "Test migration debt.", decisions },
+      "legacy-runtime": { description: "Test runtime debt.", decisions: {} },
+      "qualified-product/catalogue": { description: "Test catalogue debt.", decisions: {} },
+    },
   });
 }
 
@@ -424,7 +437,7 @@ describe("CLI layer import boundaries (#6245)", () => {
     try {
       expect(
         scanFixture(fixture, 'readInstalledHarnessPackage("future-harness");\n', packagesRoot, {
-          verifyReceiptHarnessDecisionBaseline: false,
+          verifyHarnessDecisionBaseline: false,
         }),
       ).toEqual([
         expect.objectContaining({
@@ -444,7 +457,7 @@ describe("CLI layer import boundaries (#6245)", () => {
         fixture,
         "export function selectPackage(packageId: string) { return readInstalledHarnessPackage(packageId); }\n",
         undefined,
-        { verifyReceiptHarnessDecisionBaseline: false },
+        { verifyHarnessDecisionBaseline: false },
       ),
     ).toEqual([]);
   });
@@ -468,7 +481,7 @@ describe("CLI layer import boundaries (#6245)", () => {
           fixture,
           'runHarnessProviderBrokerController("future-harness", request);\n',
           packagesRoot,
-          { verifyReceiptHarnessDecisionBaseline: false },
+          { verifyHarnessDecisionBaseline: false },
         ),
       ).toEqual([
         expect.objectContaining({
@@ -762,6 +775,30 @@ describe("CLI layer import boundaries (#6245)", () => {
     }
   });
 
+  it("discovers unpackaged agent IDs from their manifests", () => {
+    const agentManifestsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-agents-"));
+    const agentRoot = path.join(agentManifestsRoot, "future-agent");
+    fs.mkdirSync(agentRoot);
+    fs.writeFileSync(path.join(agentRoot, "manifest.yaml"), "name: future-agent\n");
+    try {
+      expect(
+        scanFixture(
+          fixturePath("src/lib", "future-agent-id"),
+          'export function selectAgent(id: string) { return id === "future-agent"; }\n',
+          undefined,
+          { agentManifestsRoot },
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          rule: "core-harness-neutrality",
+          detail: expect.stringContaining("package ID 'future-agent'"),
+        }),
+      ]);
+    } finally {
+      fs.rmSync(agentManifestsRoot, { force: true, recursive: true });
+    }
+  });
+
   it("allows package names in comments and explanatory text", () => {
     expect(
       scanFixture(
@@ -920,11 +957,11 @@ describe("CLI layer import boundaries (#6245)", () => {
 
   it("rejects a malformed harness debt occurrence limit", () => {
     expect(() =>
-      parseReceiptHarnessDecisionBaseline(
+      parseHarnessDecisionBaseline(
         harnessDebtSource([["src/lib/example.ts", "decide", "equality", "openclaw", 0]]),
         "test harness debt",
       ),
-    ).toThrow("test harness debt entry 1 has an invalid occurrence count");
+    ).toThrow("has an invalid occurrence count");
   });
 
   it("reports a stale harness debt occurrence limit", () => {
@@ -935,7 +972,7 @@ describe("CLI layer import boundaries (#6245)", () => {
       .join("/");
     const specifier = authority.startsWith(".") ? authority : `./${authority}`;
     const repoPath = path.relative(REPO_ROOT, fixture).split(path.sep).join("/");
-    const baseline = parseReceiptHarnessDecisionBaseline(
+    const baseline = parseHarnessDecisionBaseline(
       harnessDebtSource([[repoPath, "decide", "equality", "pi", 2]]),
     );
     try {
@@ -949,13 +986,13 @@ describe("CLI layer import boundaries (#6245)", () => {
 
       expect(
         findLayerImportBoundaryViolations(fixture, undefined, {
-          receiptHarnessDecisionBaseline: baseline,
-          verifyReceiptHarnessDecisionBaseline: true,
+          harnessDecisionBaseline: baseline,
+          verifyHarnessDecisionBaseline: true,
         }),
       ).toEqual([
         expect.objectContaining({
           file: "scripts/checks/harness-debt.json",
-          rule: "receipt-backed-harness-debt",
+          rule: "core-harness-debt",
           detail: expect.stringContaining(
             `package ID 'pi' expects 2 equality decision occurrence(s) in 'decide' at ${repoPath}, but found 1`,
           ),
@@ -1025,20 +1062,54 @@ describe("CLI layer import boundaries (#6245)", () => {
     );
   });
 
-  it("allows package IDs in catalogue code that does not consume package authority", () => {
-    expect(
-      scanFixture(
-        fixturePath("src/lib", "catalogue-harness-ids"),
-        'export const qualifiedHarnesses = new Set(["openclaw", "pi"]);\n',
-      ),
-    ).toEqual([]);
+  it("blocks new exact harness decisions in product catalogue code", () => {
+    const violations = scanFixture(
+      fixturePath("src/lib", "catalogue-harness-ids"),
+      'export const qualifiedHarnesses = new Set(["openclaw", "pi"]);\n',
+    );
+
+    expect(violations).toHaveLength(2);
+    expect(violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rule: "core-harness-neutrality",
+          detail: expect.stringContaining("package ID 'openclaw'"),
+        }),
+        expect.objectContaining({
+          rule: "core-harness-neutrality",
+          detail: expect.stringContaining("package ID 'pi'"),
+        }),
+      ]),
+    );
   });
 
-  it("allows exact harness decisions in legacy code without package authority", () => {
+  it("blocks new exact harness decisions in legacy code without package authority", () => {
     expect(
       scanFixture(
         fixturePath("src/lib/state", "legacy-harness-decision"),
         'export function decodeLegacyAgent(agent: string) {\n  return agent === "openclaw";\n}\n',
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        rule: "core-harness-neutrality",
+        detail: expect.stringContaining("package ID 'openclaw'"),
+      }),
+    ]);
+  });
+
+  it("allows only the exact audited core decision and discovers its external package ID", () => {
+    const fixture = fixturePath("src/lib/state", "audited-harness-decision");
+    const repoPath = path.relative(REPO_ROOT, fixture).split(path.sep).join("/");
+    const baseline = parseHarnessDecisionBaseline(
+      harnessDebtSource([[repoPath, "decodeLegacyAgent", "equality", "external-harness", 1]]),
+    );
+
+    expect(
+      scanFixture(
+        fixture,
+        'export function decodeLegacyAgent(agent: string) {\n  return agent === "external-harness";\n}\n',
+        undefined,
+        { harnessDecisionBaseline: baseline },
       ),
     ).toEqual([]);
   });
