@@ -6,18 +6,17 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import type { HarnessManagedExtension } from "@nvidia/nemoclaw-harness-contract";
 
 import { restoreEnvBulk } from "../../../../test/helpers/env-test-helpers.js";
 import type { OpenClawImagePluginInstall } from "../../../../src/lib/state/openclaw-plugin-restore.js";
 
-const ORIGINAL_HOME = process.env.HOME;
-const TMP_HOME = fs.realpathSync(
-  fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-recreated-home-")),
-);
-process.env.HOME = TMP_HOME;
+// The composed Vitest project gives every test file an isolated HOME before
+// collection. Keep that boundary intact: changing HOME here can make modules
+// collected by the same worker disagree about the package store and registry.
+const TEST_HOME = fs.realpathSync(process.env.HOME!);
 
 const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../../../..");
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
@@ -30,7 +29,7 @@ const { restoreRecreatedSandboxState } = (await import(
 )) as typeof import("../../../../src/lib/state/sandbox.js");
 
 function installOpenClawRestorePackage() {
-  const sourceRoot = path.join(TMP_HOME, "openclaw-recreated-package");
+  const sourceRoot = path.join(TEST_HOME, "openclaw-recreated-package");
   const packageRoot = path.join(sourceRoot, "packages", "nemoclaw-openclaw");
   fs.mkdirSync(path.join(packageRoot, "host"), { recursive: true, mode: 0o700 });
   fs.copyFileSync(
@@ -78,22 +77,21 @@ function installOpenClawRestorePackage() {
         },
       },
     },
-    { storeRoot: path.join(TMP_HOME, ".nemoclaw", "harnesses") },
+    { storeRoot: path.join(TEST_HOME, ".nemoclaw", "harnesses") },
   ).identity;
 }
 
-const OPENCLAW_PACKAGE_IDENTITY = installOpenClawRestorePackage();
 const { resolvePackageIdentityAgent } = await import(
   pathToFileURL(
     path.join(REPOSITORY_ROOT, "src", "lib", "onboard", "package", "package-authority.ts"),
   ).href
 );
-const OPENCLAW_AGENT_DEFINITION = resolvePackageIdentityAgent(OPENCLAW_PACKAGE_IDENTITY).definition;
+let openClawPackageIdentity!: ReturnType<typeof installOpenClawRestorePackage>;
+let openClawAgentDefinition!: ReturnType<typeof resolvePackageIdentityAgent>["definition"];
 
-afterAll(() => {
-  if (ORIGINAL_HOME === undefined) delete process.env.HOME;
-  else process.env.HOME = ORIGINAL_HOME;
-  fs.rmSync(TMP_HOME, { recursive: true, force: true });
+beforeAll(() => {
+  openClawPackageIdentity = installOpenClawRestorePackage();
+  openClawAgentDefinition = resolvePackageIdentityAgent(openClawPackageIdentity).definition;
 });
 
 const OPENCLAW_DIR = "/sandbox/.openclaw";
@@ -108,9 +106,9 @@ function writeExecutable(filePath: string, source: string): void {
 }
 
 function writeOpenClawRegistry(sandboxName: string): void {
-  fs.mkdirSync(path.join(TMP_HOME, ".nemoclaw"), { recursive: true });
+  fs.mkdirSync(path.join(TEST_HOME, ".nemoclaw"), { recursive: true });
   fs.writeFileSync(
-    path.join(TMP_HOME, ".nemoclaw", "sandboxes.json"),
+    path.join(TEST_HOME, ".nemoclaw", "sandboxes.json"),
     JSON.stringify({
       defaultSandbox: sandboxName,
       sandboxes: {
@@ -120,7 +118,7 @@ function writeOpenClawRegistry(sandboxName: string): void {
           provider: "p",
           gpuEnabled: false,
           agent: null,
-          harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+          harnessPackage: openClawPackageIdentity,
           harnessPackageMigration: {
             schemaVersion: 1,
             source: "legacy-current-bundle",
@@ -313,7 +311,7 @@ process.exit(1);
     writeOpenClawRegistry("alpha");
     const restore = restoreRecreatedSandboxState("alpha", backupPath, {
       targetAgentType: "openclaw",
-      agentDefinition: OPENCLAW_AGENT_DEFINITION,
+      agentDefinition: openClawAgentDefinition,
       ...(options.discoverFreshPluginInstalls
         ? {}
         : { freshManagedImageExtensions: freshManagedExtensions }),
