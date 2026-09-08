@@ -70,6 +70,17 @@ def devices_list(openclaw_binary):
     # CLI's stored device credential. Without it, OpenClaw may satisfy the
     # observation with shared gateway auth or a local pending-list fallback.
     child_environment["NEMOCLAW_OPENCLAW_PAIRING_SETTLEMENT"] = "1"
+    # OpenShell exec may run as the sandbox uid while retaining HOME=/root from
+    # the image. Keep every OpenClaw lookup on the package's shared state tree.
+    child_environment.update(
+        {
+            "HOME": "/sandbox",
+            "OPENCLAW_HOME": "/sandbox",
+            "OPENCLAW_STATE_DIR": "/sandbox/.openclaw",
+            "OPENCLAW_CONFIG_PATH": "/sandbox/.openclaw/openclaw.json",
+            "OPENCLAW_OAUTH_DIR": "/sandbox/.openclaw/credentials",
+        }
+    )
     result = subprocess.run(
         [openclaw_binary, "devices", "list", "--json"],
         capture_output=True,

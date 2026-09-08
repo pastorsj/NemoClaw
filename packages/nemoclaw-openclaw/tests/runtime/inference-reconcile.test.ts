@@ -79,6 +79,11 @@ describe("OpenClaw inference reconciliation", () => {
         "assert module.AUTO_PAIR_DEADLINE_SECONDS + module.AUTO_PAIR_RUN_TIMEOUT_SECONDS < module.RECONCILE_TIMEOUT_SECONDS",
         "assert f'NEMOCLAW_AUTO_PAIR_DEADLINE_SECS={module.AUTO_PAIR_DEADLINE_SECONDS}' in module.RECONCILE_SHELL",
         "assert f'NEMOCLAW_AUTO_PAIR_RUN_TIMEOUT_SECS={module.AUTO_PAIR_RUN_TIMEOUT_SECONDS}' in module.RECONCILE_SHELL",
+        "assert 'export HOME=/sandbox' in module.RECONCILE_SHELL",
+        "assert 'export OPENCLAW_HOME=/sandbox' in module.RECONCILE_SHELL",
+        "assert 'export OPENCLAW_STATE_DIR=/sandbox/.openclaw' in module.RECONCILE_SHELL",
+        "assert 'export OPENCLAW_CONFIG_PATH=/sandbox/.openclaw/openclaw.json' in module.RECONCILE_SHELL",
+        "assert 'export OPENCLAW_OAUTH_DIR=/sandbox/.openclaw/credentials' in module.RECONCILE_SHELL",
       ].join("\n"),
     );
     expect(result.status, result.stderr).toBe(0);

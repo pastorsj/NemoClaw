@@ -30,7 +30,12 @@ import sys
 
 projection = {
     "argv": sys.argv[1:],
+    "home": os.environ.get("HOME"),
     "openclawBin": os.environ.get("OPENCLAW_BIN"),
+    "openclawHome": os.environ.get("OPENCLAW_HOME"),
+    "openclawStateDir": os.environ.get("OPENCLAW_STATE_DIR"),
+    "openclawConfigPath": os.environ.get("OPENCLAW_CONFIG_PATH"),
+    "openclawOauthDir": os.environ.get("OPENCLAW_OAUTH_DIR"),
     "deadlineSeconds": os.environ.get("NEMOCLAW_AUTO_PAIR_DEADLINE_SECS"),
     "runTimeoutSeconds": os.environ.get("NEMOCLAW_AUTO_PAIR_RUN_TIMEOUT_SECS"),
     "inheritedMarkers": sorted(
@@ -63,6 +68,11 @@ raise SystemExit(${watcherExitCode})
     encoding: "utf8",
     env: {
       ...process.env,
+      HOME: "/root",
+      OPENCLAW_HOME: "/untrusted/home",
+      OPENCLAW_STATE_DIR: "/untrusted/state",
+      OPENCLAW_CONFIG_PATH: "/untrusted/config.json",
+      OPENCLAW_OAUTH_DIR: "/untrusted/oauth",
       PATH: `${temporaryDirectory}:/usr/bin:/bin`,
       NEMOCLAW_DISABLE_DEVICE_AUTH: "1",
       OPENCLAW_GATEWAY_URL: "ws://untrusted.invalid",
@@ -100,7 +110,12 @@ describe("OpenClaw package device-pairing settlement", () => {
     expect(result.stdout).toBe(`__NEMOCLAW_DEVICE_PAIRING_SETTLED__=${NONCE}\n`);
     expect(invocation).toEqual({
       argv: ["--once"],
+      home: "/sandbox",
       openclawBin: fakeOpenClaw,
+      openclawHome: "/sandbox",
+      openclawStateDir: "/sandbox/.openclaw",
+      openclawConfigPath: "/sandbox/.openclaw/openclaw.json",
+      openclawOauthDir: "/sandbox/.openclaw/credentials",
       deadlineSeconds: "90",
       runTimeoutSeconds: "10",
       inheritedMarkers: [],

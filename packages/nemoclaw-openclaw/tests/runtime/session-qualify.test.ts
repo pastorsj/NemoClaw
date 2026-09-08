@@ -42,6 +42,11 @@ function runQualification(
 [ -z "\${OPENCLAW_GATEWAY_PORT+x}" ] || exit 45
 [ -z "\${OPENCLAW_GATEWAY_TOKEN+x}" ] || exit 46
 [ -z "\${OPENCLAW_GATEWAY_PASSWORD+x}" ] || exit 47
+[ "\${HOME:-}" = /sandbox ] || exit 48
+[ "\${OPENCLAW_HOME:-}" = /sandbox ] || exit 49
+[ "\${OPENCLAW_STATE_DIR:-}" = /sandbox/.openclaw ] || exit 50
+[ "\${OPENCLAW_CONFIG_PATH:-}" = /sandbox/.openclaw/openclaw.json ] || exit 51
+[ "\${OPENCLAW_OAUTH_DIR:-}" = /sandbox/.openclaw/credentials ] || exit 52
 printf '%s\\n' ${JSON.stringify(JSON.stringify(document))}
 `,
     { mode: 0o755 },
@@ -50,8 +55,12 @@ printf '%s\\n' ${JSON.stringify(JSON.stringify(document))}
     encoding: "utf8",
     env: {
       ...process.env,
+      HOME: "/root",
       OPENCLAW_BIN: fakeOpenClaw,
+      OPENCLAW_HOME: "/untrusted/home",
       OPENCLAW_STATE_DIR: stateDirectory,
+      OPENCLAW_CONFIG_PATH: "/untrusted/config.json",
+      OPENCLAW_OAUTH_DIR: "/untrusted/oauth",
       OPENCLAW_GATEWAY_URL: "ws://untrusted.invalid",
       OPENCLAW_GATEWAY_PORT: "1",
       OPENCLAW_GATEWAY_TOKEN: "untrusted-token",

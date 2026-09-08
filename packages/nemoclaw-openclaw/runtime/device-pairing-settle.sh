@@ -13,6 +13,15 @@ esac
 openclaw_bin="$(command -v openclaw)"
 command -v python3 >/dev/null 2>&1
 
+# OpenShell exec preserves the image's HOME even when it runs this command as
+# the sandbox user. Pin every OpenClaw path to the shared persistent state so a
+# root-shaped inherited HOME cannot redirect CLI discovery to /root.
+export HOME=/sandbox
+export OPENCLAW_HOME=/sandbox
+export OPENCLAW_STATE_DIR=/sandbox/.openclaw
+export OPENCLAW_CONFIG_PATH=/sandbox/.openclaw/openclaw.json
+export OPENCLAW_OAUTH_DIR=/sandbox/.openclaw/credentials
+
 unset OPENCLAW_GATEWAY_URL OPENCLAW_GATEWAY_PORT \
   OPENCLAW_GATEWAY_TOKEN OPENCLAW_GATEWAY_PASSWORD \
   NEMOCLAW_OPENCLAW_FORCE_DEVICE_PAIRING \

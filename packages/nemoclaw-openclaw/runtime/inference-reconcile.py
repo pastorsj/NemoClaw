@@ -27,6 +27,13 @@ current="$(id -u)"
 [ "$perms" = 444 ] || exit 1
 [ "$owner" = 0 ] || [ "$owner" = "$current" ] || exit 1
 . "$PROXY_ENV" >/dev/null 2>&1 || exit 1
+# OpenShell exec can retain the image's root HOME after selecting the sandbox
+# uid. Reassert the package's shared state contract before invoking OpenClaw.
+export HOME=/sandbox
+export OPENCLAW_HOME=/sandbox
+export OPENCLAW_STATE_DIR=/sandbox/.openclaw
+export OPENCLAW_CONFIG_PATH=/sandbox/.openclaw/openclaw.json
+export OPENCLAW_OAUTH_DIR=/sandbox/.openclaw/credentials
 OPENCLAW_BIN=/usr/local/bin/openclaw
 [ -x "$OPENCLAW_BIN" ] || exit 1
 export OPENCLAW_BIN
