@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../../test/e2e/fixtures/availability-env.ts";
+import { createPrivateDockerCliConfig } from "../../test/e2e/fixtures/docker-config.ts";
 
 const OPEN_SHELL_COMPONENTS =
   process.platform === "linux"
@@ -136,9 +137,10 @@ export function createPrivateFabricRuntime(
   const home = fs.realpathSync(fs.mkdtempSync(path.join(parent, prefix)));
   try {
     fs.chmodSync(home, 0o700);
-    const dockerDirectory = path.join(home, ".docker");
-    fs.mkdirSync(dockerDirectory, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(dockerDirectory, "config.json"), "{}\n", { mode: 0o600 });
+    const dockerDirectory = createPrivateDockerCliConfig(
+      home,
+      source.HOME ? source : { ...source, HOME: os.homedir() },
+    );
     stageOpenShell(home, openshell);
     const stateRoot = path.join(home, ".nemoclaw", "gateways", portText);
     return Object.freeze({

@@ -177,6 +177,43 @@ describe("standalone Fabric runtime support", () => {
     }
   });
 
+  it("retains Docker CLI plugin discovery without copying host credentials", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-docker-"));
+    const hostDockerConfig = path.join(fixtureRoot, "host-docker");
+    const pluginDirectory = path.join(fixtureRoot, "plugins");
+    fs.mkdirSync(hostDockerConfig, { recursive: true });
+    fs.mkdirSync(pluginDirectory);
+    fs.writeFileSync(
+      path.join(hostDockerConfig, "config.json"),
+      JSON.stringify({
+        auths: { "registry.example.test": { auth: "must-not-pass" } },
+        cliPluginsExtraDirs: [pluginDirectory],
+        credsStore: "must-not-pass",
+      }),
+    );
+    const runtime = createPrivateFabricRuntime(".nemoclaw-fabric-docker-home-", {
+      DOCKER_CONFIG: hostDockerConfig,
+      DOCKER_HOST: "unix:///tmp/nemoclaw-fixture-docker.sock",
+      HOME: fixtureRoot,
+      NEMOCLAW_GATEWAY_PORT: "28133",
+      OPENSHELL_BIN: process.execPath,
+      OPENSHELL_GATEWAY: "nemoclaw-28133",
+      PATH: path.dirname(process.execPath),
+    });
+
+    try {
+      const privateDockerConfig = JSON.parse(
+        fs.readFileSync(path.join(runtime.home, ".docker", "config.json"), "utf8"),
+      );
+      expect(privateDockerConfig).toEqual({
+        cliPluginsExtraDirs: [fs.realpathSync(pluginDirectory)],
+      });
+    } finally {
+      runtime.removeHome();
+      fs.rmSync(fixtureRoot, { force: true, recursive: true });
+    }
+  });
+
   it("removes a private HOME when staging fails after directory creation", () => {
     const unique = `${process.pid.toString(36)}-${Date.now().toString(36)}`;
     const prefix = `.nemoclaw-${unique}-home-`;
