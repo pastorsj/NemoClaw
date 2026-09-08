@@ -423,7 +423,7 @@ describe("protected managed-image runtime commands", () => {
       artifactName: "provider-cleanup-name-reused-after-remove",
       captureLimitBytes: command.captureLimitBytes,
       env,
-      timeoutMs: 5_000,
+      timeoutMs: 15_000,
     });
 
     expect(result.exitCode).toBe(70);

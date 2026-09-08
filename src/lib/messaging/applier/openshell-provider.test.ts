@@ -264,7 +264,7 @@ describe("messaging OpenShell provider application", () => {
     expect(adapter.updateProvider).not.toHaveBeenCalled();
   });
 
-  it("rejects replacement when any attachment is outside the authorized sandbox (#9806)", async () => {
+  it("does not detach a sibling sandbox while replacing an owned provider (#9875)", async () => {
     const expected = definition();
     const adapter = providerAdapter({
       getProvider: vi.fn<OpenShellProviderAdapter["getProvider"]>().mockResolvedValue({
@@ -277,7 +277,7 @@ describe("messaging OpenShell provider application", () => {
           kind: "command",
           reason: "attached",
           message: "provider is attached",
-          attachedSandboxes: ["alpha", "other"],
+          attachedSandboxes: ["alpha", "sibling-live"],
         },
       }),
     });

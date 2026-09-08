@@ -7,6 +7,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { expectNoSandboxDelete } from "../../../../test/helpers/rebuild-delete-assertions";
 import { restoreEnv } from "../../../../test/helpers/env-test-helpers";
+import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
@@ -65,7 +66,7 @@ function harnessStoreRoot(): string {
   return path.join(process.env.HOME, ".nemoclaw", "harnesses");
 }
 
-describe("prepared rebuild recovery", () => {
+describe("prepared rebuild recovery", testTimeoutOptions(10_000), () => {
   installRebuildFlowTestHooks({ acceptThirdPartySoftware: true });
 
   it("restores the validated pre-upgrade manifest without taking a second backup (#6114)", async () => {

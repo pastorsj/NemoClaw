@@ -15,9 +15,12 @@ import {
   isScannedTestPath,
 } from "../../scripts/checks/no-test-dist-imports.mts";
 import {
+  discoverPackageVitestCandidates,
+  discoverPackageVitestPlans,
   discoverVitestCandidates,
   EXPECTED_VITEST_PROJECTS,
   expectedProjectForTestPath,
+  findPackageProjectMembershipMismatches,
   findProjectMembershipMismatches,
   findProjectRosterMismatches,
   parseProjectListing,
@@ -459,7 +462,9 @@ describe("compiled-test import boundary", () => {
     expect(isScannedTestPath("test/package-contract/example.test.ts")).toBe(false);
     expect(isScannedTestPath("test/e2e/example.test.ts")).toBe(false);
     expect(isScannedTestPath("test/repository/dist-sourcemaps.test.ts")).toBe(false);
-    expect(isScannedTestPath("test/installer-integration/install-managed-cli-reuse.test.ts")).toBe(false);
+    expect(isScannedTestPath("test/installer-integration/install-managed-cli-reuse.test.ts")).toBe(
+      false,
+    );
   });
 });
 
@@ -749,6 +754,42 @@ describe("Vitest project membership boundary", () => {
     }
   });
 
+  it("discovers package candidates from their independent Vitest configs (#6692)", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-package-projects-"));
+    try {
+      const writeFixtureFile = (file: string): void => {
+        const absolutePath = path.join(fixtureRoot, file);
+        fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+        fs.writeFileSync(absolutePath, "");
+      };
+      writeFixtureFile("packages/nemoclaw-example/vitest.config.ts");
+      writeFixtureFile("packages/nemoclaw-example/vitest.nemoclaw.ts");
+      writeFixtureFile("packages/nemoclaw-example/tests/runtime/example.test.ts");
+      writeFixtureFile("packages/nemoclaw-unconfigured/tests/runtime/orphan.test.ts");
+
+      const plans = discoverPackageVitestPlans(fixtureRoot);
+      expect(plans).toEqual([
+        {
+          packageRoot: "packages/nemoclaw-example",
+          configs: [
+            "packages/nemoclaw-example/vitest.config.ts",
+            "packages/nemoclaw-example/vitest.nemoclaw.ts",
+          ],
+        },
+        {
+          packageRoot: "packages/nemoclaw-unconfigured",
+          configs: [],
+        },
+      ]);
+      expect([...discoverPackageVitestCandidates(plans, fixtureRoot)]).toEqual([
+        "packages/nemoclaw-example/tests/runtime/example.test.ts",
+        "packages/nemoclaw-unconfigured/tests/runtime/orphan.test.ts",
+      ]);
+    } finally {
+      fs.rmSync(fixtureRoot, { force: true, recursive: true });
+    }
+  });
+
   it.each(
     Array.from(
       new Map<string, string | undefined>([
@@ -825,6 +866,52 @@ describe("Vitest project membership boundary", () => {
         file: "test/overlap.test.ts",
         expected: new Set(["integration"]),
         actual: new Set(["cli", "integration"]),
+        reason: "overlap",
+      },
+    ]);
+  });
+
+  it("reports package tests outside exactly one package config (#6692)", () => {
+    const candidates = new Set([
+      "packages/nemoclaw-example/tests/exact.test.ts",
+      "packages/nemoclaw-example/tests/missing.test.ts",
+      "packages/nemoclaw-example/tests/overlap.test.ts",
+    ]);
+    const configsByFile = new Map([
+      [
+        "packages/nemoclaw-example/tests/exact.test.ts",
+        new Set(["packages/nemoclaw-example/vitest.config.ts"]),
+      ],
+      [
+        "packages/nemoclaw-example/tests/overlap.test.ts",
+        new Set([
+          "packages/nemoclaw-example/vitest.config.ts",
+          "packages/nemoclaw-example/vitest.nemoclaw.ts",
+        ]),
+      ],
+      [
+        "packages/nemoclaw-example/helpers/unexpected.test.ts",
+        new Set(["packages/nemoclaw-example/vitest.config.ts"]),
+      ],
+    ]);
+
+    expect(findPackageProjectMembershipMismatches(candidates, configsByFile)).toEqual([
+      {
+        file: "packages/nemoclaw-example/helpers/unexpected.test.ts",
+        actual: new Set(["packages/nemoclaw-example/vitest.config.ts"]),
+        reason: "unexpected-listing",
+      },
+      {
+        file: "packages/nemoclaw-example/tests/missing.test.ts",
+        actual: new Set(),
+        reason: "zero-membership",
+      },
+      {
+        file: "packages/nemoclaw-example/tests/overlap.test.ts",
+        actual: new Set([
+          "packages/nemoclaw-example/vitest.config.ts",
+          "packages/nemoclaw-example/vitest.nemoclaw.ts",
+        ]),
         reason: "overlap",
       },
     ]);

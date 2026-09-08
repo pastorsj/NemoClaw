@@ -34,6 +34,17 @@ export type ProjectMembershipMismatch = {
     | "zero-membership";
 };
 
+export type PackageVitestPlan = {
+  packageRoot: string;
+  configs: readonly string[];
+};
+
+export type PackageProjectMembershipMismatch = {
+  file: string;
+  actual: ReadonlySet<string>;
+  reason: "overlap" | "unexpected-listing" | "zero-membership";
+};
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TEST_CANDIDATE_ROOTS = ["src", "test", "packages/nemoclaw-openclaw/plugin/src"] as const;
 const TEST_FILE_PATTERN = /\.(?:test|spec)\.(?:[cm]?[jt]sx?)$/;
@@ -43,7 +54,7 @@ function normalizeRepoPath(file: string): string {
   return file.replaceAll("\\", "/").replace(/^\.\/+/, "");
 }
 
-export function discoverVitestCandidates(repoRoot: string = REPO_ROOT): Set<string> {
+function discoverCandidatesUnderRoots(repoRoot: string, roots: readonly string[]): Set<string> {
   const candidates: string[] = [];
 
   const walk = (directory: string): void => {
@@ -59,8 +70,48 @@ export function discoverVitestCandidates(repoRoot: string = REPO_ROOT): Set<stri
     }
   };
 
-  for (const root of TEST_CANDIDATE_ROOTS) walk(path.join(repoRoot, root));
+  for (const root of roots) walk(path.join(repoRoot, root));
   return new Set(candidates.sort((left, right) => left.localeCompare(right)));
+}
+
+export function discoverVitestCandidates(repoRoot: string = REPO_ROOT): Set<string> {
+  return discoverCandidatesUnderRoots(repoRoot, TEST_CANDIDATE_ROOTS);
+}
+
+/** Finds each harness package test lane without teaching the check any harness names. */
+export function discoverPackageVitestPlans(repoRoot: string = REPO_ROOT): PackageVitestPlan[] {
+  const packagesRoot = path.join(repoRoot, "packages");
+  if (!existsSync(packagesRoot)) return [];
+
+  return readdirSync(packagesRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+    .flatMap((entry): PackageVitestPlan[] => {
+      const packageRoot = path.join(packagesRoot, entry.name);
+      if (!entry.name.startsWith("nemoclaw-") || !existsSync(path.join(packageRoot, "tests"))) {
+        return [];
+      }
+      const configs = ["vitest.config.ts", "vitest.nemoclaw.ts"]
+        .map((name) => path.join(packageRoot, name))
+        .filter(existsSync)
+        .map((config) => normalizeRepoPath(path.relative(repoRoot, config)));
+      return [
+        {
+          packageRoot: normalizeRepoPath(path.relative(repoRoot, packageRoot)),
+          configs,
+        },
+      ];
+    })
+    .sort((left, right) => left.packageRoot.localeCompare(right.packageRoot));
+}
+
+export function discoverPackageVitestCandidates(
+  plans: readonly PackageVitestPlan[],
+  repoRoot: string = REPO_ROOT,
+): Set<string> {
+  return discoverCandidatesUnderRoots(
+    repoRoot,
+    plans.map(({ packageRoot }) => path.posix.join(packageRoot, "tests")),
+  );
 }
 
 export function expectedProjectForTestPath(file: string): ExpectedVitestProject | undefined {
@@ -183,6 +234,36 @@ export function findProjectMembershipMismatches(
   return mismatches;
 }
 
+/** Requires every package test to belong to one, and only one, package Vitest config. */
+export function findPackageProjectMembershipMismatches(
+  candidateFiles: ReadonlySet<string>,
+  configsByFile: ReadonlyMap<string, ReadonlySet<string>>,
+): PackageProjectMembershipMismatch[] {
+  const candidates = new Set([...candidateFiles].map(normalizeRepoPath));
+  const actualByFile = new Map<string, Set<string>>();
+  for (const [file, configs] of configsByFile) {
+    const normalized = normalizeRepoPath(file);
+    const actual = actualByFile.get(normalized) ?? new Set<string>();
+    for (const config of configs) actual.add(normalizeRepoPath(config));
+    actualByFile.set(normalized, actual);
+  }
+
+  const mismatches: PackageProjectMembershipMismatch[] = [];
+  for (const file of [...new Set([...candidates, ...actualByFile.keys()])].sort((left, right) =>
+    left.localeCompare(right),
+  )) {
+    const actual = new Set([...(actualByFile.get(file) ?? [])].sort());
+    if (!candidates.has(file)) {
+      mismatches.push({ file, actual, reason: "unexpected-listing" });
+    } else if (actual.size === 0) {
+      mismatches.push({ file, actual, reason: "zero-membership" });
+    } else if (actual.size > 1) {
+      mismatches.push({ file, actual, reason: "overlap" });
+    }
+  }
+  return mismatches;
+}
+
 export function findProjectRosterMismatches(projects: ReadonlySet<string>): {
   missing: string[];
   unexpected: string[];
@@ -225,8 +306,30 @@ function main(): void {
   const candidates = discoverVitestCandidates();
   const mismatches = findProjectMembershipMismatches(candidates, projectsByFile);
   const roster = findProjectRosterMismatches(projects);
+  const packagePlans = discoverPackageVitestPlans();
+  const packageCandidates = discoverPackageVitestCandidates(packagePlans);
+  const configsByFile = new Map<string, Set<string>>();
+  for (const { configs } of packagePlans) {
+    for (const config of configs) {
+      const listing = parseProjectListing(runVitest(["list", "--config", config, "--filesOnly"]));
+      for (const file of listing.projectsByFile.keys()) {
+        const memberships = configsByFile.get(file) ?? new Set<string>();
+        memberships.add(config);
+        configsByFile.set(file, memberships);
+      }
+    }
+  }
+  const packageMismatches = findPackageProjectMembershipMismatches(
+    packageCandidates,
+    configsByFile,
+  );
 
-  if (roster.missing.length > 0 || roster.unexpected.length > 0 || mismatches.length > 0) {
+  if (
+    roster.missing.length > 0 ||
+    roster.unexpected.length > 0 ||
+    mismatches.length > 0 ||
+    packageMismatches.length > 0
+  ) {
     console.error("Vitest project discovery does not match the repository test contract:");
     if (roster.missing.length > 0) {
       console.error(`  missing projects: ${roster.missing.join(", ")}`);
@@ -239,11 +342,16 @@ function main(): void {
         `  ${file}: ${reason}; expected ${formatProjects(expected)}; found ${formatProjects(actual)}`,
       );
     }
+    for (const { file, actual, reason } of packageMismatches) {
+      console.error(
+        `  ${file}: package-${reason}; expected exactly one package config; found ${formatProjects(actual)}`,
+      );
+    }
     process.exit(1);
   }
 
   console.log(
-    `Vitest project membership is exact (${candidates.size} candidate files across ${projects.size} projects).`,
+    `Vitest project membership is exact (${candidates.size} core candidates across ${projects.size} projects; ${packageCandidates.size} package candidates across ${packagePlans.flatMap(({ configs }) => configs).length} configs).`,
   );
 }
 

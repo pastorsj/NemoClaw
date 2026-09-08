@@ -19,8 +19,8 @@ vi.mock("./mcp-bridge-adapters", () => ({
 }));
 
 vi.mock("./mcp-bridge-policy", () => ({
+  getPolicyGatewayState: () => "match",
   getRegisteredGeneratedPolicy: () => ({ name: "mcp-bridge-docs", content: "policy" }),
-  getPolicyPresence: () => true,
 }));
 
 vi.mock("./mcp-bridge-provider", () => ({

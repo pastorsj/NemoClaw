@@ -44,6 +44,7 @@ export default defineConfig({
       "tests/runtime/process-lifecycle.test.ts",
       "tests/runtime/managed-gateway-profile.test.ts",
       "tests/runtime/session-admin.test.ts",
+      "tests/runtime/session-qualify.test.ts",
       "tests/runtime/seal-config.test.ts",
       "tests/runtime/state-extensions.test.ts",
       "tests/runtime/state-restore.test.ts",
