@@ -32,7 +32,7 @@ function writeSqliteIndex(root: string, records: Readonly<Record<string, unknown
 }
 
 function inspect(root: string): SpawnSyncReturns<string> {
-  return spawnSync("python3", [CONTROLLER, root, "inspect-managed-extensions"], {
+  return spawnSync(CONTROLLER, [root, "inspect-managed-extensions"], {
     encoding: "utf8",
   });
 }
@@ -113,7 +113,7 @@ describe("OpenClaw managed-extension controller", () => {
   ])("rejects an %s", (_name, arguments_) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-state-extensions-"));
     try {
-      const result = spawnSync("python3", [CONTROLLER, root, ...arguments_], {
+      const result = spawnSync(CONTROLLER, [root, ...arguments_], {
         encoding: "utf8",
       });
       expect(result.status).toBe(1);
