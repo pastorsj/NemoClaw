@@ -602,7 +602,6 @@ COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/session-admin.sh /usr/local
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/semantic-turn.sh /usr/local/bin/nemoclaw-openclaw-semantic-turn
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/device-pairing-settle.sh /usr/local/bin/nemoclaw-device-pairing-settle
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/session-qualify.py /usr/local/bin/nemoclaw-session-qualify
-COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/auth-state.py /usr/local/lib/nemoclaw/openclaw-auth-state.py
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/state-restore.sh /usr/local/bin/nemoclaw-state-restore
 COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/state-restore.py /usr/local/lib/nemoclaw/openclaw-state-restore.py
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/state-extensions.py /usr/local/lib/nemoclaw/openclaw-state-extensions.py
@@ -1635,10 +1634,11 @@ ARG NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER=sandbox
 # the primary agent always remains the default. See generate-openclaw-config.mts
 # for the validator. Default: empty array (W10= == base64("[]")).
 ARG NEMOCLAW_EXTRA_AGENTS_JSON_B64=W10=
-# Set to "1" to force-disable device-pairing auth. Also auto-disabled when
+# Set to "1" to disable Control UI device authentication. Also enabled when
 # CHAT_UI_URL is a non-loopback address (Brev Launchable, remote deployments)
 # since terminal-based pairing is impossible in those contexts.
-# Default: "0" (device auth enabled for local deployments — secure by default).
+# The canonical CLI still uses its package-managed device pairing.
+# Default: "0" (Control UI device auth enabled for local deployments).
 ARG NEMOCLAW_DISABLE_DEVICE_AUTH=0
 # Internal audit provenance for the opt-out above. Standard onboarding rewrites
 # this to managed-onboard; direct image builders retain operator provenance.
@@ -2493,7 +2493,6 @@ RUN check_metadata() { \
     && check_metadata /usr/local/bin/nemoclaw-openclaw-semantic-turn 'root:root:555' \
     && check_metadata /usr/local/bin/nemoclaw-device-pairing-settle 'root:root:555' \
     && check_metadata /usr/local/bin/nemoclaw-session-qualify 'root:root:555' \
-    && check_metadata /usr/local/lib/nemoclaw/openclaw-auth-state.py 'root:root:444' \
     && check_metadata /usr/local/bin/nemoclaw-state-restore 'root:root:555' \
     && check_metadata /usr/local/lib/nemoclaw/openclaw-state-restore.py 'root:root:444' \
     && check_metadata /usr/local/lib/nemoclaw/openclaw-state-extensions.py 'root:root:555' \

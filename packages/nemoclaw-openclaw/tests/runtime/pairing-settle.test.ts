@@ -12,40 +12,77 @@ const NONCE = "a".repeat(64);
 const SCRIPT = path.join(import.meta.dirname, "../../runtime/device-pairing-settle.sh");
 const temporaryDirectories: string[] = [];
 
-type SettlementOptions = {
-  readonly config?: boolean | "malformed" | "missing" | "missing-field";
-  readonly flag?: string;
-  readonly source?: string;
-};
-
-function runSettlement({
-  config = true,
-  flag = "1",
-  source = "managed-onboard",
-}: SettlementOptions = {}) {
+function runSettlement(watcherExitCode = 0) {
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pair-settle-"));
   temporaryDirectories.push(temporaryDirectory);
-  if (config !== "missing") {
-    const contents =
-      config === "malformed"
-        ? "{not-json\n"
-        : JSON.stringify({
-            gateway: {
-              controlUi: config === "missing-field" ? {} : { dangerouslyDisableDeviceAuth: config },
-            },
-          });
-    fs.writeFileSync(path.join(temporaryDirectory, "openclaw.json"), contents);
-  }
-  const environment: NodeJS.ProcessEnv = {
-    PATH: "/usr/bin:/bin",
-    OPENCLAW_STATE_DIR: temporaryDirectory,
-  };
-  if (flag !== "missing") environment.NEMOCLAW_DISABLE_DEVICE_AUTH = flag;
-  if (source !== "missing") environment.NEMOCLAW_DEVICE_AUTH_OPT_OUT_SOURCE = source;
-  return spawnSync("/bin/sh", [SCRIPT, NONCE], {
+  const invocationLog = path.join(temporaryDirectory, "invocation.json");
+  const fakeOpenClaw = path.join(temporaryDirectory, "openclaw");
+  const fakeWatcher = path.join(temporaryDirectory, "auto-pair.py");
+  const settlementScript = path.join(temporaryDirectory, "device-pairing-settle.sh");
+
+  fs.writeFileSync(fakeOpenClaw, "#!/bin/sh\nexit 99\n", { mode: 0o755 });
+  fs.writeFileSync(
+    fakeWatcher,
+    `import json
+import os
+import pathlib
+import sys
+
+projection = {
+    "argv": sys.argv[1:],
+    "openclawBin": os.environ.get("OPENCLAW_BIN"),
+    "deadlineSeconds": os.environ.get("NEMOCLAW_AUTO_PAIR_DEADLINE_SECS"),
+    "runTimeoutSeconds": os.environ.get("NEMOCLAW_AUTO_PAIR_RUN_TIMEOUT_SECS"),
+    "inheritedMarkers": sorted(
+        name
+        for name in (
+            "OPENCLAW_GATEWAY_URL",
+            "OPENCLAW_GATEWAY_PORT",
+            "OPENCLAW_GATEWAY_TOKEN",
+            "OPENCLAW_GATEWAY_PASSWORD",
+            "NEMOCLAW_OPENCLAW_FORCE_DEVICE_PAIRING",
+            "NEMOCLAW_OPENCLAW_RESTORED_CLONE_PAIRING",
+            "NEMOCLAW_OPENCLAW_PAIRING_SETTLEMENT",
+            "NEMOCLAW_OPENCLAW_BOUNDED_DEVICE_APPROVAL",
+        )
+        if name in os.environ
+    ),
+}
+pathlib.Path(${JSON.stringify(invocationLog)}).write_text(
+    json.dumps(projection), encoding="utf-8"
+)
+raise SystemExit(${watcherExitCode})
+`,
+  );
+  const source = fs
+    .readFileSync(SCRIPT, "utf8")
+    .replace("/usr/local/lib/nemoclaw/openclaw-startup/auto-pair.py", fakeWatcher);
+  fs.writeFileSync(settlementScript, source, { mode: 0o755 });
+
+  const result = spawnSync("/bin/sh", [settlementScript, NONCE], {
     encoding: "utf8",
-    env: environment,
+    env: {
+      ...process.env,
+      PATH: `${temporaryDirectory}:/usr/bin:/bin`,
+      NEMOCLAW_DISABLE_DEVICE_AUTH: "1",
+      OPENCLAW_GATEWAY_URL: "ws://untrusted.invalid",
+      OPENCLAW_GATEWAY_PORT: "1",
+      OPENCLAW_GATEWAY_TOKEN: "untrusted-token",
+      OPENCLAW_GATEWAY_PASSWORD: "untrusted-password",
+      NEMOCLAW_OPENCLAW_FORCE_DEVICE_PAIRING: "1",
+      NEMOCLAW_OPENCLAW_RESTORED_CLONE_PAIRING: "1",
+      NEMOCLAW_OPENCLAW_PAIRING_SETTLEMENT: "1",
+      NEMOCLAW_OPENCLAW_BOUNDED_DEVICE_APPROVAL: "1",
+    },
+    timeout: 15_000,
   });
+  return {
+    result,
+    fakeOpenClaw,
+    invocation: fs.existsSync(invocationLog)
+      ? (JSON.parse(fs.readFileSync(invocationLog, "utf8")) as Record<string, unknown>)
+      : undefined,
+  };
 }
 
 afterEach(() => {
@@ -55,35 +92,29 @@ afterEach(() => {
 });
 
 describe("OpenClaw package device-pairing settlement", () => {
-  it.each(["managed-onboard", "operator"])(
-    "settles intentional no-auth state declared by %s",
-    (source) => {
-      const result = runSettlement({ source });
+  it("delegates the complete bounded transition to the package pairing state machine", () => {
+    const { result, fakeOpenClaw, invocation } = runSettlement();
 
-      expect(result.status).toBe(0);
-      expect(result.stderr).toBe("");
-      expect(result.stdout).toBe(`__NEMOCLAW_DEVICE_PAIRING_SETTLED__=${NONCE}\n`);
-    },
-  );
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(`__NEMOCLAW_DEVICE_PAIRING_SETTLED__=${NONCE}\n`);
+    expect(invocation).toEqual({
+      argv: ["--once"],
+      openclawBin: fakeOpenClaw,
+      deadlineSeconds: "90",
+      runTimeoutSeconds: "10",
+      inheritedMarkers: [],
+    });
+  });
 
-  it.each([
-    { name: "missing opt-out flag", options: { flag: "missing" } },
-    { name: "enabled auth with disabled config", options: { flag: "0" } },
-    { name: "unknown opt-out flag", options: { flag: "true" } },
-    { name: "missing provenance", options: { source: "missing" } },
-    { name: "unknown provenance", options: { source: "untrusted" } },
-    { name: "enabled native config", options: { config: false } },
-    { name: "missing native config", options: { config: "missing" as const } },
-    { name: "malformed native config", options: { config: "malformed" as const } },
-    { name: "incomplete native config", options: { config: "missing-field" as const } },
-  ])("fails closed for $name", ({ options }) => {
-    const result = runSettlement(options);
+  it("does not emit settlement when the exact pairing watcher fails", () => {
+    const { result } = runSettlement(7);
 
-    expect(result.status).not.toBe(0);
+    expect(result.status).toBe(7);
     expect(result.stdout).not.toContain("__NEMOCLAW_DEVICE_PAIRING_SETTLED__=");
   });
 
-  it("still rejects an invalid core nonce before the no-pairing path", () => {
+  it("rejects an invalid core nonce before starting native pairing", () => {
     const result = spawnSync("/bin/sh", [SCRIPT, "not-a-core-nonce"], {
       encoding: "utf8",
       env: {

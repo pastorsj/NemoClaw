@@ -62,6 +62,45 @@ describe("OpenClaw device self-approval patch upgrades (#4462)", () => {
     }
   });
 
+  it("adds fail-closed watcher approvals to an earlier patched devices CLI", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-device-watcher-upgrade-"));
+    const dist = path.join(tmp, "dist");
+    fs.mkdirSync(dist);
+    writeFixtureDist(dist);
+    try {
+      expect(runPatch(dist).status).toBe(0);
+      const file = path.join(dist, "devices-cli.runtime-fixture.js");
+      const currentHeader = [
+        '\tconst nemoclawBoundedDeviceApproval = process.env.NEMOCLAW_OPENCLAW_BOUNDED_DEVICE_APPROVAL === "1"; // nemoclaw: keep watcher device approval fail closed (#4462)',
+        "\tconst { scopes, originalRequest, nemoclawUseStoredDeviceAuth, nemoclawUsePairedToken, nemoclawPairedToken, nemoclawPinnedGatewayUrl, nemoclawRefuseUnsafeApproval } = await resolveApprovePairingGatewayContext(opts, requestId);",
+        '\tif (nemoclawRefuseUnsafeApproval || (nemoclawBoundedDeviceApproval && !originalRequest)) throw new Error("bounded same-device approval context changed before gateway approval");',
+      ].join("\n");
+      const legacyHeader = [
+        "\tconst { scopes, originalRequest, nemoclawUseStoredDeviceAuth, nemoclawUsePairedToken, nemoclawPairedToken, nemoclawPinnedGatewayUrl, nemoclawRefuseUnsafeApproval } = await resolveApprovePairingGatewayContext(opts, requestId);",
+        '\tif (nemoclawRefuseUnsafeApproval) throw new Error("bounded same-device approval context changed before gateway approval");',
+      ].join("\n");
+      const currentGuard =
+        "\t\tif (nemoclawBoundedDeviceApproval || nemoclawUseStoredDeviceAuth || nemoclawUsePairedToken) throw error; // nemoclaw: keep bounded device auth fail closed (#4462)";
+      const legacyGuard =
+        "\t\tif (nemoclawUseStoredDeviceAuth || nemoclawUsePairedToken) throw error; // nemoclaw: keep bounded device auth fail closed (#4462)";
+      const source = fs.readFileSync(file, "utf8");
+      expect(source).toContain(currentHeader);
+      expect(source).toContain(currentGuard);
+      fs.writeFileSync(
+        file,
+        source.replace(currentHeader, legacyHeader).replace(currentGuard, legacyGuard),
+      );
+
+      expect(runPatch(dist).status).toBe(0);
+      const upgraded = fs.readFileSync(file, "utf8");
+      expect(upgraded).toContain(currentHeader);
+      expect(upgraded).toContain(currentGuard);
+      expect(runPatch(dist).status).toBe(0);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("migrates the restored-clone mode from the force flag", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-device-clone-mode-upgrade-"));
     const dist = path.join(tmp, "dist");

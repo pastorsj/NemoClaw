@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -5,7 +6,6 @@
 
 import base64
 import hashlib
-import importlib.util
 import json
 import os
 import subprocess
@@ -14,18 +14,6 @@ import sys
 MAX_NATIVE_OUTPUT_BYTES = 1024 * 1024
 REQUIRED_PAIRED_SCOPES = {"operator.pairing", "operator.write"}
 REQUIRED_TOKEN_SCOPES = {"operator.pairing", "operator.read", "operator.write"}
-
-
-def load_auth_state_helper():
-    installed_path = "/usr/local/lib/nemoclaw/openclaw-auth-state.py"
-    source_path = os.path.join(os.path.dirname(__file__), "auth-state.py")
-    helper_path = source_path if os.path.isfile(source_path) else installed_path
-    spec = importlib.util.spec_from_file_location("nemoclaw_openclaw_auth_state", helper_path)
-    if spec is None or spec.loader is None:
-        raise ValueError("device-auth state helper is unavailable")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.read_disabled_device_auth_projection
 
 
 def exact_string_set(value, expected):
@@ -72,8 +60,16 @@ def devices_list(openclaw_binary):
         "OPENCLAW_GATEWAY_PORT",
         "OPENCLAW_GATEWAY_TOKEN",
         "OPENCLAW_GATEWAY_PASSWORD",
+        "NEMOCLAW_OPENCLAW_FORCE_DEVICE_PAIRING",
+        "NEMOCLAW_OPENCLAW_RESTORED_CLONE_PAIRING",
+        "NEMOCLAW_OPENCLAW_PAIRING_SETTLEMENT",
+        "NEMOCLAW_OPENCLAW_BOUNDED_DEVICE_APPROVAL",
     ):
         child_environment.pop(name, None)
+    # The compatibility wrapper uses this marker to require the canonical
+    # CLI's stored device credential. Without it, OpenClaw may satisfy the
+    # observation with shared gateway auth or a local pending-list fallback.
+    child_environment["NEMOCLAW_OPENCLAW_PAIRING_SETTLEMENT"] = "1"
     result = subprocess.run(
         [openclaw_binary, "devices", "list", "--json"],
         capture_output=True,
@@ -94,6 +90,8 @@ def qualified_projection(document, device_id, public_key):
     pending = document.get("pending")
     if not isinstance(paired, list) or not isinstance(pending, list):
         raise ValueError("device observation is incomplete")
+    if any(not isinstance(request, dict) for request in pending):
+        raise ValueError("pending device observation is malformed")
     candidates = [
         device
         for device in paired
@@ -105,13 +103,28 @@ def qualified_projection(document, device_id, public_key):
         and device.get("role") == "operator"
         and exact_string_set(device.get("roles"), {"operator"})
         and exact_string_set(device.get("scopes"), REQUIRED_PAIRED_SCOPES)
-        and exact_string_set(device.get("approvedScopes"), REQUIRED_PAIRED_SCOPES)
     ]
     if len(candidates) != 1:
         raise ValueError("canonical CLI device is not uniquely paired")
     candidate = candidates[0]
     tokens = candidate.get("tokens")
-    operator = tokens.get("operator") if isinstance(tokens, dict) and set(tokens) == {"operator"} else None
+    if isinstance(tokens, list):
+        operator = tokens[0] if len(tokens) == 1 else None
+        # OpenClaw's current public devices-list envelope omits approvedScopes
+        # and redacts token values. If it supplies approvedScopes, still require
+        # the exact baseline rather than accepting a contradictory projection.
+        if "approvedScopes" in candidate and not exact_string_set(
+            candidate.get("approvedScopes"), REQUIRED_PAIRED_SCOPES
+        ):
+            raise ValueError("canonical CLI approved scopes are invalid")
+    else:
+        operator = (
+            tokens.get("operator")
+            if isinstance(tokens, dict) and set(tokens) == {"operator"}
+            else None
+        )
+        if not exact_string_set(candidate.get("approvedScopes"), REQUIRED_PAIRED_SCOPES):
+            raise ValueError("canonical CLI approved scopes are invalid")
     if (
         not isinstance(operator, dict)
         or operator.get("role") != "operator"
@@ -133,14 +146,10 @@ def qualified_projection(document, device_id, public_key):
 
 
 def current_session_projection():
-    # Managed onboarding intentionally disables device authentication. In that
-    # mode there is no credential state to inspect, but launch readiness still
-    # needs a stable package-owned observation. Keeping the distinction here
-    # lets NemoClaw core remain unaware of OpenClaw configuration details.
-    if os.environ.get("NEMOCLAW_DISABLE_DEVICE_AUTH") == "1":
-        return load_auth_state_helper()()
-    if os.environ.get("NEMOCLAW_DISABLE_DEVICE_AUTH", "0") != "0":
-        raise ValueError("device authentication mode is invalid")
+    # dangerouslyDisableDeviceAuth applies to OpenClaw's Control UI. The
+    # canonical CLI still authenticates to the gateway with a paired device,
+    # so launch readiness must always prove that credential rather than infer
+    # session authority from the browser setting.
     state_directory = os.environ.get("OPENCLAW_STATE_DIR") or "/sandbox/.openclaw"
     device_id, public_key = local_identity(state_directory)
     openclaw_binary = os.environ.get("OPENCLAW_BIN") or "openclaw"

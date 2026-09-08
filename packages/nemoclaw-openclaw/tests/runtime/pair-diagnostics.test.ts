@@ -8,6 +8,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { createAutoPairPythonScript } from "../helpers/pair-bootstrap";
+import { createCanonicalCliPublicPairingFixture } from "../helpers/pair-settlement";
 import { readOpenClawAutoPairSource } from "../helpers/startup";
 
 describe("nemoclaw-start auto-pair diagnostics (#9844)", () => {
@@ -95,6 +96,19 @@ printf '%s\\n' ${JSON.stringify(response)}
     const listEnv = path.join(tmpDir, "list-env");
     const approveEnv = path.join(tmpDir, "approve-env");
     const approvalMarker = path.join(tmpDir, "approval-called");
+    const stateDirectory = path.join(tmpDir, "state");
+    const canonicalCli = createCanonicalCliPublicPairingFixture(stateDirectory);
+    const operatorToken = (canonicalCli.tokens as Array<Record<string, unknown>>)[0];
+    const pairedJson = JSON.stringify({
+      pending: [],
+      paired: [
+        {
+          ...canonicalCli,
+          scopes: ["operator.pairing"],
+          tokens: [{ ...operatorToken, scopes: ["operator.pairing"] }],
+        },
+      ],
+    });
     fs.writeFileSync(
       fakeOpenclaw,
       `#!/usr/bin/env bash
@@ -112,7 +126,7 @@ if [ "\${1:-}" = "devices" ] && [ "\${2:-}" = "list" ]; then
   elif [ "$count" -eq 3 ]; then
     printf '%s\n' '{"pending":[],"paired":[{"clientId":"not-cli","clientMode":"cli"}]}'
   else
-    printf '%s\n' '{"pending":[],"paired":[{"clientId":"cli","clientMode":"cli"}]}'
+    printf '%s\n' ${JSON.stringify(pairedJson)}
   fi
   exit 0
 fi
@@ -132,6 +146,7 @@ exit 2
         env: {
           ...process.env,
           OPENCLAW_BIN: fakeOpenclaw,
+          OPENCLAW_STATE_DIR: stateDirectory,
           OPENCLAW_GATEWAY_TOKEN: "gateway-token",
           NEMOCLAW_AUTO_PAIR_DEADLINE_SECS: "2",
           NEMOCLAW_AUTO_PAIR_SLOW_INTERVAL_SECS: "1",
@@ -253,7 +268,7 @@ printf '%s\n' '{"pending":[{"requestId":"--help","clientId":"cli","clientMode":"
       expect(run.stdout).toContain(
         "[auto-pair] stage=validation rejected reason=malformed-request-id",
       );
-      expect(run.stdout).toContain("[auto-pair] loopback CLI pairing bootstrap completed");
+      expect(run.stdout).not.toContain("[auto-pair] loopback CLI pairing bootstrap completed");
       expect(run.stdout).not.toContain("entering slow-mode");
       expect(run.stdout).toContain('[auto-pair-status] {"schemaVersion":1,"state":"stopped"}');
       expect(run.stdout).not.toContain("--help");

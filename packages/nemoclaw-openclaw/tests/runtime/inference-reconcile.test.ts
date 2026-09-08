@@ -72,13 +72,20 @@ describe("OpenClaw inference reconciliation", () => {
         "    return subprocess.CompletedProcess(argv, 0)",
         "assert module.reconcile_pairing(fake_run)",
         "assert calls[0][0] == ['/bin/bash', '-c', module.RECONCILE_SHELL]",
-        "assert calls[0][1]['timeout'] == 75",
+        "assert calls[0][1]['timeout'] == module.RECONCILE_TIMEOUT_SECONDS",
         "assert calls[0][1]['stdout'] == subprocess.DEVNULL",
         "assert calls[0][1]['stderr'] == subprocess.DEVNULL",
         "assert calls[0][1]['start_new_session'] is True",
+        "assert module.AUTO_PAIR_DEADLINE_SECONDS + module.AUTO_PAIR_RUN_TIMEOUT_SECONDS < module.RECONCILE_TIMEOUT_SECONDS",
+        "assert f'NEMOCLAW_AUTO_PAIR_DEADLINE_SECS={module.AUTO_PAIR_DEADLINE_SECONDS}' in module.RECONCILE_SHELL",
+        "assert f'NEMOCLAW_AUTO_PAIR_RUN_TIMEOUT_SECS={module.AUTO_PAIR_RUN_TIMEOUT_SECONDS}' in module.RECONCILE_SHELL",
       ].join("\n"),
     );
     expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+    expect(fs.readFileSync(RECONCILE, "utf8")).not.toContain("openclaw agent");
+    expect(fs.readFileSync(RECONCILE, "utf8")).not.toContain("nemoclaw-inference-reconcile-");
   });
 
   it("makes auto-pair one-shot exit at canonical settlement without writing status state", () => {

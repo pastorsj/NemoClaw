@@ -155,6 +155,17 @@ LAST_LIST_FAILURE_REASON = None
 REQUEST_CREATION_WAITING_REPORTED = False
 PAIRING_BOOTSTRAPPED = False
 MALFORMED_REQUEST_ID_REPORTED = False
+LAST_WRITE_SCOPE_REQUEST_AT = None
+WRITE_SCOPE_REQUEST_RETRY_SECS = _env_seconds(
+    'NEMOCLAW_AUTO_PAIR_WRITE_RETRY_SECS', 5,
+)
+CANONICAL_WARMUP_SESSION_PARAMS = json.dumps(
+    {
+        'key': 'agent:main:nemoclaw-onboard-warmup',
+        'agentId': 'main',
+    },
+    separators=(',', ':'),
+)
 # SECURITY NOTE: clientId/clientMode are client-supplied and spoofable
 # (the gateway stores connectParams.client.id verbatim). The policy requires
 # an explicit known clientId and never trusts an allowlisted mode by itself.
@@ -425,7 +436,58 @@ def exact_string_set(value, expected):
     )
 
 
+def canonical_cli_pairing_ready_for_write(paired, pending):
+    # The write trigger is a mutation, so advance only from the exact local
+    # pairing-only state observed from OpenClaw 2026.7.1. An unrelated CLI,
+    # malformed credential, or any pending request must not unlock it.
+    if pending:
+        return False
+    try:
+        local_device_id, local_public_key = _local_device_identity()
+    except (OSError, ValueError, RuntimeError, binascii.Error):
+        return False
+    candidates = [
+        device for device in paired
+        if isinstance(device, dict)
+        and device.get('deviceId') == local_device_id
+        and device.get('publicKey') == local_public_key
+        and device.get('clientId') == 'cli'
+        and device.get('clientMode') == 'cli'
+        and device.get('role') == 'operator'
+        and exact_string_set(device.get('roles'), {'operator'})
+        and exact_string_set(device.get('scopes'), {'operator.pairing'})
+    ]
+    if len(candidates) != 1:
+        return False
+    device = candidates[0]
+    tokens = device.get('tokens')
+    if isinstance(tokens, list):
+        operator = tokens[0] if len(tokens) == 1 else None
+        approved_scopes_valid = (
+            'approvedScopes' not in device
+            or exact_string_set(device.get('approvedScopes'), {'operator.pairing'})
+        )
+    else:
+        operator = (
+            tokens.get('operator')
+            if isinstance(tokens, dict) and set(tokens) == {'operator'}
+            else None
+        )
+        approved_scopes_valid = exact_string_set(
+            device.get('approvedScopes'), {'operator.pairing'},
+        )
+    return (
+        approved_scopes_valid
+        and isinstance(operator, dict)
+        and operator.get('role') == 'operator'
+        and operator.get('revokedAtMs') is None
+        and exact_string_set(operator.get('scopes'), {'operator.pairing'})
+    )
+
+
 def canonical_cli_baseline_settled(paired, pending):
+    if any(not isinstance(request, dict) for request in pending):
+        return False
     try:
         local_device_id, local_public_key = _local_device_identity()
     except (OSError, ValueError, RuntimeError, binascii.Error):
@@ -440,16 +502,30 @@ def canonical_cli_baseline_settled(paired, pending):
         and device.get('role') == 'operator'
         and exact_string_set(device.get('roles'), {'operator'})
         and exact_string_set(device.get('scopes'), {'operator.pairing', 'operator.write'})
-        and exact_string_set(device.get('approvedScopes'), {'operator.pairing', 'operator.write'})
     ]
     if len(candidates) != 1:
         return False
     device = candidates[0]
     device_id = str(device.get('deviceId', '') or '').strip()
     tokens = device.get('tokens')
-    operator = tokens.get('operator') if isinstance(tokens, dict) and set(tokens) == {'operator'} else None
+    if isinstance(tokens, list):
+        operator = tokens[0] if len(tokens) == 1 else None
+        approved_scopes_valid = (
+            'approvedScopes' not in device
+            or exact_string_set(device.get('approvedScopes'), {'operator.pairing', 'operator.write'})
+        )
+    else:
+        operator = (
+            tokens.get('operator')
+            if isinstance(tokens, dict) and set(tokens) == {'operator'}
+            else None
+        )
+        approved_scopes_valid = exact_string_set(
+            device.get('approvedScopes'), {'operator.pairing', 'operator.write'},
+        )
     if (
         not device_id
+        or not approved_scopes_valid
         or not isinstance(operator, dict)
         or operator.get('role') != 'operator'
         or operator.get('revokedAtMs') is not None
@@ -483,24 +559,44 @@ def list_failure_reason(rc, out, err):
 # to select pairing-only stored-device auth. Approval calls keep their separate
 # bounded credential selection. Remove these pieces when upstream supports that
 # flow.
-def run(*args, strip_gateway_env=False, force_device_pairing=False, pairing_settlement=False):
+def run(
+    *args,
+    strip_gateway_env=False,
+    force_device_pairing=False,
+    pairing_settlement=False,
+    bounded_device_approval=False,
+):
     # Bound every openclaw CLI invocation so a wedged child cannot pin
     # the watcher beyond DEADLINE (CodeRabbit #4292): subprocess.run with
     # no timeout would hold a hung `openclaw devices list/approve` past
     # the fast→slow transition and the 8h deadline check.
     env = None
-    if strip_gateway_env:
-        env = gateway_approval_env(os.environ)
-        env.pop('NEMOCLAW_OPENCLAW_PAIRING_SETTLEMENT', None)
+    if strip_gateway_env or force_device_pairing or pairing_settlement or bounded_device_approval:
+        env = gateway_approval_env(os.environ) if strip_gateway_env else dict(os.environ)
+        for name in (
+            'OPENCLAW_GATEWAY_PASSWORD',
+            'NEMOCLAW_OPENCLAW_FORCE_DEVICE_PAIRING',
+            'NEMOCLAW_OPENCLAW_RESTORED_CLONE_PAIRING',
+            'NEMOCLAW_OPENCLAW_PAIRING_SETTLEMENT',
+            'NEMOCLAW_OPENCLAW_BOUNDED_DEVICE_APPROVAL',
+        ):
+            env.pop(name, None)
         if pairing_settlement:
             env['NEMOCLAW_OPENCLAW_PAIRING_SETTLEMENT'] = '1'
-    elif force_device_pairing:
-        env = dict(os.environ)
-        env.pop('NEMOCLAW_OPENCLAW_PAIRING_SETTLEMENT', None)
-        env['NEMOCLAW_OPENCLAW_FORCE_DEVICE_PAIRING'] = '1'
+        elif force_device_pairing:
+            env['NEMOCLAW_OPENCLAW_FORCE_DEVICE_PAIRING'] = '1'
+        if bounded_device_approval:
+            env['NEMOCLAW_OPENCLAW_BOUNDED_DEVICE_APPROVAL'] = '1'
+    remaining_seconds = DEADLINE - time.time()
+    if remaining_seconds <= 0:
+        return 124, '', ''
     try:
         proc = subprocess.run(
-            args, capture_output=True, text=True, timeout=RUN_TIMEOUT_SECS, env=env,
+            args,
+            capture_output=True,
+            text=True,
+            timeout=min(RUN_TIMEOUT_SECS, remaining_seconds),
+            env=env,
         )
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
     except subprocess.TimeoutExpired as exc:
@@ -509,6 +605,25 @@ def run(*args, strip_gateway_env=False, force_device_pairing=False, pairing_sett
         err = (exc.stderr or '') if isinstance(exc.stderr, str) else ''
         print(f'[auto-pair] timeout calling {args[1] if len(args) > 1 else "openclaw"} {args[2] if len(args) > 2 else ""}'.rstrip())
         return 124, out.strip(), err.strip()
+
+
+def request_canonical_write_scope():
+    # The single startup watcher owns request creation as well as approval.
+    # Requesting the stable warm-up session only after this process has
+    # observed exact pairing-only state prevents concurrent settlement callers
+    # from replacing an in-flight request. Repeating the same key after the
+    # bounded retry interval is idempotent across reconnects.
+    return run(
+        OPENCLAW,
+        'gateway',
+        'call',
+        'sessions.create',
+        '--params',
+        CANONICAL_WARMUP_SESSION_PARAMS,
+        '--json',
+        strip_gateway_env=True,
+        force_device_pairing=True,
+    )
 
 
 def sleep_for_next_poll(default_seconds, productive=True):
@@ -526,30 +641,36 @@ def sleep_for_next_poll(default_seconds, productive=True):
     # silently drain the bounded window before a productive poll observes
     # the cascading upgrades.
     global FAST_REENTRY_REMAINING
+    sleep_seconds = default_seconds
     if FAST_REENTRY_REMAINING > 0:
         if productive:
             FAST_REENTRY_REMAINING -= 1
-        time.sleep(min(FAST_REENTRY_INTERVAL, default_seconds))
-        return
-    time.sleep(default_seconds)
+        sleep_seconds = min(FAST_REENTRY_INTERVAL, default_seconds)
+    remaining_seconds = DEADLINE - time.time()
+    if remaining_seconds > 0:
+        time.sleep(min(sleep_seconds, remaining_seconds))
 
 
 while time.time() < DEADLINE:
+    # A one-shot settlement pass is a read-only observer. It always requires
+    # stored device auth and can neither create the initial pairing request nor
+    # consume shared gateway credentials. The long-running startup watcher is
+    # the sole request producer and approver.
     rc, out, err = run(
         OPENCLAW,
         'devices',
         'list',
         '--json',
-        strip_gateway_env=PAIRING_BOOTSTRAPPED,
-        force_device_pairing=not PAIRING_BOOTSTRAPPED,
-        pairing_settlement=PAIRING_BOOTSTRAPPED,
+        strip_gateway_env=ONE_SHOT or PAIRING_BOOTSTRAPPED,
+        force_device_pairing=not ONE_SHOT and not PAIRING_BOOTSTRAPPED,
+        pairing_settlement=ONE_SHOT or PAIRING_BOOTSTRAPPED,
     )
     if rc != 0 or not out:
         failure_reason = list_failure_reason(rc, out, err)
         if failure_reason != LAST_LIST_FAILURE_REASON:
             print(f'[auto-pair] stage=listing failed reason={failure_reason}')
             LAST_LIST_FAILURE_REASON = failure_reason
-        initial_request_id = pairing_required_request_id(out, err)
+        initial_request_id = None if ONE_SHOT else pairing_required_request_id(out, err)
         if initial_request_id and initial_request_id not in HANDLED:
             live_request_ids = {initial_request_id}
             HANDLED.intersection_update(live_request_ids)
@@ -565,10 +686,21 @@ while time.time() < DEADLINE:
             )
         else:
             initial_request_allowed = False
-        if initial_request_id and initial_request_id not in HANDLED and initial_request_allowed:
+        if (
+            not ONE_SHOT
+            and initial_request_id
+            and initial_request_id not in HANDLED
+            and initial_request_allowed
+        ):
             print(f'[auto-pair] stage=approval attempting request={initial_request_id}')
             arc, aout, aerr = run(
-                OPENCLAW, 'devices', 'approve', initial_request_id, '--json', strip_gateway_env=True,
+                OPENCLAW,
+                'devices',
+                'approve',
+                initial_request_id,
+                '--json',
+                strip_gateway_env=True,
+                bounded_device_approval=True,
             )
             if arc == 0:
                 HANDLED.add(initial_request_id)
@@ -609,12 +741,9 @@ while time.time() < DEADLINE:
         sleep_for_next_poll(SLOW_INTERVAL if SLOW_MODE else 1, productive=False)
         continue
     LAST_LIST_FAILURE_REASON = None
-    has_cli_pairing = any(
-        d.get('clientId') == 'cli' and d.get('clientMode') == 'cli'
-        for d in paired
-        if isinstance(d, dict)
-    )
-    if not PAIRING_BOOTSTRAPPED and has_cli_pairing:
+    canonical_settled = canonical_cli_baseline_settled(paired, pending)
+    pairing_ready_for_write = canonical_cli_pairing_ready_for_write(paired, pending)
+    if not PAIRING_BOOTSTRAPPED and (pairing_ready_for_write or canonical_settled):
         PAIRING_BOOTSTRAPPED = True
         print('[auto-pair] loopback CLI pairing bootstrap completed')
     normalized_pending = []
@@ -640,6 +769,13 @@ while time.time() < DEADLINE:
         publish_status('request-not-produced')
         print('[auto-pair] stage=request-creation waiting reason=no-request')
         REQUEST_CREATION_WAITING_REPORTED = True
+
+    # The startup watcher is the sole request owner and approver. One-shot
+    # settlement only observes convergence, so it cannot race a request or an
+    # approval already captured by this long-running process.
+    if ONE_SHOT and normalized_pending:
+        sleep_for_next_poll(1, productive=False)
+        continue
 
     if normalized_pending:
         attempted_request_ids = set()
@@ -679,7 +815,13 @@ while time.time() < DEADLINE:
             attempted_request_ids.add(request_id)
             print(f'[auto-pair] stage=approval attempting request={request_id}')
             arc, aout, aerr = run(
-                OPENCLAW, 'devices', 'approve', request_id, '--json', strip_gateway_env=True,
+                OPENCLAW,
+                'devices',
+                'approve',
+                request_id,
+                '--json',
+                strip_gateway_env=True,
+                bounded_device_approval=True,
             )
             # rc=124 is the timeout sentinel from run() — do NOT add the
             # request to HANDLED on a transient timeout, so the next poll
@@ -722,12 +864,27 @@ while time.time() < DEADLINE:
         sleep_for_next_poll(SLOW_INTERVAL if SLOW_MODE else 1)
         continue
 
-    # Fresh onboarding relies on this watcher as the only scope-upgrade
-    # approver. Keep the one-second cadence until the canonical CLI record has
-    # the exact baseline scopes and no same-device pending request. Browser
-    # pairing, an unrelated paired device, or elapsed time cannot establish
-    # this transition.
-    if not SLOW_MODE and canonical_cli_baseline_settled(paired, pending):
+    # Fresh onboarding relies on this watcher as the only scope-upgrade request
+    # owner and approver. Once exact pairing-only state appears, publish the
+    # stable write request here. A retry is allowed only after a bounded quiet
+    # interval and only while no request is pending; this keeps recovery
+    # possible without creating concurrent requests.
+    if not ONE_SHOT and pairing_ready_for_write and not pending:
+        now = time.time()
+        if (
+            LAST_WRITE_SCOPE_REQUEST_AT is None
+            or now - LAST_WRITE_SCOPE_REQUEST_AT >= WRITE_SCOPE_REQUEST_RETRY_SECS
+        ):
+            LAST_WRITE_SCOPE_REQUEST_AT = now
+            request_canonical_write_scope()
+        sleep_for_next_poll(1, productive=False)
+        continue
+
+    # Keep the one-second cadence until the canonical CLI record has the exact
+    # baseline scopes and no same-device pending request. Browser pairing, an
+    # unrelated paired device, or elapsed time cannot establish this
+    # transition.
+    if not SLOW_MODE and canonical_settled:
         SLOW_MODE = True
         publish_status('canonical-settled')
         print(f'[auto-pair] canonical CLI baseline settled; entering slow-mode approvals={APPROVED}')

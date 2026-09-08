@@ -23,6 +23,7 @@ import {
 interface CliFixtureRuntime {
   gatewayCalls: Array<Record<string, unknown>>;
   setPairingLists(local: Record<string, unknown>, live?: Record<string, unknown>): void;
+  setBoundedDeviceApproval(value: boolean): void;
   setPairedTokenEnvironment(overrides?: Record<string, unknown>): void;
   setGatewayListFailure(error: Error): void;
   setApprovalFailures(errors: Error[]): void;
@@ -44,6 +45,7 @@ function openPatchedCliFixture(): { runtime: CliFixtureRuntime; tmp: string } {
     `({
       gatewayCalls,
       setPairingLists,
+      setBoundedDeviceApproval,
       setPairedTokenEnvironment,
       setGatewayListFailure,
       setApprovalFailures,
@@ -756,6 +758,49 @@ describe("OpenClaw bounded device self-approval patch (#4462)", () => {
         localPairingReadCount: 0,
         localApprovalCount: 0,
       });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a stale watcher request before any approval call", async () => {
+    const { runtime, tmp } = openPatchedCliFixture();
+    try {
+      runtime.setPairingLists({ pending: [], paired: [] });
+      runtime.setBoundedDeviceApproval(true);
+
+      await expect(
+        runtime.approvePairingWithFallback({ json: true }, "stale-request"),
+      ).rejects.toThrow("bounded same-device approval context changed before gateway approval");
+      expect(runtime.gatewayCalls.map((call) => call.method)).toEqual(["device.pair.list"]);
+      expect(runtime.pairingStats()).toEqual({
+        localPairingReadCount: 1,
+        localApprovalCount: 0,
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("never retries a marked watcher approval with administrator scope", async () => {
+    const { runtime, tmp } = openPatchedCliFixture();
+    try {
+      const pending = validPending({ isRepair: false });
+      runtime.setPairingLists({ pending: [pending], paired: [] });
+      runtime.setBoundedDeviceApproval(true);
+      runtime.setApprovalFailures([new Error("device pairing approval denied")]);
+
+      await expect(runtime.approvePairingWithFallback({ json: true }, "request-1")).rejects.toThrow(
+        "device pairing approval denied",
+      );
+      expect(runtime.gatewayCalls.map((call) => call.method)).toEqual([
+        "device.pair.list",
+        "device.pair.approve",
+      ]);
+      expect(runtime.gatewayCalls).not.toContainEqual(
+        expect.objectContaining({ scopes: ["operator.admin"] }),
+      );
+      expect(runtime.pairingStats().localApprovalCount).toBe(0);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

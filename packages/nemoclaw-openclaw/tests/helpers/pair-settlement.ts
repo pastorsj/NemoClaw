@@ -37,6 +37,26 @@ export function createCanonicalCliPairingFixture(stateDirectory: string) {
   };
 }
 
+export function createCanonicalCliPublicPairingFixture(stateDirectory: string) {
+  const paired = createCanonicalCliPairingFixture(stateDirectory);
+  return {
+    deviceId: paired.deviceId,
+    publicKey: paired.publicKey,
+    platform: "linux",
+    clientId: paired.clientId,
+    clientMode: paired.clientMode,
+    role: paired.role,
+    roles: paired.roles,
+    scopes: paired.scopes,
+    tokens: [
+      {
+        role: "operator",
+        scopes: paired.tokens.operator.scopes,
+      },
+    ],
+  };
+}
+
 export function createLateCliPairingFixture(prefix: string): {
   temporaryDirectory: string;
   fakeOpenClawPath: string;
@@ -50,7 +70,7 @@ export function createLateCliPairingFixture(prefix: string): {
   const approvalLogPath = path.join(temporaryDirectory, "approvals.log");
   const browserClient = { clientId: "openclaw-control-ui", clientMode: "webchat" };
   const cliClient = { clientId: "cli", clientMode: "cli" };
-  const canonicalCliClient = createCanonicalCliPairingFixture(stateDirectory);
+  const canonicalCliClient = createCanonicalCliPublicPairingFixture(stateDirectory);
   const initialPending = JSON.stringify({
     pending: [{ requestId: "browser-pair", ...browserClient }],
     paired: [],

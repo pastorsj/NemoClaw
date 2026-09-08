@@ -55,6 +55,7 @@ const CLI_RETRY_MARKER = "nemoclaw: keep bounded device auth fail closed";
 const CLI_LIST_MARKER = "nemoclaw: preflight bounded stored device auth before live pairing list";
 const CLI_SETTLEMENT_LIST_MARKER = "nemoclaw: use stored device auth for pairing settlement list";
 const CLI_PAIRED_TOKEN_MARKER = "nemoclaw: preflight bounded paired token before live pairing list";
+const CLI_WATCHER_APPROVAL_MARKER = "nemoclaw: keep watcher device approval fail closed";
 const CALL_FORCE_IDENTITY_MARKER = "nemoclaw: force device identity for loopback pairing bootstrap";
 const CALL_STORED_IDENTITY_MARKER =
   "nemoclaw: retain stored CLI device identity for loopback shared-token scope enforcement";
@@ -72,6 +73,7 @@ const CLI_APPLIED_MARKERS = [
   CLI_LIST_MARKER,
   CLI_SETTLEMENT_LIST_MARKER,
   CLI_PAIRED_TOKEN_MARKER,
+  CLI_WATCHER_APPROVAL_MARKER,
 ] as const;
 const AUTH_SCOPE_UPGRADE_MARKER =
   "nemoclaw: route bounded CLI device-token scope upgrade into pairing";
@@ -590,8 +592,9 @@ const CLI_CONTEXT_REPLACEMENT = [
 
 const CLI_APPROVE_HEADER_TARGET =
   "\tconst { scopes, originalRequest } = await resolveApprovePairingGatewayContext(opts, requestId);";
-const CLI_APPROVE_HEADER_REPLACEMENT =
+const CLI_APPROVE_HEADER_LEGACY_REPLACEMENT =
   '\tconst { scopes, originalRequest, nemoclawUseStoredDeviceAuth, nemoclawUsePairedToken, nemoclawPairedToken, nemoclawPinnedGatewayUrl, nemoclawRefuseUnsafeApproval } = await resolveApprovePairingGatewayContext(opts, requestId);\n\tif (nemoclawRefuseUnsafeApproval) throw new Error("bounded same-device approval context changed before gateway approval");';
+const CLI_APPROVE_HEADER_REPLACEMENT = `\tconst nemoclawBoundedDeviceApproval = process.env.NEMOCLAW_OPENCLAW_BOUNDED_DEVICE_APPROVAL === "1"; // ${CLI_WATCHER_APPROVAL_MARKER} (#4462)\n\tconst { scopes, originalRequest, nemoclawUseStoredDeviceAuth, nemoclawUsePairedToken, nemoclawPairedToken, nemoclawPinnedGatewayUrl, nemoclawRefuseUnsafeApproval } = await resolveApprovePairingGatewayContext(opts, requestId);\n\tif (nemoclawRefuseUnsafeApproval || (nemoclawBoundedDeviceApproval && !originalRequest)) throw new Error("bounded same-device approval context changed before gateway approval");`;
 const CLI_APPROVE_CALL_TARGET =
   '\t\treturn await callGatewayCli("device.pair.approve", opts, { requestId }, scopes ? { scopes } : void 0);';
 const CLI_APPROVE_CALL_REPLACEMENT = [
@@ -605,12 +608,13 @@ const CLI_ADMIN_RETRY_TARGET =
   '\t\tif (isDevicePairingApprovalDenied(error) && !scopes?.includes("operator.admin")) return await callGatewayCli("device.pair.approve", opts, { requestId }, { scopes: [ADMIN_SCOPE] });';
 const CLI_ADMIN_RETRY_TARGET_2026_7_1 =
   '\t\tif (isDevicePairingApprovalDenied(error) && !scopes?.includes("operator.admin")) try {';
-const CLI_ADMIN_RETRY_REPLACEMENT = [
-  "\t\tif (nemoclawUseStoredDeviceAuth || nemoclawUsePairedToken) throw error; // nemoclaw: keep bounded device auth fail closed (#4462)",
-  CLI_ADMIN_RETRY_TARGET,
-].join("\n");
+const CLI_ADMIN_RETRY_LEGACY_GUARD =
+  "\t\tif (nemoclawUseStoredDeviceAuth || nemoclawUsePairedToken) throw error; // nemoclaw: keep bounded device auth fail closed (#4462)";
+const CLI_ADMIN_RETRY_GUARD =
+  "\t\tif (nemoclawBoundedDeviceApproval || nemoclawUseStoredDeviceAuth || nemoclawUsePairedToken) throw error; // nemoclaw: keep bounded device auth fail closed (#4462)";
+const CLI_ADMIN_RETRY_REPLACEMENT = [CLI_ADMIN_RETRY_GUARD, CLI_ADMIN_RETRY_TARGET].join("\n");
 const CLI_ADMIN_RETRY_REPLACEMENT_2026_7_1 = [
-  "\t\tif (nemoclawUseStoredDeviceAuth || nemoclawUsePairedToken) throw error; // nemoclaw: keep bounded device auth fail closed (#4462)",
+  CLI_ADMIN_RETRY_GUARD,
   CLI_ADMIN_RETRY_TARGET_2026_7_1,
 ].join("\n");
 
@@ -1412,11 +1416,18 @@ const FILE_SPECS: FileSpec[] = [
       );
       if (appliedMarkerCounts.some((count) => count > 0)) {
         const settlementMarkerIndex = CLI_APPLIED_MARKERS.indexOf(CLI_SETTLEMENT_LIST_MARKER);
+        const watcherApprovalMarkerIndex = CLI_APPLIED_MARKERS.indexOf(CLI_WATCHER_APPROVAL_MARKER);
         const settlementMarkerCount = appliedMarkerCounts[settlementMarkerIndex];
-        const priorMarkerCounts = appliedMarkerCounts.filter(
-          (_count, index) => index !== settlementMarkerIndex,
+        const watcherApprovalMarkerCount = appliedMarkerCounts[watcherApprovalMarkerIndex];
+        const requiredMarkerCounts = appliedMarkerCounts.filter(
+          (_count, index) =>
+            index !== settlementMarkerIndex && index !== watcherApprovalMarkerIndex,
         );
-        if (priorMarkerCounts.every((count) => count === 1) && settlementMarkerCount! <= 1) {
+        if (
+          requiredMarkerCounts.every((count) => count === 1) &&
+          settlementMarkerCount! <= 1 &&
+          watcherApprovalMarkerCount! <= 1
+        ) {
           let upgradedSource = source;
           let changed = false;
           const legacyModeLine =
@@ -1439,6 +1450,27 @@ const FILE_SPECS: FileSpec[] = [
               CLI_LIST_SIGNATURE_LEGACY_REPLACEMENT,
               CLI_LIST_SIGNATURE_REPLACEMENT,
               "devices CLI pairing-settlement list target",
+              file,
+            );
+            if (result.error) return { source, status: "no-match", error: result.error };
+            upgradedSource = result.source;
+            changed = true;
+          }
+          if (watcherApprovalMarkerCount === 0) {
+            let result = replaceExactlyOnce(
+              upgradedSource,
+              CLI_APPROVE_HEADER_LEGACY_REPLACEMENT,
+              CLI_APPROVE_HEADER_REPLACEMENT,
+              "devices CLI bounded watcher approval target",
+              file,
+            );
+            if (result.error) return { source, status: "no-match", error: result.error };
+            upgradedSource = result.source;
+            result = replaceExactlyOnce(
+              upgradedSource,
+              CLI_ADMIN_RETRY_LEGACY_GUARD,
+              CLI_ADMIN_RETRY_GUARD,
+              "devices CLI bounded watcher retry target",
               file,
             );
             if (result.error) return { source, status: "no-match", error: result.error };

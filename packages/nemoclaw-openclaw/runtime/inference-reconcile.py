@@ -13,7 +13,10 @@ from collections.abc import Callable
 
 MAX_REQUEST_BYTES = 4096
 REQUEST_ID_PATTERN = re.compile(r"^[a-f0-9]{64}$")
-RECONCILE_SHELL = r"""
+RECONCILE_TIMEOUT_SECONDS = 75
+AUTO_PAIR_DEADLINE_SECONDS = 45
+AUTO_PAIR_RUN_TIMEOUT_SECONDS = 8
+RECONCILE_SHELL = rf"""
 set -eu
 PROXY_ENV=/tmp/nemoclaw-proxy-env.sh
 [ -e "$PROXY_ENV" ] || [ -L "$PROXY_ENV" ] || exit 1
@@ -27,9 +30,9 @@ current="$(id -u)"
 OPENCLAW_BIN=/usr/local/bin/openclaw
 [ -x "$OPENCLAW_BIN" ] || exit 1
 export OPENCLAW_BIN
-NEMOCLAW_OPENCLAW_FORCE_DEVICE_PAIRING=1 \
-  /usr/bin/timeout 15s "$OPENCLAW_BIN" agent --agent main -m ping \
-  --session-id "nemoclaw-inference-reconcile-$$" >/dev/null 2>&1 || true
+NEMOCLAW_AUTO_PAIR_DEADLINE_SECS={AUTO_PAIR_DEADLINE_SECONDS}
+NEMOCLAW_AUTO_PAIR_RUN_TIMEOUT_SECS={AUTO_PAIR_RUN_TIMEOUT_SECONDS}
+export NEMOCLAW_AUTO_PAIR_DEADLINE_SECS NEMOCLAW_AUTO_PAIR_RUN_TIMEOUT_SECS
 exec /usr/bin/python3 -I /usr/local/lib/nemoclaw/openclaw-startup/auto-pair.py --once
 """
 
@@ -61,7 +64,7 @@ def reconcile_pairing(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=75,
+            timeout=RECONCILE_TIMEOUT_SECONDS,
             check=False,
             start_new_session=True,
         )

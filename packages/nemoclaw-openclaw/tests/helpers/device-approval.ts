@@ -133,6 +133,10 @@ function setPairingLists(localList, liveList = localList) {
   localPairingList = localList;
   pairingList = liveList;
 }
+function setBoundedDeviceApproval(value) {
+  if (value) process.env.NEMOCLAW_OPENCLAW_BOUNDED_DEVICE_APPROVAL = "1";
+  else delete process.env.NEMOCLAW_OPENCLAW_BOUNDED_DEVICE_APPROVAL;
+}
 function setPairedTokenEnvironment(overrides = {}) {
   process.env.NEMOCLAW_OPENCLAW_RESTORED_CLONE_PAIRING = "1";
   descriptorFiles.clear();

@@ -2,79 +2,65 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createCanonicalCliPairingFixture } from "../helpers/pair-settlement";
+import {
+  createCanonicalCliPairingFixture,
+  createCanonicalCliPublicPairingFixture,
+} from "../helpers/pair-settlement";
 
 const NONCE = "a".repeat(64);
 const SCRIPT = path.join(import.meta.dirname, "../../runtime/session-qualify.py");
 const temporaryDirectories: string[] = [];
 
-function runQualification(modify?: (document: Record<string, unknown>) => void) {
+function runQualification(
+  modify?: (document: Record<string, unknown>) => void,
+  fixture: "public" | "legacy" = "public",
+) {
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-session-qualify-"));
   temporaryDirectories.push(temporaryDirectory);
   const stateDirectory = path.join(temporaryDirectory, "state");
-  const pairedDevice = createCanonicalCliPairingFixture(stateDirectory);
+  const pairedDevice =
+    fixture === "public"
+      ? createCanonicalCliPublicPairingFixture(stateDirectory)
+      : createCanonicalCliPairingFixture(stateDirectory);
   const document: Record<string, unknown> = { paired: [pairedDevice], pending: [] };
   modify?.(document);
   const fakeOpenClaw = path.join(temporaryDirectory, "openclaw");
   fs.writeFileSync(
     fakeOpenClaw,
-    `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(JSON.stringify(document))}\n`,
+    `#!/bin/sh
+[ "\${NEMOCLAW_OPENCLAW_PAIRING_SETTLEMENT:-}" = "1" ] || exit 41
+[ -z "\${NEMOCLAW_OPENCLAW_FORCE_DEVICE_PAIRING+x}" ] || exit 42
+[ -z "\${NEMOCLAW_OPENCLAW_RESTORED_CLONE_PAIRING+x}" ] || exit 43
+[ -z "\${NEMOCLAW_OPENCLAW_BOUNDED_DEVICE_APPROVAL+x}" ] || exit 44
+[ -z "\${OPENCLAW_GATEWAY_URL+x}" ] || exit 44
+[ -z "\${OPENCLAW_GATEWAY_PORT+x}" ] || exit 45
+[ -z "\${OPENCLAW_GATEWAY_TOKEN+x}" ] || exit 46
+[ -z "\${OPENCLAW_GATEWAY_PASSWORD+x}" ] || exit 47
+printf '%s\\n' ${JSON.stringify(JSON.stringify(document))}
+`,
     { mode: 0o755 },
   );
   return spawnSync("python3", [SCRIPT, NONCE], {
     encoding: "utf8",
     env: {
       ...process.env,
-      NEMOCLAW_DISABLE_DEVICE_AUTH: "0",
       OPENCLAW_BIN: fakeOpenClaw,
       OPENCLAW_STATE_DIR: stateDirectory,
+      OPENCLAW_GATEWAY_URL: "ws://untrusted.invalid",
+      OPENCLAW_GATEWAY_PORT: "1",
+      OPENCLAW_GATEWAY_TOKEN: "untrusted-token",
+      OPENCLAW_GATEWAY_PASSWORD: "untrusted-password",
+      NEMOCLAW_OPENCLAW_FORCE_DEVICE_PAIRING: "1",
+      NEMOCLAW_OPENCLAW_RESTORED_CLONE_PAIRING: "1",
+      NEMOCLAW_OPENCLAW_PAIRING_SETTLEMENT: "untrusted",
+      NEMOCLAW_OPENCLAW_BOUNDED_DEVICE_APPROVAL: "1",
     },
-  });
-}
-
-type DisabledQualificationOptions = {
-  readonly config?: boolean | "malformed" | "missing" | "missing-field";
-  readonly flag?: string;
-  readonly source?: string;
-};
-
-function runDisabledQualification({
-  config = true,
-  flag = "1",
-  source = "managed-onboard",
-}: DisabledQualificationOptions = {}) {
-  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-session-no-auth-"));
-  temporaryDirectories.push(temporaryDirectory);
-  if (config !== "missing") {
-    const contents =
-      config === "malformed"
-        ? "{not-json\n"
-        : JSON.stringify({
-            gateway: {
-              controlUi: config === "missing-field" ? {} : { dangerouslyDisableDeviceAuth: config },
-            },
-          });
-    fs.writeFileSync(path.join(temporaryDirectory, "openclaw.json"), contents);
-  }
-  const environment: NodeJS.ProcessEnv = {
-    ...process.env,
-    OPENCLAW_BIN: "/does/not/exist",
-    OPENCLAW_STATE_DIR: temporaryDirectory,
-  };
-  if (flag === "missing") delete environment.NEMOCLAW_DISABLE_DEVICE_AUTH;
-  else environment.NEMOCLAW_DISABLE_DEVICE_AUTH = flag;
-  if (source === "missing") delete environment.NEMOCLAW_DEVICE_AUTH_OPT_OUT_SOURCE;
-  else environment.NEMOCLAW_DEVICE_AUTH_OPT_OUT_SOURCE = source;
-  return spawnSync("python3", [SCRIPT, NONCE], {
-    encoding: "utf8",
-    env: environment,
   });
 }
 
@@ -85,47 +71,19 @@ afterEach(() => {
 });
 
 describe("OpenClaw package session qualification", () => {
-  it.each(["managed-onboard", "operator"])(
-    "returns a stable no-credential observation declared by %s",
-    (source) => {
-      const result = runDisabledQualification({ source });
-      const expectedDigest = createHash("sha256")
-        .update(JSON.stringify({ deviceAuth: "disabled", optOutSource: source }))
-        .digest("hex");
+  it.each(["public", "legacy"] as const)(
+    "returns one stable credential-free digest for the %s canonical CLI envelope",
+    (fixture) => {
+      const result = runQualification(undefined, fixture);
 
       expect(result.status).toBe(0);
-      expect(result.stderr).toBe("");
-      expect(result.stdout).toBe(`__NEMOCLAW_SESSION_QUALIFIED__=${NONCE}:${expectedDigest}\n`);
+      expect(result.stdout.trim()).toMatch(
+        new RegExp(`^__NEMOCLAW_SESSION_QUALIFIED__=${NONCE}:[a-f0-9]{64}$`, "u"),
+      );
+      expect(result.stdout).not.toContain("operator.read");
+      expect(result.stdout).not.toContain("publicKey");
     },
   );
-
-  it.each([
-    { name: "missing opt-out flag", options: { flag: "missing" } },
-    { name: "enabled auth with disabled config", options: { flag: "0" } },
-    { name: "unknown opt-out flag", options: { flag: "true" } },
-    { name: "missing provenance", options: { source: "missing" } },
-    { name: "unknown provenance", options: { source: "untrusted" } },
-    { name: "enabled native config", options: { config: false } },
-    { name: "missing native config", options: { config: "missing" as const } },
-    { name: "malformed native config", options: { config: "malformed" as const } },
-    { name: "incomplete native config", options: { config: "missing-field" as const } },
-  ])("fails closed for $name", ({ options }) => {
-    const result = runDisabledQualification(options);
-
-    expect(result.status).not.toBe(0);
-    expect(result.stdout).not.toContain("__NEMOCLAW_SESSION_QUALIFIED__=");
-  });
-
-  it("returns one stable credential-free digest for the canonical CLI session", () => {
-    const result = runQualification();
-
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toMatch(
-      new RegExp(`^__NEMOCLAW_SESSION_QUALIFIED__=${NONCE}:[a-f0-9]{64}$`, "u"),
-    );
-    expect(result.stdout).not.toContain("operator.read");
-    expect(result.stdout).not.toContain("publicKey");
-  });
 
   it("rejects a pending request for the canonical CLI identity", () => {
     const result = runQualification((document) => {
@@ -137,11 +95,84 @@ describe("OpenClaw package session qualification", () => {
     expect(result.stdout).toBe("");
   });
 
-  it("rejects an under-scoped paired credential", () => {
+  it("rejects a malformed pending-device observation", () => {
+    const result = runQualification((document) => {
+      document.pending = ["malformed-request"];
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+  });
+
+  it("rejects an under-scoped public paired credential", () => {
+    const result = runQualification((document) => {
+      const paired = document.paired as Array<Record<string, unknown>>;
+      paired[0] = { ...paired[0], scopes: ["operator.pairing"] };
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+  });
+
+  it("rejects a public credential with duplicate operator tokens", () => {
+    const result = runQualification((document) => {
+      const paired = document.paired as Array<Record<string, unknown>>;
+      const tokens = paired[0]?.tokens as Array<Record<string, unknown>>;
+      paired[0] = { ...paired[0], tokens: [...tokens, { ...tokens[0] }] };
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+  });
+
+  it("rejects contradictory approved scopes in a public envelope", () => {
     const result = runQualification((document) => {
       const paired = document.paired as Array<Record<string, unknown>>;
       paired[0] = { ...paired[0], approvedScopes: ["operator.pairing"] };
     });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+  });
+
+  it.each([
+    ["malformed token", ["not-a-token"]],
+    ["under-scoped token", [{ role: "operator", scopes: ["operator.pairing"] }]],
+    [
+      "wrong-role token",
+      [
+        {
+          role: "viewer",
+          scopes: ["operator.pairing", "operator.read", "operator.write"],
+        },
+      ],
+    ],
+    [
+      "revoked token",
+      [
+        {
+          role: "operator",
+          scopes: ["operator.pairing", "operator.read", "operator.write"],
+          revokedAtMs: 1,
+        },
+      ],
+    ],
+  ] as const)("rejects a public envelope with a %s", (_label, tokens) => {
+    const result = runQualification((document) => {
+      const paired = document.paired as Array<Record<string, unknown>>;
+      paired[0] = { ...paired[0], tokens };
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+  });
+
+  it("requires approved scopes in the legacy private envelope", () => {
+    const result = runQualification((document) => {
+      const paired = document.paired as Array<Record<string, unknown>>;
+      const { approvedScopes: _approvedScopes, ...withoutApprovedScopes } = paired[0] ?? {};
+      paired[0] = withoutApprovedScopes;
+    }, "legacy");
 
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
