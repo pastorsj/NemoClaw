@@ -57,7 +57,7 @@ Declare the manifest and compatible NemoClaw version window in `package.json`:
   "nemoclaw": {
     "harnessManifest": "manifest.yaml",
     "minimumNemoClawVersion": "0.0.113",
-    "maximumNemoClawVersionExclusive": "0.0.121",
+    "maximumNemoClawVersionExclusive": "0.2.0",
     "buildProjects": ["plugin"]
   }
 }
@@ -65,7 +65,9 @@ Declare the manifest and compatible NemoClaw version window in `package.json`:
 
 The two exact `x.y.z` values form a half-open compatibility window. NemoClaw accepts the package
 when its running build is at least `minimumNemoClawVersion` and strictly below
-`maximumNemoClawVersionExclusive`.
+`maximumNemoClawVersionExclusive`. Use the narrowest window that the package tests qualify. The
+in-tree packages retain their established compatibility floor and include the current NemoClaw
+minor release.
 
 `buildProjects` is optional package-rehearsal metadata. Each entry names a bounded relative path
 to another locked npm project owned by the package. NemoClaw installs those development

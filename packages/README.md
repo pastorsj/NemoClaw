@@ -121,11 +121,14 @@ NemoClaw version window:
   "nemoclaw": {
     "harnessManifest": "manifest.yaml",
     "minimumNemoClawVersion": "0.0.113",
-    "maximumNemoClawVersionExclusive": "0.0.121",
+    "maximumNemoClawVersionExclusive": "0.2.0",
     "buildProjects": ["plugin"]
   }
 }
 ```
+
+Use the narrowest compatibility window that the package tests qualify. The in-tree packages retain
+their established compatibility floor and include the current NemoClaw minor release.
 
 `buildProjects` is optional. Use it when package-owned builds need another locked npm project
 inside the package, such as a native runtime plugin. The package rehearsal installs each declared

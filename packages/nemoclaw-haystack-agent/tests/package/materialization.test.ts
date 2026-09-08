@@ -20,7 +20,7 @@ it("materializes the Haystack publish set through the public harness contract", 
       displayName: "Haystack Agent (experimental)",
       packageVersion: "0.1.0",
       minimumNemoClawVersion: "0.0.113",
-      maximumNemoClawVersionExclusive: "0.0.121",
+      maximumNemoClawVersionExclusive: "0.2.0",
       readOnly: true,
     });
     expect(
@@ -32,7 +32,7 @@ it("materializes the Haystack publish set through the public harness contract", 
       displayName: "Haystack Agent (experimental)",
       packageVersion: "0.1.0",
       minimumNemoClawVersion: "0.0.113",
-      maximumNemoClawVersionExclusive: "0.0.121",
+      maximumNemoClawVersionExclusive: "0.2.0",
       manifest: "manifest.yaml",
     });
     expect(

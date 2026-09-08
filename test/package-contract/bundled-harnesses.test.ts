@@ -10,8 +10,10 @@ import { describe, expect, it } from "vitest";
 import { materializeHarnessPackageArtifact } from "../../harness-contract/build-package.mts";
 import { listBundledAgentRuntimeSources } from "../../scripts/build-harnesses.mts";
 import { buildAgentDefinition } from "../../dist/lib/agent-runtime/manifest-loader.js";
+import { assertHarnessPackageSupportsNemoClaw } from "../../dist/lib/agent-runtime/package/compatibility.js";
 import { parseHarnessPackageManifest } from "../../dist/lib/agent-runtime/package/manifest.js";
 import { validateHarnessPackageTree } from "../../dist/lib/agent-runtime/package/tree.js";
+import { resolvePublicNemoClawVersion } from "../../dist/lib/core/build-identity.js";
 import { MANAGED_STARTUP_MESSAGING_RUNTIME } from "../../dist/lib/onboard/managed-startup/image-runtime.js";
 
 const REPOSITORY_ROOT = path.join(import.meta.dirname, "..", "..");
@@ -238,6 +240,43 @@ function artifactPublishedFiles(source: BundledAgentRuntimeSource): readonly str
 }
 
 describe("bundled harness package artifacts", () => {
+  it.each(listBundledAgentRuntimeSources())(
+    "accepts supported NemoClaw builds and refuses both boundaries for $id",
+    ({ minimumNemoClawVersion, maximumNemoClawVersionExclusive }) => {
+      const currentVersion = resolvePublicNemoClawVersion({ rootDir: REPOSITORY_ROOT });
+      const packageCompatibility = {
+        minimumNemoClawVersion,
+        maximumNemoClawVersionExclusive,
+      };
+      const currentBuild = { nemoclawVersion: currentVersion, sourceRevision: "a".repeat(40) };
+      const minimumBuild = {
+        nemoclawVersion: "0.0.113",
+        sourceRevision: "a".repeat(40),
+      };
+      const belowMinimumBuild = {
+        nemoclawVersion: "0.0.112",
+        sourceRevision: "a".repeat(40),
+      };
+      const maximumBuild = {
+        nemoclawVersion: "0.2.0",
+        sourceRevision: "a".repeat(40),
+      };
+
+      expect(() =>
+        assertHarnessPackageSupportsNemoClaw(packageCompatibility, currentBuild),
+      ).not.toThrow();
+      expect(() =>
+        assertHarnessPackageSupportsNemoClaw(packageCompatibility, minimumBuild),
+      ).not.toThrow();
+      expect(() =>
+        assertHarnessPackageSupportsNemoClaw(packageCompatibility, belowMinimumBuild),
+      ).toThrow(/or newer/u);
+      expect(() =>
+        assertHarnessPackageSupportsNemoClaw(packageCompatibility, maximumBuild),
+      ).toThrow(/older than/u);
+    },
+  );
+
   it.each(["openclaw", "hermes"])(
     "installs the %s messaging runtime at the managed-startup contract path",
     (packageId) => {

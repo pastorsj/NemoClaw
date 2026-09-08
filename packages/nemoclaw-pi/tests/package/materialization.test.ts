@@ -20,7 +20,7 @@ it("materializes the Pi publish set through the public harness contract", () => 
       displayName: "Pi",
       packageVersion: "0.1.0",
       minimumNemoClawVersion: "0.0.113",
-      maximumNemoClawVersionExclusive: "0.0.121",
+      maximumNemoClawVersionExclusive: "0.2.0",
       readOnly: true,
     });
     expect(
@@ -32,7 +32,7 @@ it("materializes the Pi publish set through the public harness contract", () => 
       displayName: "Pi",
       packageVersion: "0.1.0",
       minimumNemoClawVersion: "0.0.113",
-      maximumNemoClawVersionExclusive: "0.0.121",
+      maximumNemoClawVersionExclusive: "0.2.0",
       manifest: "manifest.yaml",
     });
     expect(fs.existsSync(path.join(artifactRoot, "fabric/pi.fabric-adapter.json"))).toBe(true);

@@ -34,7 +34,7 @@
   "nemoclaw": {
     "harnessManifest": "manifest.yaml",
     "minimumNemoClawVersion": "0.0.113",
-    "maximumNemoClawVersionExclusive": "0.0.121"
+    "maximumNemoClawVersionExclusive": "0.2.0"
   },
   "engines": {
     "node": ">=22.19.0"
