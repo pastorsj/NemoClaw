@@ -57,6 +57,18 @@ describe("Hermes provider-broker controller", () => {
     ).toEqual({ kind: "managed", providerName: "hermes-test-hermes-tool-gateway" });
   });
 
+  it("refuses a sandbox name outside the provider broker namespace", () => {
+    expect(
+      providerBrokerAdapter.buildProviderBrokerPlan({
+        operation: "ensure-broker",
+        sandboxName: "hermes--test",
+      }),
+    ).toEqual({
+      kind: "unsupported",
+      reason: "sandbox name is not supported by this provider broker",
+    });
+  });
+
   it("persists only refresh-token proof and returns an opaque provider binding", () => {
     temporaryHome = fs.mkdtempSync(path.join(TEMPORARY_ROOT, "hermes-provider-broker-"));
     const refreshToken = "refresh-token-must-not-be-persisted";

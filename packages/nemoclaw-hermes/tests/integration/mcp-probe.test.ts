@@ -60,6 +60,12 @@ const ready: ProbeResult = {
   stderr: "",
 };
 describe("Hermes managed MCP startup probe", () => {
+  it("declares that snapshot restore needs no package-owned repair", () => {
+    expect(
+      hermesMcpAdapter.buildMcpSnapshotRestorePlan({ sandboxName: "hermes-test", entries: [] }),
+    ).toEqual({ kind: "not-required" });
+  });
+
   it("retries only the exact transient gateway-starting result", () => {
     expect(runHermesProbe([starting, ready])).toEqual({
       calls: 2,
