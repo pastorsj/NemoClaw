@@ -7,6 +7,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
 
+import { loadAgent } from "../agent/defs";
 import { SHIPPED_MANAGED_IMAGE_AGENTS } from "./managed-image/contract";
 import {
   MANAGED_STARTUP_COMPLETION_FILE,
@@ -626,13 +627,19 @@ describe("initial sandbox policy real preset merge", () => {
       [],
       {
         agentName: "langchain-deepagents-code",
+        agentDefinition: loadAgent("langchain-deepagents-code"),
+        observabilityEnabled: true,
         additionalPresets: ["observability-otlp-local"],
       },
     );
     const effective = readPreparedPolicy(prepared);
+    const observability = effective.network_policies?.["observability-otlp-local"];
+    const endpoint = observability?.endpoints?.find(
+      (candidate) => candidate.host === "host.openshell.internal" && candidate.port === 4318,
+    );
 
     expect(prepared.appliedPresets).toContain("observability-otlp-local");
-    expect(effective.network_policies?.["observability-otlp-local"]).toBeDefined();
+    expect(endpoint).not.toHaveProperty("allowed_ips");
   });
 
   it.each([

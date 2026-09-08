@@ -25,6 +25,7 @@ describe("Hermes skill capability", () => {
       collision: "replace",
       removal: "remove",
       activation: { kind: "new-session" },
+      list_command: ["skills", "list"],
     });
   });
 });

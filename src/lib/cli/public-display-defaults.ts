@@ -507,6 +507,12 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
       flags: "<skill>",
     },
   ],
+  "sandbox:skill:list": [
+    {
+      group: "Skills",
+      order: 16.2,
+    },
+  ],
   "sandbox:snapshot:create": [
     {
       group: "Sandbox Management",

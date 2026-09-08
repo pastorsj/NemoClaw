@@ -22,6 +22,9 @@ skills:
   activation:
     kind: reset-session-index
     path: /sandbox/.future/sessions/index.json
+  list_command: [skills, list]
+  add_command: [skills, install, "{source}"]
+  remove_command: [skills, remove, "{name}"]
 ${overrides}`;
 }
 
@@ -39,6 +42,9 @@ describe("skill package capability", () => {
         kind: "reset-session-index",
         path: "/sandbox/.future/sessions/index.json",
       },
+      list_command: ["skills", "list"],
+      add_command: ["skills", "install", "{source}"],
+      remove_command: ["skills", "remove", "{name}"],
     });
     expect(Object.isFrozen(capability)).toBe(true);
     expect(Object.isFrozen(capability.activation)).toBe(true);
@@ -121,6 +127,30 @@ skills:
       managedCapability().replace("kind: reset-session-index", "kind: command"),
       "must contain exactly",
     ],
+    [
+      "a list command with a replacement token",
+      managedCapability().replace(
+        "list_command: [skills, list]",
+        'list_command: [skills, list, "{name}"]',
+      ),
+      "must contain no {name} token",
+    ],
+    [
+      "an add command without its source token",
+      managedCapability().replace(
+        'add_command: [skills, install, "{source}"]',
+        "add_command: [skills, install]",
+      ),
+      "must contain exactly one {source} token",
+    ],
+    [
+      "a remove command with two name tokens",
+      managedCapability().replace(
+        'remove_command: [skills, remove, "{name}"]',
+        'remove_command: [skills, remove, "{name}", "{name}"]',
+      ),
+      "must contain exactly one {name} token",
+    ],
     ["an unknown top-level field", managedCapability("  command: rm -rf /\n"), "and only"],
   ])("rejects %s", (_caseName, source, message) => {
     expect(() => read(source)).toThrow(message);
@@ -129,6 +159,7 @@ skills:
   it("rejects unsupported fresh-only combinations", () => {
     const freshOnly = managedCapability()
       .replace("  mirror_root: $HOME/.future/skills\n", "")
+      .replace('  remove_command: [skills, remove, "{name}"]\n', "")
       .replace("collision: replace", "collision: refuse");
 
     expect(() => read(freshOnly)).toThrow("removal' must be refuse");

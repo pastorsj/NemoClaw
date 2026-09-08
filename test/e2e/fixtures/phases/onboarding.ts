@@ -298,16 +298,21 @@ export class OnboardingPhaseFixture {
       );
     }
     const sandboxName = sandboxNameFromOptions(environment.onboarding, options);
+    const candidateManagedImage =
+      options.dcodeBaseImageReference === undefined &&
+      process.env.E2E_WORKLOAD_SOURCE === "managed-image" &&
+      Boolean(process.env.NEMOCLAW_E2E_MANAGED_IMAGE_CATALOG_JSON?.trim());
     const localDockerfile =
       options.dcodeBaseImageReference === undefined &&
       process.env.E2E_WORKLOAD_SOURCE === "local-dockerfile";
-    const baseImageReference = localDockerfile
-      ? undefined
-      : requireDcodeBaseImageReference(
-          options.dcodeBaseImageReference === undefined
-            ? process.env
-            : { [DCODE_BASE_IMAGE_ENV]: options.dcodeBaseImageReference },
-        );
+    const baseImageReference =
+      localDockerfile || candidateManagedImage
+        ? undefined
+        : requireDcodeBaseImageReference(
+            options.dcodeBaseImageReference === undefined
+              ? process.env
+              : { [DCODE_BASE_IMAGE_ENV]: options.dcodeBaseImageReference },
+          );
     const apiKey = this.secrets.required("NVIDIA_INFERENCE_API_KEY");
     const harnessPackage = await installHarnessPackage(this.host, "langchain-deepagents-code");
     this.registerSandboxCleanup(sandboxName);

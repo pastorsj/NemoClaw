@@ -156,6 +156,7 @@ describe("E2E workflow plan", () => {
       .map((row) => row.id);
     expect(plan.matrix.map((row) => row.id)).toEqual([
       "ubuntu-policy-custom-missing-presets-negative",
+      "ubuntu-repo-cloud-langchain-deepagents-code",
       "ubuntu-repo-cloud-openclaw",
     ]);
     expect(plan.testMatrix).toEqual([]);
@@ -749,6 +750,36 @@ describe("E2E workflow plan", () => {
     expect(selectedWorkflowJobs(plan)).toEqual(["catalogue-standard", "jetson-nvmap-gpu"]);
   });
 
+  it.each([
+    "test/e2e/e2e-cloud-experimental/features/skill/add-sandbox-skill.sh",
+    "test/e2e/e2e-cloud-experimental/features/skill/verify-sandbox-skill-via-agent.sh",
+  ])("selects the skill-agent target when its shared helper %s changes", (changedFile) => {
+    expect(catalogueTargetsForChangedFiles([changedFile]).map((target) => target.id)).toContain(
+      "skill-agent",
+    );
+  });
+  it.each([
+    "src/commands/sandbox/skill/list.ts",
+    "src/lib/skill-install.ts",
+    "src/lib/actions/sandbox/skill-install.ts",
+    "src/lib/adapters/openshell/sandbox-command-sdk.ts",
+    "src/lib/agent/skill-integration.ts",
+  ])("selects every agent skill lifecycle when %s changes", (changedFile) => {
+    const plan = buildE2eWorkflowPlan({}, { changedFiles: [changedFile] });
+    expect(catalogueTargetsForChangedFiles([changedFile]).map((target) => target.id)).toEqual(
+      expect.arrayContaining(["openclaw-skill-cli", "security-posture-hermes"]),
+    );
+    expect(plan.matrix.map((target) => target.id)).toContain(
+      "ubuntu-repo-cloud-langchain-deepagents-code",
+    );
+  });
+  it("selects the Hermes live lifecycle owner when its skill helper changes", () => {
+    expect(
+      catalogueTargetsForChangedFiles(["test/e2e/live/hermes-skill-lifecycle.ts"]).map(
+        (target) => target.id,
+      ),
+    ).toContain("security-posture-hermes");
+  });
   it.each([
     "nemoclaw-blueprint/router/pool-config.yaml",
     "test/e2e/live/model-router-provider-routed-inference-helpers.ts",

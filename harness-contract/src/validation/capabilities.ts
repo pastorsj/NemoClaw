@@ -221,7 +221,7 @@ function validatePolicy(manifest: ManifestRecord): void {
   }
   for (const [key, value] of entries) {
     const field = `policy.baseline_exclusion_impacts.${key}`;
-    if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u.test(key)) {
+    if (!/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/u.test(key)) {
       fail(field, "must use a canonical baseline policy key");
     }
     const text = requireString(value, field);
@@ -740,6 +740,36 @@ function validateSandboxPath(value: unknown, field: string): void {
   }
 }
 
+const SKILL_NAME_TOKEN = "{name}";
+const SKILL_SOURCE_TOKEN = "{source}";
+
+function validateSkillCommand(
+  value: unknown,
+  field: string,
+  requiredToken: typeof SKILL_NAME_TOKEN | typeof SKILL_SOURCE_TOKEN | null,
+): void {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > 32 ||
+    value.some(
+      (argument) =>
+        typeof argument !== "string" ||
+        argument.length === 0 ||
+        utf8ByteLength(argument) > 4096 ||
+        CONTROL_CHARACTER_PATTERN.test(argument),
+    )
+  ) {
+    fail(field, "must be an argv array of 1 through 32 bounded strings");
+  }
+  for (const token of [SKILL_NAME_TOKEN, SKILL_SOURCE_TOKEN]) {
+    const count = value.filter((argument) => argument === token).length;
+    if (count !== Number(requiredToken === token)) {
+      fail(field, `must contain ${requiredToken === token ? "exactly one" : "no"} ${token} token`);
+    }
+  }
+}
+
 function validateSkills(manifest: ManifestRecord): void {
   if (manifest.skills === undefined) return;
   const skills = requireRecord(manifest.skills, "skills");
@@ -758,11 +788,28 @@ function validateSkills(manifest: ManifestRecord): void {
   if (skills.support !== "managed") fail("skills.support", "must be managed or disabled");
   requireKnownFields(
     skills,
-    new Set(["activation", "collision", "install_root", "mirror_root", "removal", "support"]),
-    new Set(["activation", "collision", "install_root", "removal", "support"]),
+    new Set([
+      "activation",
+      "add_command",
+      "collision",
+      "install_root",
+      "list_command",
+      "mirror_root",
+      "removal",
+      "remove_command",
+      "support",
+    ]),
+    new Set(["activation", "collision", "install_root", "list_command", "removal", "support"]),
     "skills",
   );
   validateSandboxPath(skills.install_root, "skills.install_root");
+  validateSkillCommand(skills.list_command, "skills.list_command", null);
+  if (skills.add_command !== undefined) {
+    validateSkillCommand(skills.add_command, "skills.add_command", SKILL_SOURCE_TOKEN);
+  }
+  if (skills.remove_command !== undefined) {
+    validateSkillCommand(skills.remove_command, "skills.remove_command", SKILL_NAME_TOKEN);
+  }
   if (skills.collision !== "replace" && skills.collision !== "refuse") {
     fail("skills.collision", "must be replace or refuse");
   }
@@ -781,8 +828,18 @@ function validateSkills(manifest: ManifestRecord): void {
     }
     if (skills.collision !== "replace") fail("skills.mirror_root", "requires collision: replace");
   }
-  if (skills.collision === "refuse" && skills.removal !== "refuse") {
-    fail("skills.removal", "must be refuse when collision is refuse");
+  if (
+    skills.collision === "refuse" &&
+    skills.removal !== "refuse" &&
+    skills.remove_command === undefined
+  ) {
+    fail(
+      "skills.removal",
+      "must be refuse when collision is refuse without a native remove command",
+    );
+  }
+  if (skills.remove_command !== undefined && skills.removal !== "remove") {
+    fail("skills.remove_command", "requires removal: remove");
   }
 
   const activation = requireRecord(skills.activation, "skills.activation");

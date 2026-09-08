@@ -12,7 +12,7 @@ const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 const MANIFEST_PATH = path.join(PACKAGE_ROOT, "manifest.yaml");
 
 describe("Deep Agents Code skill capability", () => {
-  it("declares its agent-owned directory as fresh-only and removal-refused", () => {
+  it("declares its agent-owned directory and native list/remove commands", () => {
     const definition = buildAgentDefinition({
       manifest: loadValidatedHarnessManifest(MANIFEST_PATH, "langchain-deepagents-code"),
       manifestPath: MANIFEST_PATH,
@@ -23,8 +23,10 @@ describe("Deep Agents Code skill capability", () => {
       support: "managed",
       install_root: "/sandbox/.deepagents/agent/skills",
       collision: "refuse",
-      removal: "refuse",
+      removal: "remove",
       activation: { kind: "new-session" },
+      list_command: ["skills", "list", "--agent", "agent"],
+      remove_command: ["skills", "delete", "{name}", "--agent", "agent", "--force", "--json"],
     });
   });
 });

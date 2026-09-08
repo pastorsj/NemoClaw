@@ -434,6 +434,7 @@ skills:
   removal: remove
   activation:
     kind: new-session
+  list_command: [skills, list]
 
 # ── Messaging integration ───────────────────────────────────────
 messaging:

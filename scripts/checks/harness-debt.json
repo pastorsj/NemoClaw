@@ -233,7 +233,6 @@
           ["collectLegacyAgentStartupDiagnostics", "equality", "hermes", 1]
         ],
         "src/lib/agent/legacy-status.ts": [["legacyStatusDefaults", "equality", "openclaw", 1]],
-        "src/lib/agent/runtime.ts": [["getRegisteredAgent", "equality", "openclaw", 1]],
         "src/lib/config/schema.ts": [["semanticProblems", "equality", "openclaw", 1]],
         "src/lib/dashboard-url-command.ts": [
           ["resolveAgentDashboardAuth", "equality", "openclaw", 1],

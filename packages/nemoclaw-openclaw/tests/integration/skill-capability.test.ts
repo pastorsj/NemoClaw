@@ -12,7 +12,7 @@ const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 const MANIFEST_PATH = path.join(PACKAGE_ROOT, "manifest.yaml");
 
 describe("OpenClaw skill capability", () => {
-  it("declares its durable root, loader mirror, replacement, removal, and activation", () => {
+  it("declares its native skill commands and canonical writable root", () => {
     const definition = buildAgentDefinition({
       manifest: loadValidatedHarnessManifest(MANIFEST_PATH, "openclaw"),
       manifestPath: MANIFEST_PATH,
@@ -21,14 +21,15 @@ describe("OpenClaw skill capability", () => {
 
     expect(definition.skillCapability).toEqual({
       support: "managed",
-      install_root: "/sandbox/.openclaw/skills",
-      mirror_root: "$HOME/.openclaw/skills",
+      install_root: "/sandbox/.openclaw/workspace/skills",
       collision: "replace",
       removal: "remove",
       activation: {
         kind: "reset-session-index",
         path: "/sandbox/.openclaw/agents/main/sessions/sessions.json",
       },
+      list_command: ["skills", "list", "--agent", "main"],
+      add_command: ["skills", "install", "{source}", "--agent", "main", "--force"],
     });
   });
 });

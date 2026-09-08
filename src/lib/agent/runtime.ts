@@ -3,7 +3,7 @@
 //
 // Agent runtime lookup and shared lifecycle helpers. Package-backed sandboxes
 // resolve their exact installed manifest; legacy rows retain the historical
-// source-manifest and OpenClaw-default behavior.
+// source-manifest and manifest-declared default behavior.
 
 import { DASHBOARD_PORT } from "../core/ports";
 import type {
@@ -43,7 +43,7 @@ export {
  * (so status/connect/recovery use the right agent even when multiple
  * sandboxes exist), then falls back to the global onboard session.
  * Package-backed rows return their exact installed definition. A legacy
- * OpenClaw row remains null so existing default behavior is preserved.
+ * Default-agent rows remain null so existing default behavior is preserved.
  */
 export function getSessionAgent(
   sandboxName?: string,
@@ -54,6 +54,49 @@ export function getSessionAgent(
     if (sandbox) return getRegisteredAgent(sandbox, options);
   }
   return getRegisteredAgent(onboardSession.loadSession(), options);
+}
+
+export type SessionAgentDefinitionResolution =
+  | { agent: AgentDefinition; requestedName: string; resolved: true }
+  | { agent: null; requestedName: string; resolved: false };
+
+function loadManifestDefaultAgent(): AgentDefinition | null {
+  const definitions = listAgents().flatMap((name) => {
+    try {
+      return [loadAgent(name)];
+    } catch {
+      return [];
+    }
+  });
+  return (
+    definitions.find((definition) => definition.isDefaultOnboardingChoice) ?? definitions[0] ?? null
+  );
+}
+
+/** Resolve the legacy default-agent null without hiding an invalid registered agent. */
+export function resolveSessionAgentDefinition(
+  sandboxName: string | undefined,
+  agent: AgentDefinition | null,
+): SessionAgentDefinitionResolution {
+  if (agent) return { agent, requestedName: agent.name, resolved: true };
+  let requestedName = "default";
+  try {
+    const registered = sandboxName ? registry.getSandbox(sandboxName) : null;
+    const recordedName = registered?.agent || onboardSession.loadSession()?.agent;
+    if (!recordedName) {
+      const defaultAgent = loadManifestDefaultAgent();
+      return defaultAgent
+        ? { agent: defaultAgent, requestedName: defaultAgent.name, resolved: true }
+        : { agent: null, requestedName, resolved: false };
+    }
+    requestedName = recordedName;
+    if (!listAgents().includes(requestedName)) {
+      return { agent: null, requestedName, resolved: false };
+    }
+    return { agent: loadAgent(requestedName), requestedName, resolved: true };
+  } catch {
+    return { agent: null, requestedName, resolved: false };
+  }
 }
 
 /**
@@ -79,10 +122,11 @@ export function getRegisteredAgent(
   }
 
   const name = source?.agent;
-  if (!name || name === "openclaw") return null;
+  if (!name) return null;
   try {
     if (!listAgents().includes(name)) return null;
-    return loadAgent(name);
+    const definition = loadAgent(name);
+    return definition.isDefaultOnboardingChoice ? null : definition;
   } catch {
     return null;
   }

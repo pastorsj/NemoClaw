@@ -66,6 +66,7 @@ export type {
 export type { AgentRuntime, AgentRuntimeKind } from "../agent-runtime/runtime/manifest";
 export { getAgentRuntimeKind, isTerminalAgent } from "../agent-runtime/runtime/manifest";
 export type { AgentWebAuth, AgentWebAuthMethod } from "../agent-runtime/web-auth";
+export type { AgentSkillIntegration } from "./skill-integration";
 
 export const AGENTS_DIR = AGENT_MANIFESTS_DIR;
 export { AGENT_RUNTIME_PACKAGES_DIR };

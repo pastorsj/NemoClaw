@@ -15,9 +15,14 @@ import { installHarnessPackage } from "../agent-runtime/package/install";
 import { HarnessPackageStoreIntegrityError } from "../agent-runtime/package/store";
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
-import type { AgentDefinition } from "./defs";
+import { type AgentDefinition, loadAgent } from "./defs";
 // Import source directly so tests cannot pass against a stale build.
-import { buildRecoveryScript, getRegisteredAgent, getSessionAgent } from "./runtime";
+import {
+  buildRecoveryScript,
+  getRegisteredAgent,
+  getSessionAgent,
+  resolveSessionAgentDefinition,
+} from "./runtime";
 
 function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
   return {
@@ -239,6 +244,39 @@ describe("getRegisteredAgent", () => {
       expect(getRegisteredAgent({ agent })).toBeNull();
     },
   );
+});
+
+describe("resolveSessionAgentDefinition", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("preserves an explicitly selected agent definition", () => {
+    expect(resolveSessionAgentDefinition("alpha", managedGatewayAgent)).toEqual({
+      agent: managedGatewayAgent,
+      requestedName: "future-managed-agent",
+      resolved: true,
+    });
+  });
+
+  it("loads the trusted OpenClaw package manifest for the legacy null representation", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ agent: "openclaw" } as never);
+    const resolved = resolveSessionAgentDefinition("alpha", null);
+
+    expect(resolved.resolved).toBe(true);
+    expect(resolved.agent).toBe(loadAgent("openclaw"));
+    expect(resolved.agent?.binary_path).toBe("/usr/local/bin/openclaw");
+  });
+
+  it("preserves an unresolved registered agent instead of changing it to OpenClaw", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ agent: "missing-agent" } as never);
+
+    expect(resolveSessionAgentDefinition("alpha", null)).toEqual({
+      agent: null,
+      requestedName: "missing-agent",
+      resolved: false,
+    });
+  });
 });
 
 describe("package-backed runtime agent authority", () => {

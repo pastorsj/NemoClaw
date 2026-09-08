@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { buildAgentSkillIntegration } from "../agent/skill-integration";
 import { type AgentDashboardUi, readDashboardUi } from "./dashboard-ui";
 import type {
   AgentConfigPaths,
@@ -312,6 +313,7 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
     null) as HarnessAgentRosterCapability | null;
   const webSearch = readWebSearchCapability(raw);
   const skills = readSkillCapability(raw);
+  const skillIntegration = buildAgentSkillIntegration(skills);
   const stateLifecycle = readDefinitionStateLifecycle(raw, input.manifestSource);
   const managedImage = readManagedImageDeclaration(raw);
   const policyCapability = readPolicyCapability(raw);
@@ -468,6 +470,10 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
 
     get skillCapability(): HarnessSkillCapability {
       return skills;
+    },
+
+    get skillIntegration() {
+      return skillIntegration;
     },
 
     get stateLifecycle() {

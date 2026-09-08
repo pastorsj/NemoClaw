@@ -14,10 +14,13 @@ import { readObject } from "./manifest-readers";
 const DISABLED_FIELDS = new Set(["reason", "support"]);
 const MANAGED_FIELDS = new Set([
   "activation",
+  "add_command",
   "collision",
   "install_root",
+  "list_command",
   "mirror_root",
   "removal",
+  "remove_command",
   "support",
 ]);
 const ACTIVATION_FIELDS = new Set(["kind"]);
@@ -26,6 +29,10 @@ const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/u;
 const UNSAFE_DISPLAY_CHARACTER = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
 const MAX_PATH_BYTES = 1_024;
 const MAX_REASON_BYTES = 512;
+const MAX_COMMAND_ARGUMENTS = 32;
+const MAX_COMMAND_ARGUMENT_BYTES = 4_096;
+const SKILL_NAME_TOKEN = "{name}";
+const SKILL_SOURCE_TOKEN = "{source}";
 
 function requireExactFields(
   value: ManifestRecord,
@@ -99,6 +106,39 @@ function readMirrorRoot(value: unknown): `$HOME/${string}` | undefined {
   return value as `$HOME/${string}`;
 }
 
+function readSkillCommand(
+  value: unknown,
+  field: string,
+  requiredToken: typeof SKILL_NAME_TOKEN | typeof SKILL_SOURCE_TOKEN | null,
+): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > MAX_COMMAND_ARGUMENTS ||
+    value.some(
+      (argument) =>
+        typeof argument !== "string" ||
+        argument.length === 0 ||
+        Buffer.byteLength(argument, "utf8") > MAX_COMMAND_ARGUMENT_BYTES ||
+        /[\u0000\r\n]/u.test(argument),
+    )
+  ) {
+    throw new Error(
+      `Agent manifest field '${field}' must be an argv array of 1 through 32 bounded strings`,
+    );
+  }
+  const command = value as string[];
+  for (const token of [SKILL_NAME_TOKEN, SKILL_SOURCE_TOKEN]) {
+    const count = command.filter((argument) => argument === token).length;
+    if (count !== Number(requiredToken === token)) {
+      throw new Error(
+        `Agent manifest field '${field}' must contain ${requiredToken === token ? "exactly one" : "no"} ${token} token`,
+      );
+    }
+  }
+  return Object.freeze([...command]);
+}
+
 function readActivation(value: unknown): HarnessSkillActivation {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Agent manifest field 'skills.activation' must be an object");
@@ -152,7 +192,7 @@ export function readSkillCapability(manifest: ManifestRecord): HarnessSkillCapab
   requireKnownFields(
     value,
     MANAGED_FIELDS,
-    new Set(["activation", "collision", "install_root", "removal", "support"]),
+    new Set(["activation", "collision", "install_root", "list_command", "removal", "support"]),
     "skills",
   );
   if (value.collision !== "replace" && value.collision !== "refuse") {
@@ -165,10 +205,17 @@ export function readSkillCapability(manifest: ManifestRecord): HarnessSkillCapab
   if (value.collision === "refuse" && mirrorRoot) {
     throw new Error("Agent manifest field 'skills.mirror_root' requires collision: replace");
   }
-  if (value.collision === "refuse" && value.removal !== "refuse") {
+  if (
+    value.collision === "refuse" &&
+    value.removal !== "refuse" &&
+    value.remove_command === undefined
+  ) {
     throw new Error(
-      "Agent manifest field 'skills.removal' must be refuse when collision is refuse",
+      "Agent manifest field 'skills.removal' must be refuse when collision is refuse without a native remove command",
     );
+  }
+  if (value.remove_command !== undefined && value.removal !== "remove") {
+    throw new Error("Agent manifest field 'skills.remove_command' requires removal: remove");
   }
 
   return Object.freeze({
@@ -178,5 +225,24 @@ export function readSkillCapability(manifest: ManifestRecord): HarnessSkillCapab
     collision: value.collision,
     removal: value.removal,
     activation: readActivation(value.activation),
+    list_command: readSkillCommand(value.list_command, "skills.list_command", null),
+    ...(value.add_command === undefined
+      ? {}
+      : {
+          add_command: readSkillCommand(
+            value.add_command,
+            "skills.add_command",
+            SKILL_SOURCE_TOKEN,
+          ),
+        }),
+    ...(value.remove_command === undefined
+      ? {}
+      : {
+          remove_command: readSkillCommand(
+            value.remove_command,
+            "skills.remove_command",
+            SKILL_NAME_TOKEN,
+          ),
+        }),
   });
 }

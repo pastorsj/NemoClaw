@@ -22,6 +22,7 @@ import type {
 } from "@nvidia/nemoclaw-harness-contract";
 
 import type { AgentDashboardUi } from "./dashboard-ui";
+import type { AgentSkillIntegration } from "../agent/skill-integration";
 import type { AgentRuntime } from "./runtime/manifest";
 import type { AgentWebAuth } from "./web-auth";
 
@@ -260,6 +261,8 @@ export interface AgentDefinition {
   readonly providerAuthCapability?: HarnessProviderAuthCapability | null;
   readonly toolGatewayCapability?: HarnessToolGatewayCapability | null;
   readonly skillCapability: HarnessSkillCapability;
+  /** Native argv projection derived from the validated package skill capability. */
+  readonly skillIntegration?: AgentSkillIntegration | null;
   readonly stateLifecycle: HarnessStateLifecycleDeclaration;
   readonly managedImage: HarnessManagedImageDeclaration | null;
   readonly stateDirectories: AgentStateDirectory[];

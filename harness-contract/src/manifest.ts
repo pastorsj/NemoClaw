@@ -282,14 +282,24 @@ export type HarnessSkillActivation =
   | { readonly kind: "gateway-restart-required"; readonly path?: never }
   | { readonly kind: "reset-session-index"; readonly path: `/sandbox/${string}` };
 
+/** Native agent argv appended to the manifest's absolute binary path. */
+export type HarnessSkillCommand = readonly string[];
+
 export type HarnessSkillCapability =
   | {
       readonly support: "managed";
+      /** Canonical package-owned root used by the bounded filesystem fallback. */
       readonly install_root: `/sandbox/${string}`;
       readonly mirror_root?: `$HOME/${string}`;
       readonly collision: "replace" | "refuse";
       readonly removal: "remove" | "refuse";
       readonly activation: HarnessSkillActivation;
+      /** Native discovery command. It must not contain replacement tokens. */
+      readonly list_command: HarnessSkillCommand;
+      /** Optional native add command containing exactly one `{source}` argument. */
+      readonly add_command?: HarnessSkillCommand;
+      /** Optional native remove command containing exactly one `{name}` argument. */
+      readonly remove_command?: HarnessSkillCommand;
       readonly reason?: never;
     }
   | {
@@ -300,6 +310,9 @@ export type HarnessSkillCapability =
       readonly collision?: never;
       readonly removal?: never;
       readonly activation?: never;
+      readonly list_command?: never;
+      readonly add_command?: never;
+      readonly remove_command?: never;
     };
 
 export type HarnessManagedImagePlatform = "linux/amd64" | "linux/arm64";

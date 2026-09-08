@@ -12,7 +12,7 @@ const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 const MANIFEST_PATH = path.join(PACKAGE_ROOT, "manifest.yaml");
 
 describe("Pi skill capability", () => {
-  it("declares the user skill loader root and new-session activation", () => {
+  it("does not claim lifecycle support without a native skill inventory", () => {
     const definition = buildAgentDefinition({
       manifest: loadValidatedHarnessManifest(MANIFEST_PATH, "pi"),
       manifestPath: MANIFEST_PATH,
@@ -20,11 +20,9 @@ describe("Pi skill capability", () => {
     });
 
     expect(definition.skillCapability).toEqual({
-      support: "managed",
-      install_root: "/sandbox/.pi/agent/skills",
-      collision: "replace",
-      removal: "remove",
-      activation: { kind: "new-session" },
+      support: "disabled",
+      reason: "Pi accepts prompt-scoped skill paths but does not expose a native skill inventory.",
     });
+    expect(definition.skillIntegration).toBeNull();
   });
 });

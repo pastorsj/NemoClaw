@@ -467,7 +467,6 @@ function managedOutputTargets(
       files.add(path.join(root, "config.toml"));
       files.add(path.join(root, "fabric.json"));
       directories.add(path.join(root, ".state"));
-      directories.add(path.join(root, "skills"));
       break;
     case "pi":
       directories.add(path.join(root, "agent"));

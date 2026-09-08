@@ -13,7 +13,7 @@ const EMPTY_POLICY_CAPABILITY: HarnessPolicyCapability = Object.freeze({
 });
 
 const POLICY_PRESET_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
-const BASELINE_KEY_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
+const BASELINE_KEY_PATTERN = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/u;
 const DISPLAY_CONTROL_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const SAFE_CONTEXT_TARGET_PATTERN = /^\/sandbox\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/u;
 
