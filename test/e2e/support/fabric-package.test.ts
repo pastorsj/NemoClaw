@@ -249,6 +249,42 @@ describe("generic Fabric package E2E", () => {
     });
   });
 
+  it("binds an exact artifact through the documented tsx subprocess", () => {
+    const contract = futureFabricContract();
+    const fixturePath = writeFutureContractFixture();
+    const fixture = writeInstalledPackageFixture(contract);
+    const script = String.raw`
+import fs from "node:fs";
+const fabricContract = await import("./tools/e2e/fabric-contract.mts");
+const contract = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const bound = fabricContract.requireFabricPackageArtifactE2eBinding(contract, process.argv[2]);
+process.stdout.write(bound.reference.identity.id);
+`;
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "--input-type=module",
+        "--eval",
+        script,
+        fixturePath,
+        fixture.reference.packageRoot,
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        shell: false,
+        timeout: 10_000,
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.signal).toBeNull();
+    expect(result.stdout).toBe("future-harness");
+  });
+
   it("keeps the supplied lifecycle source exact while generating only its upgrade", () => {
     const contract = futureFabricContract();
     const fixture = writeInstalledPackageFixture(contract);

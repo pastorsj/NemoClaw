@@ -10,9 +10,16 @@ import * as packageTree from "../../src/lib/agent-runtime/package/tree.ts";
 import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/types.ts";
 import { readPrivateRegularFile } from "./private-file.mts";
 
-const { parseHarnessPackageIdentity } = identityValidation;
-const { parseHarnessPackageManifest } = packageManifest;
-const { validateHarnessPackageTree } = packageTree;
+// Root CLI sources compile as CommonJS. Across supported Node releases,
+// `tsx` may expose those modules as either a default object or a namespace.
+// Normalize that loader detail so the public command and support tests agree.
+function moduleExports<T>(namespace: T & { readonly default?: T }): T {
+  return namespace.default ?? namespace;
+}
+
+const { parseHarnessPackageIdentity } = moduleExports(identityValidation);
+const { parseHarnessPackageManifest } = moduleExports(packageManifest);
+const { validateHarnessPackageTree } = moduleExports(packageTree);
 
 const CONTRACT_VALUE_MAX_BYTES = 512;
 const PROCESS_MARKER_LIMIT = 16;
