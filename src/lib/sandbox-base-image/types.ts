@@ -37,6 +37,14 @@ export type SandboxBaseImageResolutionMetadata = {
   minGlibcVersion: string;
 };
 
+/** One disposable Docker context prepared only when local image fallback is required. */
+export type PreparedLocalBaseImageBuildContext = {
+  readonly dockerfilePath: string;
+  readonly contextDir: string;
+  verifyContext(): boolean;
+  releaseContext(): void;
+};
+
 export type ResolveBaseImageOptions = {
   imageName: string;
   dockerfilePath: string;
@@ -58,6 +66,9 @@ export type ResolveBaseImageOptions = {
   resolutionHint?: SandboxBaseImageResolutionMetadata | null;
   forceRefresh?: boolean;
   trustedLocalOverride?: TrustedLocalBaseImageOverride;
+  /** Immutable identity of shared inputs added by prepareLocalBuildContext. */
+  localBuildContextKey?: string;
+  prepareLocalBuildContext?: () => PreparedLocalBaseImageBuildContext;
 };
 
 export type TrustedLocalBaseImageOverride = {

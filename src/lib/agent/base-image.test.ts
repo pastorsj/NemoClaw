@@ -15,38 +15,20 @@ import {
   TEST_MESSAGING_ADAPTER_SOURCE,
   TEST_STARTUP_ADAPTER_SOURCE,
 } from "../../../test/helpers/adapter-fixtures";
-import { makeAgent, withMockedDocker } from "../../../test/helpers/base-image-test-harness";
+import {
+  makeAgent,
+  makeResolutionMetadata,
+  withMockedDocker,
+} from "../../../test/helpers/base-image-test-harness";
 import { removeFixtureDirectories } from "../../../test/helpers/fixture-permissions";
 import { testTimeout } from "../../../test/helpers/timeouts";
 import { tmpDir, writeCa } from "../onboard/__test-helpers__/corporate-ca-fixtures";
-import {
-  createSandboxBaseImageBuildProvenanceKey,
-  type SandboxBaseImageResolutionMetadata,
-} from "../sandbox-base-image";
+import { createSandboxBaseImageBuildProvenanceKey } from "../sandbox-base-image";
+import { resolveSourceBuildIdentity } from "../core/build-identity";
 import { loadAgent } from "./defs";
 import { loadValidatedHarnessManifest, readString } from "../agent-runtime/manifest-readers";
 import { installHarnessPackage } from "../agent-runtime/package/install";
 import { stageAgentComposedBuildContext } from "./base-image";
-
-function makeResolutionMetadata(
-  overrides: Partial<SandboxBaseImageResolutionMetadata> = {},
-): SandboxBaseImageResolutionMetadata {
-  return {
-    schema: 1,
-    key: "resolution-key",
-    imageName: "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base",
-    ref: "nemoclaw-hermes-sandbox-base-local:compatible",
-    digest: null,
-    source: "local",
-    imageId: `sha256:${"a".repeat(64)}`,
-    os: "linux",
-    architecture: "amd64",
-    glibcVersion: process.platform === "linux" ? "2.41" : null,
-    requireOpenshellSandboxAbi: process.platform === "linux",
-    minGlibcVersion: "2.39",
-    ...overrides,
-  };
-}
 
 function makeDifferingImageInspection(
   format: string,
@@ -686,6 +668,7 @@ describe("agent base image provisioning", { timeout: testTimeout(60_000) }, () =
               validateImage: expect.any(Function),
               validationDescription:
                 "the package-bound image probe and the immutable security package inventory",
+              prepareLocalBuildContext: expect.any(Function),
             }),
           );
           expect(dockerImageInspectMock).not.toHaveBeenCalled();
@@ -1197,6 +1180,7 @@ describe("agent base image provisioning", { timeout: testTimeout(60_000) }, () =
           ],
           localTag: "unused-by-build-provenance",
           rootDir: root,
+          localBuildContextKey: resolveSourceBuildIdentity({ rootDir: root }).sourceRevision,
         });
 
         expect(result.imageTag).toBe(`nemoclaw-hermes-sandbox-base-local:image-${"a".repeat(64)}`);

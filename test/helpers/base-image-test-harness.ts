@@ -9,6 +9,7 @@ import path from "node:path";
 import { vi } from "vitest";
 
 import type { AgentDefinition } from "../../src/lib/agent/defs";
+import type { SandboxBaseImageResolutionMetadata } from "../../src/lib/sandbox-base-image";
 
 type AgentOnboardModule = typeof import("../../src/lib/agent/onboard");
 type DockerRunModule = typeof import("../../src/lib/adapters/docker/run");
@@ -22,6 +23,26 @@ const requireSource = createRequire(
   new URL("../../src/lib/agent/base-image.test.ts", import.meta.url),
 );
 const TEST_REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../..");
+
+export function makeResolutionMetadata(
+  overrides: Partial<SandboxBaseImageResolutionMetadata> = {},
+): SandboxBaseImageResolutionMetadata {
+  return {
+    schema: 1,
+    key: "resolution-key",
+    imageName: "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base",
+    ref: "nemoclaw-hermes-sandbox-base-local:compatible",
+    digest: null,
+    source: "local",
+    imageId: `sha256:${"a".repeat(64)}`,
+    os: "linux",
+    architecture: "amd64",
+    glibcVersion: process.platform === "linux" ? "2.41" : null,
+    requireOpenshellSandboxAbi: process.platform === "linux",
+    minGlibcVersion: "2.39",
+    ...overrides,
+  };
+}
 
 function fixtureManagedImage(agentName: string): AgentDefinition["managedImage"] {
   const common = {
@@ -106,7 +127,10 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
       backup_quiescence: { kind: "not-required" },
       snapshot_restore: [],
       rebuild: {
-        managed_extensions: { support: "disabled", reason: "Test package has no managed extensions." },
+        managed_extensions: {
+          support: "disabled",
+          reason: "Test package has no managed extensions.",
+        },
         scheduled_work: {
           support: "disabled",
           reason: "This package does not run scheduled work.",

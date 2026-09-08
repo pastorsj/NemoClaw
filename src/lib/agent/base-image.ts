@@ -26,6 +26,7 @@ import {
 } from "../agent-runtime/package/tree";
 import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import { CUA_SANDBOX_IMAGE_ENV, requireCuaSandboxImageRef } from "../cua/feature";
+import { resolveSourceBuildIdentity } from "../core/build-identity";
 import { REPOSITORY_ROOT } from "../core/repository-root";
 import { encodeCorporateCaArg, resolveCorporateCa } from "../onboard/corporate-ca";
 import { createCustomBuildContextFilter } from "../onboard/custom-build-context";
@@ -752,6 +753,21 @@ function createAgentBaseImageResolutionOptions(
     pinnedRemoteRef,
     requirePinnedRemoteRef: pinnedRemoteRef !== undefined,
     allowLocalFallback: options.allowLocalFallback,
+    localBuildContextKey: resolveSourceBuildIdentity({ rootDir: REPOSITORY_ROOT }).sourceRevision,
+    prepareLocalBuildContext: () => {
+      const staged = stageAgentComposedBuildContext(
+        agent,
+        dockerfilePath,
+        "Dockerfile.base",
+        options,
+      );
+      return {
+        dockerfilePath: staged.stagedDockerfile,
+        contextDir: staged.buildCtx,
+        verifyContext: staged.verifyBuildCtx,
+        releaseContext: () => removeAgentBuildContext(staged.buildCtx),
+      };
+    },
     ...validationOptions,
   };
 }

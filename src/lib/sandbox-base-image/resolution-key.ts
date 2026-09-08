@@ -79,6 +79,7 @@ export function createSandboxBaseImageBuildProvenanceKey(options: ResolveBaseIma
     rootIdentity: canonicalRootIdentity(rootDir),
     sourceRevisions: getSourceRevisionIds(rootDir, env),
     inputFingerprint: hashBaseImageInputs(rootDir, options.dockerfilePath, options.inputPaths),
+    localBuildContextKey: options.localBuildContextKey ?? null,
 
     buildArgsFingerprint: hashBuildArgs(options.buildArgs),
   };
@@ -105,6 +106,7 @@ export function createSandboxBaseImageResolutionKey(options: ResolveBaseImageOpt
     sourceTags: getSourceShortShaTags(rootDir, env),
     localTag: options.localTag,
     inputFingerprint: hashBaseImageInputs(rootDir, options.dockerfilePath, options.inputPaths),
+    localBuildContextKey: options.localBuildContextKey ?? null,
 
     buildArgsFingerprint: hashBuildArgs(options.buildArgs),
     platform: dockerPlatform(),

@@ -23,7 +23,10 @@ vi.mock("./source-identity", async (importOriginal) => ({
   getNearestVersionedBaseImageTags: sourceMocks.nearestTags,
 }));
 
-import { createSandboxBaseImageResolutionKey } from "./resolution-key";
+import {
+  createSandboxBaseImageBuildProvenanceKey,
+  createSandboxBaseImageResolutionKey,
+} from "./resolution-key";
 
 const roots: string[] = [];
 
@@ -70,6 +73,19 @@ describe("sandbox base-image resolution key", () => {
     const before = createSandboxBaseImageResolutionKey(options(root));
     fs.writeFileSync(path.join(root, "Dockerfile.base"), "FROM node:22\nRUN echo changed\n");
     expect(createSandboxBaseImageResolutionKey(options(root))).not.toBe(before);
+  });
+
+  it("binds cache and provenance identity to the prepared local build context", () => {
+    const root = fixture();
+    const first = { ...options(root), localBuildContextKey: "core-revision-one" };
+    const second = { ...options(root), localBuildContextKey: "core-revision-two" };
+
+    expect(createSandboxBaseImageResolutionKey(second)).not.toBe(
+      createSandboxBaseImageResolutionKey(first),
+    );
+    expect(createSandboxBaseImageBuildProvenanceKey(second)).not.toBe(
+      createSandboxBaseImageBuildProvenanceKey(first),
+    );
   });
 
   it("isolates build args without exposing their values (#8119)", () => {

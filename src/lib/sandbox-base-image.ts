@@ -427,18 +427,33 @@ function resolveLocalCandidate(
   // `suppressOutput` keeps captured stdio out of the user's terminal.
   // On failure, surface the captured stderr so the user still gets a
   // useful diagnostic.
-  const buildResult = withLocalBuildHeartbeat(() =>
-    dockerBuild(options.dockerfilePath, imageRef, options.rootDir || ROOT, {
-      buildArgs: options.buildArgs,
+  const buildResult = withLocalBuildHeartbeat(() => {
+    const prepared = options.prepareLocalBuildContext?.();
+    try {
+      if (prepared && !prepared.verifyContext()) {
+        throw new SandboxBaseImageResolutionError(
+          "Prepared local base-image build context changed before Docker consumed it.",
+        );
+      }
+      return dockerBuild(
+        prepared?.dockerfilePath ?? options.dockerfilePath,
+        imageRef,
+        prepared?.contextDir ?? options.rootDir ?? ROOT,
+        {
+          buildArgs: options.buildArgs,
 
-      labels: {
-        [SANDBOX_BASE_BUILD_PROVENANCE_LABEL]: createSandboxBaseImageBuildProvenance(options),
-      },
-      quiet: true,
-      ignoreError: true,
-      suppressOutput: true,
-    }),
-  );
+          labels: {
+            [SANDBOX_BASE_BUILD_PROVENANCE_LABEL]: createSandboxBaseImageBuildProvenance(options),
+          },
+          quiet: true,
+          ignoreError: true,
+          suppressOutput: true,
+        },
+      );
+    } finally {
+      prepared?.releaseContext();
+    }
+  });
   if (buildResult.error || buildResult.status !== 0) {
     const diagnostics = formatBuildFailureDiagnostics(buildResult);
     if (diagnostics) console.error(diagnostics);

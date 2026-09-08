@@ -574,6 +574,60 @@ describe("sandbox base-image warm resolution", () => {
     );
   });
 
+  it("builds a local fallback from a prepared disposable context", () => {
+    sourceMocks.inputsDirty.mockReturnValue(true);
+    dockerMocks.build.mockReturnValue({ status: 0 });
+    const verifyContext = vi.fn(() => true);
+    const releaseContext = vi.fn();
+    const options = {
+      ...resolutionOptions(),
+      env: {
+        ...resolutionOptions().env,
+        NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1",
+      },
+      prepareLocalBuildContext: vi.fn(() => ({
+        dockerfilePath: "/prepared/Dockerfile.base",
+        contextDir: "/prepared",
+        verifyContext,
+        releaseContext,
+      })),
+    };
+
+    expect(resolveSandboxBaseImage(options)).toMatchObject({ source: "local" });
+    expect(options.prepareLocalBuildContext).toHaveBeenCalledOnce();
+    expect(verifyContext).toHaveBeenCalledOnce();
+    expect(dockerMocks.build).toHaveBeenCalledWith(
+      "/prepared/Dockerfile.base",
+      options.localTag,
+      "/prepared",
+      expect.objectContaining({ quiet: true }),
+    );
+    expect(releaseContext).toHaveBeenCalledOnce();
+  });
+
+  it("releases a prepared local context when its package bytes drift", () => {
+    sourceMocks.inputsDirty.mockReturnValue(true);
+    const releaseContext = vi.fn();
+
+    expect(() =>
+      resolveSandboxBaseImage({
+        ...resolutionOptions(),
+        env: {
+          ...resolutionOptions().env,
+          NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1",
+        },
+        prepareLocalBuildContext: () => ({
+          dockerfilePath: "/prepared/Dockerfile.base",
+          contextDir: "/prepared",
+          verifyContext: () => false,
+          releaseContext,
+        }),
+      }),
+    ).toThrow("Prepared local base-image build context changed before Docker consumed it.");
+    expect(dockerMocks.build).not.toHaveBeenCalled();
+    expect(releaseContext).toHaveBeenCalledOnce();
+  });
+
   it("rebuilds a local fallback when the current build omits the previous corporate CA input (#8119)", () => {
     const options = {
       ...resolutionOptions(),
