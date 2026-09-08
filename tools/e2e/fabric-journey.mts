@@ -47,6 +47,8 @@ import { runPublicFabricTurn } from "./fabric-turn.mts";
 
 const COMMAND_TIMEOUT_MS = 3 * 60_000;
 const ONBOARD_TIMEOUT_MS = 25 * 60_000;
+const BUILD_IDENTITY_MAX_BYTES = 16 * 1024;
+const SOURCE_REVISION_PATTERN = /^[a-f0-9]{40,64}$/u;
 const FABRIC_PACKAGE_PHASES = [
   "verify local package and runtime prerequisites",
   "install and inspect the receipt-backed harness package",
@@ -118,12 +120,76 @@ export function buildFabricOnboardingEnvironment(
 }
 
 function currentCommit(repositoryRoot: string): string {
-  return execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
-    cwd: repositoryRoot,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 5_000,
-  }).trim();
+  let revision: string;
+  try {
+    revision = execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+    }).trim();
+  } catch {
+    throw new Error("Fabric package E2E requires a tested Git checkout");
+  }
+  if (!SOURCE_REVISION_PATTERN.test(revision)) {
+    throw new Error("Fabric package E2E requires an exact tested Git revision");
+  }
+  return revision;
+}
+
+function requireCleanTrackedCheckout(repositoryRoot: string): string {
+  const revision = currentCommit(repositoryRoot);
+  let status: string;
+  try {
+    status = execFileSync(
+      "git",
+      ["status", "--porcelain=v1", "--untracked-files=no", "--ignore-submodules=none"],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5_000,
+      },
+    );
+  } catch {
+    throw new Error("Fabric package E2E could not inspect the tested Git checkout");
+  }
+  if (status.length > 0) {
+    throw new Error("Fabric package E2E requires a checkout without tracked changes");
+  }
+  return revision;
+}
+
+function requireGeneratedBuildRevision(repositoryRoot: string, revision: string): void {
+  const identityPath = path.join(repositoryRoot, "dist", "build-identity.json");
+  let metadata: fs.Stats;
+  try {
+    metadata = fs.lstatSync(identityPath);
+  } catch {
+    throw new Error("Fabric package E2E requires a generated CLI build identity");
+  }
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isFile() ||
+    metadata.size === 0 ||
+    metadata.size > BUILD_IDENTITY_MAX_BYTES
+  ) {
+    throw new Error("Fabric package E2E requires a bounded regular CLI build identity");
+  }
+  let identity: unknown;
+  try {
+    identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
+  } catch {
+    throw new Error("Fabric package E2E requires a valid generated CLI build identity");
+  }
+  if (
+    !identity ||
+    typeof identity !== "object" ||
+    Array.isArray(identity) ||
+    Reflect.get(identity, "sourceRevision") !== revision
+  ) {
+    throw new Error("Fabric package E2E generated CLI does not match the tested Git revision");
+  }
 }
 
 /** Bind execution to the regular CLI file in the checkout being attested. */
@@ -154,6 +220,8 @@ export function requireTestedNemoClawCli(
       throw new Error("NEMOCLAW_CLI_BIN must resolve to the tested checkout's NemoClaw CLI");
     }
   }
+  const revision = requireCleanTrackedCheckout(repositoryRoot);
+  requireGeneratedBuildRevision(repositoryRoot, revision);
   return Object.freeze({
     contentSha256: createHash("sha256").update(fs.readFileSync(expectedPath)).digest("hex"),
     path: expectedPath,

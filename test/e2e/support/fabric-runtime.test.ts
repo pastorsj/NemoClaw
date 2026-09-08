@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +18,46 @@ import { LiveCommandRunner } from "../../../tools/e2e/live-client.mts";
 import { createPrivateFabricRuntime } from "../../../tools/e2e/private-runtime.mts";
 
 const temporaryDirectories: string[] = [];
+
+function runGit(repositoryRoot: string, arguments_: readonly string[]): string {
+  return execFileSync("git", arguments_, {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+}
+
+function testedCheckout(buildRevision?: string): {
+  readonly cliPath: string;
+  readonly repositoryRoot: string;
+  readonly revision: string;
+} {
+  const repositoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-checkout-"));
+  temporaryDirectories.push(repositoryRoot);
+  const cliPath = path.join(repositoryRoot, "bin", "nemoclaw.js");
+  fs.mkdirSync(path.dirname(cliPath), { recursive: true });
+  fs.writeFileSync(cliPath, "#!/usr/bin/env node\n", { mode: 0o755 });
+  runGit(repositoryRoot, ["init", "--quiet"]);
+  runGit(repositoryRoot, ["add", "bin/nemoclaw.js"]);
+  runGit(repositoryRoot, [
+    "-c",
+    "user.name=NemoClaw E2E",
+    "-c",
+    "user.email=nemoclaw-e2e@example.invalid",
+    "commit",
+    "--quiet",
+    "-m",
+    "test: create exact checkout",
+  ]);
+  const revision = runGit(repositoryRoot, ["rev-parse", "HEAD"]);
+  fs.mkdirSync(path.join(repositoryRoot, "dist"));
+  fs.writeFileSync(
+    path.join(repositoryRoot, "dist", "build-identity.json"),
+    `${JSON.stringify({ nemoclawVersion: "0.0.0-test", sourceRevision: buildRevision ?? revision })}\n`,
+    "utf8",
+  );
+  return { cliPath, repositoryRoot, revision };
+}
 
 function artifactSink(): { readonly directory: string; readonly sink: ArtifactSink } {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-live-command-"));
@@ -63,14 +104,32 @@ describe("standalone Fabric runtime support", () => {
   });
 
   it("binds CLI execution to the regular file in the tested checkout", () => {
-    const identity = requireTestedNemoClawCli(process.cwd(), {});
+    const checkout = testedCheckout();
+    const identity = requireTestedNemoClawCli(checkout.repositoryRoot, {});
 
     expect(path.isAbsolute(identity.path)).toBe(true);
-    expect(identity.path).toBe(fs.realpathSync(path.join(process.cwd(), "bin/nemoclaw.js")));
+    expect(identity.path).toBe(fs.realpathSync(checkout.cliPath));
     expect(identity.contentSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(() =>
-      requireTestedNemoClawCli(process.cwd(), { NEMOCLAW_CLI_BIN: process.execPath }),
+      requireTestedNemoClawCli(checkout.repositoryRoot, { NEMOCLAW_CLI_BIN: process.execPath }),
     ).toThrow("must resolve to the tested checkout's NemoClaw CLI");
+  });
+
+  it("rejects a generated CLI from another Git revision", () => {
+    const checkout = testedCheckout("a".repeat(40));
+
+    expect(() => requireTestedNemoClawCli(checkout.repositoryRoot, {})).toThrow(
+      "generated CLI does not match the tested Git revision",
+    );
+  });
+
+  it("rejects tracked checkout changes before live execution", () => {
+    const checkout = testedCheckout();
+    fs.appendFileSync(checkout.cliPath, "process.exitCode = 1;\n", "utf8");
+
+    expect(() => requireTestedNemoClawCli(checkout.repositoryRoot, {})).toThrow(
+      "requires a checkout without tracked changes",
+    );
   });
 
   it("adds credentials to onboarding without mutating the secret-free control environment", () => {
