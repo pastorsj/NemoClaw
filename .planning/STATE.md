@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Phase 4 typed agent runtime contract work is active; generic Dockerfile, terminal, and
-  Fabric composition has local Mac and Brev evidence, while product, distribution, broad root aggregate,
-  managed-startup, managed-image, and named-package live gates remain open
-last_updated: "2026-09-04T00:00:00.000Z"
+status: NCC-06 local POC qualification is active; six receipt-backed harness packages use the
+  typed package and Fabric path, while exact-candidate deterministic, macOS, Brev, and protected
+  managed-image evidence remain open
+last_updated: "2026-09-08T00:00:00.000Z"
 progress:
   total_phases: 9
   completed_phases: 1
-  total_plans: 33
-  completed_plans: 29
-  percent: 88
+  total_plans: 34
+  completed_plans: 31
+  percent: 91
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -21,17 +21,15 @@ progress:
 
 ## Current Position
 
-Phase: 4 of 9 — Agent Runtime Contract
+Workstream: NCC-06 — Official-ready Harness Contract Local POC
 
-Status: Phase 2 Plans 02-01 through 02-22 completed the package foundation. Plan 02-23 remains
-pending and shares its no-messaging environment evidence with Phase 3 Plan 03-04. Phase 3 Plans
-03-01 through 03-03 completed the generic, OpenClaw, and Hermes Fabric implementation; Plan 03-04
-remains open. Phase 4 Plans 04-01 through 04-03 implemented the finite receipt-bound loader,
-package-backed Model Context Protocol slice, synthetic composition proof, and package test
-ownership as a local prototype. Plans 04-04 and 04-05 remain active because the broad root aggregate,
-current managed-image, and named-package live evidence is not complete. The ordinary bundled
-Dockerfile, terminal, and Fabric path has bounded macOS and Brev development evidence for an
-unknown package ID.
+Status: The package foundation, finite typed loader, package lifecycle, package-owned Fabric
+adapters, and generic live runner now cover OpenClaw, Hermes, LangChain Deep Agents Code, Pi,
+DeepSeek Harness, and Haystack Agent. Receipt-backed skill lifecycle uses the same typed capability:
+packages declare native list/add/remove argv when available and bounded filesystem behavior when
+the harness has no native operation. The latest upstream native skill work was reconciled without
+adding a production-core package-ID decision. Exact-candidate aggregate and live qualification is
+now running; messaging-service E2E remains intentionally excluded.
 
 This work does not activate or support an upstream product surface. The accepted Phase 2 decision
 covers the data, sandbox, and image package foundation. It does not accept package-authored host
@@ -41,18 +39,19 @@ Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
 
 Accepted Phase 2 proposal revision: `5802308d09bdb64dba62dd541e42ad6bb223ceb0`
 
-Current implementation candidate: `461e30e5d45aa97d58cfd9ce451f33b0c17f0f50`
+Current code candidate before the state-only qualification commit:
+`5d1caa8536dcbf8a6b17953f35e6282784de2909`
 
 Decision record revision: `4fb6083cb02419d7a3768e9602220a00b361bc63`
 
 ## Repository Reconciliation
 
 - Active branch: `agent-runtime-composition-architecture`
-- Exact base: `origin/main` at `4b254b9bef3e0ba745af4859fc65700742f5317e`
-- Local upstream merge: `3a6786019e58ec9540754a285939236630559c7b`
+- Exact base: `origin/main` at `efd56a372999acc9d97936e9b30b2164743255a5`
+- Local upstream merge: `5d1caa8536dcbf8a6b17953f35e6282784de2909`
 - Preserved candidate: `backup/agent-runtime-package-migration-pre-origin-main-20260827`
 - Preserved candidate tip: `e856215a07`
-- Fork branch remains at `c5ef46cd65`; all later work remains local-only and must not be pushed
+- All work after the previously published fork tip remains local-only and must not be pushed
 
 At the Phase 1 baseline, the preserved candidate changed 1,773 files after its common base and main
 changed 1,806. A trial direct merge produced 2,189 unresolved paths, including 1,889 paths under
@@ -60,12 +59,22 @@ changed 1,806. A trial direct merge produced 2,189 unresolved paths, including 1
 above. The migration strategy remains semantic capability-slice replay onto current main.
 
 The tracked source packages are `nemoclaw-fabric`, `nemoclaw-openclaw`, `nemoclaw-hermes`,
-`nemoclaw-langchain-deepagents-code`, and `nemoclaw-pi`.
+`nemoclaw-langchain-deepagents-code`, `nemoclaw-pi`, `nemoclaw-deepseek-harness`, and
+`nemoclaw-haystack-agent`.
 
 After Plan 02-03, the branch merged the three newer `origin/main` commits through
 `d63f7b037dbec3d34dba73ed75f09a330d36b36f`. The merge had no conflicts. Package-store,
 image/policy source, integration, E2E-support, and CLI type checks passed against the refreshed
 tree.
+
+On 2026-09-08, the branch semantically merged `origin/main` through `efd56a3729`. The reconciliation
+kept upstream's native agent skill lifecycle, expressed its command grammar in the existing typed
+package capability, removed one literal OpenClaw decision from core and its audited debt allowance,
+and retained package receipt revalidation before mutation. Contract validation, all six package
+conformance checks, focused skill and runtime tests, CLI typechecking, policy materialization, the
+reviewed runtime bundle, architecture budgets, assertion budgets, and growth guardrails pass. The
+repository check proceeds through every ordinary gate and then stops at the protected Pi
+qualification-receipt publication requirement; local code cannot manufacture that release evidence.
 
 ## Completed Evidence
 
@@ -87,8 +96,8 @@ tree.
   authority-bound cleanup implemented with 140 focused tests.
 - [x] Immutable objects, digest-addressed receipts, atomic active pointers, pinned reads, and one
   data-only installation transaction implemented with 105 focused tests.
-- [x] Three accepted standard harnesses build as validated read-only artifacts, and one catalogue
-  reports available, healthy installed, and damaged state without fallback.
+- [x] Six local-POC harnesses build as validated read-only artifacts, and one catalogue reports
+  available, healthy installed, and damaged state without fallback.
 - [x] Session state can retain exact package identity and secret-free migration provenance;
   checkpoint v5 carries exact identity and explicitly migrates active v4 state without inference.
 - [x] `harness list/install` exposes only reviewed packages, and `agents list` projects healthy
@@ -131,11 +140,14 @@ tree.
   plugin, and Fabric lanes.
 - [x] Hermes supplies its package-owned released-adapter integration and deterministic package,
   composition, subprocess, Python, and Fabric lanes.
+- [x] DeepSeek Harness and Haystack Agent supply package-owned stable-Fabric adapters, immutable
+  runtime configuration, cancellation and cleanup behavior, and deterministic package lanes
+  without adding their IDs to production core.
 - [x] One finite typed loader owns fixed package paths, exports, TypeScript request and result
   types, runtime schemas, value bounds, and receipt-pinned evaluation.
 - [x] Package-backed MCP dispatch uses Hermes, OpenClaw, and LangChain Deep Agents Code package
   adapters without a core native fallback; Pi fails through typed capability validation.
-- [x] All four packages supply typed runtime-configuration plans; OpenClaw also supplies its
+- [x] All six packages supply typed runtime-configuration plans; OpenClaw also supplies its
   receipt-pinned restore merge grammar.
 - [x] Core retains credentials, SSRF validation, policy, OpenShell execution, state, transaction,
   restart, verification, rollback, and redacted diagnostics.
@@ -158,8 +170,9 @@ tree.
   2,476 candidates across 7 projects passed.
 - [ ] Current managed-image evidence is pending after the reviewed runtime bundle changed; existing
   Pi receipts bind older source bytes.
-- [ ] The broad root aggregate and named managed-startup or package-specific live gates remain open.
-  The unknown-package Mac and Brev runs are development evidence, not release evidence.
+- [ ] Exact-candidate aggregate and six-package Mac and Brev live gates remain open. Earlier
+  unknown-package and named-package runs are development evidence, not release evidence for this
+  candidate.
 
 ## Architecture Recommendations
 
@@ -180,17 +193,16 @@ tree.
 
 ## Next Execution
 
-1. Obtain an `Accept` product decision before treating package-authored host code as canonical or
-   implementing DeepSeek, Haystack, or another supported extension surface.
-2. Finish the broad root aggregate from implementation candidate
-   `461e30e5d45aa97d58cfd9ce451f33b0c17f0f50`. Record remaining platform or image
-   failures without repeating package lanes that passed.
-3. Replace stale managed-image evidence for the changed reviewed runtime bundle. Keep Pi candidate
-   evidence separate from a shipped cohort that excludes Pi.
-4. Run named managed-startup, MCP, or package-specific live edges only where their distinct risk is
-   still required. Keep messaging-service coverage excluded.
-5. Keep Plans 04-04 and 04-05 active until their evidence closes. Then migrate each remaining native
-   core seam with its current consumer rather than claiming full agent-runtime independence.
+1. Finish package-contract, E2E-support, package-owned, and changed-source deterministic aggregates
+   for the state-only qualification candidate.
+2. Build exact artifacts and run the shared install/onboard/Fabric-turn/restart/turn/destroy journey
+   for all six packages on macOS and Brev. Keep messaging-service coverage excluded.
+3. Record package digests, runtime identities, redaction, process cleanup, sandbox cleanup, and any
+   bounded failure evidence in the NCC-06 qualification record.
+4. Keep the protected Pi image-receipt publication gate explicit. Local development builds cannot
+   replace a same-workflow AMD64 and ARM64 release receipt.
+5. Obtain a separate product `Accept` decision before describing this local contract, DeepSeek,
+   Haystack, or package-authored host code as canonical or supported NemoClaw behavior.
 
 The next native slices are the no-receipt MCP and configuration paths, remaining restore and CLI
 grammar, closed managed startup, pairing and messaging projection, gateway and dashboard

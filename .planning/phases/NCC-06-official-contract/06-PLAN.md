@@ -71,3 +71,15 @@ harness-agnostic control plane.
   that code alone cannot complete.
 - A repository check rejects new receipt-backed production dispatch that selects native behavior
   from an exact harness ID, while explicitly allowlisting catalogue and legacy-decoder ownership.
+
+## Execution status
+
+- [x] Reconcile `origin/main` through `efd56a3729` and preserve upstream native skill behavior.
+- [x] Express native list/add/remove skill commands in the existing typed package capability.
+- [x] Keep package receipt capture and revalidation ahead of every package-managed skill mutation.
+- [x] Remove the new literal default-harness decision from core and lower the audited debt ledger.
+- [x] Validate the contract and all six package artifacts after the upstream merge.
+- [ ] Complete exact-candidate package-contract, E2E-support, and package-owned aggregates.
+- [ ] Run all six no-messaging public lifecycle journeys on macOS and Brev.
+- [ ] Record exact package identity, Fabric result, restart, redaction, and cleanup evidence.
+- [ ] Commit the final local qualification record and leave the fork remote unchanged.

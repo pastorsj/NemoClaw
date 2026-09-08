@@ -367,7 +367,7 @@ describe.sequential("packaged Blueprint Runner external target", () => {
 
   afterAll(() => {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   function expectPrivateValuesRedacted(result: SpawnSyncReturns<string>): void {
     expect(privateValues.some((value) => commandOutput(result).includes(value))).toBe(false);
