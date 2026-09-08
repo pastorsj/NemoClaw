@@ -14,6 +14,45 @@ const ROOT = path.resolve(import.meta.dirname, "../../../..");
 const DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
 
 describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () => {
+  it("keeps copied messaging metadata searchable by the sandbox user", () => {
+    const dockerfile = fs.readFileSync(DOCKERFILE, "utf-8");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-messaging-mode-"));
+    const messagingDirectory = path.join(tmp, "usr", "local", "share", "nemoclaw", "messaging");
+
+    try {
+      fs.mkdirSync(messagingDirectory, { recursive: true });
+      fs.writeFileSync(path.join(messagingDirectory, "runtime-profile.json"), "{}\n", {
+        mode: 0o444,
+      });
+      // Docker COPY --chmod applies the restrictive mode to a newly created
+      // destination directory on BuildKit. Replay that state before the image
+      // changes to the unprivileged sandbox user.
+      fs.chmodSync(messagingDirectory, 0o444);
+
+      const command = dockerRunCommandBetween(
+        dockerfile,
+        "# Bake reduced messaging runtime metadata",
+        "USER sandbox",
+      ).replaceAll("/usr/local/share/nemoclaw/messaging", messagingDirectory);
+      const { result } = runLoggedDockerShell(command, tmp, ["node() { :; }"], {
+        env: { OPENCLAW_VERSION: "fixture-version" },
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      expect((fs.statSync(messagingDirectory).mode & 0o777).toString(8)).toBe("755");
+      expect(
+        fs.accessSync(path.join(messagingDirectory, "runtime-profile.json"), fs.constants.R_OK),
+      ).toBeUndefined();
+    } finally {
+      try {
+        fs.chmodSync(messagingDirectory, 0o755);
+      } catch {
+        // The directory may not exist if fixture creation failed.
+      }
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes copied blueprint permissions before non-root config generation", () => {
     const dockerfile = fs.readFileSync(DOCKERFILE, "utf-8");
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-blueprint-mode-"));

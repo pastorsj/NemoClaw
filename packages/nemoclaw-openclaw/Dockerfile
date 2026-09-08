@@ -1874,7 +1874,8 @@ COPY --chmod=0444 packages/nemoclaw-openclaw/messaging/profile.json packages/nem
 # forwards explicit runtime env, so nemoclaw-start reads this generic artifact
 # when the env plan is absent.
 # hadolint ignore=DL3059
-RUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --profile /usr/local/share/nemoclaw/messaging/runtime-profile.json --agent openclaw --phase runtime-setup
+RUN chmod 755 /usr/local/share/nemoclaw/messaging \
+    && OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /usr/local/lib/nemoclaw/messaging-build.mts --profile /usr/local/share/nemoclaw/messaging/runtime-profile.json --agent openclaw --phase runtime-setup
 USER sandbox
 
 # npm still needs a writable _cacache/tmp while OpenClaw packs the verified archive,
