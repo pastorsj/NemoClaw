@@ -125,7 +125,7 @@ exit 0
       ["first then second", "printf 'FIRST_SIGNAL\\n'; sleep 0.05; printf 'SECOND_SIGNAL\\n'"],
       ["second then first", "printf 'SECOND_SIGNAL\\n'; sleep 0.05; printf 'FIRST_SIGNAL\\n'"],
     ])("accepts %s", (_name, command) => {
-      const result = runPair(command);
+      const result = runPair(command, 2);
 
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stdout).toContain("ISSUE6194_MARK first");
@@ -133,12 +133,12 @@ exit 0
     });
 
     it.each([
-      ["first signal timeout", "printf 'SECOND_SIGNAL\\n'; sleep 2", 20],
-      ["first signal EOF", "printf 'SECOND_SIGNAL\\n'", 21],
-      ["second signal timeout", "printf 'FIRST_SIGNAL\\n'; sleep 2", 22],
-      ["second signal EOF", "printf 'FIRST_SIGNAL\\n'", 23],
-    ])("preserves the %s exit", (_name, command, expectedExit) => {
-      const result = runPair(command);
+      ["first signal timeout", "printf 'SECOND_SIGNAL\\n'; sleep 2", 20, 1],
+      ["first signal EOF", "printf 'SECOND_SIGNAL\\n'", 21, 2],
+      ["second signal timeout", "printf 'FIRST_SIGNAL\\n'; sleep 2", 22, 1],
+      ["second signal EOF", "printf 'FIRST_SIGNAL\\n'", 23, 2],
+    ])("preserves the %s exit", (_name, command, expectedExit, timeoutSeconds) => {
+      const result = runPair(command, timeoutSeconds);
 
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(expectedExit);
     });
