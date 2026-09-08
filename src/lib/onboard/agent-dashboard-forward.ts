@@ -21,6 +21,7 @@ export type EnsureDashboardForward = (
   chatUiUrl?: string,
   options?: {
     allowPortReallocation?: boolean;
+    reuseOwnedForward?: boolean;
     revalidateSandboxIdentity?: (operation: string) => void;
   },
 ) => number;
@@ -48,6 +49,7 @@ export async function ensureAgentDashboardForward(options: {
   /** Whether the exact package receipt, rather than legacy registry fields, owns the ports. */
   receiptBackedPackage: boolean;
   beforeForwardPort?: (port: number) => Promise<void> | void;
+  reuseOwnedForward?: boolean;
   revalidateSandboxIdentity?: (operation: string) => void;
   warn?: (message: string) => void;
 }): Promise<number> {
@@ -61,6 +63,7 @@ export async function ensureAgentDashboardForward(options: {
     secondaryForwardPort,
     receiptBackedPackage,
     beforeForwardPort,
+    reuseOwnedForward = false,
     revalidateSandboxIdentity,
     warn = (message: string) => console.warn(message),
   } = options;
@@ -134,6 +137,7 @@ export async function ensureAgentDashboardForward(options: {
     await beforeForwardPort?.(agentDashboardPort);
     const actualAgentDashboardPort = ensureDashboardForward(sandboxName, requestedDashboardUrl, {
       allowPortReallocation: false,
+      ...(reuseOwnedForward ? { reuseOwnedForward: true } : {}),
       ...(revalidateIdentity ? { revalidateSandboxIdentity: revalidateIdentity } : {}),
     });
     if (!usesFixedApiPort) {

@@ -196,6 +196,8 @@ export interface HarnessDashboardDeclaration {
   readonly path?: string;
   readonly health_path?: string;
   readonly auth?: "url_token" | "session" | "none";
+  /** Reuse an existing host forward only after core proves that it belongs to this sandbox. */
+  readonly forward_reuse?: "same-sandbox";
   readonly token_path?: string;
   /** Config-object path that receives browser origins created by `nemoclaw tunnel`. */
   readonly tunnel_allowed_origins_path?: string;

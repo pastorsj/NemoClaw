@@ -393,6 +393,12 @@ forwarding, drift decisions, and durable neutral state. It reconstructs those ac
 pinned package declaration; a malformed or missing declaration fails closed instead of entering a
 harness-specific fallback.
 
+The primary `dashboard` declaration may set `forward_reuse: same-sandbox`. This makes an existing
+host forward eligible for reuse; it never authorizes adoption by name or port alone. NemoClaw must
+still prove the exact gateway, live sandbox identity, local port, target port, and registry
+ownership before retaining that forward. Packages that omit the field fail closed and receive a
+new forward through the ordinary allocation path.
+
 An MCP bridge implements eight fixed operations. They cover registration, removal, inspection,
 mutation and teardown capability probes, runtime intent verification, runtime planning, and
 snapshot repair.

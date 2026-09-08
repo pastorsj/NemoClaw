@@ -655,6 +655,7 @@ export function validateRuntimeSurfaces(manifest: ManifestRecord): void {
       dashboard,
       new Set([
         "auth",
+        "forward_reuse",
         "health_path",
         "kind",
         "label",
@@ -686,6 +687,9 @@ export function validateRuntimeSurfaces(manifest: ManifestRecord): void {
       dashboard.auth !== "none"
     ) {
       fail("dashboard.auth", "must be url_token, session, or none");
+    }
+    if (dashboard.forward_reuse !== undefined && dashboard.forward_reuse !== "same-sandbox") {
+      fail("dashboard.forward_reuse", "must be same-sandbox");
     }
     if (dashboard.token_path !== undefined) {
       const tokenPath = requireString(dashboard.token_path, "dashboard.token_path").split(".");

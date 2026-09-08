@@ -240,6 +240,25 @@ describe("managed tool gateway manifest metadata", () => {
 });
 
 describe("dashboard manifest metadata", () => {
+  it("projects a typed same-sandbox forward reuse declaration", () => {
+    expect(
+      readDashboard(
+        parseManifestRecord("dashboard:\n  forward_reuse: same-sandbox\n", "test manifest"),
+      ).reuseOwnedForward,
+    ).toBe(true);
+    expect(
+      readDashboard(parseManifestRecord("dashboard: {}\n", "test manifest")).reuseOwnedForward,
+    ).toBe(false);
+  });
+
+  it("rejects an unknown dashboard forward reuse mode", () => {
+    expect(() =>
+      readDashboard(
+        parseManifestRecord("dashboard:\n  forward_reuse: trust-port\n", "test manifest"),
+      ),
+    ).toThrow(/dashboard\.forward_reuse.*same-sandbox/u);
+  });
+
   it("parses a bounded config token path for URL-token dashboards", () => {
     expect(
       readDashboard(

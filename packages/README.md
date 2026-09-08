@@ -206,6 +206,7 @@ regenerate its runtime inputs, and test without a NemoClaw source checkout.
 | Startup | `host/startup-adapter.cts` | Startup plan, initial profile, profile preparation, and reconciliation for source-built and package-published images |
 | Sandbox create | `manifest.sandbox_create` | Startup controls, Docker process limits, driver mounts, and generated-image build requirements |
 | Secondary forward | `manifest.health_probe.port_resolution: sandbox-secondary-forward` and `health_probe.secondary_forward` | Environment name, preferred port, bounded allocation range, operator label, and recovery guidance for one package-owned endpoint |
+| Primary dashboard | `manifest.dashboard` | Browser or API presentation, authentication, health path, and eligibility to retain an existing forward that core proves belongs to the same sandbox |
 | Optional dashboard | `manifest.dashboard_ui` | Opt-in environment name, public and private port settings, optional terminal UI flag, browser path, and operator label |
 | State | `manifest.state_lifecycle`, `state_dirs`, and `state_files` | Backup quiescence, snapshot repair actions, and typed rebuild declarations made from fixed package commands and core-owned finite operations |
 | Configuration restore | `host/restore-adapter.cts` when a state file uses `merge: package-config` | Native configuration merge and bounded write plan |

@@ -153,6 +153,8 @@ export interface AgentDashboard {
   path: string;
   healthPath: string;
   auth: "url_token" | "session" | "none";
+  /** Core may retain a verified forward already owned by the same sandbox. */
+  reuseOwnedForward?: boolean;
   /** Config-object path containing the URL fragment token when auth is url_token. */
   tokenPath?: readonly string[] | null;
   /** Config-object path that accepts public tunnel origins, or null when unsupported. */

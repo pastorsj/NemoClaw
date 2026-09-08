@@ -1386,6 +1386,13 @@ test("rejects unknown and missing fields in every public nested manifest shape",
       },
     },
     {
+      name: "an unknown dashboard forward reuse mode",
+      field: "dashboard.forward_reuse",
+      update: (manifest) => {
+        manifest.dashboard = { kind: "ui", forward_reuse: "trust-port" };
+      },
+    },
+    {
       name: "an unknown dashboard UI field",
       field: "dashboard_ui",
       update: (manifest) => {

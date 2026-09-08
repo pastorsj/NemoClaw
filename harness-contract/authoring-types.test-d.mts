@@ -5,6 +5,7 @@ import type {
   HarnessAgentRosterAdapterModule,
   HarnessAgentRosterCapability,
   HarnessAgentManifest,
+  HarnessDashboardDeclaration,
   HarnessDashboardUiDeclaration,
   HarnessInferenceContextWindowRequirement,
   HarnessMcpAdapterCommandPlan,
@@ -67,6 +68,14 @@ const agentRosterAdapter = {
 
 void agentRosterCapability;
 void agentRosterAdapter;
+
+const primaryDashboard = {
+  kind: "ui",
+  auth: "url_token",
+  forward_reuse: "same-sandbox",
+} satisfies HarnessDashboardDeclaration;
+
+void primaryDashboard;
 
 const dashboardUi = {
   label: "Future dashboard",

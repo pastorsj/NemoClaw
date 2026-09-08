@@ -378,6 +378,10 @@ export function readDashboard(record: ManifestRecord): AgentDashboard {
   }
 
   const auth = rawAuth ?? (kind === "api" ? "none" : "url_token");
+  const rawForwardReuse = dashboard.forward_reuse;
+  if (rawForwardReuse !== undefined && rawForwardReuse !== "same-sandbox") {
+    throw new Error("Agent manifest field 'dashboard.forward_reuse' must be same-sandbox");
+  }
   const rawTokenPath = dashboard.token_path;
   if (rawTokenPath !== undefined && typeof rawTokenPath !== "string") {
     throw new Error("Agent manifest field 'dashboard.token_path' must be a dotted config path");
@@ -429,6 +433,7 @@ export function readDashboard(record: ManifestRecord): AgentDashboard {
     path: normalizePath("path", "/"),
     healthPath: normalizePath("health_path", "/health"),
     auth,
+    reuseOwnedForward: rawForwardReuse === "same-sandbox",
     tokenPath,
     tunnelAllowedOriginsPath,
   };

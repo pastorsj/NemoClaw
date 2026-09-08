@@ -124,6 +124,9 @@ health_probe:
 # ── Dashboard / UI ──────────────────────────────────────────────
 dashboard:
   auth: url_token
+  # Re-onboarding may retain a host forward after NemoClaw proves its exact
+  # gateway, sandbox, local port, and target port ownership.
+  forward_reuse: same-sandbox
   token_path: gateway.auth.token
   tunnel_allowed_origins_path: gateway.controlUi.allowedOrigins
 forward_ports:
