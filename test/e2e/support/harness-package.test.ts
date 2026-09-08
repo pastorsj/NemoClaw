@@ -45,8 +45,13 @@ function packageIdentity(
 function inventoryJson(
   selectedId: string,
   identities: HarnessPackageIdentity[] = [packageIdentity(selectedId)],
-  options: { readonly includeAvailable?: boolean } = {},
+  options: {
+    readonly availableIdentities?: HarnessPackageIdentity[];
+    readonly includeAvailable?: boolean;
+    readonly installationState?: "not-installed" | "active" | "different" | "damaged";
+  } = {},
 ): string {
+  const availableIdentities = options.availableIdentities ?? identities;
   return JSON.stringify({
     schemaVersion: 1,
     installed: identities.map((identity) => ({
@@ -58,10 +63,10 @@ function inventoryJson(
     available:
       options.includeAvailable === false
         ? []
-        : identities.map((identity) => ({
+        : availableIdentities.map((identity) => ({
             displayName: `Display ${identity.id}`,
             identity,
-            installationState: "active",
+            installationState: options.installationState ?? "active",
           })),
   });
 }
@@ -243,6 +248,49 @@ describe("harness package E2E evidence", () => {
       ],
       ["harness", "list", "--json"],
     ]);
+  });
+
+  it("accepts a healthy trusted-local receipt when its identity differs from the catalogue", async () => {
+    const installedIdentity = packageIdentity("openclaw", { contentDigest: "f".repeat(64) });
+    const catalogueIdentity = packageIdentity("openclaw");
+    const inventory = inventoryJson("openclaw", [installedIdentity], {
+      availableIdentities: [catalogueIdentity],
+      installationState: "different",
+    });
+    const { host } = createHost(shellResult(0, "Installed.\n"), shellResult(0, inventory));
+
+    const evidence = await installHarnessPackage(host, "openclaw", process.env, {
+      packageArtifact: "/tmp/nemoclaw-openclaw",
+    });
+
+    expect(evidence.identity).toEqual(installedIdentity);
+  });
+
+  it("rejects a trusted-local receipt when an active catalogue row has another identity", async () => {
+    const installedIdentity = packageIdentity("openclaw", { contentDigest: "f".repeat(64) });
+    const inventory = inventoryJson("openclaw", [installedIdentity], {
+      availableIdentities: [packageIdentity("openclaw")],
+    });
+    const { host } = createHost(shellResult(0, "Installed.\n"), shellResult(0, inventory));
+
+    await expect(
+      installHarnessPackage(host, "openclaw", process.env, {
+        packageArtifact: "/tmp/nemoclaw-openclaw",
+      }),
+    ).rejects.toThrow(/does not confirm the selected package identity/u);
+  });
+
+  it("rejects a catalogue install when the selected catalogue row reports different", async () => {
+    const installedIdentity = packageIdentity("openclaw", { contentDigest: "f".repeat(64) });
+    const inventory = inventoryJson("openclaw", [installedIdentity], {
+      availableIdentities: [packageIdentity("openclaw")],
+      installationState: "different",
+    });
+    const { host } = createHost(shellResult(0, "Installed.\n"), shellResult(0, inventory));
+
+    await expect(installHarnessPackage(host, "openclaw")).rejects.toThrow(
+      /does not confirm the selected package identity/u,
+    );
   });
 
   it("stops before inventory when public installation fails", async () => {

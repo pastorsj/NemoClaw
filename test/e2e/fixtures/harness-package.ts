@@ -57,6 +57,8 @@ interface HarnessInventory {
   readonly available: readonly AvailableInventoryRow[];
 }
 
+type CatalogueIdentityRequirement = "require-active-match" | "allow-trusted-local-difference";
+
 function requireExactRecord(
   value: unknown,
   fields: ReadonlySet<string>,
@@ -203,6 +205,7 @@ function parseHarnessInventory(source: string): HarnessInventory {
 function selectInstalledIdentity(
   source: string,
   selectedId: HarnessPackageId,
+  catalogueIdentityRequirement: CatalogueIdentityRequirement,
 ): HarnessPackageIdentity {
   const inventory = parseHarnessInventory(source);
   const installed = inventory.installed.filter((row) => row.id === selectedId);
@@ -213,12 +216,20 @@ function selectInstalledIdentity(
   if (available.length > 1) {
     throw new Error("Harness inventory contains duplicate selected package availability");
   }
-  if (
-    available.length === 1 &&
-    (available[0]?.installationState !== "active" ||
-      !harnessPackageIdentitiesEqual(installed[0].identity, available[0].identity))
-  ) {
-    throw new Error("Harness inventory does not confirm the selected package as active");
+  const availablePackage = available[0];
+  if (availablePackage) {
+    const identitiesMatch = harnessPackageIdentitiesEqual(
+      installed[0].identity,
+      availablePackage.identity,
+    );
+    const activeCatalogueMatch = availablePackage.installationState === "active" && identitiesMatch;
+    const trustedLocalDifference =
+      catalogueIdentityRequirement === "allow-trusted-local-difference" &&
+      availablePackage.installationState === "different" &&
+      !identitiesMatch;
+    if (!activeCatalogueMatch && !trustedLocalDifference) {
+      throw new Error("Harness inventory does not confirm the selected package identity");
+    }
   }
   return installed[0].identity;
 }
@@ -235,6 +246,20 @@ export async function readInstalledHarnessPackage(
   selectedId: HarnessPackageId,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<HarnessInventoryEvidence> {
+  return readInstalledHarnessPackageWithRequirement(
+    host,
+    selectedId,
+    environment,
+    "require-active-match",
+  );
+}
+
+async function readInstalledHarnessPackageWithRequirement(
+  host: Pick<HostCliClient, "nemoclaw">,
+  selectedId: HarnessPackageId,
+  environment: NodeJS.ProcessEnv,
+  catalogueIdentityRequirement: CatalogueIdentityRequirement,
+): Promise<HarnessInventoryEvidence> {
   const id = requireHarnessId(selectedId);
   const inventoryResult = await host.nemoclaw(["harness", "list", "--json"], {
     artifactName: `harness-list-${id}`,
@@ -243,7 +268,7 @@ export async function readInstalledHarnessPackage(
   });
   requireCommandSuccess(inventoryResult, "inventory");
   return Object.freeze({
-    identity: selectInstalledIdentity(inventoryResult.stdout, id),
+    identity: selectInstalledIdentity(inventoryResult.stdout, id, catalogueIdentityRequirement),
     inventoryResult,
   });
 }
@@ -265,7 +290,12 @@ export async function installHarnessPackage(
     timeoutMs: INSTALL_TIMEOUT_MS,
   });
   requireCommandSuccess(installResult, "install");
-  const inventory = await readInstalledHarnessPackage(host, id, environment);
+  const inventory = await readInstalledHarnessPackageWithRequirement(
+    host,
+    id,
+    environment,
+    options.packageArtifact ? "allow-trusted-local-difference" : "require-active-match",
+  );
   return Object.freeze({
     identity: inventory.identity,
     installResult,
