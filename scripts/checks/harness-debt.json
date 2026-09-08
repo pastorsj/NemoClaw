@@ -291,6 +291,18 @@
           ["appendLegacyObservability", "equality", "langchain-deepagents-code", 1],
           ["isLegacyOpenClaw", "equality", "openclaw", 1]
         ],
+        "src/lib/onboard/managed-startup/shared-state-transaction.ts": [
+          ["agentRoot", "switch-case", "hermes", 1],
+          ["agentRoot", "switch-case", "langchain-deepagents-code", 1],
+          ["agentRoot", "switch-case", "openclaw", 1],
+          ["agentRoot", "switch-case", "pi", 1],
+          ["managedOutputTargets", "switch-case", "hermes", 1],
+          ["managedOutputTargets", "switch-case", "langchain-deepagents-code", 1],
+          ["managedOutputTargets", "switch-case", "openclaw", 1],
+          ["managedOutputTargets", "switch-case", "pi", 1],
+          ["renderTarget", "equality", "hermes", 1],
+          ["renderTarget", "equality", "openclaw", 2]
+        ],
         "src/lib/onboard/machine/phase-progress.ts": [["<module>", "membership", "openclaw", 1]],
         "src/lib/onboard/openclaw-setup.ts": [["readEnabled", "equality", "openclaw", 1]],
         "src/lib/onboard/package/legacy-onboard.ts": [
@@ -357,14 +369,6 @@
           ["getAgentSandboxBaseImageEnvVar", "equality", "nemocua", 1],
           ["ensureAgentBaseImage", "equality", "nemocua", 1],
           ["createAgentSandbox", "equality", "nemocua", 4]
-        ],
-        "src/lib/agent/deep-agents-code-base-image.ts": [
-          [
-            "createDeepAgentsCodeBaseImageResolutionOptions",
-            "equality",
-            "langchain-deepagents-code",
-            1
-          ]
         ],
         "src/lib/agent/defs.ts": [
           ["listAgents", "equality", "nemocua", 1],
@@ -488,18 +492,6 @@
           ["validateManagedStartupProfile", "equality", "openclaw", 2],
           ["validateTuning", "equality", "hermes", 1],
           ["validateTuning", "equality", "openclaw", 1]
-        ],
-        "src/lib/onboard/managed-startup/shared-state-transaction.ts": [
-          ["agentRoot", "switch-case", "hermes", 1],
-          ["agentRoot", "switch-case", "langchain-deepagents-code", 1],
-          ["agentRoot", "switch-case", "openclaw", 1],
-          ["agentRoot", "switch-case", "pi", 1],
-          ["managedOutputTargets", "switch-case", "hermes", 1],
-          ["managedOutputTargets", "switch-case", "langchain-deepagents-code", 1],
-          ["managedOutputTargets", "switch-case", "openclaw", 1],
-          ["managedOutputTargets", "switch-case", "pi", 1],
-          ["renderTarget", "equality", "hermes", 1],
-          ["renderTarget", "equality", "openclaw", 2]
         ],
         "src/lib/onboard/managed-workload/hermes-state-volume.ts": [
           ["requiresManagedHermesStateVolume", "equality", "hermes", 1]

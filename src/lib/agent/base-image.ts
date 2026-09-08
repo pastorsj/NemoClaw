@@ -17,7 +17,11 @@ import {
 } from "../adapters/docker";
 import { fingerprintBuildContext } from "../adapters/fs/build-context-fingerprint";
 import { copyVerifiedPackageTree } from "../agent-runtime/package/copy";
-import { resolvePinnedHarnessPackage } from "../agent-runtime/package/store";
+import {
+  getHarnessPackageStoreRoot,
+  resolvePinnedHarnessPackage,
+} from "../agent-runtime/package/store";
+import { harnessPackageStorePaths } from "../agent-runtime/package/store-files";
 import {
   assertTreeAuthority,
   getPackageTreeAuthority,
@@ -294,18 +298,17 @@ export function stageAgentComposedBuildContext(
   const packageDirectoryName = `nemoclaw-${agent.name}`;
   const stagedPackageRoot = path.join(buildCtx, "packages", packageDirectoryName);
   let verifiedPackageCopy: ReturnType<typeof copyVerifiedPackageTree> | null = null;
-  let verifiedPackageParent: string | null = null;
   try {
     try {
       let copyIntegrationRoot = integrationRoot;
       let copyDockerfilePath = dockerfilePath;
       if (receiptBoundTree) {
-        verifiedPackageParent = fs.mkdtempSync(
-          path.join(fs.realpathSync(os.tmpdir()), ".nemoclaw-package-build-"),
-        );
-        fs.chmodSync(verifiedPackageParent, 0o700);
+        const storeRoot = options.harnessPackageStoreRoot ?? getHarnessPackageStoreRoot();
+        // Reuse the store's private staging directory. A normal system temp root is
+        // sticky and world-writable, so it cannot be a trusted package-tree ancestor.
         verifiedPackageCopy = copyVerifiedPackageTree(receiptBoundTree, {
-          stagingParent: verifiedPackageParent,
+          stagingParent: harnessPackageStorePaths(storeRoot, agent.name).staging,
+          stagingPrefix: ".nemoclaw-package-build-",
         });
         copyIntegrationRoot = path.join(
           verifiedPackageCopy.packageRoot,
@@ -354,7 +357,6 @@ export function stageAgentComposedBuildContext(
       };
     } finally {
       verifiedPackageCopy?.removeStagingRoot();
-      if (verifiedPackageParent) fs.rmdirSync(verifiedPackageParent);
     }
   } catch (error) {
     removeAgentBuildContext(buildCtx);

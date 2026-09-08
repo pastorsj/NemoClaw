@@ -144,47 +144,21 @@ describe("sandbox oclif command adapters", () => {
     process.exitCode = undefined;
   });
 
-  it("maps connect and lifecycle flags to typed action options", async () => {
+  it("maps connect and recovery flags to typed action options", async () => {
+    await ConnectCliCommand.run(["alpha", "--probe-only"], rootDir);
+    await RecoverCliCommand.run(["alpha"], rootDir);
+
+    expect(mocks.connectSandbox).toHaveBeenCalledWith("alpha", { probeOnly: true });
+    expect(mocks.recoverSandboxStateAfterRestore).toHaveBeenCalledWith("alpha");
+  });
+
+  it("maps destroy flags to typed action options", async () => {
     const originalCleanupGatewayEnv = process.env.NEMOCLAW_CLEANUP_GATEWAY;
     delete process.env.NEMOCLAW_CLEANUP_GATEWAY;
     try {
-      await ConnectCliCommand.run(["alpha", "--probe-only"], rootDir);
-      await RecoverCliCommand.run(["alpha"], rootDir);
       await DestroyCliCommand.run(["alpha", "--yes"], rootDir);
-      await RebuildCliCommand.run(
-        [
-          "alpha",
-          "--force",
-          "--verbose",
-          "--tool-disclosure",
-          "direct",
-          "--dcode-auto-approval",
-          "thread-opt-in",
-        ],
-        rootDir,
-      );
-      await RebuildCliCommand.run(["dcode", "--yes", "--no-observability"], rootDir);
-      await GatewayRestartCliCommand.run(["alpha", "--quiet"], rootDir);
 
-      expect(mocks.connectSandbox).toHaveBeenCalledWith("alpha", { probeOnly: true });
-      expect(mocks.recoverSandboxStateAfterRestore).toHaveBeenCalledWith("alpha");
       expect(mocks.destroySandbox).toHaveBeenCalledWith("alpha", { force: false, yes: true });
-      expect(mocks.rebuildSandbox).toHaveBeenCalledWith("alpha", {
-        dcodeAutoApprovalMode: "thread-opt-in",
-        force: true,
-        toolDisclosure: "direct",
-        verbose: true,
-        yes: false,
-      });
-      expect(mocks.rebuildSandbox).toHaveBeenCalledWith("dcode", {
-        dcodeAutoApprovalMode: undefined,
-        force: false,
-        observabilityEnabled: false,
-        toolDisclosure: undefined,
-        verbose: false,
-        yes: true,
-      });
-      expect(mocks.restartSandboxGateway).toHaveBeenCalledWith("alpha", { quiet: true });
     } finally {
       if (originalCleanupGatewayEnv === undefined) {
         delete process.env.NEMOCLAW_CLEANUP_GATEWAY;
@@ -192,6 +166,44 @@ describe("sandbox oclif command adapters", () => {
         process.env.NEMOCLAW_CLEANUP_GATEWAY = originalCleanupGatewayEnv;
       }
     }
+  });
+
+  it("maps rebuild flags to typed action options", async () => {
+    await RebuildCliCommand.run(
+      [
+        "alpha",
+        "--force",
+        "--verbose",
+        "--tool-disclosure",
+        "direct",
+        "--dcode-auto-approval",
+        "thread-opt-in",
+      ],
+      rootDir,
+    );
+    await RebuildCliCommand.run(["dcode", "--yes", "--no-observability"], rootDir);
+
+    expect(mocks.rebuildSandbox).toHaveBeenCalledWith("alpha", {
+      dcodeAutoApprovalMode: "thread-opt-in",
+      force: true,
+      toolDisclosure: "direct",
+      verbose: true,
+      yes: false,
+    });
+    expect(mocks.rebuildSandbox).toHaveBeenCalledWith("dcode", {
+      dcodeAutoApprovalMode: undefined,
+      force: false,
+      observabilityEnabled: false,
+      toolDisclosure: undefined,
+      verbose: false,
+      yes: true,
+    });
+  });
+
+  it("maps gateway restart flags to typed action options", async () => {
+    await GatewayRestartCliCommand.run(["alpha", "--quiet"], rootDir);
+
+    expect(mocks.restartSandboxGateway).toHaveBeenCalledWith("alpha", { quiet: true });
   });
 
   it("does not hold the command lifecycle lock during an interactive connect (#9737)", async () => {

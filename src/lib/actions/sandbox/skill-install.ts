@@ -64,31 +64,6 @@ export function printSkillInstallUsage(): void {
   console.log("");
 }
 
-export function looksLikeOpenClawPlugin(candidatePath: string): boolean {
-  const dir =
-    fs.existsSync(candidatePath) && fs.statSync(candidatePath).isDirectory()
-      ? candidatePath
-      : path.dirname(candidatePath);
-  if (!fs.existsSync(dir)) return false;
-  if (fs.existsSync(path.join(dir, "openclaw.plugin.json"))) return true;
-  try {
-    const packageJson = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
-    const openclaw = packageJson?.openclaw;
-    return Boolean(
-      packageJson?.["openclaw.plugin"] === true ||
-      openclaw === true ||
-      (openclaw &&
-        typeof openclaw === "object" &&
-        (openclaw.plugin === true ||
-          typeof openclaw.entry === "string" ||
-          typeof openclaw.main === "string" ||
-          (Array.isArray(openclaw.extensions) && openclaw.extensions.length > 0))),
-    );
-  } catch {
-    return false;
-  }
-}
-
 function lstatOrNull(candidatePath: string): fs.Stats | null {
   try {
     return fs.lstatSync(candidatePath);
@@ -312,7 +287,7 @@ function resolveLocalSkill(skillPath: string): {
       : null;
   if (!directory) {
     console.error(`  No SKILL.md found at '${resolvedPath}'.`);
-    if (looksLikeOpenClawPlugin(resolvedPath)) printPluginInstallHint();
+    printAgentExtensionInstallHint();
     return null;
   }
   const directoryStat = lstatOrNull(directory);
@@ -323,7 +298,7 @@ function resolveLocalSkill(skillPath: string): {
   const skillFile = path.join(directory, "SKILL.md");
   if (!lstatOrNull(skillFile)) {
     console.error(`  No SKILL.md found in '${directory}'.`);
-    if (looksLikeOpenClawPlugin(directory)) printPluginInstallHint();
+    printAgentExtensionInstallHint();
     return null;
   }
   const source = readRegularFileNoFollow(skillFile);
@@ -343,9 +318,9 @@ function resolveLocalSkill(skillPath: string): {
   }
 }
 
-export function printPluginInstallHint(): void {
-  console.error("  This looks like an OpenClaw plugin, not a SKILL.md agent skill.");
+export function printAgentExtensionInstallHint(): void {
   console.error("  `skill install` accepts only agent skills.");
+  console.error("  Use the selected agent's native plugin or extension workflow for other types.");
 }
 
 /** Validate and stage a local tree, then invoke native add or one canonical-root placement. */

@@ -64,8 +64,8 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     const localBin = path.join(tmp, "usr", "local", "bin");
     const localLib = path.join(tmp, "usr", "local", "lib", "nemoclaw");
     const localShare = path.join(tmp, "usr", "local", "share", "nemoclaw");
-    const localSrc = path.join(tmp, "src");
     const localScripts = path.join(tmp, "scripts");
+    const retiredSourceRoot = path.join(tmp, "retired-source-root");
     const localPackageRoot = path.join(tmp, "packages", "nemoclaw-openclaw");
     const generatorPath = path.join(localPackageRoot, "config", "generate-config.mts");
     const toolSearchValidatorPath = path.join(localScripts, "validate-openclaw-tool-search.mts");
@@ -123,38 +123,45 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
         localPackageRoot,
         path.join(localPackageRoot, "config"),
         path.join(localPackageRoot, "host"),
-        localSrc,
-        path.join(localSrc, "lib"),
       ]) {
         fs.mkdirSync(directory, { recursive: true });
         fs.chmodSync(directory, 0o700);
       }
 
-      const runtimePermissionCommand = dockerRunCommandBetween(
-        dockerfile,
-        "# Copy startup script and shared sandbox initialisation library",
-        "# Lock down npm for the next RUN",
-      );
-      const command = runtimePermissionCommand
-        .replaceAll("/usr/local/bin", localBin)
-        .replaceAll("/usr/local/lib/nemoclaw", localLib)
-        .replaceAll("/usr/local/share/nemoclaw", localShare)
-        .replaceAll("/packages/nemoclaw-openclaw", "__OPENCLAW_PACKAGE__")
-        .replaceAll("/packages", path.join(tmp, "packages"))
-        .replaceAll("__OPENCLAW_PACKAGE__", localPackageRoot)
-        .replaceAll("/src", localSrc)
-        .replaceAll("/scripts", localScripts);
-      const { result } = runLoggedDockerShell(command, tmp, ["chown() { :; }"]);
+      const permissionCommands = [
+        dockerRunCommandBetween(
+          dockerfile,
+          "# Copy only the configuration inputs needed by the expensive non-messaging",
+          "# Build args for config that varies per deployment",
+        ),
+        dockerRunCommandBetween(
+          dockerfile,
+          "# Copy startup script and shared sandbox initialisation library",
+          "# Lock down npm for the next RUN",
+        ),
+      ];
+      for (const permissionCommand of permissionCommands) {
+        const command = permissionCommand
+          .replaceAll("/usr/local/bin", localBin)
+          .replaceAll("/usr/local/lib/nemoclaw", localLib)
+          .replaceAll("/usr/local/share/nemoclaw", localShare)
+          .replaceAll("/packages/nemoclaw-openclaw", "__OPENCLAW_PACKAGE__")
+          .replaceAll("/packages", path.join(tmp, "packages"))
+          .replaceAll("__OPENCLAW_PACKAGE__", localPackageRoot)
+          // Leave this localized path absent. A stale final-image /src chmod then
+          // fails exactly as it would against a clean published base image.
+          .replaceAll("/src", retiredSourceRoot)
+          .replaceAll("/scripts", localScripts);
+        const { result } = runLoggedDockerShell(command, tmp, ["chown() { :; }"]);
+        expect(result.status, result.stderr).toBe(0);
+      }
 
-      expect(result.status, result.stderr).toBe(0);
       expect((fs.statSync(generatorPath).mode & 0o777).toString(8)).toBe("755");
       for (const directory of [
         path.join(tmp, "packages"),
         localPackageRoot,
         path.join(localPackageRoot, "config"),
         path.join(localPackageRoot, "host"),
-        localSrc,
-        path.join(localSrc, "lib"),
       ]) {
         expect((fs.statSync(directory).mode & 0o777).toString(8)).toBe("755");
       }

@@ -1567,8 +1567,6 @@ RUN chmod 755 /packages \
         /packages/nemoclaw-openclaw \
         /packages/nemoclaw-openclaw/config \
         /packages/nemoclaw-openclaw/host \
-        /src \
-        /src/lib \
         /packages/nemoclaw-openclaw/config/generate-config.mts \
         /scripts/validate-openclaw-tool-search.mts \
     && chmod 444 /packages/nemoclaw-openclaw/config/tool-disclosure.ts \
@@ -2047,8 +2045,6 @@ RUN chmod 755 /packages \
         /packages/nemoclaw-openclaw \
         /packages/nemoclaw-openclaw/config \
         /packages/nemoclaw-openclaw/host \
-        /src \
-        /src/lib \
         /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-codex-acp \
         /usr/local/bin/nemoclaw-managed-bootstrap \
         /usr/local/bin/nemoclaw-managed-startup-hold \

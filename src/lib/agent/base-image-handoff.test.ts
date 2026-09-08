@@ -40,6 +40,7 @@ vi.mock("../sandbox-base-image/source-identity", async (importOriginal) => ({
   getVersionedBaseImageTags: vi.fn(() => []),
 }));
 
+import { resolveSourceBuildIdentity } from "../core/build-identity";
 import { ROOT } from "../runner";
 import {
   createSandboxBaseImageBuildProvenanceKey,
@@ -62,7 +63,7 @@ function fixture(options: { canonicalSource?: boolean } = {}) {
     envVar: "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF",
     label: "Hermes Agent sandbox base image",
     requireOpenshellSandboxAbi: process.platform === "linux",
-    rootDir: ROOT,
+    rootDir: agent.packageRoot,
     inputPaths: [
       agent.manifestPath,
       path.join(agent.agentDir, "runtime/requirements.lock"),
@@ -71,6 +72,7 @@ function fixture(options: { canonicalSource?: boolean } = {}) {
     ],
     pinnedRemoteRef,
     requirePinnedRemoteRef: true,
+    localBuildContextKey: resolveSourceBuildIdentity({ rootDir: ROOT }).sourceRevision,
     validateImage: () => true,
     validationDescription:
       "the package-bound image probe and the immutable security package inventory",

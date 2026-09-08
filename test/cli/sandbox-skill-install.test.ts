@@ -32,37 +32,29 @@ describe("sandbox skill install CLI dispatch", () => {
     expect(r.out).toContain("path");
   });
 
-  it("points plugin-shaped directories away from skill install", () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-plugin-hint-"));
-    const pluginDir = path.join(home, "openclaw-plugin");
-    fs.mkdirSync(pluginDir, { recursive: true });
+  it("points non-skill directories to the selected agent's extension workflow", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-extension-hint-"));
+    const extensionDir = path.join(home, "agent-extension");
+    fs.mkdirSync(extensionDir, { recursive: true });
     writeSandboxRegistry(home);
-    fs.writeFileSync(
-      path.join(pluginDir, "package.json"),
-      JSON.stringify({ name: "demo-plugin", openclaw: { extensions: ["./dist/index.js"] } }),
-    );
 
-    const r = runWithEnv(`alpha skill install ${JSON.stringify(pluginDir)}`, { HOME: home });
+    const r = runWithEnv(`alpha skill install ${JSON.stringify(extensionDir)}`, { HOME: home });
 
     expect(r.code).toBe(1);
     expect(r.out).toContain("No SKILL.md found in");
-    expect(r.out).toContain("This looks like an OpenClaw plugin");
+    expect(r.out).toContain("`skill install` accepts only agent skills");
+    expect(r.out).toContain("selected agent's native plugin or extension workflow");
   });
 
-  it("detects openclaw.plugin.json as a plugin marker", () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-plugin-marker-"));
-    const pluginDir = path.join(home, "openclaw-plugin");
-    fs.mkdirSync(pluginDir, { recursive: true });
+  it("gives the same neutral guidance for a missing path", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-missing-skill-"));
+    const missingPath = path.join(home, "missing-extension");
     writeSandboxRegistry(home);
-    fs.writeFileSync(
-      path.join(pluginDir, "openclaw.plugin.json"),
-      JSON.stringify({ name: "demo" }),
-    );
 
-    const r = runWithEnv(`alpha skill install ${JSON.stringify(pluginDir)}`, { HOME: home });
+    const r = runWithEnv(`alpha skill install ${JSON.stringify(missingPath)}`, { HOME: home });
 
     expect(r.code).toBe(1);
-    expect(r.out).toContain("No SKILL.md found in");
-    expect(r.out).toContain("This looks like an OpenClaw plugin");
+    expect(r.out).toContain("No SKILL.md found at");
+    expect(r.out).toContain("selected agent's native plugin or extension workflow");
   });
 });
