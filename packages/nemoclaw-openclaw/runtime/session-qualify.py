@@ -5,6 +5,7 @@
 
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -13,6 +14,18 @@ import sys
 MAX_NATIVE_OUTPUT_BYTES = 1024 * 1024
 REQUIRED_PAIRED_SCOPES = {"operator.pairing", "operator.write"}
 REQUIRED_TOKEN_SCOPES = {"operator.pairing", "operator.read", "operator.write"}
+
+
+def load_auth_state_helper():
+    installed_path = "/usr/local/lib/nemoclaw/openclaw-auth-state.py"
+    source_path = os.path.join(os.path.dirname(__file__), "auth-state.py")
+    helper_path = source_path if os.path.isfile(source_path) else installed_path
+    spec = importlib.util.spec_from_file_location("nemoclaw_openclaw_auth_state", helper_path)
+    if spec is None or spec.loader is None:
+        raise ValueError("device-auth state helper is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.read_disabled_device_auth_projection
 
 
 def exact_string_set(value, expected):
@@ -119,16 +132,28 @@ def qualified_projection(document, device_id, public_key):
     }
 
 
+def current_session_projection():
+    # Managed onboarding intentionally disables device authentication. In that
+    # mode there is no credential state to inspect, but launch readiness still
+    # needs a stable package-owned observation. Keeping the distinction here
+    # lets NemoClaw core remain unaware of OpenClaw configuration details.
+    if os.environ.get("NEMOCLAW_DISABLE_DEVICE_AUTH") == "1":
+        return load_auth_state_helper()()
+    if os.environ.get("NEMOCLAW_DISABLE_DEVICE_AUTH", "0") != "0":
+        raise ValueError("device authentication mode is invalid")
+    state_directory = os.environ.get("OPENCLAW_STATE_DIR") or "/sandbox/.openclaw"
+    device_id, public_key = local_identity(state_directory)
+    openclaw_binary = os.environ.get("OPENCLAW_BIN") or "openclaw"
+    return qualified_projection(devices_list(openclaw_binary), device_id, public_key)
+
+
 def main():
     if len(sys.argv) != 2 or len(sys.argv[1]) != 64:
         raise SystemExit(2)
     nonce = sys.argv[1]
     if any(character not in "0123456789abcdef" for character in nonce):
         raise SystemExit(2)
-    state_directory = os.environ.get("OPENCLAW_STATE_DIR") or "/sandbox/.openclaw"
-    device_id, public_key = local_identity(state_directory)
-    openclaw_binary = os.environ.get("OPENCLAW_BIN") or "openclaw"
-    projection = qualified_projection(devices_list(openclaw_binary), device_id, public_key)
+    projection = current_session_projection()
     canonical = json.dumps(projection, separators=(",", ":"), sort_keys=True).encode("utf-8")
     state_digest = hashlib.sha256(canonical).hexdigest()
     print(f"__NEMOCLAW_SESSION_QUALIFIED__={nonce}:{state_digest}")

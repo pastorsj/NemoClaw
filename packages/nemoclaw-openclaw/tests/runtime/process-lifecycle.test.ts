@@ -81,7 +81,13 @@ describe("OpenClaw device-pairing settlement declaration", () => {
       "COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/session-qualify.py /usr/local/bin/nemoclaw-session-qualify",
     );
     expect(dockerfile).toContain(
+      "COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/auth-state.py /usr/local/lib/nemoclaw/openclaw-auth-state.py",
+    );
+    expect(dockerfile).toContain(
       "check_metadata /usr/local/bin/nemoclaw-session-qualify 'root:root:555'",
+    );
+    expect(dockerfile).toContain(
+      "check_metadata /usr/local/lib/nemoclaw/openclaw-auth-state.py 'root:root:444'",
     );
   });
 });

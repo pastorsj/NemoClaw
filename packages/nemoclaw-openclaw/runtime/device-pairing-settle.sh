@@ -10,6 +10,25 @@ case "$nonce" in
 esac
 [ "${#nonce}" -eq 64 ] || exit 2
 
+# Managed onboarding currently builds OpenClaw with device authentication
+# disabled. There is no native pairing state to settle in that configuration,
+# so validate the immutable image intent against the live native config before
+# acknowledging the core nonce. The package owns this distinction; NemoClaw
+# core only validates the completion record declared by the package contract.
+case "${NEMOCLAW_DISABLE_DEVICE_AUTH:-0}" in
+  1)
+    auth_state_helper="$(dirname "$0")/auth-state.py"
+    if [ ! -f "$auth_state_helper" ]; then
+      auth_state_helper=/usr/local/lib/nemoclaw/openclaw-auth-state.py
+    fi
+    python3 "$auth_state_helper" >/dev/null
+    printf '__NEMOCLAW_DEVICE_PAIRING_SETTLED__=%s\n' "$nonce"
+    exit 0
+    ;;
+  0) ;;
+  *) exit 1 ;;
+esac
+
 openclaw_bin="$(command -v openclaw)"
 command -v python3 >/dev/null 2>&1
 

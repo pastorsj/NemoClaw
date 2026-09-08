@@ -41,6 +41,7 @@ export default defineConfig({
       "tests/integration/live-contract.test.ts",
       "tests/messaging/probe.test.ts",
       "tests/runtime/inference-reconcile.test.ts",
+      "tests/runtime/pairing-settle.test.ts",
       "tests/runtime/process-lifecycle.test.ts",
       "tests/runtime/managed-gateway-profile.test.ts",
       "tests/runtime/session-admin.test.ts",

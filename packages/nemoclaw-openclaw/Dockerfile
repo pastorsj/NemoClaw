@@ -602,6 +602,7 @@ COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/session-admin.sh /usr/local
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/semantic-turn.sh /usr/local/bin/nemoclaw-openclaw-semantic-turn
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/device-pairing-settle.sh /usr/local/bin/nemoclaw-device-pairing-settle
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/session-qualify.py /usr/local/bin/nemoclaw-session-qualify
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/auth-state.py /usr/local/lib/nemoclaw/openclaw-auth-state.py
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/state-restore.sh /usr/local/bin/nemoclaw-state-restore
 COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/state-restore.py /usr/local/lib/nemoclaw/openclaw-state-restore.py
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/state-extensions.py /usr/local/lib/nemoclaw/openclaw-state-extensions.py
@@ -2492,6 +2493,7 @@ RUN check_metadata() { \
     && check_metadata /usr/local/bin/nemoclaw-openclaw-semantic-turn 'root:root:555' \
     && check_metadata /usr/local/bin/nemoclaw-device-pairing-settle 'root:root:555' \
     && check_metadata /usr/local/bin/nemoclaw-session-qualify 'root:root:555' \
+    && check_metadata /usr/local/lib/nemoclaw/openclaw-auth-state.py 'root:root:444' \
     && check_metadata /usr/local/bin/nemoclaw-state-restore 'root:root:555' \
     && check_metadata /usr/local/lib/nemoclaw/openclaw-state-restore.py 'root:root:444' \
     && check_metadata /usr/local/lib/nemoclaw/openclaw-state-extensions.py 'root:root:555' \
