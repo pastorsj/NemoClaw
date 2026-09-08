@@ -298,7 +298,7 @@
     },
     {
       "file": "test/automation/pull-requests/pr-workflow-contract.test.ts",
-      "test": "keeps compiled plugin artifacts on the extracted package path",
+      "test": "keeps extracted package build and test boundaries in CI",
       "category": "compatibility"
     },
     {

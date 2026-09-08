@@ -487,8 +487,8 @@ describe("pull request and main workflow contracts", () => {
     expect(workflow.jobs["cli-test-shards"]?.["timeout-minutes"]).toBe(cliShardTimeoutMinutes);
   });
 
-  // source-shape-contract: compatibility -- Every compiled plugin producer and consumer must use the extracted package path
-  it("keeps compiled plugin artifacts on the extracted package path", () => {
+  // source-shape-contract: compatibility -- Extracted package builds and marker-discovered tests must keep their generic CI boundary
+  it("keeps extracted package build and test boundaries in CI", () => {
     const pluginRoot = "packages/nemoclaw-openclaw/plugin";
     const expectedInputs = `dist\n${pluginRoot}/dist\n`;
     const expectedLocks = `package-lock.json\n${pluginRoot}/npm-shrinkwrap.json\n`;
@@ -512,6 +512,15 @@ describe("pull request and main workflow contracts", () => {
       (workflow) =>
         requiredWorkflowStep(workflow.jobs["cli-test-shards"], "Verify compiled test inputs").run,
     );
+    const packageTestFilters = YAML.parse(
+      String(requiredWorkflowStep(prWorkflow.jobs.changes, "Detect changed paths").with?.filters),
+    ) as Record<string, string[]>;
+    const buildTypecheckSteps = [prWorkflow, mainWorkflow].map((workflow) =>
+      requiredWorkflowStep(
+        workflow.jobs["build-typecheck"],
+        "Run package-contract and type checks",
+      ),
+    );
 
     expect(workflowUploads).toEqual([expectedInputs, expectedInputs]);
     expect(workflowLocks).toEqual([expectedLocks, expectedLocks]);
@@ -527,16 +536,42 @@ describe("pull request and main workflow contracts", () => {
       [pluginEntry, sandboxNameBoundary].every((output) => compile?.includes(`test -s ${output}`)),
     ).toBe(true);
     expect(compile).not.toContain("nemoclaw/dist/");
+    expect(prWorkflow.jobs.changes.outputs?.package_tests).toBe(
+      "${{ steps.filter.outputs.package_tests }}",
+    );
+    expect(packageTestFilters.package_tests).toEqual([
+      "packages/**",
+      "harness-contract/**",
+      "scripts/packages/**",
+      "scripts/build-harnesses.mts",
+      ".github/actions/ci-build-typecheck/action.yaml",
+      "package.json",
+      "package-lock.json",
+    ]);
+    expect(buildTypecheckSteps.map((step) => step.env?.NEMOCLAW_RUN_PACKAGE_TESTS)).toEqual([
+      "${{ needs.changes.outputs.package_tests }}",
+      "true",
+    ]);
+    expect(requiredStep(sharedActions.buildTypecheck, "Verify NeMo Fabric runner").run).toBe(
+      "bash packages/nemoclaw-fabric/tests/run-tests.sh",
+    );
+    expect(
+      requiredStep(sharedActions.buildTypecheck, "Verify composed NeMo Fabric package contracts"),
+    ).toMatchObject({
+      if: "env.NEMOCLAW_RUN_PACKAGE_TESTS != 'true'",
+      run: "npx tsx scripts/packages/run-tests.mts fabric",
+    });
+    expect(requiredStep(sharedActions.buildTypecheck, "Verify package-owned tests")).toMatchObject({
+      if: "env.NEMOCLAW_RUN_PACKAGE_TESTS == 'true'",
+      run: "npm run test:packages",
+    });
   });
 
   // source-shape-contract: security -- Credential-free workflow structure prevents pull request code from receiving Hugging Face or checkout credentials
   it("verifies changed Hugging Face catalog references without credentials", () => {
     const job = prWorkflow.jobs["hugging-face-models"];
     const filterStep = prWorkflow.jobs.changes.steps?.find((step) => step.id === "filter");
-    const filters = YAML.parse(String(filterStep?.with?.filters ?? "")) as Record<
-      string,
-      string[]
-    >;
+    const filters = YAML.parse(String(filterStep?.with?.filters ?? "")) as Record<string, string[]>;
     const huggingFaceModelFilters = filters.hugging_face_models ?? [];
 
     expect(

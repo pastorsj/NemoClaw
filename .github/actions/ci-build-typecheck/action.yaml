@@ -18,9 +18,19 @@ runs:
         NPM_CONFIG_CACHE: ${{ runner.temp }}/npm
       run: npx vitest run --project package-contract
 
-    - name: Verify NeMo Fabric package contracts
+    - name: Verify NeMo Fabric runner
       shell: bash
-      run: npm run test:fabric
+      run: bash packages/nemoclaw-fabric/tests/run-tests.sh
+
+    - name: Verify composed NeMo Fabric package contracts
+      if: env.NEMOCLAW_RUN_PACKAGE_TESTS != 'true'
+      shell: bash
+      run: npx tsx scripts/packages/run-tests.mts fabric
+
+    - name: Verify package-owned tests
+      if: env.NEMOCLAW_RUN_PACKAGE_TESTS == 'true'
+      shell: bash
+      run: npm run test:packages
 
     - name: Typecheck CLI + tests
       shell: bash

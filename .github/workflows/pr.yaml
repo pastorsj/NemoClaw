@@ -27,6 +27,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       hugging_face_models: ${{ steps.filter.outputs.hugging_face_models }}
+      package_tests: ${{ steps.filter.outputs.package_tests }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,6 +48,14 @@ jobs:
               - '!fern/assets/**'
             hugging_face_models:
               - '{managed-inference/models/**,src/lib/inference/serving/catalog-loader.ts,src/lib/inference/serving/generate-catalog.ts,src/lib/inference/serving/hugging-face-model-verification.ts,tools/managed-inference/verify-hugging-face-models.ts,package.json,package-lock.json}'
+            package_tests:
+              - 'packages/**'
+              - 'harness-contract/**'
+              - 'scripts/packages/**'
+              - 'scripts/build-harnesses.mts'
+              - '.github/actions/ci-build-typecheck/action.yaml'
+              - 'package.json'
+              - 'package-lock.json'
 
   docs-only-checks:
     needs: changes
@@ -481,6 +490,8 @@ jobs:
 
       - name: Run package-contract and type checks
         uses: ./.trusted-ci-actions/.github/actions/ci-build-typecheck
+        env:
+          NEMOCLAW_RUN_PACKAGE_TESTS: ${{ needs.changes.outputs.package_tests }}
 
   installer-integration:
     needs: [changes, openshell-sdk-package]
