@@ -55,6 +55,29 @@ describe("Hermes session adapter", () => {
     ).toMatchObject({ kind: "unsupported", reason: expect.stringContaining("reset") });
   });
 
+  it("refuses captured mutation output because deletion streams its native result", () => {
+    expect(
+      adapter.interpretSessionMutationOutput({
+        request: {
+          operation: "delete",
+          key: "20260727_130357_cb2b61",
+          agent: null,
+          keepTranscript: false,
+          jsonOutput: false,
+          verboseOutput: false,
+        },
+        plan: {
+          kind: "capture",
+          command: ["hermes", "sessions", "delete", "20260727_130357_cb2b61", "--yes"],
+        },
+        output: "deleted",
+      }),
+    ).toEqual({
+      kind: "refused",
+      reason: "Hermes session deletion streams its native result and has no captured output.",
+    });
+  });
+
   it("builds a native full-store export to the core-selected staging file", () => {
     expect(
       adapter.buildSessionExportPlan({
@@ -91,5 +114,20 @@ describe("Hermes session adapter", () => {
         },
       }),
     ).toMatchObject({ kind: "refused", reason: expect.stringContaining("positional") });
+  });
+
+  it("refuses indexed export interpretation because Hermes writes a native file", () => {
+    expect(
+      adapter.interpretSessionExportIndex({
+        output: "[]",
+        agent: "hermes",
+        selectedKeys: "all",
+        includeTrajectory: false,
+        hiddenSessionIdPrefix: "nemoclaw-internal-",
+      }),
+    ).toEqual({
+      kind: "refused",
+      reason: "Hermes exports a native JSONL file and does not expose an indexed-file plan.",
+    });
   });
 });

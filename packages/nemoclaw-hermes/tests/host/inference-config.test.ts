@@ -15,6 +15,35 @@ const target = {
 } as const;
 
 describe("Hermes inference configuration adapter", () => {
+  it("describes inference configuration as mutable with its provider override", () => {
+    expect(adapter.describeInferenceConfig({ target })).toEqual({
+      kind: "mutable",
+      providerApiOverrides: [
+        { provider: "compatible-anthropic-endpoint", api: "openai-completions" },
+      ],
+    });
+  });
+
+  it("describes the package-owned mutable configuration probe", () => {
+    expect(
+      adapter.describeMutableConfig({ target, sandboxUid: null, sandboxGid: null }),
+    ).toMatchObject({
+      kind: "probe",
+      probe: {
+        command: expect.arrayContaining([
+          "/usr/bin/setpriv",
+          "/sandbox/.hermes",
+          "/sandbox/.hermes/config.yaml",
+          "/sandbox/.hermes/.config-hash",
+          "/sandbox/.hermes/.env",
+        ]),
+        timeoutSeconds: 20,
+        failureMessage: "Hermes mutable configuration posture could not be verified.",
+        success: { kind: "exit-zero" },
+      },
+    });
+  });
+
   it("translates a managed route into the complete Hermes provider grammar", () => {
     const plan = adapter.prepareInferenceConfig({
       target,

@@ -6,11 +6,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import type { HarnessProviderBrokerAdapterModule } from "@nvidia/nemoclaw-harness-contract";
 import { afterEach, describe, expect, it } from "vitest";
+
+import { loadPackageHostModule } from "../helpers/host-module";
 
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 const CONTROLLER = path.join(PACKAGE_ROOT, "host", "provider-broker-control.cts");
 const TEMPORARY_ROOT = process.platform === "darwin" ? "/tmp" : os.tmpdir();
+const providerBrokerAdapter = loadPackageHostModule<HarnessProviderBrokerAdapterModule>(
+  "provider-broker-adapter.cts",
+);
 let temporaryHome: string | null = null;
 
 function runController(request: Record<string, unknown>, timeout = 5_000) {
@@ -42,6 +48,15 @@ afterEach(() => {
 });
 
 describe("Hermes provider-broker controller", () => {
+  it("builds the package-owned provider broker plan", () => {
+    expect(
+      providerBrokerAdapter.buildProviderBrokerPlan({
+        operation: "ensure-broker",
+        sandboxName: "hermes-test",
+      }),
+    ).toEqual({ kind: "managed", providerName: "hermes-test-hermes-tool-gateway" });
+  });
+
   it("persists only refresh-token proof and returns an opaque provider binding", () => {
     temporaryHome = fs.mkdtempSync(path.join(TEMPORARY_ROOT, "hermes-provider-broker-"));
     const refreshToken = "refresh-token-must-not-be-persisted";

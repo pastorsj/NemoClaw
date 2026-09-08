@@ -15,6 +15,24 @@ const target = {
 } as const;
 
 describe("OpenClaw inference configuration adapter", () => {
+  it("describes inference configuration as mutable", () => {
+    expect(adapter.describeInferenceConfig({ target })).toEqual({
+      kind: "mutable",
+      providerApiOverrides: [],
+    });
+  });
+
+  it("describes the mutable configuration ownership boundary", () => {
+    expect(adapter.describeMutableConfig({ target, sandboxUid: null, sandboxGid: null })).toEqual({
+      kind: "stat",
+      directoryMode: "2770",
+      directoryOwner: "sandbox:sandbox",
+      fileMode: "660",
+      fileOwner: "sandbox:sandbox",
+      repair: null,
+    });
+  });
+
   it("translates a managed route without losing package-native model metadata", () => {
     const plan = adapter.prepareInferenceConfig({
       target,

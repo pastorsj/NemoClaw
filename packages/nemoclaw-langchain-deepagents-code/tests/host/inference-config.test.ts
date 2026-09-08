@@ -15,6 +15,13 @@ const target = {
 } as const;
 
 describe("Deep Agents inference configuration adapter", () => {
+  it("describes its image-owned mutable configuration as requiring no host repair", () => {
+    expect(adapter.describeMutableConfig({ target, sandboxUid: null, sandboxGid: null })).toEqual({
+      kind: "not-required",
+      reason: "The image owns this terminal runtime configuration.",
+    });
+  });
+
   it("explicitly refuses runtime mutation of its image-owned config", () => {
     const reason =
       "This configuration is materialized by the sandbox image. Re-onboard to change it.";

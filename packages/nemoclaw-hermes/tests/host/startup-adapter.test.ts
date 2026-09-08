@@ -156,7 +156,9 @@ describe("Hermes startup adapter", () => {
     const { webSearch: _webSearch, ...inputWithoutWebSearch } = preparationRequest.input;
     const resultWithoutWebSearch = adapter.prepareStartupProfile({
       ...preparationRequest,
-      input: inputWithoutWebSearch,
+      // Exercise defensive compatibility with a pre-contract payload. Typed callers always
+      // provide webSearch, so keep the deliberately incomplete fixture explicit.
+      input: inputWithoutWebSearch as unknown as typeof preparationRequest.input,
     });
     expect(resultWithoutWebSearch.kind).toBe("prepared");
     if (resultWithoutWebSearch.kind !== "prepared") throw new Error(resultWithoutWebSearch.reason);

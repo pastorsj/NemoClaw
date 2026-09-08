@@ -36,3 +36,37 @@ it("returns typed unsupported session listing for Haystack Agent", () => {
     }),
   ).toMatchObject({ kind: "unsupported", reason: expect.stringContaining("export") });
 });
+
+it("refuses output interpretation because Haystack Agent sessions are unsupported", () => {
+  const adapter = loadPackageHostModule<HarnessSessionAdapterModule>("session-adapter.cts");
+  expect(
+    adapter.interpretSessionListOutput({
+      output: "[]",
+      jsonOutput: true,
+      hiddenSessionIdPrefix: "nemoclaw-internal-",
+    }),
+  ).toEqual({ kind: "refused", reason: "Session listing is not supported by this package." });
+  expect(
+    adapter.interpretSessionMutationOutput({
+      request: {
+        operation: "reset",
+        key: "session",
+        agent: null,
+        reason: "reset",
+        jsonOutput: false,
+        verboseOutput: false,
+      },
+      plan: { kind: "capture", command: ["haystack", "sessions", "reset", "session"] },
+      output: "reset",
+    }),
+  ).toEqual({ kind: "refused", reason: "Session mutation is not supported by this package." });
+  expect(
+    adapter.interpretSessionExportIndex({
+      output: "[]",
+      agent: "haystack-agent",
+      selectedKeys: "all",
+      includeTrajectory: false,
+      hiddenSessionIdPrefix: "nemoclaw-internal-",
+    }),
+  ).toEqual({ kind: "refused", reason: "Session export is not supported by this package." });
+});

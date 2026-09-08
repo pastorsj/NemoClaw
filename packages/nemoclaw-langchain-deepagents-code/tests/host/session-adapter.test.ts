@@ -36,3 +36,37 @@ it("returns typed unsupported session listing for Deep Agents Code", () => {
     }),
   ).toMatchObject({ kind: "unsupported", reason: expect.stringContaining("export") });
 });
+
+it("refuses output interpretation because Deep Agents Code sessions are unsupported", () => {
+  const adapter = loadPackageHostModule<HarnessSessionAdapterModule>("session-adapter.cts");
+  expect(
+    adapter.interpretSessionListOutput({
+      output: "[]",
+      jsonOutput: true,
+      hiddenSessionIdPrefix: "nemoclaw-internal-",
+    }),
+  ).toEqual({ kind: "refused", reason: "Session listing is not supported by this package." });
+  expect(
+    adapter.interpretSessionMutationOutput({
+      request: {
+        operation: "delete",
+        key: "session",
+        agent: null,
+        keepTranscript: false,
+        jsonOutput: false,
+        verboseOutput: false,
+      },
+      plan: { kind: "capture", command: ["deepagents", "sessions", "delete", "session"] },
+      output: "deleted",
+    }),
+  ).toEqual({ kind: "refused", reason: "Session mutation is not supported by this package." });
+  expect(
+    adapter.interpretSessionExportIndex({
+      output: "[]",
+      agent: "deepagents",
+      selectedKeys: "all",
+      includeTrajectory: false,
+      hiddenSessionIdPrefix: "nemoclaw-internal-",
+    }),
+  ).toEqual({ kind: "refused", reason: "Session export is not supported by this package." });
+});
